@@ -22,6 +22,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@stack/scanner": "workspace:*",
+    "@stack/spec": "workspace:*",
     "commander": "15.0.0"
   }
 }

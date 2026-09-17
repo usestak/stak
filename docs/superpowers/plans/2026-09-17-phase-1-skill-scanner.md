@@ -23,12 +23,14 @@
 ### Task 1: Scanner contracts and root resolution
 
 **Files:**
+
 - Create: `packages/spec/src/scanner.ts`
 - Modify: `packages/spec/src/index.ts`, `packages/spec/package.json`
 - Create: `packages/scanner/src/roots.ts`, `packages/scanner/src/roots.test.ts`
 - Modify: `packages/scanner/package.json`, `packages/scanner/src/index.ts`
 
 **Interfaces:**
+
 - Produces: scanner schemas/types and `resolveScanRoots(options): SkillRoot[]`.
 
 - [ ] Write failing tests for global roots, `CODEX_HOME`, fallback Codex home, and project roots.
@@ -39,11 +41,13 @@
 ### Task 2: Parsing, hashing, traversal, and provenance
 
 **Files:**
+
 - Create: `packages/scanner/src/frontmatter.ts`, `packages/scanner/src/hash.ts`, `packages/scanner/src/provenance.ts`, `packages/scanner/src/scanner.ts`
 - Test: `packages/scanner/src/frontmatter.test.ts`, `packages/scanner/src/hash.test.ts`, `packages/scanner/src/scanner.test.ts`
 - Create: Phase 1 content beneath `fixtures/skills/`
 
 **Interfaces:**
+
 - Produces: `hashSkillDirectory`, `parseSkillFile`, `detectProvenance`, and `scanSkills({ roots }): Promise<ScanResult>`.
 
 - [ ] Add fixtures and failing tests for valid, nested, malformed, missing metadata, deterministic hashing, meaningful changes, ignored noise, scripts/assets, duplicates, collisions, multiple roots, and read-only behavior.
@@ -54,10 +58,12 @@
 ### Task 3: Scope, Git, and symlink edge cases
 
 **Files:**
+
 - Test: `packages/scanner/src/scanner.test.ts`, `packages/scanner/src/provenance.test.ts`
 - Modify: scanner implementation files as required by failing tests.
 
 **Interfaces:**
+
 - Extends scan results with correct global/project locations, Git provenance, visible/resolved symlink paths, and nested-link diagnostics.
 
 - [ ] Add failing tests for project/global separation, Git metadata, direct Skill symlinks, nested symlinks, and failed/missing roots.
@@ -68,10 +74,12 @@
 ### Task 4: CLI orchestration and rendering
 
 **Files:**
+
 - Create: `packages/cli/src/commands/scan.ts`, `packages/cli/src/ui/scan.ts`
 - Modify: `packages/cli/src/program.ts`, `packages/cli/src/program.test.ts`, `packages/cli/package.json`
 
 **Interfaces:**
+
 - Consumes: `resolveScanRoots` and `scanSkills` from `@stack/scanner`.
 - Produces: `stack scan`, `--json`, and `--project`.
 
@@ -83,13 +91,14 @@
 ### Task 5: Documentation and final verification
 
 **Files:**
+
 - Modify: `docs/technical-build-spec.md`
 
 **Interfaces:**
+
 - Documents the approved physical-location versus adapter-visibility distinction.
 
 - [ ] Add the narrow technical clarification without changing frozen product concepts.
 - [ ] Run `pnpm install`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build`.
 - [ ] Run built CLI help, fixture JSON scan, and a safe real-root read-only smoke test.
 - [ ] Inspect Git diff/status and commit Phase 1 without starting Phase 2.
-

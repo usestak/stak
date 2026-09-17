@@ -48,4 +48,3 @@ Human output reports physical roots, counts, duplicates, collisions, provenance,
 ## Testing
 
 Tests use temporary roots and committed fixture content, never the developer's real home. Coverage includes roots, nested discovery, parsing failures, name mismatch, hashing invariants, duplicates, collisions, scope, Codex root selection, read-only behavior, Git provenance, CLI JSON/human behavior, and symlink behavior with graceful platform skips.
-

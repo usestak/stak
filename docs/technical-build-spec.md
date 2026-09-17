@@ -801,6 +801,17 @@ includes project Skills.
 
 Project Skills must not automatically enter global `main`.
 
+### Physical Location vs Agent Visibility
+
+Scanner root information records where a Skill physically exists. It does
+not assert which agents can consume that Skill. For example, a Skill under
+`~/.codex/skills` has the `codex` physical root kind even when another agent
+can consume Codex-compatible Skills. Likewise, `~/.agents/skills` is the
+shared standard root and does not represent an agent named `agents`.
+
+Effective agent visibility is derived capability information owned by agent
+adapters. It is not part of a Skill's canonical physical identity.
+
 ---
 
 ## 18. Scanner Algorithm

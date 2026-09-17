@@ -1,0 +1,251 @@
+import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
+import path from 'node:path';
+
+import { scanResultSchema } from '@stack/spec';
+import type {
+  DiscoveredSkill,
+  NameCollision,
+  ScanDiagnostic,
+  ScanResult,
+  ScannedRoot,
+  SkillLocation,
+  SkillRoot,
+  SkillSource,
+} from '@stack/spec';
+
+import { parseSkillFile } from './frontmatter.js';
+import { hashSkillDirectory } from './hash.js';
+import { detectProvenance } from './provenance.js';
+
+const maxDepth = 32;
+const sourceRank: Record<SkillSource['type'], number> = {
+  unknown: 0,
+  local: 1,
+  git: 2,
+};
+export type ScanSkillsOptions = { roots: SkillRoot[] };
+
+const discoverPaths = async (
+  root: SkillRoot,
+  diagnostics: ScanDiagnostic[],
+) => {
+  const found: Array<{ path: string; realPath?: string }> = [];
+  const visit = async (directory: string, depth: number): Promise<void> => {
+    if (depth > maxDepth) {
+      diagnostics.push({
+        severity: 'warning',
+        code: 'max-depth-reached',
+        message: `Stopped after ${maxDepth} directory levels`,
+        path: directory,
+      });
+      return;
+    }
+    const stats = await lstat(directory);
+    if (stats.isSymbolicLink()) {
+      const resolved = await realpath(directory);
+      if (!(await stat(resolved)).isDirectory()) return;
+      if ((await readdir(resolved)).includes('SKILL.md'))
+        found.push({ path: directory, realPath: resolved });
+      else
+        diagnostics.push({
+          severity: 'warning',
+          code: 'organizational-symlink-skipped',
+          message:
+            'Skipped directory symlink that does not directly expose a Skill',
+          path: directory,
+        });
+      return;
+    }
+    if (!stats.isDirectory()) return;
+    const entries = await readdir(directory, { withFileTypes: true });
+    if (entries.some((entry) => entry.name === 'SKILL.md' && entry.isFile())) {
+      found.push({ path: directory });
+      return;
+    }
+    for (const entry of entries.sort((a, b) =>
+      a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+    )) {
+      if (
+        entry.name !== '.git' &&
+        (entry.isDirectory() || entry.isSymbolicLink())
+      )
+        await visit(path.join(directory, entry.name), depth + 1);
+    }
+  };
+  await visit(root.path, 0);
+  return found;
+};
+
+const inspectOccurrence = async (
+  root: SkillRoot,
+  visiblePath: string,
+  resolvedPath?: string,
+) => {
+  const contentPath = resolvedPath ?? visiblePath;
+  const diagnostics: ScanDiagnostic[] = [];
+  const parsed = parseSkillFile(
+    await readFile(path.join(contentPath, 'SKILL.md'), 'utf8'),
+  );
+  const hashed = await hashSkillDirectory(contentPath);
+  const source = await detectProvenance(contentPath);
+  const location: SkillLocation = {
+    path: visiblePath,
+    rootPath: root.path,
+    rootKind: root.rootKind,
+    scope: root.scope,
+    isSymlink: resolvedPath !== undefined,
+    ...(resolvedPath ? { realPath: resolvedPath } : {}),
+    source,
+  };
+  for (const nestedPath of hashed.nestedSymlinks) {
+    diagnostics.push({
+      severity: 'warning',
+      code: 'nested-symlink-not-followed',
+      message: 'Nested symlink was hashed as link metadata and not followed',
+      path: path.join(visiblePath, nestedPath),
+    });
+  }
+  if ('error' in parsed)
+    diagnostics.push({
+      severity: 'error',
+      code: 'invalid-skill-metadata',
+      message: parsed.error,
+      path: path.join(visiblePath, 'SKILL.md'),
+    });
+  else if (parsed.metadata.name !== path.basename(visiblePath))
+    diagnostics.push({
+      severity: 'warning',
+      code: 'skill-name-mismatch',
+      message: `Declared name '${parsed.metadata.name}' differs from directory '${path.basename(visiblePath)}'`,
+      path: visiblePath,
+    });
+  const skill: DiscoveredSkill = {
+    contentHash: hashed.hash,
+    ...('metadata' in parsed ? { metadata: parsed.metadata } : {}),
+    valid: 'metadata' in parsed,
+    source,
+    locations: [location],
+  };
+  return { skill, diagnostics };
+};
+
+const summarize = (
+  roots: ScannedRoot[],
+  skills: DiscoveredSkill[],
+  collisions: NameCollision[],
+  diagnostics: ScanDiagnostic[],
+): ScanResult['summary'] => ({
+  roots: {
+    scanned: roots.filter((root) => root.status === 'scanned').length,
+    missing: roots.filter((root) => root.status === 'missing').length,
+    failed: roots.filter((root) => root.status === 'failed').length,
+  },
+  uniqueSkillContents: skills.length,
+  locations: skills.reduce((count, skill) => count + skill.locations.length, 0),
+  validSkills: skills.filter((skill) => skill.valid).length,
+  invalidSkills: skills.filter((skill) => !skill.valid).length,
+  exactDuplicateContents: skills.filter((skill) => skill.locations.length > 1)
+    .length,
+  nameCollisions: collisions.length,
+  diagnostics: {
+    errors: diagnostics.filter((item) => item.severity === 'error').length,
+    warnings: diagnostics.filter((item) => item.severity === 'warning').length,
+    info: diagnostics.filter((item) => item.severity === 'info').length,
+  },
+  provenance: {
+    git: skills.filter((skill) => skill.source.type === 'git').length,
+    local: skills.filter((skill) => skill.source.type === 'local').length,
+    unknown: skills.filter((skill) => skill.source.type === 'unknown').length,
+  },
+});
+
+export const scanSkills = async ({
+  roots,
+}: ScanSkillsOptions): Promise<ScanResult> => {
+  const scannedRoots: ScannedRoot[] = [];
+  const diagnostics: ScanDiagnostic[] = [];
+  const byHash = new Map<string, DiscoveredSkill>();
+  for (const root of roots) {
+    try {
+      const rootStats = await lstat(root.path);
+      if (!rootStats.isDirectory() && !rootStats.isSymbolicLink())
+        throw new Error('Root is not a directory');
+      const paths = await discoverPaths(root, diagnostics);
+      scannedRoots.push({
+        ...root,
+        status: 'scanned',
+        skillLocations: paths.length,
+      });
+      for (const skillPath of paths) {
+        try {
+          const occurrence = await inspectOccurrence(
+            root,
+            skillPath.path,
+            skillPath.realPath,
+          );
+          diagnostics.push(...occurrence.diagnostics);
+          const existing = byHash.get(occurrence.skill.contentHash);
+          if (existing) {
+            existing.locations.push(...occurrence.skill.locations);
+            if (
+              sourceRank[occurrence.skill.source.type] >
+              sourceRank[existing.source.type]
+            )
+              existing.source = occurrence.skill.source;
+          } else byHash.set(occurrence.skill.contentHash, occurrence.skill);
+        } catch (error) {
+          diagnostics.push({
+            severity: 'error',
+            code: 'skill-scan-failed',
+            message: error instanceof Error ? error.message : String(error),
+            path: skillPath.path,
+          });
+        }
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+        scannedRoots.push({ ...root, status: 'missing', skillLocations: 0 });
+      else {
+        const message = error instanceof Error ? error.message : String(error);
+        scannedRoots.push({
+          ...root,
+          status: 'failed',
+          skillLocations: 0,
+          error: message,
+        });
+        diagnostics.push({
+          severity: 'error',
+          code: 'root-scan-failed',
+          message,
+          path: root.path,
+        });
+      }
+    }
+  }
+  const skills = [...byHash.values()].sort((a, b) =>
+    a.contentHash < b.contentHash ? -1 : a.contentHash > b.contentHash ? 1 : 0,
+  );
+  const hashesByName = new Map<string, Set<string>>();
+  for (const skill of skills) {
+    if (!skill.metadata) continue;
+    const hashes = hashesByName.get(skill.metadata.name) ?? new Set<string>();
+    hashes.add(skill.contentHash);
+    hashesByName.set(skill.metadata.name, hashes);
+  }
+  const nameCollisions = [...hashesByName]
+    .filter(([, hashes]) => hashes.size > 1)
+    .map(([name, hashes]) => ({ name, contentHashes: [...hashes].sort() }));
+  for (const collision of nameCollisions)
+    diagnostics.push({
+      severity: 'warning',
+      code: 'skill-name-collision',
+      message: `Declared name '${collision.name}' has ${collision.contentHashes.length} different content hashes`,
+    });
+  return scanResultSchema.parse({
+    roots: scannedRoots,
+    skills,
+    nameCollisions,
+    diagnostics,
+    summary: summarize(scannedRoots, skills, nameCollisions, diagnostics),
+  });
+};

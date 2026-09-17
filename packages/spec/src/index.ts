@@ -1,1 +1,1 @@
-export const specPackage = '@stack/spec' as const;
+export * from './scanner.js';
