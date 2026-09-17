@@ -1,0 +1,2566 @@
+# Stack V0 Technical Build Specification
+
+**Status:** Approved for development
+**Version:** 0.1
+**Product Foundation:** Frozen
+**Primary language:** TypeScript
+**Initial runtime:** Node.js 22+
+**Initial agents:** Codex, Cursor, Claude Code
+
+---
+
+## 1. Development Objective
+
+Build the smallest technically sound version of Stack that proves the core thesis:
+
+> A developer can discover their accumulated Agent Skills, preserve them as a portable Environment, restore them, compose additional Stacks safely, and test another developer's Stack without destroying their existing setup.
+
+V0 must prioritize:
+
+1. reliability
+2. filesystem safety
+3. reproducibility
+4. transparent behavior
+5. cross-agent architecture
+6. simple CLI UX
+
+Do not attempt to build the entire long-term Stack platform.
+
+---
+
+## 2. V0 Definition of Done
+
+### Scenario A: Discover
+
+A developer has Skills across supported locations.
+
+They run:
+
+```bash
+stack scan
+```
+
+Stack reports:
+
+```text
+Found 24 unique Skills across 3 agents.
+
+Cursor        18
+Codex         15
+Claude Code   13
+
+Shared        11
+Unknown source 3
+```
+
+---
+
+### Scenario B: Establish Desired State
+
+The developer runs:
+
+```bash
+stack init
+```
+
+Stack creates:
+
+```text
+Environment: main
+```
+
+representing the desired local setup.
+
+---
+
+### Scenario C: Detect Drift
+
+The developer runs:
+
+```bash
+stack status
+```
+
+and:
+
+```bash
+stack diff
+```
+
+Stack identifies:
+
+```text
+missing
+modified
+untracked
+conflicting
+```
+
+Skills.
+
+---
+
+### Scenario D: Restore
+
+Stack can restore managed Skills from references or snapshots and verify resulting hashes.
+
+---
+
+### Scenario E: Compose
+
+The user runs:
+
+```bash
+stack use @someone/frontend
+```
+
+Stack:
+
+1. resolves the Stack
+2. compares it with the active Environment
+3. deduplicates compatible Skills
+4. identifies conflicts
+5. previews changes
+6. requests approval
+7. applies transactionally
+
+---
+
+### Scenario F: Try Safely
+
+The user runs:
+
+```bash
+stack try @someone/frontend -- codex
+```
+
+Stack creates a temporary Environment and launches Codex with access to those Skills.
+
+`main` remains unchanged.
+
+---
+
+### Scenario G: Cloud Portability
+
+Machine A:
+
+```bash
+stack push
+```
+
+Machine B:
+
+```bash
+stack pull
+```
+
+Machine B reconstructs the Environment with matching managed Skill hashes.
+
+---
+
+## 3. Technical Principles
+
+### 3.1 Stack Owns Canonical State
+
+Vendor directories are integration targets.
+
+They are not Stack's database.
+
+Canonical Stack state lives under:
+
+```text
+~/.stack/
+```
+
+---
+
+### 3.2 Use the Existing Agent Skill Format
+
+Stack does not invent a replacement for `SKILL.md`.
+
+A Skill remains an existing Agent Skill directory.
+
+Stack records metadata around it.
+
+---
+
+### 3.3 Core Logic Must Be Agent-Neutral
+
+Do not scatter:
+
+```ts
+if (agent === "codex")
+```
+
+throughout the codebase.
+
+Vendor-specific behavior belongs in adapters.
+
+---
+
+### 3.4 Local Must Work Without Cloud
+
+These features must work offline:
+
+```text
+scan
+init
+status
+diff
+local restore
+local Stack resolution
+local try
+```
+
+Cloud is an enhancement, not a prerequisite.
+
+---
+
+## 4. Architecture
+
+```text
+                    STACK CLOUD
+                         │
+                         │ HTTPS
+                         ▼
+                 ┌──────────────┐
+                 │  Stack CLI   │
+                 └──────┬───────┘
+                        │
+             ┌──────────┴──────────┐
+             │                     │
+             ▼                     ▼
+       Stack Core              Local State
+             │                     │
+     ┌───────┼────────┐       ~/.stack/
+     │       │        │
+     ▼       ▼        ▼
+  Scanner Resolver  Store
+     │       │        │
+     └───────┴────┬───┘
+                  │
+              Adapters
+          ┌───────┼────────┐
+          ▼       ▼        ▼
+        Codex   Cursor    Claude
+```
+
+---
+
+## 5. Technology Stack
+
+### Monorepo
+
+Use:
+
+```text
+pnpm
+Turborepo
+TypeScript
+```
+
+### Runtime
+
+```text
+Node.js >= 22
+```
+
+Use ESM throughout.
+
+### CLI
+
+Recommended:
+
+```text
+commander
+@clack/prompts
+picocolors
+ora
+```
+
+CLI handlers should orchestrate.
+
+Core business logic belongs outside the CLI package.
+
+### Validation
+
+Use:
+
+```text
+zod
+```
+
+for:
+
+* manifests
+* lockfiles
+* local state
+* API payloads
+* configuration
+
+### YAML
+
+Use:
+
+```text
+yaml
+```
+
+for editable manifests.
+
+### Testing
+
+Use:
+
+```text
+vitest
+```
+
+with filesystem fixtures and temporary directories.
+
+### Cloud
+
+Recommended:
+
+```text
+Next.js
+Supabase Postgres
+Supabase Auth
+Supabase Storage
+```
+
+The CLI communicates through an HTTP API.
+
+It must not depend directly on Supabase internals.
+
+---
+
+## 6. Repository Structure
+
+```text
+stack/
+│
+├── apps/
+│   └── web/
+│
+├── packages/
+│   ├── cli/
+│   │   └── src/
+│   │       ├── commands/
+│   │       ├── ui/
+│   │       └── index.ts
+│   │
+│   ├── core/
+│   │   └── src/
+│   │       ├── environment/
+│   │       ├── stack/
+│   │       ├── skill/
+│   │       ├── resolver/
+│   │       ├── transaction/
+│   │       └── plan/
+│   │
+│   ├── scanner/
+│   │   └── src/
+│   │       ├── scanner.ts
+│   │       ├── roots.ts
+│   │       ├── provenance.ts
+│   │       └── hash.ts
+│   │
+│   ├── adapters/
+│   │   └── src/
+│   │       ├── types.ts
+│   │       ├── codex/
+│   │       ├── cursor/
+│   │       └── claude/
+│   │
+│   ├── spec/
+│   │   └── src/
+│   │       ├── stack.schema.ts
+│   │       ├── environment.schema.ts
+│   │       ├── lock.schema.ts
+│   │       └── skill.schema.ts
+│   │
+│   ├── store/
+│   │   └── src/
+│   │       ├── content-store.ts
+│   │       ├── snapshots.ts
+│   │       └── cache.ts
+│   │
+│   ├── cloud-client/
+│   │   └── src/
+│   │
+│   └── shared/
+│       └── src/
+│
+├── fixtures/
+│   ├── skills/
+│   ├── environments/
+│   ├── stacks/
+│   └── machines/
+│
+├── docs/
+│   ├── product-foundation.md
+│   └── technical-build-spec.md
+│
+├── package.json
+├── pnpm-workspace.yaml
+├── turbo.json
+└── tsconfig.base.json
+```
+
+---
+
+## 7. Package Responsibilities
+
+### `@stack/core`
+
+Contains:
+
+```text
+Skill
+Stack
+Environment
+resolution
+conflicts
+plans
+transactions
+drift
+revisions
+```
+
+No CLI prompts.
+
+No React.
+
+No Supabase imports.
+
+---
+
+### `@stack/scanner`
+
+Read-only discovery.
+
+Returns structured data.
+
+Never modifies vendor Skill directories.
+
+---
+
+### `@stack/adapters`
+
+Translates Stack's canonical Environment into agent-specific behavior.
+
+---
+
+### `@stack/spec`
+
+Canonical schemas.
+
+This package should eventually be independently publishable.
+
+---
+
+### `@stack/store`
+
+Handles:
+
+* immutable Skill content
+* content hashes
+* snapshots
+* cached source content
+* runtime materialization
+
+---
+
+### `@stack/cloud-client`
+
+Typed HTTP client for hosted Stack services.
+
+---
+
+### `@stack/cli`
+
+Presentation and command orchestration only.
+
+---
+
+## 8. Local Filesystem
+
+Use:
+
+```text
+~/.stack/
+```
+
+Suggested structure:
+
+```text
+~/.stack/
+│
+├── config.json
+├── machine.json
+│
+├── environments/
+│   ├── main/
+│   │   ├── environment.yaml
+│   │   ├── stack.lock.json
+│   │   └── revisions/
+│   │
+│   └── work/
+│
+├── store/
+│   └── sha256/
+│
+├── snapshots/
+├── cache/
+├── runtime/
+│
+└── state/
+    └── bindings.json
+```
+
+Support:
+
+```text
+STACK_HOME
+```
+
+to override the default location.
+
+---
+
+## 9. Machine Identity
+
+On first use, generate a random UUID.
+
+Store:
+
+```json
+{
+  "schemaVersion": 1,
+  "machineId": "uuid",
+  "createdAt": "ISO_DATE",
+  "platform": "win32",
+  "arch": "x64"
+}
+```
+
+Do not use hardware serial numbers or invasive fingerprinting.
+
+---
+
+## 10. Skill Identity
+
+Skill names are not globally unique.
+
+Canonical Skill identity should include provenance.
+
+Conceptually:
+
+```text
+source + sourcePath + skillName
+```
+
+Example:
+
+```text
+github:owner/repository:/skills/frontend-design
+```
+
+---
+
+## 11. Skill Record
+
+Conceptual shape:
+
+```ts
+type SkillRecord = {
+  id: string
+  name: string
+  description?: string
+
+  source: SkillSource
+
+  contentHash: string
+
+  discoveredAt: string
+
+  locations: SkillLocation[]
+
+  agents: AgentId[]
+
+  scope: "global" | "project"
+
+  managed: boolean
+
+  status:
+    | "healthy"
+    | "modified"
+    | "unknown-source"
+    | "invalid"
+}
+```
+
+---
+
+## 12. Skill Source
+
+Use a discriminated union.
+
+```ts
+type SkillSource =
+  | GitSource
+  | LocalSource
+  | SnapshotSource
+  | UnknownSource
+```
+
+Example Git source:
+
+```ts
+{
+  type: "git",
+  remote: "https://github.com/example/repo.git",
+  revision: "commit-sha",
+  path: "skills/design"
+}
+```
+
+Snapshot:
+
+```ts
+{
+  type: "snapshot",
+  snapshotId: "snap_..."
+}
+```
+
+---
+
+## 13. Environment Model
+
+`main` is an Environment.
+
+It can contain:
+
+```text
+direct Skills
++
+Stacks
++
+overrides
+```
+
+Example:
+
+```yaml
+schemaVersion: 1
+
+name: main
+
+skills:
+  - skill: github:foo/bar:/skills/debugging
+
+stacks:
+  - "@temi/frontend"
+  - "@temi/web3"
+
+overrides: {}
+```
+
+---
+
+## 14. Stack Manifest
+
+Use:
+
+```text
+stack.yaml
+```
+
+Example:
+
+```yaml
+schemaVersion: 1
+
+name: creative-frontend
+
+description: >
+  Frontend environment for polished interactive web applications.
+
+extends:
+  - "@temi/frontend"
+
+skills:
+  - source: github:example/design-skills
+    path: skills/design-engineering
+    requirement: required
+
+  - source: github:example/threejs
+    path: skills/threejs
+    requirement: optional
+```
+
+Do not place resolved hashes in the human-edited manifest.
+
+---
+
+## 15. Lockfile
+
+Use:
+
+```text
+stack.lock.json
+```
+
+Example:
+
+```json
+{
+  "schemaVersion": 1,
+  "resolvedAt": "2026-09-17T20:00:00Z",
+  "skills": {
+    "github:example/design-skills:/skills/design-engineering": {
+      "revision": "a53e...",
+      "contentHash": "sha256:...",
+      "source": "https://github.com/example/design-skills.git"
+    }
+  }
+}
+```
+
+The lockfile is the reproducibility layer.
+
+---
+
+## 16. Resolved Environment
+
+Conceptual type:
+
+```ts
+type ResolvedEnvironment = {
+  environmentId: string
+
+  skills: ResolvedSkill[]
+
+  stacks: ResolvedStack[]
+
+  skippedOptionalSkills: ResolvedSkill[]
+
+  overrides: EnvironmentOverride[]
+
+  warnings: ResolutionWarning[]
+}
+```
+
+Given identical input and lock data, resolution should be deterministic.
+
+---
+
+## 17. Scanner Roots
+
+Initial global roots:
+
+```text
+~/.agents/skills
+~/.cursor/skills
+~/.claude/skills
+$CODEX_HOME/skills
+```
+
+Fallback:
+
+```text
+~/.codex/skills
+```
+
+Potential project roots:
+
+```text
+.agents/skills
+.cursor/skills
+.claude/skills
+.codex/skills
+```
+
+Default:
+
+```bash
+stack scan
+```
+
+focuses on global Skills.
+
+Optional:
+
+```bash
+stack scan --project
+```
+
+includes project Skills.
+
+Project Skills must not automatically enter global `main`.
+
+---
+
+## 18. Scanner Algorithm
+
+For each root:
+
+1. verify directory exists
+2. locate directories containing `SKILL.md`
+3. parse frontmatter
+4. validate metadata
+5. determine scope
+6. calculate tree hash
+7. inspect provenance
+8. detect duplicates
+9. associate agents
+10. return structured records
+
+The scanner is read-only.
+
+---
+
+## 19. Content Hashing
+
+Use SHA-256.
+
+Hash the complete Skill directory.
+
+Algorithm:
+
+1. recursively enumerate files
+2. remove ignored filesystem noise
+3. sort paths lexicographically
+4. normalize separators to `/`
+5. hash path + contents deterministically
+
+Ignore:
+
+```text
+.git/
+.DS_Store
+Thumbs.db
+```
+
+Do not ignore:
+
+```text
+scripts
+assets
+references
+```
+
+Those are part of the Skill.
+
+---
+
+## 20. Provenance Detection
+
+Order:
+
+### 1. Existing installer metadata
+
+Use trustworthy lock/installer metadata where available.
+
+### 2. Git metadata
+
+Determine:
+
+```text
+remote
+commit
+relative path
+```
+
+### 3. Symlink target
+
+Resolve the target for provenance inspection.
+
+### 4. Local
+
+If only local:
+
+```text
+source.type = local
+```
+
+### 5. Unknown
+
+If provenance cannot be established:
+
+```text
+source.type = unknown
+```
+
+Never guess.
+
+---
+
+## 21. Reference vs Snapshot
+
+### Reference
+
+Use when Stack can reliably reacquire the Skill.
+
+Record:
+
+```text
+source
+revision
+path
+hash
+```
+
+### Snapshot
+
+Use when the Skill is:
+
+* local
+* modified
+* source-less
+* unavailable
+* otherwise not reproducible
+
+Snapshot the complete Skill directory.
+
+---
+
+## 22. Content-Addressed Store
+
+Canonical Skill content:
+
+```text
+~/.stack/store/sha256/<hash>
+```
+
+Example:
+
+```text
+~/.stack/store/sha256/
+└── 73/
+    └── 73a88f...
+        ├── SKILL.md
+        ├── scripts/
+        └── references/
+```
+
+Store contents are immutable.
+
+Changed content receives a new hash.
+
+---
+
+## 23. Agent Adapter Contract
+
+Every adapter implements:
+
+```ts
+interface AgentAdapter {
+  id: AgentId
+
+  detect(): Promise<AgentDetection>
+
+  discoverSkills(): Promise<SkillLocation[]>
+
+  planBindings(
+    environment: ResolvedEnvironment
+  ): Promise<BindingPlan>
+
+  applyBindings(
+    plan: BindingPlan
+  ): Promise<ApplyResult>
+
+  removeBindings(
+    plan: BindingPlan
+  ): Promise<ApplyResult>
+
+  launch?(
+    context: LaunchContext
+  ): Promise<number>
+}
+```
+
+---
+
+## 24. Adapter Priority
+
+Implement in this order:
+
+```text
+1. Codex
+2. Cursor
+3. Claude Code
+```
+
+This is implementation order only.
+
+The architecture must remain generic.
+
+---
+
+## 25. Binding Strategy
+
+Canonical content remains under:
+
+```text
+~/.stack/store/
+```
+
+Agent-facing copies are bindings/materializations.
+
+Track them in:
+
+```text
+~/.stack/state/bindings.json
+```
+
+Example:
+
+```json
+{
+  "codex": {
+    "frontend-design": {
+      "contentHash": "sha256:...",
+      "target": "C:/Users/.../.codex/skills/frontend-design"
+    }
+  }
+}
+```
+
+Do not consider these copies canonical.
+
+---
+
+## 26. Unmanaged Skills
+
+Before modifying an existing destination, check whether Stack owns it.
+
+If the path exists but is absent from Stack's binding registry:
+
+```text
+UNMANAGED
+```
+
+Stop and ask.
+
+Example:
+
+```text
+Conflict
+
+frontend-design already exists.
+
+Stack does not manage this directory.
+
+Choose:
+
+Import existing Skill
+Keep existing Skill
+Replace it
+Cancel
+```
+
+Never silently overwrite it.
+
+---
+
+## 27. Resolver Input
+
+Resolver receives:
+
+```text
+active Environment
++
+requested Stack
++
+lock information
++
+overrides
+```
+
+---
+
+## 28. Resolution Plan
+
+Conceptual:
+
+```ts
+type ResolutionPlan = {
+  satisfied: ResolvedSkill[]
+  additions: ResolvedSkill[]
+  removals: ResolvedSkill[]
+  updates: ResolvedSkill[]
+  conflicts: Conflict[]
+  skipped: ResolvedSkill[]
+}
+```
+
+---
+
+## 29. V0 Resolver Complexity
+
+Do not build a general SAT solver.
+
+V0 supports:
+
+```text
+exact revisions
+same-content deduplication
+simple compatibility
+explicit conflicts
+required/optional
+overrides
+```
+
+Advanced version range solving can come later.
+
+---
+
+## 30. Conflict Rules
+
+### Same canonical Skill + same hash
+
+Deduplicate.
+
+### Same canonical Skill + incompatible revision/hash
+
+Conflict.
+
+### Same target name + different canonical Skill
+
+Name collision.
+
+### Optional conflicting Skill
+
+Can be skipped after disclosure.
+
+### Existing unmanaged target
+
+Ownership conflict.
+
+Requires explicit user choice.
+
+---
+
+## 31. `stack scan`
+
+Responsibilities:
+
+1. detect supported agents
+2. discover Skills
+3. parse and validate
+4. hash
+5. infer provenance
+6. deduplicate
+7. display result
+
+Example:
+
+```text
+Scanning...
+
+✓ Cursor
+✓ Codex
+✓ Claude Code
+
+24 unique Skills found
+
+Verified source      18
+Local                 3
+Unknown source        3
+
+Duplicates            7
+```
+
+No account required.
+
+No network required for basic scan.
+
+---
+
+## 32. `stack init`
+
+Creates:
+
+```text
+Environment: main
+```
+
+from discovered Skills.
+
+Example:
+
+```bash
+stack init
+```
+
+Output:
+
+```text
+24 Skills found
+
+Import into main?
+
+✓ 21
+○ 3 project-only excluded
+```
+
+Writes:
+
+```text
+~/.stack/environments/main/environment.yaml
+~/.stack/environments/main/stack.lock.json
+```
+
+---
+
+## 33. `stack status`
+
+Compares desired Environment with Machine state.
+
+Example:
+
+```text
+main
+
+✓ 20 satisfied
+
+Missing
+- agent-browser
+
+Modified
+~ frontend-design
+
+Untracked
++ experiment-skill
+```
+
+---
+
+## 34. `stack diff`
+
+Detailed comparison.
+
+Should show where applicable:
+
+```text
+desired hash
+actual hash
+source
+revision
+affected agents
+ownership
+```
+
+Never mutates.
+
+---
+
+## 35. `stack use`
+
+Example:
+
+```bash
+stack use @someone/frontend
+```
+
+Flow:
+
+```text
+Fetch Stack
+↓
+Resolve
+↓
+Generate Plan
+↓
+Preview
+↓
+Confirm
+↓
+Snapshot current managed state
+↓
+Apply
+↓
+Verify
+↓
+Commit revision
+```
+
+No filesystem changes occur before approval.
+
+---
+
+## 36. `stack remove`
+
+Example:
+
+```bash
+stack remove @someone/frontend
+```
+
+Resolver determines which Skills become orphaned.
+
+Example:
+
+```text
+Removing @someone/frontend
+
+12 Skills referenced
+
+8 still required elsewhere
+4 no longer required
+
+Remove 4 unused Skills?
+```
+
+---
+
+## 37. `stack try`
+
+Example:
+
+```bash
+stack try @someone/frontend -- codex
+```
+
+Flow:
+
+```text
+Fetch Stack
+↓
+Resolve
+↓
+Create temporary Environment
+↓
+Materialize runtime Skills
+↓
+Launch target agent
+↓
+Run session
+↓
+Exit
+↓
+Clean runtime
+```
+
+`main` must remain unchanged.
+
+---
+
+## 38. Isolation Strategy
+
+V0 isolation is:
+
+> Skill Environment isolation.
+
+Not full process isolation.
+
+Runtime root:
+
+```text
+~/.stack/runtime/<session-id>/
+```
+
+Example:
+
+```text
+runtime/
+└── try_0182/
+    ├── environment.json
+    ├── skills/
+    └── workspace/
+```
+
+Agent adapters determine how those Skills are exposed.
+
+---
+
+## 39. Scratch Testing First
+
+Initial `stack try` should launch agents inside a Stack-controlled temporary workspace.
+
+Example:
+
+```text
+~/.stack/runtime/<session>/workspace
+```
+
+This proves isolation before solving all existing-project edge cases.
+
+---
+
+## 40. Existing Project Testing
+
+After scratch mode works, support something like:
+
+```bash
+stack try @someone/frontend -- codex --cwd .
+```
+
+Requirements:
+
+* existing project remains intact
+* temporary Skill exposure is injected safely
+* existing project Skills are never overwritten
+* cleanup occurs after exit
+* interruption recovery is supported
+
+---
+
+## 41. `stack run`
+
+Example:
+
+```bash
+stack run codex
+```
+
+Launch selected agent using the active Environment.
+
+Future:
+
+```bash
+stack run cursor
+stack run claude
+```
+
+The adapter decides the concrete process invocation.
+
+---
+
+## 42. Transactions
+
+Filesystem changes must be transactional.
+
+Before applying:
+
+1. calculate full plan
+2. validate destinations
+3. record rollback metadata
+4. snapshot required managed state
+
+Then apply.
+
+If an operation fails:
+
+```text
+rollback
+```
+
+Do not knowingly leave a half-applied Environment.
+
+---
+
+## 43. Transaction Model
+
+Conceptual:
+
+```ts
+type Transaction = {
+  id: string
+
+  createdAt: string
+
+  operations: Operation[]
+
+  rollbackOperations: Operation[]
+
+  status:
+    | "planned"
+    | "applying"
+    | "committed"
+    | "rolled-back"
+    | "failed"
+}
+```
+
+---
+
+## 44. Environment Revisions
+
+Every successful Environment mutation creates a revision.
+
+Examples:
+
+```text
+init
+use
+remove
+pull
+override
+```
+
+Example:
+
+```json
+{
+  "revision": 7,
+  "parent": 6,
+  "reason": "use:@someone/frontend",
+  "createdAt": "..."
+}
+```
+
+Full user-facing rollback may come later, but revision storage should begin early.
+
+---
+
+## 45. Cloud Timing
+
+Do not build cloud first.
+
+Cloud work starts after these are reliable:
+
+```text
+scan
+init
+status
+diff
+local store
+local restore
+resolver
+Codex adapter
+stack try
+```
+
+---
+
+## 46. Cloud Data Model
+
+Initial tables:
+
+```text
+users
+profiles
+stacks
+stack_versions
+environments
+environment_versions
+snapshots
+machines
+cli_auth_sessions
+```
+
+Do not add organization/team tables in V0.
+
+---
+
+## 47. Stack Versions
+
+Published Stack versions are immutable.
+
+Example:
+
+```text
+@temi/frontend
+
+v1
+v2
+v3
+```
+
+Each version contains:
+
+```text
+manifest
+lock information
+creator
+createdAt
+```
+
+---
+
+## 48. Snapshot Storage
+
+Private snapshots may live in object storage.
+
+Example:
+
+```text
+snapshots/<user-id>/<hash>.tar.gz
+```
+
+Database stores metadata.
+
+Use authenticated, short-lived downloads.
+
+Never expose private snapshot URLs publicly.
+
+---
+
+## 49. CLI Authentication
+
+Recommended:
+
+```bash
+stack login
+```
+
+Flow:
+
+```text
+CLI creates auth session
+↓
+Browser opens Stack
+↓
+User authenticates with GitHub
+↓
+Web approves session
+↓
+CLI receives credential
+```
+
+Do not require manual API key copy/paste.
+
+---
+
+## 50. Credential Storage
+
+Prefer OS credential storage.
+
+Abstract credential persistence so V0 implementation can later be replaced without changing CLI behavior.
+
+Never log credentials.
+
+---
+
+## 51. Cloud API
+
+Use versioned routes.
+
+Example:
+
+```text
+POST /api/v1/cli/auth/start
+GET  /api/v1/cli/auth/session/:id
+
+GET  /api/v1/stacks/:owner/:name
+POST /api/v1/stacks
+POST /api/v1/stacks/:id/versions
+
+GET  /api/v1/environments/:name
+PUT  /api/v1/environments/:name
+
+POST /api/v1/snapshots
+GET  /api/v1/snapshots/:id/download
+```
+
+---
+
+## 52. `stack push`
+
+Direction:
+
+```text
+Machine → Cloud
+```
+
+Uploads:
+
+```text
+Environment manifest
+lockfile
+revision metadata
+required private snapshots
+```
+
+Do not upload vendor Skill directories blindly.
+
+---
+
+## 53. `stack pull`
+
+Flow:
+
+```text
+Fetch Environment
+↓
+Resolve references
+↓
+Download required snapshots
+↓
+Compare Machine
+↓
+Preview
+↓
+Confirm
+↓
+Apply transaction
+↓
+Verify
+```
+
+---
+
+## 54. `stack publish`
+
+Creates a reusable Stack.
+
+Do not automatically publish `main`.
+
+User must intentionally select what becomes public or shareable.
+
+---
+
+## 55. Public Stack Safety
+
+Before publishing, inspect metadata for:
+
+```text
+private sources
+snapshot references
+local absolute paths
+obvious credentials in metadata
+```
+
+Warn or block where appropriate.
+
+Stack cannot guarantee that arbitrary Skill text itself contains no secret, so do not falsely claim full secret scanning.
+
+---
+
+## 56. CLI UX Rule
+
+Every mutating operation follows:
+
+```text
+Intent
+↓
+Plan
+↓
+Preview
+↓
+Approval
+↓
+Apply
+↓
+Result
+```
+
+Example:
+
+```text
+stack use @emil/frontend
+
+Already satisfied     8
+Add                    5
+Update                 1
+Conflict               0
+
+Apply to main?
+
+Yes
+No
+View details
+```
+
+---
+
+## 57. Structured Output
+
+Important commands should support or be designed to support:
+
+```text
+--json
+```
+
+Especially:
+
+```text
+scan
+status
+diff
+```
+
+Core code returns objects.
+
+CLI formatting converts those objects to human-readable output.
+
+---
+
+## 58. Error Model
+
+Use typed errors.
+
+Examples:
+
+```text
+SkillParseError
+SkillSourceError
+UnmanagedPathConflict
+ResolutionConflict
+IntegrityMismatch
+AgentNotInstalled
+CloudAuthenticationError
+TransactionFailure
+```
+
+Do not make callers parse error strings.
+
+---
+
+## 59. Logging
+
+Human-friendly by default.
+
+Debug mode:
+
+```bash
+stack scan --debug
+```
+
+or:
+
+```text
+STACK_DEBUG=1
+```
+
+Never log:
+
+```text
+auth tokens
+secret values
+private snapshot contents
+```
+
+---
+
+## 60. Security Boundary
+
+Skills may include executable scripts.
+
+Installing a Stack may therefore introduce executable developer tooling.
+
+V0 must:
+
+* show source
+* show unknown provenance
+* preserve hashes
+* verify expected content
+* never execute bundled Skill scripts merely as part of installation
+* never imply public membership means safety
+
+---
+
+## 61. Trust Labels
+
+Good:
+
+```text
+Source verified
+Hash matched
+Source unavailable
+Local Skill
+Modified locally
+```
+
+Avoid unsupported claims like:
+
+```text
+Safe
+Trusted
+Secure
+```
+
+unless those properties were actually verified.
+
+---
+
+# DEVELOPMENT PHASES
+
+## 62. Phase 0: Repository Foundation
+
+Goal:
+
+> Create a clean base Codex can safely extend.
+
+Implement:
+
+```text
+pnpm monorepo
+Turborepo
+TypeScript
+ESM
+ESLint
+Prettier
+Vitest
+shared tsconfig
+```
+
+Packages:
+
+```text
+cli
+core
+scanner
+adapters
+spec
+store
+cloud-client
+shared
+```
+
+Also:
+
+```text
+apps/web
+fixtures
+docs
+CI
+```
+
+### Acceptance Criteria
+
+These must all succeed:
+
+```bash
+pnpm install
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+No real product functionality yet.
+
+---
+
+## 63. Phase 1: Scanner
+
+Implement:
+
+```bash
+stack scan
+```
+
+Features:
+
+* detect roots
+* locate Skills
+* parse `SKILL.md`
+* validate frontmatter
+* determine agent
+* calculate hashes
+* detect duplicates
+* determine scope
+* infer basic provenance
+* human output
+* JSON output
+
+### Acceptance Criteria
+
+Fixtures containing duplicated Skills across agent directories return the correct unique Skill count and locations.
+
+---
+
+## 64. Phase 2: Local Environment
+
+Implement:
+
+```bash
+stack init
+stack status
+stack diff
+```
+
+Add:
+
+* Machine identity
+* Environment schema
+* lockfile
+* desired vs actual comparison
+
+### Acceptance Criteria
+
+Delete a managed Skill.
+
+`stack status` reports it missing.
+
+Modify one.
+
+`stack status` reports it modified.
+
+Add an unrelated Skill.
+
+`stack status` reports it untracked.
+
+---
+
+## 65. Phase 3: Store and Restore
+
+Implement:
+
+```text
+content-addressed store
+reference restoration
+snapshot creation
+materialization
+integrity verification
+```
+
+### Acceptance Criteria
+
+Scan fixture environment.
+
+Save canonical content.
+
+Delete original Skills.
+
+Restore.
+
+Resulting hashes match originals.
+
+---
+
+## 66. Phase 4: Codex Adapter
+
+Implement:
+
+```text
+detect
+discover
+plan bindings
+apply
+remove
+verify
+launch
+```
+
+### Acceptance Criteria
+
+A Stack-managed Skill becomes available in a newly launched Codex session.
+
+Existing unmanaged Skill directories are never silently overwritten.
+
+---
+
+## 67. Phase 5: Resolver and `stack use`
+
+Implement:
+
+```bash
+stack use <local-stack>
+stack remove <stack>
+```
+
+Initially use local fixture Stacks.
+
+Implement:
+
+* dedupe
+* required/optional
+* conflict detection
+* overrides
+* preview
+* transactions
+* rollback
+
+### Acceptance Criteria
+
+Shared exact Skills resolve once.
+
+Incompatible Skills create a conflict.
+
+No mutation occurs before approval.
+
+---
+
+## 68. Phase 6: `stack try`
+
+Implement:
+
+```bash
+stack try <stack> -- codex
+```
+
+Start with scratch workspace isolation.
+
+### Acceptance Criteria
+
+Codex launches with temporary Stack Skills.
+
+After exit:
+
+```text
+main
+```
+
+is byte-for-byte unchanged.
+
+---
+
+## 69. Phase 7: Cursor and Claude Adapters
+
+Create adapter conformance tests.
+
+Each adapter should implement supported parts of:
+
+```text
+detect
+discover
+apply
+verify
+remove
+launch
+```
+
+Do not assume all vendors behave identically.
+
+---
+
+## 70. Phase 8: Cloud
+
+Build:
+
+```text
+web account
+GitHub auth
+CLI login
+push
+pull
+private snapshot upload
+Stack publishing
+Stack retrieval
+```
+
+### Acceptance Criteria
+
+Machine A pushes.
+
+Machine B pulls.
+
+Managed Skill hashes match.
+
+---
+
+## 71. Phase 9: Public Stack Flow
+
+Implement:
+
+```bash
+stack publish
+stack use @owner/name
+stack try @owner/name -- codex
+```
+
+Web route:
+
+```text
+/@owner/stack-name
+```
+
+Display:
+
+```text
+description
+Skills
+sources
+supported agents
+latest version
+usage command
+```
+
+No ranking or marketplace required.
+
+---
+
+## 72. Phase 10: Hardening
+
+Test:
+
+```text
+Windows
+macOS
+Linux
+interrupted transaction
+invalid SKILL.md
+deleted upstream source
+private source
+corrupted lockfile
+permissions errors
+missing agent
+unknown provenance
+duplicate Skill names
+path casing differences
+network failures
+modified local Skill
+```
+
+---
+
+## 73. Explicitly Deferred
+
+Codex must not build these during V0 unless explicitly instructed later:
+
+```text
+Teams
+Organizations
+SSO
+MCP management
+Rules management
+Hooks management
+General prompt management
+IDE extension management
+OS packages
+API key management
+Billing
+Marketplace ranking
+Recommendation engine
+AI semantic conflict detection
+Security scanning engine
+Fleet management
+Mobile app
+```
+
+---
+
+## 74. Fixtures
+
+Create Skill fixtures:
+
+```text
+fixtures/skills/react-v1/
+fixtures/skills/react-v2/
+fixtures/skills/local-custom/
+fixtures/skills/invalid-metadata/
+fixtures/skills/with-script/
+fixtures/skills/with-assets/
+```
+
+Machine fixtures:
+
+```text
+fixtures/machines/clean/
+fixtures/machines/duplicates/
+fixtures/machines/conflict/
+fixtures/machines/drift/
+```
+
+Stack fixtures:
+
+```text
+fixtures/stacks/base/
+fixtures/stacks/frontend/
+fixtures/stacks/conflicting/
+```
+
+---
+
+## 75. Adapter Contract Tests
+
+Use a shared conformance suite.
+
+Conceptually:
+
+```ts
+runAdapterContractTests(() => new CodexAdapter())
+runAdapterContractTests(() => new CursorAdapter())
+runAdapterContractTests(() => new ClaudeAdapter())
+```
+
+Vendor-specific tests can exist in addition to shared contract tests.
+
+---
+
+## 76. Critical Invariants
+
+These must become automated tests.
+
+### Invariant 1
+
+Scanning never mutates agent directories.
+
+### Invariant 2
+
+Canonical store content is immutable.
+
+### Invariant 3
+
+Unmanaged content is never overwritten without explicit approval.
+
+### Invariant 4
+
+Failed transactions restore the previous managed state.
+
+### Invariant 5
+
+Removing one Stack cannot remove a Skill still required elsewhere.
+
+### Invariant 6
+
+`stack try` cannot mutate `main`.
+
+### Invariant 7
+
+The same locked Environment resolves deterministically.
+
+### Invariant 8
+
+Hash mismatch is surfaced rather than silently accepted.
+
+### Invariant 9
+
+Cloud is not required for normal local operation.
+
+---
+
+## 77. Milestone 1
+
+> Stack can reconstruct the user's current Skill environment.
+
+Demo:
+
+```bash
+stack scan
+```
+
+Expected quality:
+
+```text
+Scanning your agent setup...
+
+✓ Codex
+✓ Cursor
+✓ Claude Code
+
+Found 27 unique Skills
+
+                     Cursor   Codex   Claude
+frontend-design        ✓        ✓       ✓
+playwright             ✓        ✓
+debugging              ✓                ✓
+agent-browser          ✓        ✓       ✓
+
+Sources
+
+21 Git-backed
+3 local
+2 unknown
+1 modified
+
+No changes were made.
+```
+
+Do not proceed until this is reliable.
+
+---
+
+## 78. Milestone 2
+
+> Stack understands desired state.
+
+Demo:
+
+```bash
+stack init
+stack status
+```
+
+Delete a managed Skill manually.
+
+Then:
+
+```bash
+stack status
+```
+
+must report it missing.
+
+---
+
+## 79. Milestone 3
+
+> Stack can restore.
+
+Demo:
+
+```text
+save
+delete
+restore
+verify hashes
+```
+
+The original laptop-loss use case now works locally.
+
+---
+
+## 80. Milestone 4
+
+> Stacks compose.
+
+Demo:
+
+```bash
+stack use ./fixtures/stacks/frontend
+```
+
+Example:
+
+```text
+8 already satisfied
+5 added
+1 optional skipped
+0 conflicts
+```
+
+---
+
+## 81. Milestone 5
+
+> Try without fear.
+
+Demo:
+
+```bash
+stack try ./fixtures/stacks/frontend -- codex
+```
+
+Codex launches.
+
+Temporary Skills work.
+
+Exit.
+
+Then:
+
+```bash
+stack status
+```
+
+returns:
+
+```text
+main
+✓ unchanged
+```
+
+---
+
+## 82. Milestone 6
+
+> The Environment survives the machine.
+
+Machine A:
+
+```bash
+stack push
+```
+
+Machine B:
+
+```bash
+stack pull
+```
+
+The same Environment returns.
+
+---
+
+## 83. Development Rule
+
+Implementation discoveries may change:
+
+```text
+filesystem mechanics
+adapter implementation
+library choices
+API details
+internal representations
+```
+
+They should not casually change:
+
+```text
+Skill
+Stack
+Environment
+Machine
+```
+
+or the frozen product semantics.
+
+Any such change requires an explicit product decision.
+
+---
+
+## 84. Source of Truth
+
+If implementation documents conflict:
+
+```text
+1. Product Foundation
+2. Technical Build Specification
+3. Stack manifest/specification
+4. Code comments
+```
+
+The codebase should eventually be brought back into consistency with the documentation.
+
+---
+
+## 85. Immediate Development Scope
+
+Begin with:
+
+```text
+PHASE 0
+Repository foundation
+
+PHASE 1
+Scanner
+```
+
+Do not begin with:
+
+```text
+website
+authentication
+cloud sync
+sharing UI
+teams
+billing
+```
+
+The first question Stack must answer reliably is:
+
+> What Agent Skills does this developer actually have right now?
+
+---
+
+## 86. V0 North Star
+
+The first complete workflow is:
+
+```bash
+# Discover my setup
+stack scan
+
+# Make it my desired environment
+stack init
+
+# See whether my machine matches it
+stack status
+
+# Add someone else's Stack
+stack use @someone/frontend
+
+# Or test it safely
+stack try @someone/frontend -- codex
+
+# Save my environment
+stack push
+```
+
+New machine:
+
+```bash
+stack login
+stack pull
+```
+
+The user's Agent Skill Environment returns.
+
+That is Stack V0.

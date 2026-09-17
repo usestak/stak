@@ -23,9 +23,11 @@
 ### Task 1: Root workspace and tooling
 
 **Files:**
+
 - Create: `.gitignore`, `.prettierignore`, `.prettierrc.json`, `eslint.config.js`, `package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `turbo.json`
 
 **Interfaces:**
+
 - Produces: root scripts `build`, `test`, `lint`, `typecheck`, and `format`; shared compiler and lint rules consumed by all workspaces.
 
 - [ ] Create the root package manifest with Node 22, pinned pnpm, Turbo scripts, and development dependencies.
@@ -36,6 +38,7 @@
 ### Task 2: Workspace package skeletons and fixture roots
 
 **Files:**
+
 - Create: `packages/{core,scanner,adapters,spec,store,cloud-client,shared}/package.json`
 - Create: `packages/{core,scanner,adapters,spec,store,cloud-client,shared}/tsconfig.json`
 - Create: `packages/{core,scanner,adapters,spec,store,cloud-client,shared}/src/index.ts`
@@ -43,6 +46,7 @@
 - Create: `fixtures/{skills,environments,stacks,machines}/.gitkeep`
 
 **Interfaces:**
+
 - Produces: importable public package roots for `@stack/core`, `@stack/scanner`, `@stack/adapters`, `@stack/spec`, `@stack/store`, `@stack/cloud-client`, `@stack/shared`, and the private `@stack/web` placeholder.
 
 - [ ] Add uniform ESM package manifests with `exports`, `types`, and root task scripts.
@@ -54,11 +58,13 @@
 ### Task 3: Minimal CLI through TDD
 
 **Files:**
+
 - Create: `packages/cli/package.json`, `packages/cli/tsconfig.json`
 - Test: `packages/cli/src/program.test.ts`
 - Create: `packages/cli/src/program.ts`, `packages/cli/src/index.ts`, `packages/cli/src/bin.ts`
 
 **Interfaces:**
+
 - Consumes: Commander.
 - Produces: `createProgram(): Command`, the `@stack/cli` public export, and the `stack` executable.
 
@@ -71,10 +77,12 @@
 ### Task 4: Continuous integration and repository verification
 
 **Files:**
+
 - Create: `.github/workflows/ci.yml`
 - Modify: any Phase 0 file required to fix validation failures.
 
 **Interfaces:**
+
 - Consumes: root scripts and `pnpm-lock.yaml`.
 - Produces: CI validation on Node 22 with frozen dependency installation.
 
