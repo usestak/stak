@@ -2,8 +2,14 @@ import { CommanderError } from 'commander';
 import { describe, expect, it } from 'vitest';
 
 import type {
+  AgentDetection,
+  BindingApplyResult,
+  BindingPlan,
+  BindingVerification,
   EnvironmentDiff,
   EnvironmentStatus,
+  LaunchResult,
+  ResolvedLocalEnvironment,
   ScanResult,
 } from '@stack/spec';
 
@@ -68,6 +74,41 @@ const emptyStatus: EnvironmentStatus = {
   },
 };
 const emptyDiff: EnvironmentDiff = { ...emptyStatus, entries: [] };
+const resolvedEnvironment: ResolvedLocalEnvironment = {
+  name: 'main',
+  machineId: '00000000-0000-4000-8000-000000000000',
+  skills: [],
+};
+const detection: AgentDetection = {
+  agent: 'codex',
+  installed: true,
+  executablePath: '/bin/codex',
+};
+const plan: BindingPlan = {
+  schemaVersion: 1,
+  agent: 'codex',
+  environment: 'main',
+  targetRoot: '/home/test/.agents/skills',
+  operations: [],
+  blocking: false,
+};
+const applyResult: BindingApplyResult = {
+  agent: 'codex',
+  applied: [],
+  removed: [],
+  unchanged: 0,
+  rolledBack: false,
+};
+const verification: BindingVerification = {
+  agent: 'codex',
+  healthy: true,
+  bindings: [],
+};
+const launchResult: LaunchResult = {
+  agent: 'codex',
+  exitCode: 0,
+  signal: null,
+};
 
 const runProgram = async (
   arguments_: string[],
@@ -99,6 +140,13 @@ const runProgram = async (
     }),
     status: async () => emptyStatus,
     diff: async () => emptyDiff,
+    loadRunEnvironment: async () => resolvedEnvironment,
+    detectCodex: async () => detection,
+    planCodexBindings: async () => plan,
+    applyCodexBindings: async () => applyResult,
+    verifyCodexBindings: async () => verification,
+    launchCodex: async () => launchResult,
+    confirm: async () => true,
     writeOut: (value) => {
       output += value;
     },
@@ -123,17 +171,16 @@ const runProgram = async (
 };
 
 describe('Stack CLI', () => {
-  it('prints root help with Phase 2 commands but without later commands', async () => {
+  it('prints root help with run but without Phase 5+ commands', async () => {
     const result = await runProgram(['--help']);
 
     expect(result.exit?.exitCode).toBe(0);
-    for (const command of ['scan', 'init', 'status', 'diff'])
+    for (const command of ['scan', 'init', 'status', 'diff', 'run'])
       expect(result.output).toContain(`  ${command}`);
     for (const command of [
       'use',
       'remove',
       'try',
-      'run',
       'restore',
       'push',
       'pull',
@@ -141,6 +188,191 @@ describe('Stack CLI', () => {
     ]) {
       expect(result.output).not.toContain(`  ${command}`);
     }
+  });
+
+  it('documents Codex-only run options', async () => {
+    const result = await runProgram(['run', '--help']);
+    expect(result.output).toContain('<agent>');
+    expect(result.output).toContain('Codex');
+    const codex = await runProgram(['run', 'codex', '--help']);
+    expect(codex.output).toContain('--dry-run');
+    expect(codex.output).toContain('--yes');
+    expect(codex.output).toContain('--json');
+  });
+
+  it('dry-run plans without applying or launching and emits parseable JSON', async () => {
+    let applied = false;
+    let launched = false;
+    const result = await runProgram(['run', 'codex', '--dry-run', '--json'], {
+      applyCodexBindings: async () => {
+        applied = true;
+        return applyResult;
+      },
+      launchCodex: async () => {
+        launched = true;
+        return launchResult;
+      },
+    });
+    expect(JSON.parse(result.output)).toMatchObject({
+      detection,
+      plan,
+      dryRun: true,
+    });
+    expect(applied).toBe(false);
+    expect(launched).toBe(false);
+  });
+
+  it('detects missing Codex before planning or mutation', async () => {
+    let planned = false;
+    await expect(
+      runProgram(['run', 'codex'], {
+        detectCodex: async () => ({ agent: 'codex', installed: false }),
+        planCodexBindings: async () => {
+          planned = true;
+          return plan;
+        },
+      }),
+    ).rejects.toThrow('Codex CLI was not found');
+    expect(planned).toBe(false);
+  });
+
+  it('fails cleanly when main does not exist', async () => {
+    await expect(
+      runProgram(['run', 'codex'], {
+        loadRunEnvironment: async () => {
+          throw new Error(
+            'main does not exist. Run stack scan and stack init.',
+          );
+        },
+      }),
+    ).rejects.toThrow('main does not exist');
+  });
+
+  it('requires approval for mutations and does not launch when declined', async () => {
+    let launched = false;
+    const addPlan: BindingPlan = {
+      ...plan,
+      operations: [
+        {
+          state: 'add',
+          entryId: 'skill_12345678',
+          skillName: 'demo',
+          contentHash: `sha256:${'a'.repeat(64)}`,
+          targetPath: '/home/test/.agents/skills/demo',
+        },
+      ],
+    };
+    const result = await runProgram(['run', 'codex'], {
+      planCodexBindings: async () => addPlan,
+      confirm: async () => false,
+      launchCodex: async () => {
+        launched = true;
+        return launchResult;
+      },
+    });
+    expect(result.output).toContain('Cancelled');
+    expect(launched).toBe(false);
+  });
+
+  it('blocks conflicts even with --yes', async () => {
+    let applied = false;
+    const conflictPlan: BindingPlan = {
+      ...plan,
+      blocking: true,
+      operations: [
+        {
+          state: 'conflict-unmanaged',
+          entryId: 'skill_12345678',
+          skillName: 'demo',
+          contentHash: `sha256:${'a'.repeat(64)}`,
+          currentHash: `sha256:${'b'.repeat(64)}`,
+          targetPath: '/home/test/.agents/skills/demo',
+        },
+      ],
+    };
+    await expect(
+      runProgram(['run', 'codex', '--yes'], {
+        planCodexBindings: async () => conflictPlan,
+        applyCodexBindings: async () => {
+          applied = true;
+          return applyResult;
+        },
+      }),
+    ).rejects.toThrow('unresolved conflicts');
+    expect(applied).toBe(false);
+  });
+
+  it('launches without confirmation when no binding mutations are needed', async () => {
+    let confirmed = false;
+    let launched = false;
+    const result = await runProgram(['run', 'codex'], {
+      confirm: async () => {
+        confirmed = true;
+        return true;
+      },
+      launchCodex: async () => {
+        launched = true;
+        return launchResult;
+      },
+    });
+    expect(confirmed).toBe(false);
+    expect(launched).toBe(true);
+    expect(result.output).toContain('Launching Codex');
+  });
+
+  it('applies, verifies, and launches approved additions', async () => {
+    const calls: string[] = [];
+    const addPlan: BindingPlan = {
+      ...plan,
+      operations: [
+        {
+          state: 'add',
+          entryId: 'skill_12345678',
+          skillName: 'demo',
+          contentHash: `sha256:${'a'.repeat(64)}`,
+          targetPath: '/home/test/.agents/skills/demo',
+        },
+      ],
+    };
+    const result = await runProgram(['run', 'codex', '--yes'], {
+      planCodexBindings: async () => addPlan,
+      applyCodexBindings: async () => {
+        calls.push('apply');
+        return applyResult;
+      },
+      verifyCodexBindings: async () => {
+        calls.push('verify');
+        return verification;
+      },
+      launchCodex: async () => {
+        calls.push('launch');
+        return launchResult;
+      },
+    });
+    expect(calls).toEqual(['apply', 'verify', 'launch']);
+    expect(result.output).toContain('Bindings applied and verified');
+  });
+
+  it('renders dry-run additions and conflicts for humans', async () => {
+    const addPlan: BindingPlan = {
+      ...plan,
+      operations: [
+        {
+          state: 'add',
+          entryId: 'skill_12345678',
+          skillName: 'demo',
+          contentHash: `sha256:${'a'.repeat(64)}`,
+          targetPath: '/home/test/.agents/skills/demo',
+        },
+      ],
+    };
+    expect(
+      (
+        await runProgram(['run', 'codex', '--dry-run'], {
+          planCodexBindings: async () => addPlan,
+        })
+      ).output,
+    ).toContain('Add      1');
   });
 
   it.each(['init', 'status', 'diff'])(

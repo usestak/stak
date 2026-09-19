@@ -1048,6 +1048,53 @@ Changed content receives a new hash.
 
 ## 23. Agent Adapter Contract
 
+### Phase 4 Codex Binding Behavior
+
+Codex currently discovers personal user Skills from:
+
+```text
+$HOME/.agents/skills
+```
+
+This is Stack's V0 target for newly created Codex bindings. It is resolved from
+the actual user home and is independent of `STACK_HOME`.
+
+Legacy Codex locations remain discovery-only:
+
+```text
+$CODEX_HOME/skills
+~/.codex/skills
+```
+
+Stack continues scanning non-system user Skills in those locations, but excludes
+the top-level `.system/` subtree because Codex owns those bundled Skills. Stack
+does not migrate legacy Skills automatically and does not scan or manage Codex
+admin/system locations such as `/etc/codex/skills` in V0.
+
+Binding ownership is Machine-specific and stored under:
+
+```text
+$STACK_HOME/state/machines/<machineId>/bindings/codex.json
+```
+
+A target is Stack-managed only when this registry records the exact target and
+Environment entry. Matching filesystem bytes do not transfer ownership. An
+identical unmanaged target may satisfy Codex availability while remaining
+external; differing unmanaged content is a blocking conflict.
+
+Codex binding state is separate from Environment status. Environment status asks
+whether desired bytes exist in any supported Machine root. Binding status asks
+whether those bytes are available at Codex's current user target. Adapter writes
+do not refresh the Environment placement baseline, so a new binding may appear as
+additional placement drift in later status output.
+
+`stack run codex` loads `main`, detects Codex before mutation, plans and previews
+bindings, requires approval for writes, materializes only from the immutable
+Store, records ownership atomically, verifies managed bindings, and launches the
+normal Codex executable. `--dry-run` performs detection and planning only.
+Project `.agents/skills` discovery remains Codex's responsibility during launch.
+Isolated homes and `stack try` remain Phase 6 work.
+
 Every adapter implements:
 
 ```ts
@@ -1107,7 +1154,7 @@ Agent-facing copies are bindings/materializations.
 Track them in:
 
 ```text
-~/.stack/state/bindings.json
+$STACK_HOME/state/machines/<machineId>/bindings/codex.json
 ```
 
 Example:
@@ -1117,7 +1164,7 @@ Example:
   "codex": {
     "frontend-design": {
       "contentHash": "sha256:...",
-      "target": "C:/Users/.../.codex/skills/frontend-design"
+      "target": "C:/Users/.../.agents/skills/frontend-design"
     }
   }
 }

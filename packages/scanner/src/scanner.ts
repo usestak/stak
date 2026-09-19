@@ -65,6 +65,8 @@ const discoverPaths = async (
     for (const entry of entries.sort((a, b) =>
       a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
     )) {
+      if (root.rootKind === 'codex' && depth === 0 && entry.name === '.system')
+        continue;
       if (
         entry.name !== '.git' &&
         (entry.isDirectory() || entry.isSymbolicLink())

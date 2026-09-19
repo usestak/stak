@@ -116,6 +116,31 @@ describe('scanSkills', () => {
     );
   });
 
+  it('skips bundled .system Skills only in the legacy Codex root', async () => {
+    const directory = await temp();
+    await copyFixture(
+      'valid-basic',
+      path.join(directory, '.system', 'bundled'),
+    );
+    await copyFixture('with-assets', path.join(directory, 'legacy-user'));
+
+    const result = await scanSkills({ roots: [root(directory, 'codex')] });
+
+    expect(result.skills.map((skill) => skill.metadata?.name)).toEqual([
+      'with-assets',
+    ]);
+    expect(result.roots[0]?.skillLocations).toBe(1);
+  });
+
+  it('does not apply the Codex .system exclusion to shared roots', async () => {
+    const directory = await temp();
+    await copyFixture('valid-basic', path.join(directory, '.system', 'user'));
+
+    const result = await scanSkills({ roots: [root(directory, 'agents')] });
+
+    expect(result.skills).toHaveLength(1);
+  });
+
   it('merges exact duplicate content while preserving physical locations', async () => {
     const first = await temp();
     const second = await temp();

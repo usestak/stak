@@ -193,10 +193,23 @@ importers:
 
   apps/web: {}
 
-  packages/adapters: {}
+  packages/adapters:
+    dependencies:
+      '@stack/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@stack/spec':
+        specifier: workspace:*
+        version: link:../spec
+      '@stack/store':
+        specifier: workspace:*
+        version: link:../store
 
   packages/cli:
     dependencies:
+      '@stack/adapters':
+        specifier: workspace:*
+        version: link:../adapters
       '@stack/core':
         specifier: workspace:*
         version: link:../core
