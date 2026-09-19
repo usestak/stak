@@ -812,6 +812,34 @@ shared standard root and does not represent an agent named `agents`.
 Effective agent visibility is derived capability information owned by agent
 adapters. It is not part of a Skill's canonical physical identity.
 
+### Portable Environment vs Machine Placement State
+
+The scanner's current observation, the portable desired Environment, and the
+Machine-specific placement baseline are separate forms of state:
+
+```text
+Machine discovery             ScanResult
+Portable desired state        Environment manifest + lockfile
+Machine observation baseline  Per-Machine Environment state
+```
+
+The portable Environment and lock identify logical Skills and resolved content.
+They must not contain absolute paths to vendor Skill directories on the Machine
+that created them. Observed paths, physical root kinds, symlink targets, and
+initial placement belong in per-Machine state under:
+
+```text
+~/.stack/state/machines/<machineId>/environments/<environment>.json
+```
+
+Logical Skill drift and physical placement drift are also distinct. A desired
+content hash is satisfied when it remains available in any successfully observed
+supported global root. Removing one of several duplicate placements is placement
+drift, not a missing logical Skill. A desired Skill is modified only when baseline
+location evidence associates changed content with a previously observed
+occurrence. Failed roots make the observation uncertain and must not be converted
+into a definite missing result.
+
 ---
 
 ## 18. Scanner Algorithm

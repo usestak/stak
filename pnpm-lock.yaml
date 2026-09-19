@@ -197,6 +197,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@stack/core':
+        specifier: workspace:*
+        version: link:../core
       '@stack/scanner':
         specifier: workspace:*
         version: link:../scanner
@@ -209,7 +212,14 @@ importers:
 
   packages/cloud-client: {}
 
-  packages/core: {}
+  packages/core:
+    dependencies:
+      '@stack/spec':
+        specifier: workspace:*
+        version: link:../spec
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
 
   packages/scanner:
     dependencies:
