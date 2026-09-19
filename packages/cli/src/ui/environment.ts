@@ -18,13 +18,21 @@ export const renderInitResult = (
     `Physical locations recorded      ${result.physicalLocations}`,
     `Exact duplicates consolidated    ${result.consolidatedDuplicates}`,
     `Name collisions preserved        ${result.nameCollisions}`,
+    '',
+    'Preservation',
+    '',
+    `${result.preservedContents} Skill contents preserved locally`,
+    `${result.references} portable Git references`,
+    `${result.snapshots} local snapshots`,
+    `${result.integrityChecks}/${result.importedSkills} integrity checks passed`,
   ];
-  if (result.localOrUnknown > 0)
-    lines.push(
-      '',
-      `${result.localOrUnknown} Skills require future local snapshot support for portable restoration.`,
-    );
-  lines.push('', 'main created.', '', 'No Skill files were modified.', '');
+  lines.push(
+    '',
+    'main created.',
+    '',
+    'No source Skill files were modified.',
+    '',
+  );
   return lines.join('\n');
 };
 
@@ -54,6 +62,17 @@ export const renderStatus = (status: EnvironmentStatus): string => {
     `${summary.placementAdded} added placement`,
     `${summary.placementRemoved} removed placement`,
     `${summary.placementChanged} changed placement`,
+    '',
+    'Local preservation',
+    '',
+    `Available      ${summary.preservation.available}`,
+    `Missing        ${summary.preservation.missing}`,
+    `Corrupt        ${summary.preservation.corrupt}`,
+    '',
+    'Restoration strategy',
+    '',
+    `Reference      ${summary.restoration.reference}`,
+    `Snapshot       ${summary.restoration.snapshot}`,
   ];
   if (summary.rootFailures > 0)
     lines.push(
@@ -92,7 +111,8 @@ const sourceLabel = (source: SkillStatus['desiredSource']): string => {
 export const renderDiff = (diff: EnvironmentDiff): string => {
   const lines = [`Environment diff: ${diff.environment}`];
   for (const entry of diff.entries.filter(
-    (item) => item.state !== 'satisfied',
+    (item) =>
+      item.state !== 'satisfied' || item.preservation.state !== 'available',
   )) {
     lines.push(
       '',
@@ -106,7 +126,11 @@ export const renderDiff = (diff: EnvironmentDiff): string => {
       '',
       'Desired',
       entry.desiredHash,
+      '',
+      'Local preservation',
+      entry.preservation.state.toUpperCase(),
     );
+    if (entry.preservation.message) lines.push(entry.preservation.message);
     if (entry.currentHash) lines.push('', 'Current', entry.currentHash);
     lines.push('', 'Desired source', sourceLabel(entry.desiredSource));
     if (entry.currentSource)
@@ -153,6 +177,7 @@ export const renderDiff = (diff: EnvironmentDiff): string => {
     );
   if (
     diff.entries.every((item) => item.state === 'satisfied') &&
+    diff.entries.every((item) => item.preservation.state === 'available') &&
     diff.untracked.length === 0 &&
     diff.placementDrift.length === 0
   )

@@ -1,1 +1,1 @@
-export const sharedPackage = '@stack/shared' as const;
+export * from './tree.js';

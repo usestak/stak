@@ -893,6 +893,61 @@ references
 
 Those are part of the Skill.
 
+### Local Preservation vs Portable Restoration
+
+Every valid Skill imported into an Environment is preserved locally by its exact
+content hash, regardless of provenance. Local preservation and portable
+restoration strategy are separate facts:
+
+```text
+local preservation  immutable bytes available under ~/.stack/store
+portable strategy   reference or snapshot metadata used to reacquire those bytes
+```
+
+The content-addressed layout is:
+
+```text
+~/.stack/store/sha256/<first-two-hex>/<full-hex>/
+  content/
+  object.json
+```
+
+`content/` contains only the canonical Skill tree. `object.json` is Stack metadata
+and is not part of the Skill hash. Existing objects are verified before reuse and
+are never silently overwritten or repaired when corrupt.
+
+The deterministic tree enumeration and hashing primitive is shared by Scanner and
+Store. Store ingestion and materialization therefore use the same ignored noise,
+path normalization, file ordering, file bytes, and nested-symlink metadata as
+discovery.
+
+### Reference and Snapshot Eligibility
+
+`reference` requires one unambiguous Git observation with a portable HTTPS, SSH,
+Git, or SCP-style remote, an exact revision, a repository-relative Skill path, and
+a subtree that is clean relative to that revision. Stack determines cleanliness
+from local Git state without fetching or contacting the remote. A portable remote
+may be public or private; Phase 3 does not attempt to determine accessibility.
+
+When this evidence is incomplete, dirty, local, unknown, non-portable, or
+ambiguous, Stack selects `snapshot`. Local snapshot records live under:
+
+```text
+~/.stack/snapshots/<snapshotId>.json
+```
+
+A snapshot record points to an immutable content-store hash and does not duplicate
+the Skill bytes. Cloud archive creation and upload remain deferred.
+
+`stack init` must preserve and verify every included desired Skill before the
+complete Environment becomes visible. `stack status` and `stack diff` verify store
+objects read-only and report `available`, `missing`, or `corrupt` independently
+from logical Machine drift.
+
+Public restore commands remain deferred. Phase 3 materialization is an internal
+engine for controlled targets only; writing actual Codex, Cursor, or Claude Skill
+roots remains the responsibility of Phase 4+ adapters.
+
 ---
 
 ## 20. Provenance Detection

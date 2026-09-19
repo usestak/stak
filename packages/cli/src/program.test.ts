@@ -63,6 +63,8 @@ const emptyStatus: EnvironmentStatus = {
     placementChanged: 0,
     invalid: 0,
     rootFailures: 0,
+    preservation: { available: 0, missing: 0, corrupt: 0 },
+    restoration: { reference: 0, snapshot: 0 },
   },
 };
 const emptyDiff: EnvironmentDiff = { ...emptyStatus, entries: [] };
@@ -83,6 +85,11 @@ const runProgram = async (
       consolidatedDuplicates: 0,
       nameCollisions: 0,
       localOrUnknown: 0,
+      preservedContents: 0,
+      reusedContents: 0,
+      references: 0,
+      snapshots: 0,
+      integrityChecks: 0,
       files: {
         manifest: 'environment.yaml',
         lock: 'stack.lock.json',
@@ -199,6 +206,11 @@ describe('Stack CLI', () => {
           consolidatedDuplicates: 0,
           nameCollisions: 0,
           localOrUnknown: 0,
+          preservedContents: 0,
+          reusedContents: 0,
+          references: 0,
+          snapshots: 0,
+          integrityChecks: 0,
           files: { manifest: '', lock: '', baseline: '', machine: '' },
         };
       },
@@ -206,6 +218,7 @@ describe('Stack CLI', () => {
     expect(project).toBe(false);
     expect(received).toBe(emptyResult);
     expect(result.output).toContain('main created.');
+    expect(result.output).toContain('Preservation');
   });
 
   it.each([
@@ -221,6 +234,8 @@ describe('Stack CLI', () => {
     const status = await runProgram(['status']);
     const diff = await runProgram(['diff']);
     expect(status.output).toContain('Environment: main');
+    expect(status.output).toContain('Local preservation');
+    expect(status.output).toContain('Restoration strategy');
     expect(status.output).toContain('No changes were made.');
     expect(diff.output).toContain('Environment diff: main');
     expect(diff.output).toContain('No changes were made.');

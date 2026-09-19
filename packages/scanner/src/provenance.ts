@@ -27,9 +27,17 @@ export const detectProvenance = async (
     }
     const sourcePath =
       path.relative(repository, directory).split(path.sep).join('/') || '.';
+    const clean =
+      (await git(repository, [
+        'status',
+        '--porcelain',
+        '--untracked-files=all',
+        '--',
+        sourcePath,
+      ])) === '';
     return remote
-      ? { type: 'git', remote, revision, path: sourcePath }
-      : { type: 'git', revision, path: sourcePath };
+      ? { type: 'git', remote, revision, path: sourcePath, clean }
+      : { type: 'git', revision, path: sourcePath, clean };
   } catch {
     return { type: 'local' };
   }

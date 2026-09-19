@@ -217,12 +217,22 @@ importers:
       '@stack/spec':
         specifier: workspace:*
         version: link:../spec
+      '@stack/store':
+        specifier: workspace:*
+        version: link:../store
       yaml:
         specifier: 2.9.1
         version: 2.9.1
+    devDependencies:
+      '@stack/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/scanner:
     dependencies:
+      '@stack/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@stack/spec':
         specifier: workspace:*
         version: link:../spec
@@ -238,7 +248,14 @@ importers:
         specifier: 4.6.5
         version: 4.6.5
 
-  packages/store: {}
+  packages/store:
+    dependencies:
+      '@stack/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@stack/spec':
+        specifier: workspace:*
+        version: link:../spec
 
 packages:
 

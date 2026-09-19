@@ -9,9 +9,14 @@ import {
   skillScopeSchema,
   skillSourceSchema,
 } from './scanner.js';
+import {
+  contentHashSchema,
+  localContentRecordSchema,
+  restorationStrategySchema,
+  storeVerificationSchema,
+} from './storage.js';
 
 const timestampSchema = z.iso.datetime({ offset: true });
-const contentHashSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 const entryIdSchema = z.string().regex(/^skill_[A-Za-z0-9_-]{8,}$/);
 
 export const machineIdentitySchema = z.object({
@@ -43,6 +48,8 @@ export const lockedSkillSchema = z.object({
   metadata: skillMetadataSchema.optional(),
   preferredSource: skillSourceSchema.optional(),
   observedSources: z.array(skillSourceSchema),
+  localContent: localContentRecordSchema,
+  restoration: restorationStrategySchema,
 });
 
 export const environmentLockSchema = z.object({
@@ -80,6 +87,8 @@ export const skillStatusSchema = z.object({
   baselineLocations: z.array(baselineLocationSchema),
   currentLocations: z.array(baselineLocationSchema),
   uncertaintyRoots: z.array(scannedRootSchema),
+  preservation: storeVerificationSchema,
+  restorationStrategy: z.enum(['reference', 'snapshot']),
 });
 
 export const untrackedSkillSchema = z.object({
@@ -118,6 +127,15 @@ export const environmentStatusSummarySchema = z.object({
   placementChanged: z.number().int().nonnegative(),
   invalid: z.number().int().nonnegative(),
   rootFailures: z.number().int().nonnegative(),
+  preservation: z.object({
+    available: z.number().int().nonnegative(),
+    missing: z.number().int().nonnegative(),
+    corrupt: z.number().int().nonnegative(),
+  }),
+  restoration: z.object({
+    reference: z.number().int().nonnegative(),
+    snapshot: z.number().int().nonnegative(),
+  }),
 });
 
 const statusFields = {

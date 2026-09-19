@@ -1,7 +1,9 @@
 import {
+  cp,
   mkdtemp,
   mkdir,
   readFile,
+  readdir,
   rm,
   stat,
   writeFile,
@@ -18,6 +20,14 @@ import type {
   SkillRootKind,
   SkillSource,
 } from '@stack/spec';
+import type { StoreVerification } from '@stack/spec';
+import type { IngestSkillOptions, IngestSkillResult } from '@stack/store';
+import { hashSkillDirectory } from '@stack/shared';
+import {
+  contentObjectPaths,
+  materializeStoredSkill,
+  verifyStoredSkill,
+} from '@stack/store';
 import {
   environmentLockSchema,
   environmentManifestSchema,
@@ -26,12 +36,12 @@ import {
 } from '@stack/spec';
 
 import {
-  diffMainEnvironment,
+  diffMainEnvironment as realDiffMainEnvironment,
   getOrCreateMachineIdentity,
-  initializeMainEnvironment,
+  initializeMainEnvironment as realInitializeMainEnvironment,
   loadMainEnvironment,
   resolveStackHome,
-  statusMainEnvironment,
+  statusMainEnvironment as realStatusMainEnvironment,
 } from './index.js';
 
 const temporaryDirectories: string[] = [];
@@ -134,6 +144,40 @@ const fixedNow = () => new Date('2026-09-19T12:00:00.000Z');
 let idCounter = 0;
 const fixedId = () =>
   `00000000-0000-4000-8000-${String(++idCounter).padStart(12, '0')}`;
+const testStore = {
+  ingestSkill: async (
+    options: IngestSkillOptions,
+  ): Promise<IngestSkillResult> => ({
+    contentHash: options.expectedContentHash,
+    objectPath: path.join(
+      options.stackHome,
+      'store',
+      options.expectedContentHash,
+    ),
+    contentPath: path.join(
+      options.stackHome,
+      'store',
+      options.expectedContentHash,
+      'content',
+    ),
+    reused: false,
+  }),
+  verifyStoredSkill: async (options: {
+    contentHash: string;
+  }): Promise<StoreVerification> => ({
+    state: 'available' as const,
+    contentHash: options.contentHash,
+  }),
+};
+const initializeMainEnvironment = (
+  options: Parameters<typeof realInitializeMainEnvironment>[0],
+) => realInitializeMainEnvironment({ ...options, store: testStore });
+const statusMainEnvironment = (
+  options: Parameters<typeof realStatusMainEnvironment>[0],
+) => realStatusMainEnvironment({ ...options, store: testStore });
+const diffMainEnvironment = (
+  options: Parameters<typeof realDiffMainEnvironment>[0],
+) => realDiffMainEnvironment({ ...options, store: testStore });
 
 describe('Machine identity and paths', () => {
   it('respects STACK_HOME and keeps a stable random identity', async () => {
@@ -634,5 +678,309 @@ describe('status and diff', () => {
       desiredHash: hash('a'),
       state: 'satisfied',
     });
+  });
+});
+
+describe('Phase 3 preservation integration', () => {
+  const createSkill = async (root: string, name = 'one') => {
+    const directory = path.join(root, name);
+    await mkdir(path.join(directory, 'scripts'), { recursive: true });
+    await writeFile(
+      path.join(directory, 'SKILL.md'),
+      `---\nname: ${name}\ndescription: ${name} description\n---\n`,
+    );
+    await writeFile(path.join(directory, 'scripts', 'run.js'), 'run');
+    return directory;
+  };
+
+  it('preserves one object for duplicate placements and records a snapshot', async () => {
+    idCounter = 0;
+    const stackHome = await temp();
+    const firstRoot = path.join(await temp(), 'codex');
+    const secondRoot = path.join(await temp(), 'cursor');
+    const first = await createSkill(firstRoot);
+    const second = path.join(secondRoot, 'one');
+    await cp(first, second, { recursive: true });
+    const contentHash = (await hashSkillDirectory(first)).hash;
+    const discovered = skill(firstRoot, 'one', contentHash, {
+      locations: [
+        location(firstRoot, 'one', 'codex'),
+        location(secondRoot, 'one', 'cursor'),
+      ],
+    });
+
+    const result = await realInitializeMainEnvironment({
+      stackHome,
+      scanResult: scan([discovered]),
+      now: fixedNow,
+      idFactory: fixedId,
+    });
+    const saved = await loadMainEnvironment({ stackHome });
+    const locked = Object.values(saved.lock.skills)[0];
+
+    expect(result).toMatchObject({
+      preservedContents: 1,
+      reusedContents: 0,
+      references: 0,
+      snapshots: 1,
+      integrityChecks: 1,
+    });
+    expect(locked?.localContent).toEqual({ available: true, contentHash });
+    expect(locked?.restoration).toMatchObject({
+      strategy: 'snapshot',
+      reason: 'local',
+    });
+    expect(Object.values(saved.baseline.skills)[0]?.locations).toHaveLength(2);
+    expect(await verifyStoredSkill({ stackHome, contentHash })).toMatchObject({
+      state: 'available',
+    });
+    const objects = await readdir(
+      path.dirname(contentObjectPaths(stackHome, contentHash).objectDirectory),
+    );
+    expect(objects).toEqual([contentHash.slice('sha256:'.length)]);
+    const snapshotId =
+      locked?.restoration.strategy === 'snapshot'
+        ? locked.restoration.snapshotId
+        : '';
+    expect(
+      JSON.parse(
+        await readFile(
+          path.join(stackHome, 'snapshots', `${snapshotId}.json`),
+          'utf8',
+        ),
+      ),
+    ).toMatchObject({
+      contentHash,
+      environmentEntryId: saved.manifest.skills[0]?.id,
+    });
+  });
+
+  it('records one portable reference from duplicate Git and local evidence', async () => {
+    idCounter = 0;
+    const stackHome = await temp();
+    const gitRoot = path.join(await temp(), 'git-root');
+    const localRoot = path.join(await temp(), 'local-root');
+    const source = await createSkill(gitRoot);
+    await cp(source, path.join(localRoot, 'one'), { recursive: true });
+    const contentHash = (await hashSkillDirectory(source)).hash;
+    const portableGit: SkillSource = {
+      type: 'git',
+      remote: 'git@github.com:example/skills.git',
+      revision: 'abc123',
+      path: 'skills/one',
+      clean: true,
+    };
+    const discovered = skill(gitRoot, 'one', contentHash, {
+      source: portableGit,
+      locations: [
+        location(gitRoot, 'one', 'codex', portableGit),
+        location(localRoot, 'one', 'cursor', { type: 'local' }),
+      ],
+    });
+
+    const result = await realInitializeMainEnvironment({
+      stackHome,
+      scanResult: scan([discovered]),
+      now: fixedNow,
+      idFactory: fixedId,
+    });
+    const locked = Object.values(
+      (await loadMainEnvironment({ stackHome })).lock.skills,
+    )[0];
+
+    expect(result).toMatchObject({ references: 1, snapshots: 0 });
+    expect(locked?.restoration).toEqual({
+      strategy: 'reference',
+      reference: {
+        remote: 'git@github.com:example/skills.git',
+        revision: 'abc123',
+        path: 'skills/one',
+        expectedContentHash: contentHash,
+      },
+    });
+    expect(locked?.observedSources).toHaveLength(2);
+    expect(JSON.stringify(locked)).not.toContain(stackHome);
+    expect(
+      await readdir(path.join(stackHome, 'snapshots')).catch(() => []),
+    ).toEqual([]);
+  });
+
+  it('recovers exact content from Store after the source is deleted', async () => {
+    idCounter = 0;
+    const stackHome = await temp();
+    const root = path.join(await temp(), 'skills');
+    const source = await createSkill(root);
+    const contentHash = (await hashSkillDirectory(source)).hash;
+    await realInitializeMainEnvironment({
+      stackHome,
+      scanResult: scan([skill(root, 'one', contentHash)]),
+      now: fixedNow,
+      idFactory: fixedId,
+    });
+    await rm(source, { recursive: true, force: true });
+
+    const status = await realStatusMainEnvironment({
+      stackHome,
+      scanResult: scan([]),
+      now: fixedNow,
+    });
+    expect(status.summary).toMatchObject({
+      missing: 1,
+      preservation: { available: 1, missing: 0, corrupt: 0 },
+    });
+    const targetPath = path.join(await temp(), 'restored');
+    await materializeStoredSkill({ stackHome, contentHash, targetPath });
+    expect((await hashSkillDirectory(targetPath)).hash).toBe(contentHash);
+  });
+
+  it('preserves resolved content for a root-level Skill symlink occurrence', async () => {
+    idCounter = 0;
+    const stackHome = await temp();
+    const realRoot = path.join(await temp(), 'real');
+    const realSkill = await createSkill(realRoot);
+    const contentHash = (await hashSkillDirectory(realSkill)).hash;
+    const visibleRoot = path.join(await temp(), 'visible');
+    const visiblePath = path.join(visibleRoot, 'one');
+    const discovered = skill(visibleRoot, 'one', contentHash, {
+      locations: [
+        {
+          ...location(visibleRoot, 'one'),
+          path: visiblePath,
+          isSymlink: true,
+          realPath: realSkill,
+        },
+      ],
+    });
+
+    await realInitializeMainEnvironment({
+      stackHome,
+      scanResult: scan([discovered]),
+      now: fixedNow,
+      idFactory: fixedId,
+    });
+
+    expect(await verifyStoredSkill({ stackHome, contentHash })).toMatchObject({
+      state: 'available',
+    });
+  });
+
+  it('keeps preserved content healthy after the source is modified', async () => {
+    idCounter = 0;
+    const stackHome = await temp();
+    const root = path.join(await temp(), 'skills');
+    const source = await createSkill(root);
+    const originalHash = (await hashSkillDirectory(source)).hash;
+    await realInitializeMainEnvironment({
+      stackHome,
+      scanResult: scan([skill(root, 'one', originalHash)]),
+      now: fixedNow,
+      idFactory: fixedId,
+    });
+    await writeFile(path.join(source, 'scripts', 'run.js'), 'changed');
+    const changedHash = (await hashSkillDirectory(source)).hash;
+    const status = await realStatusMainEnvironment({
+      stackHome,
+      scanResult: scan([skill(root, 'one', changedHash)]),
+      now: fixedNow,
+    });
+    expect(status.summary).toMatchObject({
+      modified: 1,
+      preservation: { available: 1 },
+    });
+    expect(
+      await verifyStoredSkill({ stackHome, contentHash: originalHash }),
+    ).toMatchObject({ state: 'available' });
+  });
+
+  it.each([
+    [
+      'missing',
+      async (stackHome: string, contentHash: string) =>
+        rm(contentObjectPaths(stackHome, contentHash).objectDirectory, {
+          recursive: true,
+          force: true,
+        }),
+    ],
+    [
+      'corrupt',
+      async (stackHome: string, contentHash: string) =>
+        writeFile(
+          path.join(
+            contentObjectPaths(stackHome, contentHash).contentPath,
+            'SKILL.md',
+          ),
+          'corrupt',
+        ),
+    ],
+  ] as const)(
+    'reports %s preservation without changing logical satisfaction',
+    async (expected, damage) => {
+      idCounter = 0;
+      const stackHome = await temp();
+      const root = path.join(await temp(), 'skills');
+      const source = await createSkill(root);
+      const contentHash = (await hashSkillDirectory(source)).hash;
+      const current = scan([skill(root, 'one', contentHash)]);
+      await realInitializeMainEnvironment({
+        stackHome,
+        scanResult: current,
+        now: fixedNow,
+        idFactory: fixedId,
+      });
+      await damage(stackHome, contentHash);
+      const before =
+        expected === 'corrupt'
+          ? await readFile(
+              path.join(
+                contentObjectPaths(stackHome, contentHash).contentPath,
+                'SKILL.md',
+              ),
+              'utf8',
+            )
+          : undefined;
+
+      const status = await realStatusMainEnvironment({
+        stackHome,
+        scanResult: current,
+        now: fixedNow,
+      });
+      const diff = await realDiffMainEnvironment({
+        stackHome,
+        scanResult: current,
+        now: fixedNow,
+      });
+
+      expect(status.summary.satisfied).toBe(1);
+      expect(status.skills[0]?.preservation.state).toBe(expected);
+      expect(diff.entries[0]?.preservation.state).toBe(expected);
+      if (before)
+        expect(
+          await readFile(
+            path.join(
+              contentObjectPaths(stackHome, contentHash).contentPath,
+              'SKILL.md',
+            ),
+            'utf8',
+          ),
+        ).toBe(before);
+    },
+  );
+
+  it('does not commit main when preservation fails', async () => {
+    idCounter = 0;
+    const stackHome = await temp();
+    const root = path.join(await temp(), 'skills');
+    await createSkill(root);
+    await expect(
+      realInitializeMainEnvironment({
+        stackHome,
+        scanResult: scan([skill(root, 'one', hash('f'))]),
+        now: fixedNow,
+        idFactory: fixedId,
+      }),
+    ).rejects.toMatchObject({ code: 'content-hash-mismatch' });
+    await expect(
+      stat(path.join(stackHome, 'environments', 'main')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

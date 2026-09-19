@@ -11,6 +11,7 @@ import type {
   ScannedRoot,
   SkillStatus,
 } from '@stack/spec';
+import { verifyStoredSkill } from '@stack/store';
 
 import { loadMainEnvironment } from './state.js';
 
@@ -18,6 +19,12 @@ export type ObserveMainEnvironmentOptions = {
   stackHome: string;
   scanResult: ScanResult;
   now?: () => Date;
+  store?: {
+    verifyStoredSkill(options: {
+      stackHome: string;
+      contentHash: string;
+    }): ReturnType<typeof verifyStoredSkill>;
+  };
 };
 
 const pathKey = (value: string): string => {
@@ -129,6 +136,7 @@ export const statusMainEnvironment = async (
   const assignedModifiedHashes = new Set<string>();
   const skills: SkillStatus[] = [];
   const placementDrift: PlacementDrift[] = [];
+  const verify = options.store?.verifyStoredSkill ?? verifyStoredSkill;
 
   for (const entry of saved.manifest.skills) {
     const locked = saved.lock.skills[entry.id];
@@ -187,6 +195,11 @@ export const statusMainEnvironment = async (
       baselineLocations: baseline.locations,
       currentLocations,
       uncertaintyRoots: uniqueUncertainty,
+      preservation: await verify({
+        stackHome: options.stackHome,
+        contentHash: locked.contentHash,
+      }),
+      restorationStrategy: locked.restoration.strategy,
     };
     skills.push(skillStatus);
     placementDrift.push(
@@ -267,6 +280,23 @@ export const statusMainEnvironment = async (
         .length,
       invalid: invalidSkills.length,
       rootFailures: failedRoots.length,
+      preservation: {
+        available: skills.filter(
+          (item) => item.preservation.state === 'available',
+        ).length,
+        missing: skills.filter((item) => item.preservation.state === 'missing')
+          .length,
+        corrupt: skills.filter((item) => item.preservation.state === 'corrupt')
+          .length,
+      },
+      restoration: {
+        reference: skills.filter(
+          (item) => item.restorationStrategy === 'reference',
+        ).length,
+        snapshot: skills.filter(
+          (item) => item.restorationStrategy === 'snapshot',
+        ).length,
+      },
     },
   });
 };

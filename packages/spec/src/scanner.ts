@@ -18,6 +18,7 @@ export const skillSourceSchema = z.discriminatedUnion('type', [
     remote: z.string().optional(),
     revision: z.string(),
     path: z.string(),
+    clean: z.boolean().optional(),
   }),
   z.object({ type: z.literal('local') }),
   z.object({ type: z.literal('unknown'), reason: z.string().optional() }),

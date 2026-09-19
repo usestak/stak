@@ -17,3 +17,6 @@ export type {
 } from './initialize.js';
 export { diffMainEnvironment, statusMainEnvironment } from './status.js';
 export type { ObserveMainEnvironmentOptions } from './status.js';
+export { selectRestorationStrategy } from './restoration.js';
+export type { SelectRestorationStrategyOptions } from './restoration.js';
+export { StackStoreError } from '@stack/store';

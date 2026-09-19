@@ -31,6 +31,15 @@ describe('Phase 2 contracts', () => {
           description: 'Design help',
           contentHash: `sha256:${'a'.repeat(64)}`,
           observedSources: [source],
+          localContent: {
+            available: true,
+            contentHash: `sha256:${'a'.repeat(64)}`,
+          },
+          restoration: {
+            strategy: 'snapshot',
+            snapshotId: 'snap_86526e9e-3c97-4b0f-8bcb-1a65660568cf',
+            reason: 'local',
+          },
         },
       },
     });
@@ -98,6 +107,8 @@ describe('Phase 2 contracts', () => {
         placementChanged: 0,
         invalid: 0,
         rootFailures: 0,
+        preservation: { available: 0, missing: 0, corrupt: 0 },
+        restoration: { reference: 0, snapshot: 0 },
       },
     };
     const status = environmentStatusSchema.parse(common);
