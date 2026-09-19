@@ -37,3 +37,42 @@ export {
 export type { StackUseProposal, StackRemoveProposal } from './composition.js';
 export { preserveTrialStack, resolveTrialStack } from './trial.js';
 export type { TrialStackResolution } from './trial.js';
+export {
+  buildCloudEnvironmentBundle,
+  canonicalJson,
+  computeEnvironmentDigest,
+} from './cloud-bundle.js';
+export type { BuildCloudEnvironmentBundleOptions } from './cloud-bundle.js';
+export {
+  readMachineSyncState,
+  readEnvironmentSyncState,
+  writeEnvironmentSyncState,
+} from './sync-metadata.js';
+export { restoreReference, spawnGit } from './git-reference.js';
+export type {
+  GitCommandResult,
+  GitExecutor,
+  RestoreReferenceOptions,
+} from './git-reference.js';
+export { applyCloudRestore, planCloudRestore } from './cloud-restore.js';
+export type {
+  ApplyCloudRestoreOptions,
+  CloudRestorePlan,
+  CloudRestoreResult,
+} from './cloud-restore.js';
+export { applyPush, preparePush } from './cloud-push.js';
+export type {
+  ApplyPushOptions,
+  ApplyPushResult,
+  PreparePushOptions,
+  PushConflict,
+  PushPlan,
+} from './cloud-push.js';
+export { applyPull, preparePull } from './cloud-pull.js';
+export type {
+  ApplyPullOptions,
+  ApplyPullResult,
+  PreparePullOptions,
+  PullConflict,
+  PullPlan,
+} from './cloud-pull.js';

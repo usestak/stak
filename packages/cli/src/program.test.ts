@@ -14,7 +14,7 @@ import type {
 } from '@stack/spec';
 
 import { createProgram, type ProgramDependencies } from './program.js';
-import type { TrialStackResolution } from '@stack/core';
+import type { PullPlan, PushPlan, TrialStackResolution } from '@stack/core';
 
 const emptyResult: ScanResult = {
   roots: [
@@ -211,6 +211,27 @@ const runProgram = async (
       signal: null,
       cleaned: true,
     }),
+    cloudLogin: async () => {
+      throw new Error('not configured');
+    },
+    cloudLogout: async () => {
+      throw new Error('not configured');
+    },
+    cloudWhoami: async () => {
+      throw new Error('not configured');
+    },
+    cloudPreparePush: async () => {
+      throw new Error('not configured');
+    },
+    cloudApplyPush: async () => {
+      throw new Error('not configured');
+    },
+    cloudPreparePull: async () => {
+      throw new Error('not configured');
+    },
+    cloudApplyPull: async () => {
+      throw new Error('not configured');
+    },
     confirm: async () => true,
     writeOut: (value) => {
       output += value;
@@ -236,7 +257,7 @@ const runProgram = async (
 };
 
 describe('Stack CLI', () => {
-  it('prints root help with try but without Phase 7+ commands', async () => {
+  it('prints root help with cloud commands but without deferred commands', async () => {
     const result = await runProgram(['--help']);
 
     expect(result.exit?.exitCode).toBe(0);
@@ -249,9 +270,14 @@ describe('Stack CLI', () => {
       'remove',
       'run',
       'try',
+      'login',
+      'logout',
+      'whoami',
+      'push',
+      'pull',
     ])
       expect(result.output).toContain(`  ${command}`);
-    for (const command of ['switch', 'restore', 'push', 'pull', 'publish']) {
+    for (const command of ['switch', 'restore', 'publish']) {
       expect(result.output).not.toContain(`  ${command}`);
     }
   });
@@ -632,5 +658,139 @@ describe('Stack CLI', () => {
 
     expect(result.exit?.exitCode).toBe(0);
     expect(result.output).toBe('0.0.0\n');
+  });
+
+  const cloudBundle = {
+    schemaVersion: 1 as const,
+    environment: {
+      schemaVersion: 1 as const,
+      name: 'main',
+      skills: [],
+      stacks: [],
+      overrides: {},
+    },
+    resolved: { schemaVersion: 1 as const, skills: {} },
+    importedStackVersions: [],
+    snapshotRequirements: [],
+    digest: `sha256:${'a'.repeat(64)}`,
+  };
+  const basePushPlan: PushPlan = {
+    environment: 'main',
+    machineId: '00000000-0000-4000-8000-000000000000',
+    bundle: cloudBundle,
+    digest: cloudBundle.digest,
+    remoteExists: false,
+    remoteVersionNumber: null,
+    remoteDigest: null,
+    expectedLatestVersionId: null,
+    noop: false,
+    conflict: null,
+    desiredSkills: 2,
+    stackLayers: 1,
+    references: 0,
+    snapshotsAlready: 0,
+    snapshotsToUpload: [`sha256:${'b'.repeat(64)}`],
+    pendingUploads: [],
+  };
+  const basePullPlan: PullPlan = {
+    environment: 'main',
+    mode: 'create',
+    conflict: null,
+    remoteExists: true,
+    remoteVersionNumber: 1,
+    remoteDigest: cloudBundle.digest,
+    localExists: false,
+    localDigest: null,
+    localSyncedVersionId: null,
+    restore: {
+      desiredSkills: 2,
+      importedStackVersions: 1,
+      alreadyPresent: [],
+      snapshotDownloads: [`sha256:${'b'.repeat(64)}`],
+      referenceRestores: [],
+    },
+    bundle: cloudBundle,
+    remoteEnvironmentId: '00000000-0000-4000-8000-0000000000e0',
+    remoteVersionId: '00000000-0000-4000-8000-000000000001',
+  };
+
+  it('emits secret-free push dry-run JSON', async () => {
+    const result = await runProgram(['push', '--dry-run', '--json'], {
+      cloudPreparePush: async () => basePushPlan,
+    });
+    const parsed = JSON.parse(result.output);
+    expect(parsed).toMatchObject({
+      environment: 'main',
+      dryRun: true,
+      snapshots: { alreadyUploaded: 0, needUpload: 1 },
+    });
+    expect(result.output).not.toContain('token');
+    expect(result.output).not.toContain('pendingUploads');
+  });
+
+  it('never applies a push when a synchronization conflict exists, even with --yes', async () => {
+    let applied = false;
+    await expect(
+      runProgram(['push', '--yes'], {
+        cloudPreparePush: async () => ({
+          ...basePushPlan,
+          conflict: {
+            kind: 'remote-newer',
+            message: 'Cloud main changed since this Machine last synced.',
+            localBaseVersionId: 'x',
+            remoteVersionNumber: 4,
+          },
+        }),
+        cloudApplyPush: async () => {
+          applied = true;
+          throw new Error('should not apply');
+        },
+      }),
+    ).rejects.toThrow(/changed since this Machine last synced/);
+    expect(applied).toBe(false);
+  });
+
+  it('previews a pull without changing agent bindings', async () => {
+    const result = await runProgram(['pull', '--dry-run'], {
+      cloudPreparePull: async () => basePullPlan,
+    });
+    expect(result.output).toContain('Cloud main');
+    expect(result.output).toContain('Agent bindings will not be changed.');
+  });
+
+  it('emits parseable pull dry-run JSON', async () => {
+    const result = await runProgram(['pull', '--dry-run', '--json'], {
+      cloudPreparePull: async () => basePullPlan,
+    });
+    expect(JSON.parse(result.output)).toMatchObject({
+      environment: 'main',
+      dryRun: true,
+      mode: 'create',
+      snapshotDownloads: [`sha256:${'b'.repeat(64)}`],
+    });
+  });
+
+  it('shows whoami without leaking credentials', async () => {
+    const result = await runProgram(['whoami', '--json'], {
+      cloudWhoami: async () => ({
+        userId: '00000000-0000-4000-8000-00000000aaaa',
+        githubUsername: 'temi',
+        source: 'server',
+      }),
+    });
+    const parsed = JSON.parse(result.output);
+    expect(parsed).toMatchObject({ githubUsername: 'temi' });
+    expect(result.output).not.toContain('token');
+  });
+
+  it('reports logout outcomes', async () => {
+    const revoked = await runProgram(['logout'], {
+      cloudLogout: async () => ({ wasSignedIn: true, remoteRevoked: true }),
+    });
+    expect(revoked.output).toContain('Signed out.');
+    const offline = await runProgram(['logout'], {
+      cloudLogout: async () => ({ wasSignedIn: true, remoteRevoked: false }),
+    });
+    expect(offline.output).toContain('Signed out locally.');
   });
 });

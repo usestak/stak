@@ -210,6 +210,9 @@ importers:
       '@stack/adapters':
         specifier: workspace:*
         version: link:../adapters
+      '@stack/cloud-client':
+        specifier: workspace:*
+        version: link:../cloud-client
       '@stack/core':
         specifier: workspace:*
         version: link:../core
@@ -222,11 +225,34 @@ importers:
       commander:
         specifier: 15.0.0
         version: 15.0.0
+    devDependencies:
+      '@stack/cloud-server':
+        specifier: workspace:*
+        version: link:../cloud-server
+      '@stack/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@stack/store':
+        specifier: workspace:*
+        version: link:../store
 
-  packages/cloud-client: {}
+  packages/cloud-client:
+    dependencies:
+      '@stack/spec':
+        specifier: workspace:*
+        version: link:../spec
+
+  packages/cloud-server:
+    dependencies:
+      '@stack/spec':
+        specifier: workspace:*
+        version: link:../spec
 
   packages/core:
     dependencies:
+      '@stack/cloud-client':
+        specifier: workspace:*
+        version: link:../cloud-client
       '@stack/scanner':
         specifier: workspace:*
         version: link:../scanner

@@ -6,6 +6,7 @@ import {
   StackStoreError,
 } from '@stack/core';
 import { StackAdapterError } from '@stack/adapters';
+import { StackCloudError } from '@stack/cloud-client';
 
 import { createProgram } from './program.js';
 
@@ -16,7 +17,8 @@ try {
     error instanceof StackStateError ||
     error instanceof StackStoreError ||
     error instanceof StackCompositionError ||
-    error instanceof StackAdapterError
+    error instanceof StackAdapterError ||
+    error instanceof StackCloudError
   ) {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;

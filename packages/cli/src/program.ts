@@ -47,6 +47,13 @@ import type {
   TryPreparationResult,
 } from '@stack/spec';
 
+import type {
+  ApplyPullResult,
+  ApplyPushResult,
+  PullPlan,
+  PushPlan,
+} from '@stack/core';
+
 import { registerDiffCommand } from './commands/diff.js';
 import { registerInitCommand } from './commands/init.js';
 import { registerScanCommand } from './commands/scan.js';
@@ -55,6 +62,25 @@ import { registerRunCommand } from './commands/run.js';
 import { registerUseCommand } from './commands/use.js';
 import { registerRemoveCommand } from './commands/remove.js';
 import { registerTryCommand } from './commands/try.js';
+import { registerLoginCommand } from './commands/login.js';
+import { registerLogoutCommand } from './commands/logout.js';
+import { registerWhoamiCommand } from './commands/whoami.js';
+import { registerPushCommand } from './commands/push.js';
+import { registerPullCommand } from './commands/pull.js';
+import { fileCredentialStore } from './cloud/credentials.js';
+import {
+  cloudApplyPull,
+  cloudApplyPush,
+  cloudPreparePull,
+  cloudPreparePush,
+  performLogin,
+  performLogout,
+  performWhoami,
+  type CloudOperationsDeps,
+  type LoginResult,
+  type LogoutResult,
+  type WhoamiResult,
+} from './cloud/operations.js';
 
 const require = createRequire(import.meta.url);
 const packageMetadata = require('../package.json') as { version: string };
@@ -104,6 +130,17 @@ export type ProgramDependencies = {
     preparation: TryPreparationResult,
     detection: AgentDetection,
   ): Promise<TryExitResult>;
+  cloudLogin(options: {
+    apiUrl?: string;
+    label?: string;
+    openBrowser?: boolean;
+  }): Promise<LoginResult>;
+  cloudLogout(): Promise<LogoutResult>;
+  cloudWhoami(): Promise<WhoamiResult>;
+  cloudPreparePush(): Promise<PushPlan>;
+  cloudApplyPush(plan: PushPlan): Promise<ApplyPushResult>;
+  cloudPreparePull(): Promise<PullPlan>;
+  cloudApplyPull(plan: PullPlan): Promise<ApplyPullResult>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -113,6 +150,12 @@ const codex = new CodexAdapter({ stackHome, homeDir: os.homedir() });
 const cursor = new CursorAdapter({ stackHome, homeDir: os.homedir() });
 const claude = new ClaudeAdapter({ stackHome, homeDir: os.homedir() });
 const adapters = { codex, cursor, claude };
+const cloudDeps: CloudOperationsDeps = {
+  stackHome,
+  env: process.env,
+  credentials: fileCredentialStore(stackHome),
+  writeOut: (value) => process.stdout.write(value),
+};
 const defaultDependencies: ProgramDependencies = {
   scan: async ({ project }) =>
     scanSkills({ roots: resolveScanRoots({ includeProject: project }) }),
@@ -166,6 +209,13 @@ const defaultDependencies: ProgramDependencies = {
     cleanupCodexTryRuntime({ stackHome, session: preparation.session }),
   launchTry: (preparation, detection) =>
     launchCodexTryRuntime({ stackHome, preparation, detection }),
+  cloudLogin: (options) => performLogin(cloudDeps, options),
+  cloudLogout: () => performLogout(cloudDeps),
+  cloudWhoami: () => performWhoami(cloudDeps),
+  cloudPreparePush: () => cloudPreparePush(cloudDeps),
+  cloudApplyPush: (plan) => cloudApplyPush(cloudDeps, plan),
+  cloudPreparePull: () => cloudPreparePull(cloudDeps),
+  cloudApplyPull: (plan) => cloudApplyPull(cloudDeps, plan),
   confirm: async (message) => {
     if (!process.stdin.isTTY) return false;
     const prompt = createInterface({
@@ -197,5 +247,10 @@ export const createProgram = (
   registerRemoveCommand(program, dependencies);
   registerRunCommand(program, dependencies);
   registerTryCommand(program, dependencies);
+  registerLoginCommand(program, dependencies);
+  registerLogoutCommand(program, dependencies);
+  registerWhoamiCommand(program, dependencies);
+  registerPushCommand(program, dependencies);
+  registerPullCommand(program, dependencies);
   return program;
 };

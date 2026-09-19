@@ -19,6 +19,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@stack/cloud-client": "workspace:*",
     "@stack/scanner": "workspace:*",
     "@stack/shared": "workspace:*",
     "@stack/spec": "workspace:*",

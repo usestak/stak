@@ -1,0 +1,299 @@
+import { z } from 'zod';
+
+import { environmentManifestSchema } from './environment.js';
+import { skillSourceSchema, skillMetadataSchema } from './scanner.js';
+import {
+  contentHashSchema,
+  referenceRestorationSchema,
+  snapshotReasonSchema,
+} from './storage.js';
+import { requirementOriginSchema } from './stack.js';
+
+const entryIdSchema = z.string().regex(/^skill_[A-Za-z0-9_-]{8,}$/);
+
+/**
+ * Cloud-neutral restoration. A local snapshot restoration references a
+ * Machine-local `snap_...` id; the cloud form drops that id and keeps only the
+ * portable content hash. Reference restoration is already portable.
+ */
+export const portableSnapshotRestorationSchema = z.object({
+  strategy: z.literal('snapshot'),
+  contentHash: contentHashSchema,
+  reason: snapshotReasonSchema,
+});
+export const portableRestorationStrategySchema = z.discriminatedUnion(
+  'strategy',
+  [referenceRestorationSchema, portableSnapshotRestorationSchema],
+);
+
+export const portableLockedSkillSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().min(1),
+  contentHash: contentHashSchema,
+  metadata: skillMetadataSchema.optional(),
+  preferredSource: skillSourceSchema.optional(),
+  observedSources: z.array(skillSourceSchema),
+  restoration: portableRestorationStrategySchema,
+  origins: z.array(requirementOriginSchema).optional(),
+});
+
+export const portableEnvironmentResolutionSchema = z.object({
+  schemaVersion: z.literal(1),
+  skills: z.record(entryIdSchema, portableLockedSkillSchema),
+});
+
+export const portableStackRequirementSchema = z.object({
+  id: z.string().regex(/^req_[A-Za-z0-9_-]{8,}$/),
+  name: z.string().min(1),
+  requirement: z.enum(['required', 'optional']),
+  contentHash: contentHashSchema,
+  metadata: skillMetadataSchema,
+  restoration: portableRestorationStrategySchema,
+  observedSources: z.array(skillSourceSchema),
+  preferredSource: skillSourceSchema.optional(),
+  originStackName: z.string().min(1),
+});
+export const portableImportedStackVersionSchema = z.object({
+  schemaVersion: z.literal(1),
+  stackId: z.string().regex(/^stack_[A-Za-z0-9_-]{8,}$/),
+  name: z.string().min(1),
+  description: z.string().min(1),
+  versionHash: contentHashSchema,
+  requirements: z.array(portableStackRequirementSchema),
+  inheritedStacks: z.array(
+    z.object({ name: z.string(), versionHash: contentHashSchema }),
+  ),
+  skippedOptional: z.array(
+    z.object({
+      stackName: z.string().min(1),
+      path: z.string().min(1),
+      reason: z.string().min(1),
+    }),
+  ),
+});
+
+export const cloudSnapshotRequirementSchema = z.object({
+  contentHash: contentHashSchema,
+  reason: snapshotReasonSchema,
+});
+
+export const cloudEnvironmentBundleSchema = z.object({
+  schemaVersion: z.literal(1),
+  environment: environmentManifestSchema,
+  resolved: portableEnvironmentResolutionSchema,
+  importedStackVersions: z.array(portableImportedStackVersionSchema),
+  snapshotRequirements: z.array(cloudSnapshotRequirementSchema),
+  digest: contentHashSchema,
+});
+
+/* -------------------------------------------------------------------------- */
+/* Cloud API DTOs (versioned under /api/v1)                                   */
+/* -------------------------------------------------------------------------- */
+
+export const cloudMachineDescriptorSchema = z.object({
+  machineId: z.uuid(),
+  platform: z.string().min(1),
+  arch: z.string().min(1),
+});
+
+export const cliAuthStartRequestSchema = z.object({
+  machine: cloudMachineDescriptorSchema.optional(),
+  label: z.string().min(1).max(120).optional(),
+  clientVersion: z.string().min(1).max(120).optional(),
+});
+export const cliAuthStartResponseSchema = z.object({
+  sessionId: z.uuid(),
+  userCode: z.string().regex(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/),
+  deviceSecret: z.string().min(1),
+  verificationUri: z.string().min(1),
+  verificationUriComplete: z.string().min(1),
+  expiresAt: z.iso.datetime({ offset: true }),
+  intervalMs: z.number().int().positive(),
+});
+
+export const cliAuthTokenRequestSchema = z.object({
+  deviceSecret: z.string().min(1),
+});
+export const cliAuthTokenResponseSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('pending') }),
+  z.object({ status: z.literal('slow_down') }),
+  z.object({ status: z.literal('denied') }),
+  z.object({ status: z.literal('expired') }),
+  z.object({
+    status: z.literal('approved'),
+    token: z.string().min(1),
+    tokenId: z.uuid(),
+    user: z.object({
+      userId: z.uuid(),
+      githubUsername: z.string().optional(),
+      displayName: z.string().optional(),
+      avatarUrl: z.string().optional(),
+    }),
+  }),
+]);
+
+export const cliAuthApproveRequestSchema = z.object({
+  userCode: z.string().regex(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/),
+});
+export const cliAuthApproveResponseSchema = z.object({
+  approved: z.literal(true),
+});
+
+export const meResponseSchema = z.object({
+  userId: z.uuid(),
+  githubUsername: z.string().optional(),
+  displayName: z.string().optional(),
+  avatarUrl: z.string().optional(),
+});
+
+export const remoteEnvironmentVersionSchema = z.object({
+  versionId: z.uuid(),
+  versionNumber: z.number().int().positive(),
+  digest: contentHashSchema,
+  createdAt: z.iso.datetime({ offset: true }),
+});
+export const getEnvironmentResponseSchema = z.object({
+  environmentId: z.uuid(),
+  name: z.string().min(1),
+  latest: z
+    .object({
+      version: remoteEnvironmentVersionSchema,
+      bundle: cloudEnvironmentBundleSchema,
+    })
+    .nullable(),
+});
+
+export const commitEnvironmentVersionRequestSchema = z.object({
+  bundle: cloudEnvironmentBundleSchema,
+  expectedLatestVersionId: z.uuid().nullable(),
+  machineId: z.uuid().optional(),
+  idempotencyKey: z.uuid().optional(),
+});
+export const commitEnvironmentVersionResponseSchema = z.object({
+  environmentId: z.uuid(),
+  name: z.string().min(1),
+  version: remoteEnvironmentVersionSchema,
+  createdNew: z.boolean(),
+});
+
+export const prepareSnapshotRequestSchema = z.object({
+  contentHash: contentHashSchema,
+  archiveHash: contentHashSchema,
+  byteSize: z.number().int().nonnegative(),
+});
+export const prepareSnapshotResponseSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('exists') }),
+  z.object({
+    status: z.literal('upload'),
+    uploadTicket: z.string().min(1),
+  }),
+]);
+export const finalizeSnapshotRequestSchema = z.object({
+  contentHash: contentHashSchema,
+  archiveHash: contentHashSchema,
+  byteSize: z.number().int().nonnegative(),
+  uploadTicket: z.string().min(1),
+});
+export const finalizeSnapshotResponseSchema = z.object({
+  contentHash: contentHashSchema,
+  stored: z.literal(true),
+});
+export const snapshotDownloadResponseSchema = z.object({
+  contentHash: contentHashSchema,
+  archiveHash: contentHashSchema,
+  byteSize: z.number().int().nonnegative(),
+  downloadTicket: z.string().min(1),
+});
+
+/* -------------------------------------------------------------------------- */
+/* Machine-local sync metadata (never portable, never uploaded)               */
+/* -------------------------------------------------------------------------- */
+
+export const environmentSyncStateSchema = z.object({
+  remoteEnvironmentId: z.uuid(),
+  lastSyncedVersionId: z.uuid(),
+  lastSyncedDigest: contentHashSchema,
+  syncedAt: z.iso.datetime({ offset: true }),
+});
+export const machineSyncStateSchema = z.object({
+  schemaVersion: z.literal(1),
+  environments: z.record(z.string().min(1), environmentSyncStateSchema),
+});
+
+export const cloudErrorCodeSchema = z.enum([
+  'not-authenticated',
+  'authentication-expired',
+  'cloud-unauthorized',
+  'remote-environment-not-found',
+  'remote-environment-conflict',
+  'snapshot-not-found',
+  'snapshot-upload-failed',
+  'snapshot-integrity-mismatch',
+  'cloud-bundle-invalid',
+  'cloud-version-commit-failed',
+  'invalid-request',
+  'not-found',
+]);
+export const cloudErrorResponseSchema = z.object({
+  error: z.object({
+    code: cloudErrorCodeSchema,
+    message: z.string(),
+  }),
+});
+
+export type PortableRestorationStrategy = z.infer<
+  typeof portableRestorationStrategySchema
+>;
+export type PortableLockedSkill = z.infer<typeof portableLockedSkillSchema>;
+export type PortableEnvironmentResolution = z.infer<
+  typeof portableEnvironmentResolutionSchema
+>;
+export type PortableImportedStackVersion = z.infer<
+  typeof portableImportedStackVersionSchema
+>;
+export type CloudSnapshotRequirement = z.infer<
+  typeof cloudSnapshotRequirementSchema
+>;
+export type CloudEnvironmentBundle = z.infer<
+  typeof cloudEnvironmentBundleSchema
+>;
+export type CloudMachineDescriptor = z.infer<
+  typeof cloudMachineDescriptorSchema
+>;
+export type CliAuthStartRequest = z.infer<typeof cliAuthStartRequestSchema>;
+export type CliAuthStartResponse = z.infer<typeof cliAuthStartResponseSchema>;
+export type CliAuthTokenRequest = z.infer<typeof cliAuthTokenRequestSchema>;
+export type CliAuthTokenResponse = z.infer<typeof cliAuthTokenResponseSchema>;
+export type CliAuthApproveRequest = z.infer<typeof cliAuthApproveRequestSchema>;
+export type MeResponse = z.infer<typeof meResponseSchema>;
+export type RemoteEnvironmentVersion = z.infer<
+  typeof remoteEnvironmentVersionSchema
+>;
+export type GetEnvironmentResponse = z.infer<
+  typeof getEnvironmentResponseSchema
+>;
+export type CommitEnvironmentVersionRequest = z.infer<
+  typeof commitEnvironmentVersionRequestSchema
+>;
+export type CommitEnvironmentVersionResponse = z.infer<
+  typeof commitEnvironmentVersionResponseSchema
+>;
+export type PrepareSnapshotRequest = z.infer<
+  typeof prepareSnapshotRequestSchema
+>;
+export type PrepareSnapshotResponse = z.infer<
+  typeof prepareSnapshotResponseSchema
+>;
+export type FinalizeSnapshotRequest = z.infer<
+  typeof finalizeSnapshotRequestSchema
+>;
+export type FinalizeSnapshotResponse = z.infer<
+  typeof finalizeSnapshotResponseSchema
+>;
+export type SnapshotDownloadResponse = z.infer<
+  typeof snapshotDownloadResponseSchema
+>;
+export type CloudErrorCode = z.infer<typeof cloudErrorCodeSchema>;
+export type CloudErrorResponse = z.infer<typeof cloudErrorResponseSchema>;
+export type EnvironmentSyncState = z.infer<typeof environmentSyncStateSchema>;
+export type MachineSyncState = z.infer<typeof machineSyncStateSchema>;

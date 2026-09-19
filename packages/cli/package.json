@@ -23,9 +23,15 @@
   },
   "dependencies": {
     "@stack/adapters": "workspace:*",
+    "@stack/cloud-client": "workspace:*",
     "@stack/core": "workspace:*",
     "@stack/scanner": "workspace:*",
     "@stack/spec": "workspace:*",
     "commander": "15.0.0"
+  },
+  "devDependencies": {
+    "@stack/cloud-server": "workspace:*",
+    "@stack/shared": "workspace:*",
+    "@stack/store": "workspace:*"
   }
 }
