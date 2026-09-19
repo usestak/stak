@@ -9,8 +9,8 @@ export class StackAdapterError extends Error {
   }
 }
 export class AgentNotInstalledError extends StackAdapterError {
-  constructor() {
-    super('agent-not-installed', 'Codex CLI was not found on this machine.');
+  constructor(agent = 'Codex') {
+    super('agent-not-installed', `${agent} CLI was not found on this machine.`);
     this.name = 'AgentNotInstalledError';
   }
 }

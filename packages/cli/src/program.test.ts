@@ -354,6 +354,28 @@ describe('Stack CLI', () => {
     expect(launched).toBe(false);
   });
 
+  it.each(['cursor', 'claude'] as const)(
+    'supports %s dry-run JSON through the shared adapter surface',
+    async (agent) => {
+      const result = await runProgram(['run', agent, '--dry-run', '--json'], {
+        detectAgent: async (requested) => ({
+          agent: requested,
+          installed: true,
+          executablePath: `/bin/${requested}`,
+        }),
+        planAgentBindings: async (requested) => ({
+          ...plan,
+          agent: requested,
+        }),
+      });
+      expect(JSON.parse(result.output)).toMatchObject({
+        detection: { agent },
+        plan: { agent },
+        dryRun: true,
+      });
+    },
+  );
+
   it('detects missing Codex before planning or mutation', async () => {
     let planned = false;
     await expect(

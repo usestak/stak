@@ -9,13 +9,11 @@ import {
 const hash = `sha256:${'a'.repeat(64)}`;
 
 describe('adapter schemas', () => {
-  it('parses a machine-specific Codex binding registry', () => {
+  it('parses a machine-specific physical binding registry', () => {
     expect(
       bindingRegistrySchema.parse({
         schemaVersion: 1,
-        agent: 'codex',
         machineId: '00000000-0000-4000-8000-000000000000',
-        targetRoot: 'C:/Users/test/.agents/skills',
         bindings: [
           {
             environment: 'main',
@@ -23,6 +21,7 @@ describe('adapter schemas', () => {
             skillName: 'demo',
             contentHash: hash,
             targetPath: 'C:/Users/test/.agents/skills/demo',
+            targetRoot: 'agents',
             createdAt: '2026-09-19T00:00:00.000Z',
           },
         ],

@@ -19,6 +19,8 @@ import {
 } from '@stack/core';
 import {
   CodexAdapter,
+  CursorAdapter,
+  ClaudeAdapter,
   cleanupCodexTryRuntime,
   launchCodexTryRuntime,
   prepareCodexTryRuntime,
@@ -32,6 +34,7 @@ import type {
 import { resolveScanRoots, scanSkills } from '@stack/scanner';
 import type {
   AgentDetection,
+  AgentId,
   BindingApplyResult,
   BindingPlan,
   BindingVerification,
@@ -78,6 +81,21 @@ export type ProgramDependencies = {
     environment: ResolvedLocalEnvironment,
   ): Promise<BindingVerification>;
   launchCodex(): Promise<LaunchResult>;
+  detectAgent?(agent: AgentId): Promise<AgentDetection>;
+  planAgentBindings?(
+    agent: AgentId,
+    environment: ResolvedLocalEnvironment,
+  ): Promise<BindingPlan>;
+  applyAgentBindings?(
+    agent: AgentId,
+    plan: BindingPlan,
+    machineId: string,
+  ): Promise<BindingApplyResult>;
+  verifyAgentBindings?(
+    agent: AgentId,
+    environment: ResolvedLocalEnvironment,
+  ): Promise<BindingVerification>;
+  launchAgent?(agent: AgentId): Promise<LaunchResult>;
   resolveTry(input: string): Promise<TrialStackResolution>;
   preserveTry(trial: TrialStackResolution): Promise<void>;
   prepareTry(trial: TrialStackResolution): Promise<TryPreparationResult>;
@@ -92,6 +110,9 @@ export type ProgramDependencies = {
 
 const stackHome = resolveStackHome();
 const codex = new CodexAdapter({ stackHome, homeDir: os.homedir() });
+const cursor = new CursorAdapter({ stackHome, homeDir: os.homedir() });
+const claude = new ClaudeAdapter({ stackHome, homeDir: os.homedir() });
+const adapters = { codex, cursor, claude };
 const defaultDependencies: ProgramDependencies = {
   scan: async ({ project }) =>
     scanSkills({ roots: resolveScanRoots({ includeProject: project }) }),
@@ -123,6 +144,15 @@ const defaultDependencies: ProgramDependencies = {
   applyCodexBindings: (plan, machineId) => codex.applyBindings(plan, machineId),
   verifyCodexBindings: (environment) => codex.verifyBindings(environment),
   launchCodex: () => codex.launch({ cwd: process.cwd(), env: process.env }),
+  detectAgent: (agent) => adapters[agent].detect(),
+  planAgentBindings: (agent, environment) =>
+    adapters[agent].planBindings(environment),
+  applyAgentBindings: (agent, plan, machineId) =>
+    adapters[agent].applyBindings(plan, machineId),
+  verifyAgentBindings: (agent, environment) =>
+    adapters[agent].verifyBindings(environment),
+  launchAgent: (agent) =>
+    adapters[agent].launch({ cwd: process.cwd(), env: process.env }),
   resolveTry: (input) => resolveTrialStack({ input }),
   preserveTry: (trial) => preserveTrialStack({ stackHome, trial }),
   prepareTry: (trial) =>

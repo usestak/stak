@@ -10,7 +10,7 @@ import {
 } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { hashSkillDirectory } from '@stack/shared';
+import { hashSkillDirectory, pathsEqual } from '@stack/shared';
 import {
   agentDetectionSchema,
   bindingApplyResultSchema,
@@ -20,6 +20,7 @@ import {
   launchResultSchema,
 } from '@stack/spec';
 import type {
+  AgentId,
   AgentDetection,
   BindingApplyResult,
   BindingOperation,
@@ -59,14 +60,7 @@ export const resolveCodexBindingRoot = (options: {
   stackHome?: string;
 }) => path.resolve(options.homeDir ?? os.homedir(), '.agents', 'skills');
 export const bindingRegistryPath = (stackHome: string, machineId: string) =>
-  path.resolve(
-    stackHome,
-    'state',
-    'machines',
-    machineId,
-    'bindings',
-    'codex.json',
-  );
+  path.resolve(stackHome, 'state', 'machines', machineId, 'bindings.json');
 export type WriteRegistry = (
   file: string,
   registry: BindingRegistry,
@@ -92,25 +86,23 @@ export const writeBindingRegistry: WriteRegistry = async (file, registry) => {
 export const readBindingRegistry = async (options: {
   stackHome: string;
   machineId: string;
-  targetRoot: string;
+  targetRoot?: string;
 }): Promise<BindingRegistry> => {
   const file = bindingRegistryPath(options.stackHome, options.machineId);
   try {
     const registry = bindingRegistrySchema.parse(
       JSON.parse(await readFile(file, 'utf8')),
     );
-    if (path.resolve(registry.targetRoot) !== path.resolve(options.targetRoot))
+    if (registry.machineId !== options.machineId)
       throw new BindingRegistryCorruptError(
-        'Codex binding registry target root does not match this Machine.',
+        'Binding registry Machine identity does not match this Machine.',
       );
     return registry;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT')
       return bindingRegistrySchema.parse({
         schemaVersion: 1,
-        agent: 'codex',
         machineId: options.machineId,
-        targetRoot: options.targetRoot,
         bindings: [],
       });
     if (error instanceof BindingRegistryCorruptError) throw error;
@@ -159,6 +151,37 @@ const directVersion = async (
       resolve(output.trim() || undefined);
     });
   });
+export const detectExecutableAgent = async (options: {
+  agent: AgentId;
+  candidates: string[];
+  validateVersion?: (version: string, candidate: string) => boolean;
+  env?: NodeJS.ProcessEnv;
+  findExecutable?: typeof findExecutableOnPath;
+  runVersion?: (file: string, args: string[]) => Promise<string | undefined>;
+}): Promise<AgentDetection> => {
+  for (const candidate of options.candidates) {
+    const executablePath = await (
+      options.findExecutable ?? findExecutableOnPath
+    )(candidate, options.env);
+    if (!executablePath) continue;
+    const version = await (options.runVersion ?? directVersion)(
+      executablePath,
+      ['--version'],
+    ).catch(() => undefined);
+    if (
+      options.validateVersion &&
+      (!version || !options.validateVersion(version, candidate))
+    )
+      continue;
+    return agentDetectionSchema.parse({
+      agent: options.agent,
+      installed: true,
+      executablePath,
+      ...(version ? { version } : {}),
+    });
+  }
+  return agentDetectionSchema.parse({ agent: options.agent, installed: false });
+};
 export const detectCodex = async (
   options: {
     env?: NodeJS.ProcessEnv;
@@ -206,6 +229,7 @@ const blockedStates = new Set([
   'invalid-target-name',
   'store-unavailable',
   'store-corrupt',
+  'visibility-conflict',
 ]);
 export type SpawnProcess = (
   file: string,
@@ -225,16 +249,25 @@ export type CodexAdapterOptions = {
   materialize?: typeof materializeStoredSkill;
   detection?: Parameters<typeof detectCodex>[0];
   spawnProcess?: SpawnProcess;
+  agent?: AgentId;
+  targetRootKind?: 'agents' | 'claude';
+  visibilityRoots?: string[];
+  detect?: () => Promise<AgentDetection>;
 };
 
-export class CodexAdapter implements AgentAdapter {
-  readonly id = 'codex' as const;
+export class FilesystemSkillAdapter implements AgentAdapter {
+  readonly id: AgentId;
   private readonly targetRoot: string;
   constructor(private readonly options: CodexAdapterOptions) {
-    this.targetRoot = resolveCodexBindingRoot(options);
+    this.id = options.agent ?? 'codex';
+    this.targetRoot = path.resolve(
+      options.homeDir ?? os.homedir(),
+      options.targetRootKind === 'claude' ? '.claude' : '.agents',
+      'skills',
+    );
   }
   detect() {
-    return detectCodex(this.options.detection);
+    return this.options.detect?.() ?? detectCodex(this.options.detection);
   }
   async planBindings(
     environment: ResolvedLocalEnvironment,
@@ -242,7 +275,6 @@ export class CodexAdapter implements AgentAdapter {
     const registry = await readBindingRegistry({
       stackHome: this.options.stackHome,
       machineId: environment.machineId,
-      targetRoot: this.targetRoot,
     });
     const counts = new Map<string, number>();
     for (const skill of environment.skills)
@@ -260,12 +292,47 @@ export class CodexAdapter implements AgentAdapter {
           return { ...base, state: 'invalid-target-name' as const };
         if ((counts.get(skill.name) ?? 0) > 1)
           return { ...base, state: 'conflict-name' as const };
+        if (this.id === 'cursor') {
+          const visible = (
+            await Promise.all(
+              (this.options.visibilityRoots ?? []).map(async (root) => ({
+                path: path.join(root, skill.name),
+                hash: await currentHash(path.join(root, skill.name)),
+              })),
+            )
+          ).filter((item) => item.path !== targetPath);
+          const present = visible.filter(
+            (item): item is { path: string; hash: string } =>
+              Boolean(item.hash),
+          );
+          if (present.some((item) => item.hash !== skill.contentHash))
+            return {
+              ...base,
+              state: 'visibility-conflict' as const,
+              message: present
+                .map((item) => `${item.path} (${item.hash})`)
+                .join(', '),
+            };
+          if (
+            !(await currentHash(targetPath)) &&
+            present.some((item) => item.hash === skill.contentHash)
+          )
+            return {
+              ...base,
+              state: 'externally-satisfied' as const,
+              currentHash: skill.contentHash,
+            };
+        }
         const hash = await currentHash(targetPath);
-        const record = registry.bindings.find(
-          (item) =>
+        let record: BindingRecord | undefined;
+        for (const item of registry.bindings)
+          if (
             item.environmentEntryId === skill.entryId &&
-            path.resolve(item.targetPath) === path.resolve(targetPath),
-        );
+            (await pathsEqual({ left: item.targetPath, right: targetPath }))
+          ) {
+            record = item;
+            break;
+          }
         if (!record && hash)
           return hash === skill.contentHash
             ? {
@@ -328,6 +395,7 @@ export class CodexAdapter implements AgentAdapter {
     for (const record of registry.bindings.filter(
       (item) =>
         item.environment === environment.name &&
+        item.targetRoot === (this.options.targetRootKind ?? 'agents') &&
         !desiredIds.has(item.environmentEntryId),
     )) {
       const hash = await currentHash(record.targetPath);
@@ -344,7 +412,7 @@ export class CodexAdapter implements AgentAdapter {
     }
     return bindingPlanSchema.parse({
       schemaVersion: 1,
-      agent: 'codex',
+      agent: this.id,
       environment: environment.name,
       targetRoot: this.targetRoot,
       operations,
@@ -363,7 +431,6 @@ export class CodexAdapter implements AgentAdapter {
     const registry = await readBindingRegistry({
       stackHome: this.options.stackHome,
       machineId,
-      targetRoot: this.targetRoot,
     });
     const backups: Array<{ target: string; backup?: string }> = [];
     const applied: BindingRecord[] = [];
@@ -371,12 +438,18 @@ export class CodexAdapter implements AgentAdapter {
     try {
       for (const operation of plan.operations) {
         if (operation.state === 'remove-managed') {
-          const record = registry.bindings.find(
-            (item) =>
+          let record: BindingRecord | undefined;
+          for (const item of registry.bindings)
+            if (
               item.environmentEntryId === operation.entryId &&
-              path.resolve(item.targetPath) ===
-                path.resolve(operation.targetPath),
-          );
+              (await pathsEqual({
+                left: item.targetPath,
+                right: operation.targetPath,
+              }))
+            ) {
+              record = item;
+              break;
+            }
           if (
             !record ||
             (await currentHash(operation.targetPath)) !== record.contentHash
@@ -388,7 +461,11 @@ export class CodexAdapter implements AgentAdapter {
           await rename(operation.targetPath, backup);
           backups.push({ target: operation.targetPath, backup });
           registry.bindings = registry.bindings.filter(
-            (item) => item.environmentEntryId !== operation.entryId,
+            (item) =>
+              !(
+                item.environmentEntryId === operation.entryId &&
+                item.targetRoot === (this.options.targetRootKind ?? 'agents')
+              ),
           );
           removed.push(record);
           continue;
@@ -426,10 +503,15 @@ export class CodexAdapter implements AgentAdapter {
           skillName: operation.skillName,
           contentHash: operation.contentHash,
           targetPath: operation.targetPath,
+          targetRoot: this.options.targetRootKind ?? 'agents',
           createdAt: (this.options.now ?? (() => new Date()))().toISOString(),
         };
         registry.bindings = registry.bindings.filter(
-          (item) => item.environmentEntryId !== operation.entryId,
+          (item) =>
+            !(
+              item.environmentEntryId === operation.entryId &&
+              item.targetRoot === (this.options.targetRootKind ?? 'agents')
+            ),
         );
         registry.bindings.push(record);
         applied.push(record);
@@ -447,7 +529,7 @@ export class CodexAdapter implements AgentAdapter {
             () => undefined,
           );
       return bindingApplyResultSchema.parse({
-        agent: 'codex',
+        agent: this.id,
         applied,
         removed,
         unchanged: plan.operations.length - applied.length - removed.length,
@@ -476,11 +558,14 @@ export class CodexAdapter implements AgentAdapter {
     const registry = await readBindingRegistry({
       stackHome: this.options.stackHome,
       machineId: environment.machineId,
-      targetRoot: this.targetRoot,
     });
     const bindings = await Promise.all(
       registry.bindings
-        .filter((record) => record.environment === environment.name)
+        .filter(
+          (record) =>
+            record.environment === environment.name &&
+            record.targetRoot === (this.options.targetRootKind ?? 'agents'),
+        )
         .map(async (record) => {
           const hash = await currentHash(record.targetPath);
           return {
@@ -495,7 +580,7 @@ export class CodexAdapter implements AgentAdapter {
         }),
     );
     return bindingVerificationSchema.parse({
-      agent: 'codex',
+      agent: this.id,
       healthy: bindings.every((item) => item.state === 'healthy'),
       bindings,
     });
@@ -506,10 +591,11 @@ export class CodexAdapter implements AgentAdapter {
     const registry = await readBindingRegistry({
       stackHome: this.options.stackHome,
       machineId: request.machineId,
-      targetRoot: this.targetRoot,
     });
-    const selected = registry.bindings.filter((item) =>
-      request.environmentEntryIds.includes(item.environmentEntryId),
+    const selected = registry.bindings.filter(
+      (item) =>
+        item.targetRoot === (this.options.targetRootKind ?? 'agents') &&
+        request.environmentEntryIds.includes(item.environmentEntryId),
     );
     if (selected.length !== new Set(request.environmentEntryIds).size)
       throw new BindingConflictError(
@@ -531,7 +617,10 @@ export class CodexAdapter implements AgentAdapter {
       }
       registry.bindings = registry.bindings.filter(
         (item) =>
-          !request.environmentEntryIds.includes(item.environmentEntryId),
+          !(
+            item.targetRoot === (this.options.targetRootKind ?? 'agents') &&
+            request.environmentEntryIds.includes(item.environmentEntryId)
+          ),
       );
       await (this.options.writeRegistry ?? writeBindingRegistry)(
         bindingRegistryPath(this.options.stackHome, request.machineId),
@@ -557,7 +646,7 @@ export class CodexAdapter implements AgentAdapter {
       );
     }
     return bindingApplyResultSchema.parse({
-      agent: 'codex',
+      agent: this.id,
       applied: [],
       removed: selected,
       unchanged: registry.bindings.length,
@@ -566,7 +655,8 @@ export class CodexAdapter implements AgentAdapter {
   }
   launch(context: LaunchContext) {
     return this.detect().then((detection) =>
-      launchCodex({
+      launchAgent({
+        agent: this.id,
         ...context,
         detection,
         ...(this.options.spawnProcess
@@ -576,6 +666,12 @@ export class CodexAdapter implements AgentAdapter {
     );
   }
 }
+export class CodexAdapter extends FilesystemSkillAdapter {
+  constructor(options: CodexAdapterOptions) {
+    super({ ...options, agent: 'codex', targetRootKind: 'agents' });
+  }
+}
+
 const directSpawn: SpawnProcess = (file, args, options) =>
   new Promise((resolve, reject) => {
     const child = spawn(file, args, options);
@@ -583,6 +679,15 @@ const directSpawn: SpawnProcess = (file, args, options) =>
     child.once('close', (exitCode, signal) => resolve({ exitCode, signal }));
   });
 export const launchCodex = async (options: {
+  detection: AgentDetection;
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  spawnProcess?: SpawnProcess;
+}): Promise<LaunchResult> => {
+  return launchAgent({ agent: 'codex', ...options });
+};
+export const launchAgent = async (options: {
+  agent: AgentId;
   detection: AgentDetection;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
@@ -602,13 +707,16 @@ export const launchCodex = async (options: {
       },
     );
     return launchResultSchema.parse({
-      agent: 'codex',
+      agent: options.agent,
       exitCode: result.exitCode,
       signal: result.signal ?? null,
     });
   } catch (error) {
-    throw new AgentLaunchFailedError('Codex could not be launched.', {
-      cause: error,
-    });
+    throw new AgentLaunchFailedError(
+      `${options.agent} could not be launched.`,
+      {
+        cause: error,
+      },
+    );
   }
 };

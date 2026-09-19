@@ -2,6 +2,7 @@ import type { Command } from 'commander';
 
 import { AgentNotInstalledError, BindingConflictError } from '@stack/adapters';
 import type {
+  AgentId,
   AgentDetection,
   BindingApplyResult,
   BindingPlan,
@@ -26,6 +27,21 @@ export type RunCommandDependencies = {
     environment: ResolvedLocalEnvironment,
   ): Promise<BindingVerification>;
   launchCodex(): Promise<LaunchResult>;
+  detectAgent?(agent: AgentId): Promise<AgentDetection>;
+  planAgentBindings?(
+    agent: AgentId,
+    environment: ResolvedLocalEnvironment,
+  ): Promise<BindingPlan>;
+  applyAgentBindings?(
+    agent: AgentId,
+    plan: BindingPlan,
+    machineId: string,
+  ): Promise<BindingApplyResult>;
+  verifyAgentBindings?(
+    agent: AgentId,
+    environment: ResolvedLocalEnvironment,
+  ): Promise<BindingVerification>;
+  launchAgent?(agent: AgentId): Promise<LaunchResult>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -43,7 +59,7 @@ export const registerRunCommand = (
 ): void => {
   program
     .command('run <agent>')
-    .description('Reconcile main with an agent and launch it (Codex only)')
+    .description('Reconcile main with Codex, Cursor, or Claude and launch it')
     .option('--dry-run', 'preview bindings without mutation or launch')
     .option('--json', 'emit structured JSON for dry-run')
     .option('--yes', 'approve safe binding mutations non-interactively')
@@ -52,11 +68,26 @@ export const registerRunCommand = (
         agent: string,
         options: { dryRun?: boolean; json?: boolean; yes?: boolean },
       ) => {
-        if (agent !== 'codex') throw new Error('Phase 4 supports Codex only.');
+        if (!['codex', 'cursor', 'claude'].includes(agent))
+          throw new Error(`Unsupported agent: ${agent}`);
+        const agentId = agent as AgentId;
+        const agentLabel =
+          agentId === 'claude'
+            ? 'Claude'
+            : agentId === 'cursor'
+              ? 'Cursor'
+              : 'Codex';
         const environment = await dependencies.loadRunEnvironment();
-        const detection = await dependencies.detectCodex();
-        if (!detection.installed) throw new AgentNotInstalledError();
-        const plan = await dependencies.planCodexBindings(environment);
+        const detection = dependencies.detectAgent
+          ? await dependencies.detectAgent(agentId)
+          : await dependencies.detectCodex();
+        if (!detection.installed)
+          throw new AgentNotInstalledError(
+            agentId === 'cursor' ? 'Cursor Agent' : agentLabel,
+          );
+        const plan = dependencies.planAgentBindings
+          ? await dependencies.planAgentBindings(agentId, environment)
+          : await dependencies.planCodexBindings(environment);
         if (options.json) {
           if (!options.dryRun)
             throw new Error('--json currently requires --dry-run.');
@@ -74,23 +105,34 @@ export const registerRunCommand = (
         if (
           needsMutation &&
           !options.yes &&
-          !(await dependencies.confirm('Apply bindings and launch Codex?'))
+          !(await dependencies.confirm(
+            `Apply bindings and launch ${agentLabel}?`,
+          ))
         ) {
           dependencies.writeOut('Cancelled. No changes were made.\n');
           return;
         }
         if (needsMutation) {
-          await dependencies.applyCodexBindings(plan, environment.machineId);
-          const verification =
-            await dependencies.verifyCodexBindings(environment);
+          if (dependencies.applyAgentBindings)
+            await dependencies.applyAgentBindings(
+              agentId,
+              plan,
+              environment.machineId,
+            );
+          else
+            await dependencies.applyCodexBindings(plan, environment.machineId);
+          const verification = dependencies.verifyAgentBindings
+            ? await dependencies.verifyAgentBindings(agentId, environment)
+            : await dependencies.verifyCodexBindings(environment);
           if (!verification.healthy)
             throw new BindingConflictError(
-              'Codex Skill binding verification failed.',
+              `${agentLabel} Skill binding verification failed.`,
             );
           dependencies.writeOut('Bindings applied and verified.\n\n');
         }
-        dependencies.writeOut('Launching Codex...\n');
-        await dependencies.launchCodex();
+        dependencies.writeOut(`Launching ${agentLabel}...\n`);
+        if (dependencies.launchAgent) await dependencies.launchAgent(agentId);
+        else await dependencies.launchCodex();
       },
     );
 };

@@ -690,14 +690,7 @@ describe('Codex adapter', () => {
 
   it('uses the machine-specific registry location', () => {
     expect(bindingRegistryPath('/stack', 'machine')).toBe(
-      path.resolve(
-        '/stack',
-        'state',
-        'machines',
-        'machine',
-        'bindings',
-        'codex.json',
-      ),
+      path.resolve('/stack', 'state', 'machines', 'machine', 'bindings.json'),
     );
   });
 });

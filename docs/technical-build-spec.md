@@ -2785,3 +2785,29 @@ preparation also proves that its temporary HOME, temporary `CODEX_HOME`, workspa
 workspace Skill root remain separated from real user Skill locations before creating
 the runtime. These restrictions do not apply to the intentional, separately owned
 `stack run codex` binding workflow.
+
+---
+
+## 89. Phase 7 Multi-Agent Physical Bindings
+
+Binding ownership is Machine-specific and physical. The registry at
+`$STACK_HOME/state/machines/<machineId>/bindings.json` records Environment entry,
+installed hash, normalized target path, and physical root kind; an agent does not
+exclusively own a record.
+
+Codex and Cursor intentionally share `$HOME/.agents/skills`. Cursor writes only to
+that local root, avoiding `$HOME/.cursor/skills`, whose Cloud Agent synchronization
+policy could expose private/local content. Cursor may inspect `.cursor/skills`,
+`.claude/skills`, and legacy `.codex/skills` as read-only visibility evidence. Exact
+copies may externally satisfy a requirement; same-name differing copies are a
+blocking visibility conflict. Cursor never reconciles those compatibility roots.
+
+Claude Code uses `$HOME/.claude/skills` as its separate personal binding root. Plugin,
+enterprise, bundled, project, and administrator Skills remain unmanaged. Verification
+therefore proves Stack's personal filesystem binding, not effective precedence under
+every organization policy.
+
+`stack run codex`, `stack run cursor`, and `stack run claude` project the same resolved
+`main` Environment. Environment status remains agent-neutral. The pre-release Codex-
+specific registry was replaced rather than migrated. `stack try` remains Codex-only;
+cross-agent trials and cloud work are deferred.

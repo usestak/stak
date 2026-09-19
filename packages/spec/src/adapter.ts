@@ -30,13 +30,12 @@ export const bindingRecordSchema = z.object({
   skillName: z.string().min(1),
   contentHash: contentHashSchema,
   targetPath: z.string().min(1),
+  targetRoot: z.enum(['agents', 'claude']),
   createdAt: timestampSchema,
 });
 export const bindingRegistrySchema = z.object({
   schemaVersion: z.literal(1),
-  agent: z.literal('codex'),
   machineId: z.uuid(),
-  targetRoot: z.string().min(1),
   bindings: z.array(bindingRecordSchema),
 });
 
@@ -52,6 +51,7 @@ export const bindingStateSchema = z.enum([
   'invalid-target-name',
   'store-unavailable',
   'store-corrupt',
+  'visibility-conflict',
 ]);
 export const bindingOperationSchema = z.object({
   state: bindingStateSchema,
@@ -67,7 +67,7 @@ export const bindingOperationSchema = z.object({
 });
 export const bindingPlanSchema = z.object({
   schemaVersion: z.literal(1),
-  agent: z.literal('codex'),
+  agent: agentIdSchema,
   environment: z.string().min(1),
   targetRoot: z.string().min(1),
   operations: z.array(bindingOperationSchema),
@@ -75,7 +75,7 @@ export const bindingPlanSchema = z.object({
 });
 
 export const bindingApplyResultSchema = z.object({
-  agent: z.literal('codex'),
+  agent: agentIdSchema,
   applied: z.array(bindingRecordSchema),
   removed: z.array(bindingRecordSchema),
   unchanged: z.number().int().nonnegative(),
@@ -87,12 +87,12 @@ export const bindingVerificationItemSchema = z.object({
   currentHash: contentHashSchema.optional(),
 });
 export const bindingVerificationSchema = z.object({
-  agent: z.literal('codex'),
+  agent: agentIdSchema,
   healthy: z.boolean(),
   bindings: z.array(bindingVerificationItemSchema),
 });
 export const launchResultSchema = z.object({
-  agent: z.literal('codex'),
+  agent: agentIdSchema,
   exitCode: z.number().int().nullable(),
   signal: z.string().nullable().optional(),
 });

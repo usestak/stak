@@ -12,6 +12,7 @@ const label: Record<BindingPlan['operations'][number]['state'], string> = {
   'invalid-target-name': 'Invalid name',
   'store-unavailable': 'Store missing',
   'store-corrupt': 'Store corrupt',
+  'visibility-conflict': 'Visibility conflict',
 };
 
 export const renderBindingPlan = (
@@ -23,7 +24,7 @@ export const renderBindingPlan = (
     counts.set(operation.state, (counts.get(operation.state) ?? 0) + 1);
   const lines = [
     `Environment: ${plan.environment}`,
-    'Agent: Codex',
+    `Agent: ${plan.agent === 'claude' ? 'Claude' : plan.agent === 'cursor' ? 'Cursor' : 'Codex'}`,
     '',
     `Binding root: ${plan.targetRoot}`,
     '',
