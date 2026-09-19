@@ -1,17 +1,19 @@
 import {
   access,
-  mkdtemp,
-  mkdir,
+  mkdir as filesystemMkdir,
   readFile,
-  rm,
-  writeFile,
+  writeFile as filesystemWriteFile,
 } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { hashSkillDirectory } from '@stack/shared';
+import {
+  createOwnedTestRoot,
+  hashSkillDirectory,
+  type OwnedTestRoot,
+  pathIsWithin,
+} from '@stack/shared';
 import type { TryResolvedEnvironment } from '@stack/spec';
 import { ingestSkill } from '@stack/store';
 
@@ -22,18 +24,46 @@ import {
   prepareCodexTryRuntime,
 } from './codex-trial.js';
 
-const directories: string[] = [];
+const ownedRoots: OwnedTestRoot[] = [];
 const temp = async () => {
-  const value = await mkdtemp(path.join(tmpdir(), 'stack-codex-try-'));
-  directories.push(value);
-  return value;
+  const owned = await createOwnedTestRoot('stack-codex-try-');
+  ownedRoots.push(owned);
+  return owned.rootPath;
+};
+const removeOwned = async (target: string) => {
+  for (const owned of ownedRoots)
+    if (
+      await pathIsWithin({
+        ownedRoot: owned.rootPath,
+        proposedPath: target,
+      })
+    ) {
+      await owned.cleanupPath(target);
+      return;
+    }
+  throw new Error('Test cleanup target is outside every owned root.');
+};
+const assertOwnedMutation = async (target: string) => {
+  for (const owned of ownedRoots)
+    if (
+      await pathIsWithin({
+        ownedRoot: owned.rootPath,
+        proposedPath: target,
+      })
+    )
+      return owned.assertMutationPath(target);
+  throw new Error('Test fixture target is outside every owned root.');
+};
+const mkdir = async (target: string, options?: { recursive?: boolean }) => {
+  await assertOwnedMutation(target);
+  await filesystemMkdir(target, options);
+};
+const writeFile = async (target: string, contents: string) => {
+  await assertOwnedMutation(target);
+  await filesystemWriteFile(target, contents);
 };
 afterEach(async () => {
-  await Promise.all(
-    directories
-      .splice(0)
-      .map((value) => rm(value, { recursive: true, force: true })),
-  );
+  await Promise.all(ownedRoots.splice(0).map((owned) => owned.cleanup()));
 });
 const storedTrial = async (stackHome: string, names = ['trial-skill']) => {
   const skills: TryResolvedEnvironment['environment']['skills'] = [];
@@ -161,9 +191,9 @@ describe('Codex trial runtime', () => {
     expect(await readFile(path.join(realSkill, 'SKILL.md'), 'utf8')).toBe(
       normalBefore,
     );
-    await rm(path.dirname(result.session.workspacePath), {
-      recursive: true,
-      force: true,
+    await cleanupCodexTryRuntime({
+      stackHome,
+      session: result.session,
     });
   });
 
@@ -387,7 +417,7 @@ describe('Codex trial runtime', () => {
       idFactory: () => 'missingmarker1',
     });
     const sessionRoot = path.dirname(preparation.session.workspacePath);
-    await rm(path.join(sessionRoot, 'session.json'));
+    await removeOwned(path.join(sessionRoot, 'session.json'));
 
     await expect(
       cleanupCodexTryRuntime({
@@ -396,5 +426,283 @@ describe('Codex trial runtime', () => {
       }),
     ).rejects.toMatchObject({ code: 'try-runtime-cleanup-failed' });
     await expect(access(sessionRoot)).resolves.toBeUndefined();
+  });
+
+  it('aborts before writes when runtime HOME equals the real HOME', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const protectedFiles = [
+      path.join(stackHome, 'environments', 'main', 'environment.yaml'),
+      path.join(
+        stackHome,
+        'state',
+        'machines',
+        'machine',
+        'bindings',
+        'codex.json',
+      ),
+    ];
+    for (const [index, file] of protectedFiles.entries()) {
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, `protected-${index}`);
+    }
+    const protectedBefore = await Promise.all(
+      protectedFiles.map((file) => readFile(file)),
+    );
+    const sessionId = 'try_equalhome1';
+    const runtimeHome = path.join(stackHome, 'runtime', sessionId, 'home');
+    const trial = await storedTrial(stackHome);
+
+    await expect(
+      prepareCodexTryRuntime({
+        stackHome,
+        trial,
+        homeDir: runtimeHome,
+        idFactory: () => 'equalhome1',
+      }),
+    ).rejects.toMatchObject({ code: 'unsafe-runtime-path' });
+    await expect(access(path.join(stackHome, 'runtime'))).rejects.toMatchObject(
+      { code: 'ENOENT' },
+    );
+    expect(
+      await Promise.all(protectedFiles.map((file) => readFile(file))),
+    ).toEqual(protectedBefore);
+  });
+
+  it('aborts before writes when runtime CODEX_HOME equals the real CODEX_HOME', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const sessionId = 'try_equalcodex1';
+    const runtimeCodexHome = path.join(
+      stackHome,
+      'runtime',
+      sessionId,
+      'codex-home',
+    );
+    const trial = await storedTrial(stackHome);
+
+    await expect(
+      prepareCodexTryRuntime({
+        stackHome,
+        trial,
+        homeDir: path.join(root, 'real-home'),
+        env: { CODEX_HOME: runtimeCodexHome },
+        idFactory: () => 'equalcodex1',
+      }),
+    ).rejects.toMatchObject({ code: 'unsafe-runtime-path' });
+    await expect(access(path.join(stackHome, 'runtime'))).rejects.toMatchObject(
+      { code: 'ENOENT' },
+    );
+  });
+
+  it('aborts before writes when the trial Skill root is the real user Skill root', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const sessionId = 'try_equalskills1';
+    const workspace = path.join(stackHome, 'runtime', sessionId, 'workspace');
+    const trial = await storedTrial(stackHome);
+
+    await expect(
+      prepareCodexTryRuntime({
+        stackHome,
+        trial,
+        homeDir: workspace,
+        env: {},
+        idFactory: () => 'equalskills1',
+      }),
+    ).rejects.toMatchObject({ code: 'unsafe-runtime-path' });
+    await expect(access(path.join(stackHome, 'runtime'))).rejects.toMatchObject(
+      { code: 'ENOENT' },
+    );
+  });
+
+  it('preserves a canary real-home Skill tree byte-for-byte through prepare, launch, and cleanup', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack-home');
+    const realHome = path.join(root, 'real-home');
+    const userSentinel = path.join(
+      realHome,
+      '.agents',
+      'skills',
+      'do-not-touch',
+      'SKILL.md',
+    );
+    const legacySentinel = path.join(
+      realHome,
+      '.codex',
+      'skills',
+      'do-not-touch',
+      'SKILL.md',
+    );
+    await mkdir(path.dirname(userSentinel), { recursive: true });
+    await mkdir(path.dirname(legacySentinel), { recursive: true });
+    await writeFile(userSentinel, 'user-sentinel-bytes');
+    await writeFile(legacySentinel, 'legacy-sentinel-bytes');
+    const before = await hashSkillDirectory(realHome);
+    const trial = await storedTrial(stackHome, ['trial-only']);
+
+    const preparation = await prepareCodexTryRuntime({
+      stackHome,
+      trial,
+      homeDir: realHome,
+      env: {},
+      idFactory: () => 'canaryhome1',
+    });
+    await launchCodexTryRuntime({
+      stackHome,
+      preparation,
+      detection: { agent: 'codex', installed: true, executablePath: '/fake' },
+      spawnProcess: async (_file, _args, options) => {
+        await expect(
+          access(
+            path.join(
+              options.cwd,
+              '.agents',
+              'skills',
+              'trial-only',
+              'SKILL.md',
+            ),
+          ),
+        ).resolves.toBeUndefined();
+        return { exitCode: 0, signal: null };
+      },
+    });
+
+    expect(await hashSkillDirectory(realHome)).toEqual(before);
+    expect(await readFile(userSentinel, 'utf8')).toBe('user-sentinel-bytes');
+    expect(await readFile(legacySentinel, 'utf8')).toBe(
+      'legacy-sentinel-bytes',
+    );
+  });
+
+  it('rechecks real-home separation immediately before launch', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack-home');
+    const trial = await storedTrial(stackHome);
+    const preparation = await prepareCodexTryRuntime({
+      stackHome,
+      trial,
+      homeDir: path.join(root, 'real-home'),
+      env: {},
+      idFactory: () => 'launchfence1',
+    });
+    let spawned = false;
+
+    await expect(
+      launchCodexTryRuntime({
+        stackHome,
+        preparation,
+        detection: {
+          agent: 'codex',
+          installed: true,
+          executablePath: '/fake',
+        },
+        env: { HOME: preparation.session.runtimeHomePath },
+        spawnProcess: async () => {
+          spawned = true;
+          return { exitCode: 0, signal: null };
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'unsafe-runtime-path' });
+    expect(spawned).toBe(false);
+    await expect(
+      access(path.dirname(preparation.session.workspacePath)),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('does not write a failure marker through tampered outside-runtime metadata', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack-home');
+    const outside = path.join(root, 'outside-runtime');
+    await mkdir(path.join(outside, 'workspace'), { recursive: true });
+    const trial = await storedTrial(stackHome);
+    const preparation = await prepareCodexTryRuntime({
+      stackHome,
+      trial,
+      homeDir: path.join(root, 'real-home'),
+      env: {},
+      idFactory: () => 'tamperedlaunch1',
+    });
+    const tampered = {
+      ...preparation,
+      session: {
+        ...preparation.session,
+        workspacePath: path.join(outside, 'workspace'),
+        runtimeHomePath: path.join(outside, 'home'),
+        runtimeCodexHomePath: path.join(outside, 'codex-home'),
+      },
+    };
+
+    await expect(
+      launchCodexTryRuntime({
+        stackHome,
+        preparation: tampered,
+        detection: {
+          agent: 'codex',
+          installed: true,
+          executablePath: '/fake',
+        },
+        spawnProcess: async () => ({ exitCode: 0, signal: null }),
+      }),
+    ).rejects.toMatchObject({ code: 'unsafe-runtime-path' });
+    await expect(
+      access(path.join(outside, 'session.json')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('cannot overwrite or delete a different owned runtime session', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack-home');
+    const trial = await storedTrial(stackHome);
+    const first = await prepareCodexTryRuntime({
+      stackHome,
+      trial,
+      homeDir: path.join(root, 'real-home'),
+      env: {},
+      idFactory: () => 'sessionowner1',
+    });
+    const second = await prepareCodexTryRuntime({
+      stackHome,
+      trial,
+      homeDir: path.join(root, 'real-home'),
+      env: {},
+      idFactory: () => 'sessionowner2',
+    });
+    const secondMarker = path.join(
+      path.dirname(second.session.workspacePath),
+      'session.json',
+    );
+    const markerBefore = await readFile(secondMarker);
+    const forged = {
+      ...first,
+      session: {
+        ...first.session,
+        workspacePath: second.session.workspacePath,
+        runtimeHomePath: second.session.runtimeHomePath,
+        runtimeCodexHomePath: second.session.runtimeCodexHomePath,
+      },
+    };
+
+    await expect(
+      launchCodexTryRuntime({
+        stackHome,
+        preparation: forged,
+        detection: {
+          agent: 'codex',
+          installed: true,
+          executablePath: '/fake',
+        },
+        spawnProcess: async () => ({ exitCode: 0, signal: null }),
+      }),
+    ).rejects.toMatchObject({ code: 'unsafe-runtime-path' });
+    expect(await readFile(secondMarker)).toEqual(markerBefore);
+    await expect(
+      access(path.dirname(first.session.workspacePath)),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(path.dirname(second.session.workspacePath)),
+    ).resolves.toBeUndefined();
+    await cleanupCodexTryRuntime({ stackHome, session: first.session });
+    await cleanupCodexTryRuntime({ stackHome, session: second.session });
   });
 });

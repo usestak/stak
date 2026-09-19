@@ -11,8 +11,14 @@ import {
 } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 
-import { hashSkillDirectory } from '@stack/shared';
+import {
+  assertPathWithin,
+  hashSkillDirectory,
+  pathIsWithin,
+  pathsEqual,
+} from '@stack/shared';
 import {
   tryExitResultSchema,
   tryPreparationResultSchema,
@@ -94,6 +100,99 @@ const writeSession = async (directory: string, session: TrySession) => {
   );
 };
 
+const removeOwnedRuntimePath = async (
+  runtimeRoot: string,
+  target: string,
+): Promise<void> => {
+  await assertPathWithin({ ownedRoot: runtimeRoot, proposedPath: target });
+  await rm(target, { recursive: true, force: true });
+};
+
+const assertCodexTryIsolation = async (options: {
+  runtimeRoot: string;
+  sessionRoot: string;
+  workspacePath: string;
+  runtimeHomePath: string;
+  runtimeCodexHomePath: string;
+  skillRoot: string;
+  realHome: string;
+  realCodexHome: string;
+}) => {
+  try {
+    await assertPathWithin({
+      ownedRoot: options.runtimeRoot,
+      proposedPath: options.sessionRoot,
+    });
+    for (const proposedPath of [
+      options.workspacePath,
+      options.runtimeHomePath,
+      options.runtimeCodexHomePath,
+    ])
+      await assertPathWithin({
+        ownedRoot: options.sessionRoot,
+        proposedPath,
+      });
+    await assertPathWithin({
+      ownedRoot: options.workspacePath,
+      proposedPath: options.skillRoot,
+    });
+    if (
+      (await pathsEqual({
+        left: options.runtimeHomePath,
+        right: options.realHome,
+      })) ||
+      (await pathsEqual({
+        left: options.runtimeCodexHomePath,
+        right: options.realCodexHome,
+      })) ||
+      (await pathIsWithin({
+        ownedRoot: path.join(options.realHome, '.agents', 'skills'),
+        proposedPath: options.skillRoot,
+        allowRoot: true,
+      })) ||
+      (await pathIsWithin({
+        ownedRoot: path.join(options.realCodexHome, 'skills'),
+        proposedPath: options.skillRoot,
+        allowRoot: true,
+      }))
+    )
+      throw new UnsafeRuntimePathError();
+  } catch (error) {
+    if (error instanceof UnsafeRuntimePathError) throw error;
+    throw new UnsafeRuntimePathError();
+  }
+};
+
+const assertOwnedReadySession = async (options: {
+  stackHome: string;
+  session: TrySession;
+}): Promise<void> => {
+  const runtimeRoot = path.resolve(options.stackHome, 'runtime');
+  const sessionRoot = path.resolve(runtimeRoot, options.session.sessionId);
+  const expected = {
+    runtimeRootPath: runtimeRoot,
+    workspacePath: path.join(sessionRoot, 'workspace'),
+    runtimeHomePath: path.join(sessionRoot, 'home'),
+    runtimeCodexHomePath: path.join(sessionRoot, 'codex-home'),
+  };
+  for (const pair of [
+    { left: options.session.runtimeRootPath, right: expected.runtimeRootPath },
+    { left: options.session.workspacePath, right: expected.workspacePath },
+    { left: options.session.runtimeHomePath, right: expected.runtimeHomePath },
+    {
+      left: options.session.runtimeCodexHomePath,
+      right: expected.runtimeCodexHomePath,
+    },
+  ])
+    if (!(await pathsEqual(pair))) throw new UnsafeRuntimePathError();
+  await assertPathWithin({ ownedRoot: runtimeRoot, proposedPath: sessionRoot });
+  const marker = trySessionSchema.parse(
+    JSON.parse(await readFile(path.join(sessionRoot, 'session.json'), 'utf8')),
+  );
+  if (marker.status !== 'ready' || !isDeepStrictEqual(marker, options.session))
+    throw new UnsafeRuntimePathError();
+};
+
 export const prepareCodexTryRuntime = async (options: {
   stackHome: string;
   trial: TryResolvedEnvironment;
@@ -111,8 +210,23 @@ export const prepareCodexTryRuntime = async (options: {
   const runtimeHomePath = path.join(finalDirectory, 'home');
   const runtimeCodexHomePath = path.join(finalDirectory, 'codex-home');
   const skillRoot = path.join(workspacePath, '.agents', 'skills');
+  const realHome = path.resolve(options.homeDir ?? os.homedir());
+  const realCodexHome = resolveUserCodexHome({
+    homeDir: realHome,
+    ...(options.env ? { env: options.env } : {}),
+  });
   let finalOwned = false;
   try {
+    await assertCodexTryIsolation({
+      runtimeRoot,
+      sessionRoot: finalDirectory,
+      workspacePath,
+      runtimeHomePath,
+      runtimeCodexHomePath,
+      skillRoot,
+      realHome,
+      realCodexHome,
+    });
     await secureDirectory(runtimeRoot);
     await mkdir(finalDirectory, { recursive: false, mode: 0o700 });
     finalOwned = true;
@@ -121,10 +235,7 @@ export const prepareCodexTryRuntime = async (options: {
     await secureDirectory(runtimeCodexHomePath);
     await mkdir(skillRoot, { recursive: true });
     const bridgedFiles = await bridgeCodexRuntimeState({
-      sourceCodexHome: resolveUserCodexHome({
-        ...(options.homeDir ? { homeDir: options.homeDir } : {}),
-        ...(options.env ? { env: options.env } : {}),
-      }),
+      sourceCodexHome: realCodexHome,
       runtimeCodexHome: runtimeCodexHomePath,
     });
     const materialize = options.materialize ?? materializeStoredSkill;
@@ -167,9 +278,11 @@ export const prepareCodexTryRuntime = async (options: {
     return tryPreparationResultSchema.parse({ session, bridgedFiles });
   } catch (error) {
     if (finalOwned)
-      await rm(finalDirectory, { recursive: true, force: true }).catch(
-        () => undefined,
-      );
+      try {
+        await removeOwnedRuntimePath(runtimeRoot, finalDirectory);
+      } catch (cleanupError) {
+        throw new TryRuntimeCleanupFailedError({ cause: cleanupError });
+      }
     if (
       error instanceof TryRuntimePreparationFailedError ||
       error instanceof UnsafeRuntimePathError ||
@@ -190,13 +303,21 @@ export const cleanupCodexTryRuntime = async (options: {
   const expectedWorkspace = path.join(directory, 'workspace');
   const expectedHome = path.join(directory, 'home');
   const expectedCodexHome = path.join(directory, 'codex-home');
-  if (
-    path.resolve(session.runtimeRootPath) !== runtimeRoot ||
-    path.dirname(directory) !== runtimeRoot ||
-    path.resolve(session.workspacePath) !== expectedWorkspace ||
-    path.resolve(session.runtimeHomePath) !== expectedHome ||
-    path.resolve(session.runtimeCodexHomePath) !== expectedCodexHome
-  )
+  const sessionPathsValid =
+    (await pathsEqual({ left: session.runtimeRootPath, right: runtimeRoot })) &&
+    (await pathsEqual({
+      left: session.workspacePath,
+      right: expectedWorkspace,
+    })) &&
+    (await pathsEqual({
+      left: session.runtimeHomePath,
+      right: expectedHome,
+    })) &&
+    (await pathsEqual({
+      left: session.runtimeCodexHomePath,
+      right: expectedCodexHome,
+    }));
+  if (!sessionPathsValid)
     throw new TryRuntimeCleanupFailedError({
       cause: new Error(
         'Runtime paths are outside the owned session directory.',
@@ -209,19 +330,21 @@ export const cleanupCodexTryRuntime = async (options: {
     throw new TryRuntimeCleanupFailedError({ cause: error });
   }
   try {
+    await assertPathWithin({ ownedRoot: runtimeRoot, proposedPath: directory });
     const marker = trySessionSchema.parse(
       JSON.parse(await readFile(path.join(directory, 'session.json'), 'utf8')),
     );
-    if (
-      marker.sessionId !== session.sessionId ||
-      path.basename(directory) !== session.sessionId ||
-      path.resolve(marker.runtimeRootPath) !== runtimeRoot ||
-      path.resolve(marker.workspacePath) !== expectedWorkspace ||
-      path.resolve(marker.runtimeHomePath) !== expectedHome ||
-      path.resolve(marker.runtimeCodexHomePath) !== expectedCodexHome
-    )
+    if (marker.sessionId !== session.sessionId)
       throw new Error('Runtime marker does not match the requested session.');
-    await rm(directory, { recursive: true, force: true });
+    for (const pair of [
+      { left: marker.runtimeRootPath, right: runtimeRoot },
+      { left: marker.workspacePath, right: expectedWorkspace },
+      { left: marker.runtimeHomePath, right: expectedHome },
+      { left: marker.runtimeCodexHomePath, right: expectedCodexHome },
+    ])
+      if (!(await pathsEqual(pair)))
+        throw new Error('Runtime marker does not match the requested session.');
+    await removeOwnedRuntimePath(runtimeRoot, directory);
   } catch (error) {
     throw new TryRuntimeCleanupFailedError({ cause: error });
   }
@@ -250,7 +373,35 @@ export const launchCodexTryRuntime = async (options: {
   };
   let exitCode: number | null;
   let signal: string | null | undefined;
+  let isolationVerified = false;
+  let ownershipVerified = false;
   try {
+    await assertOwnedReadySession({
+      stackHome: options.stackHome,
+      session,
+    });
+    ownershipVerified = true;
+    const inheritedEnvironment = options.env ?? process.env;
+    const realHome = path.resolve(
+      inheritedEnvironment.HOME ??
+        inheritedEnvironment.USERPROFILE ??
+        os.homedir(),
+    );
+    const realCodexHome = resolveUserCodexHome({
+      homeDir: realHome,
+      env: inheritedEnvironment,
+    });
+    await assertCodexTryIsolation({
+      runtimeRoot: path.resolve(options.stackHome, 'runtime'),
+      sessionRoot: path.dirname(session.workspacePath),
+      workspacePath: session.workspacePath,
+      runtimeHomePath: session.runtimeHomePath,
+      runtimeCodexHomePath: session.runtimeCodexHomePath,
+      skillRoot: path.join(session.workspacePath, '.agents', 'skills'),
+      realHome,
+      realCodexHome,
+    });
+    isolationVerified = true;
     await writeSession(path.dirname(session.workspacePath), {
       ...session,
       status: 'running',
@@ -268,13 +419,15 @@ export const launchCodexTryRuntime = async (options: {
       status: 'exited',
     });
   } catch (error) {
-    await writeSession(path.dirname(session.workspacePath), {
-      ...session,
-      status: 'failed',
-    }).catch(() => undefined);
+    if (isolationVerified)
+      await writeSession(path.dirname(session.workspacePath), {
+        ...session,
+        status: 'failed',
+      }).catch(() => undefined);
     throw error;
   } finally {
-    await cleanupCodexTryRuntime({ stackHome: options.stackHome, session });
+    if (ownershipVerified)
+      await cleanupCodexTryRuntime({ stackHome: options.stackHome, session });
   }
   return tryExitResultSchema.parse({
     sessionId: session.sessionId,

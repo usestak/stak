@@ -2774,3 +2774,14 @@ runtime or Store content. Completed, failed, and non-zero-exit sessions are clea
 Unknown or potentially live orphan runtime directories are not deleted automatically.
 Existing-project mode, keeping a scratch workspace, remote Stacks, and automatic Stack
 adoption remain deferred.
+
+### Phase 6 filesystem safety fence
+
+Trial and controlled test/demo fixture mutation is fenced to explicitly created,
+Stack-owned temporary roots. Paths are normalized, canonically resolved where possible,
+and checked with platform-aware containment rules before writes or cleanup. Failure to
+prove path ownership aborts the operation and leaves uncertain paths untouched. Trial
+preparation also proves that its temporary HOME, temporary `CODEX_HOME`, workspace, and
+workspace Skill root remain separated from real user Skill locations before creating
+the runtime. These restrictions do not apply to the intentional, separately owned
+`stack run codex` binding workflow.
