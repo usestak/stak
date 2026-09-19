@@ -30,7 +30,12 @@ export type RunCommandDependencies = {
   writeOut(value: string): void;
 };
 
-const mutationStates = new Set(['add', 'update-managed', 'managed-drift']);
+const mutationStates = new Set([
+  'add',
+  'update-managed',
+  'managed-drift',
+  'remove-managed',
+]);
 
 export const registerRunCommand = (
   program: Command,
@@ -38,7 +43,7 @@ export const registerRunCommand = (
 ): void => {
   program
     .command('run <agent>')
-    .description('Expose main to an agent and launch it (Phase 4: Codex only)')
+    .description('Reconcile main with an agent and launch it (Codex only)')
     .option('--dry-run', 'preview bindings without mutation or launch')
     .option('--json', 'emit structured JSON for dry-run')
     .option('--yes', 'approve safe binding mutations non-interactively')

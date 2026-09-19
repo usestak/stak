@@ -50,7 +50,9 @@ export const renderStatus = (status: EnvironmentStatus): string => {
   const lines = [
     `Environment: ${status.environment}`,
     '',
-    `${status.desiredCount} desired Skills`,
+    `Direct Skills    ${status.skills.filter((skill) => skill.origins?.some((origin) => origin.type === 'direct')).length}`,
+    `Stack layers     ${status.stacks?.length ?? 0}`,
+    `Resolved Skills  ${status.desiredCount}`,
     '',
     `Satisfied      ${summary.satisfied}`,
     `Modified       ${summary.modified}`,
@@ -74,6 +76,14 @@ export const renderStatus = (status: EnvironmentStatus): string => {
     `Reference      ${summary.restoration.reference}`,
     `Snapshot       ${summary.restoration.snapshot}`,
   ];
+  if (status.stacks?.length)
+    lines.splice(
+      5,
+      0,
+      '',
+      'Stacks',
+      ...status.stacks.map((stack) => `✓ ${stack.name}`),
+    );
   if (summary.rootFailures > 0)
     lines.push(
       '',
@@ -132,6 +142,16 @@ export const renderDiff = (diff: EnvironmentDiff): string => {
     );
     if (entry.preservation.message) lines.push(entry.preservation.message);
     if (entry.currentHash) lines.push('', 'Current', entry.currentHash);
+    if (entry.origins?.length)
+      lines.push(
+        '',
+        'Required by',
+        ...entry.origins.map((origin) =>
+          origin.type === 'direct'
+            ? `Direct: ${origin.entryId}`
+            : `Stack: ${origin.stackName}`,
+        ),
+      );
     lines.push('', 'Desired source', sourceLabel(entry.desiredSource));
     if (entry.currentSource)
       lines.push('', 'Current source', sourceLabel(entry.currentSource));

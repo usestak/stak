@@ -15,6 +15,10 @@ import {
   restorationStrategySchema,
   storeVerificationSchema,
 } from './storage.js';
+import {
+  environmentStackLayerSchema,
+  requirementOriginSchema,
+} from './stack.js';
 
 const timestampSchema = z.iso.datetime({ offset: true });
 const entryIdSchema = z.string().regex(/^skill_[A-Za-z0-9_-]{8,}$/);
@@ -37,7 +41,7 @@ export const environmentManifestSchema = z.object({
   schemaVersion: z.literal(1),
   name: z.string().min(1),
   skills: z.array(environmentSkillEntrySchema),
-  stacks: z.array(z.string()),
+  stacks: z.array(environmentStackLayerSchema),
   overrides: z.record(z.string(), z.unknown()),
 });
 
@@ -50,6 +54,7 @@ export const lockedSkillSchema = z.object({
   observedSources: z.array(skillSourceSchema),
   localContent: localContentRecordSchema,
   restoration: restorationStrategySchema,
+  origins: z.array(requirementOriginSchema).optional(),
 });
 
 export const environmentLockSchema = z.object({
@@ -89,6 +94,7 @@ export const skillStatusSchema = z.object({
   uncertaintyRoots: z.array(scannedRootSchema),
   preservation: storeVerificationSchema,
   restorationStrategy: z.enum(['reference', 'snapshot']),
+  origins: z.array(requirementOriginSchema).optional(),
 });
 
 export const untrackedSkillSchema = z.object({
@@ -148,6 +154,7 @@ const statusFields = {
   placementDrift: z.array(placementDriftSchema),
   invalidSkills: z.array(invalidDiscoveredSkillSchema),
   rootFailures: z.array(scannedRootSchema),
+  stacks: z.array(environmentStackLayerSchema).optional(),
   summary: environmentStatusSummarySchema,
 };
 

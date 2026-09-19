@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 
-import { StackStateError, StackStoreError } from '@stack/core';
+import {
+  StackCompositionError,
+  StackStateError,
+  StackStoreError,
+} from '@stack/core';
 import { StackAdapterError } from '@stack/adapters';
 
 import { createProgram } from './program.js';
@@ -11,6 +15,7 @@ try {
   if (
     error instanceof StackStateError ||
     error instanceof StackStoreError ||
+    error instanceof StackCompositionError ||
     error instanceof StackAdapterError
   ) {
     process.stderr.write(`${error.message}\n`);

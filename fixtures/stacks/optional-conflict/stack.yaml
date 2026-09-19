@@ -1,0 +1,7 @@
+schemaVersion: 1
+name: optional-conflict
+description: Optional alternate review Skill.
+extends: []
+skills:
+  - path: ./skills/review
+    requirement: optional

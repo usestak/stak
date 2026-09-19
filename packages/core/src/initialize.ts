@@ -218,6 +218,7 @@ export const initializeMainEnvironment = async (
       metadata: { name: metadata.name, description: metadata.description },
       localContent: { available: true, contentHash: discovered.contentHash },
       restoration,
+      origins: [{ type: 'direct', entryId: id }],
       ...evidence,
     };
     baseline.skills[id] = {

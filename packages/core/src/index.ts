@@ -20,3 +20,18 @@ export type { ObserveMainEnvironmentOptions } from './status.js';
 export { selectRestorationStrategy } from './restoration.js';
 export type { SelectRestorationStrategyOptions } from './restoration.js';
 export { StackStoreError } from '@stack/store';
+export {
+  loadLocalStack,
+  stackVersionHash,
+  StackCompositionError,
+  StackCycleError,
+} from './stack-loader.js';
+export type { LoadedLocalStack } from './stack-loader.js';
+export { resolveEnvironment, importedVersionKey } from './resolver.js';
+export {
+  prepareStackUse,
+  applyStackUse,
+  prepareStackRemove,
+  applyStackRemove,
+} from './composition.js';
+export type { StackUseProposal, StackRemoveProposal } from './composition.js';

@@ -46,6 +46,7 @@ export const bindingStateSchema = z.enum([
   'add',
   'update-managed',
   'managed-drift',
+  'remove-managed',
   'conflict-unmanaged',
   'conflict-name',
   'invalid-target-name',
@@ -62,6 +63,7 @@ export const bindingOperationSchema = z.object({
   installedHash: contentHashSchema.optional(),
   preservation: storeVerificationSchema.optional(),
   message: z.string().optional(),
+  stale: z.boolean().optional(),
 });
 export const bindingPlanSchema = z.object({
   schemaVersion: z.literal(1),

@@ -22,6 +22,7 @@ import {
 import type {
   AgentDetection,
   BindingApplyResult,
+  BindingOperation,
   BindingPlan,
   BindingRecord,
   BindingRegistry,
@@ -245,7 +246,7 @@ export class CodexAdapter implements AgentAdapter {
     const counts = new Map<string, number>();
     for (const skill of environment.skills)
       counts.set(skill.name, (counts.get(skill.name) ?? 0) + 1);
-    const operations = await Promise.all(
+    const operations: BindingOperation[] = await Promise.all(
       environment.skills.map(async (skill) => {
         const targetPath = path.join(this.targetRoot, skill.name);
         const base = {
@@ -320,13 +321,37 @@ export class CodexAdapter implements AgentAdapter {
         };
       }),
     );
+    const desiredIds = new Set(
+      environment.skills.map((skill) => skill.entryId),
+    );
+    for (const record of registry.bindings.filter(
+      (item) =>
+        item.environment === environment.name &&
+        !desiredIds.has(item.environmentEntryId),
+    )) {
+      const hash = await currentHash(record.targetPath);
+      operations.push({
+        entryId: record.environmentEntryId,
+        skillName: record.skillName,
+        contentHash: record.contentHash,
+        targetPath: record.targetPath,
+        installedHash: record.contentHash,
+        stale: true,
+        ...(hash ? { currentHash: hash } : {}),
+        state: hash === record.contentHash ? 'remove-managed' : 'managed-drift',
+      });
+    }
     return bindingPlanSchema.parse({
       schemaVersion: 1,
       agent: 'codex',
       environment: environment.name,
       targetRoot: this.targetRoot,
       operations,
-      blocking: operations.some((item) => blockedStates.has(item.state)),
+      blocking: operations.some(
+        (item) =>
+          blockedStates.has(item.state) ||
+          (item.state === 'managed-drift' && item.stale),
+      ),
     });
   }
   async applyBindings(
@@ -341,12 +366,45 @@ export class CodexAdapter implements AgentAdapter {
     });
     const backups: Array<{ target: string; backup?: string }> = [];
     const applied: BindingRecord[] = [];
+    const removed: BindingRecord[] = [];
     try {
       for (const operation of plan.operations) {
+        if (operation.state === 'remove-managed') {
+          const record = registry.bindings.find(
+            (item) =>
+              item.environmentEntryId === operation.entryId &&
+              path.resolve(item.targetPath) ===
+                path.resolve(operation.targetPath),
+          );
+          if (
+            !record ||
+            (await currentHash(operation.targetPath)) !== record.contentHash
+          )
+            throw new BindingConflictError(
+              'A stale managed binding changed before removal.',
+            );
+          const backup = `${operation.targetPath}.${randomUUID()}.stack-rollback`;
+          await rename(operation.targetPath, backup);
+          backups.push({ target: operation.targetPath, backup });
+          registry.bindings = registry.bindings.filter(
+            (item) => item.environmentEntryId !== operation.entryId,
+          );
+          removed.push(record);
+          continue;
+        }
         if (
           !['add', 'update-managed', 'managed-drift'].includes(operation.state)
         )
           continue;
+        const hashAtApply = await currentHash(operation.targetPath);
+        if (operation.state === 'add' && hashAtApply)
+          throw new BindingConflictError(
+            'An unmanaged Codex target appeared after binding approval.',
+          );
+        if (operation.state !== 'add' && hashAtApply !== operation.currentHash)
+          throw new BindingConflictError(
+            'A managed Codex target changed after binding approval.',
+          );
         let backup: string | undefined;
         if (await exists(operation.targetPath)) {
           backup = `${operation.targetPath}.${randomUUID()}.stack-rollback`;
@@ -390,8 +448,8 @@ export class CodexAdapter implements AgentAdapter {
       return bindingApplyResultSchema.parse({
         agent: 'codex',
         applied,
-        removed: [],
-        unchanged: plan.operations.length - applied.length,
+        removed,
+        unchanged: plan.operations.length - applied.length - removed.length,
         rolledBack: false,
       });
     } catch (error) {

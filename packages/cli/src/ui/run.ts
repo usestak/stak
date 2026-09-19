@@ -6,6 +6,7 @@ const label: Record<BindingPlan['operations'][number]['state'], string> = {
   add: 'Add',
   'update-managed': 'Update managed',
   'managed-drift': 'Managed drift',
+  'remove-managed': 'Remove managed',
   'conflict-unmanaged': 'Unmanaged conflict',
   'conflict-name': 'Name conflict',
   'invalid-target-name': 'Invalid name',

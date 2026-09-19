@@ -1,0 +1,7 @@
+schemaVersion: 1
+name: required-conflict
+description: Required alternate review Skill.
+extends: []
+skills:
+  - path: ./skills/review
+    requirement: required

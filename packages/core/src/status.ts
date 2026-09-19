@@ -138,9 +138,12 @@ export const statusMainEnvironment = async (
   const placementDrift: PlacementDrift[] = [];
   const verify = options.store?.verifyStoredSkill ?? verifyStoredSkill;
 
-  for (const entry of saved.manifest.skills) {
-    const locked = saved.lock.skills[entry.id];
-    const baseline = saved.baseline.skills[entry.id];
+  for (const [entryId, locked] of Object.entries(saved.lock.skills)) {
+    const entry = { id: entryId, name: locked.name };
+    const baseline = saved.baseline.skills[entry.id] ?? {
+      contentHash: locked.contentHash,
+      locations: [],
+    };
     if (!locked || !baseline) continue;
     const exact = byHash.get(locked.contentHash);
     const modified = baseline.locations
@@ -200,6 +203,7 @@ export const statusMainEnvironment = async (
         contentHash: locked.contentHash,
       }),
       restorationStrategy: locked.restoration.strategy,
+      ...(locked.origins ? { origins: locked.origins } : {}),
     };
     skills.push(skillStatus);
     placementDrift.push(
@@ -260,12 +264,13 @@ export const statusMainEnvironment = async (
     schemaVersion: 1,
     environment: saved.manifest.name,
     observedAt: (options.now ?? (() => new Date()))().toISOString(),
-    desiredCount: saved.manifest.skills.length,
+    desiredCount: Object.keys(saved.lock.skills).length,
     skills,
     untracked,
     placementDrift,
     invalidSkills,
     rootFailures: failedRoots,
+    stacks: saved.manifest.stacks,
     summary: {
       satisfied: count('satisfied'),
       modified: count('modified'),

@@ -227,6 +227,12 @@ importers:
 
   packages/core:
     dependencies:
+      '@stack/scanner':
+        specifier: workspace:*
+        version: link:../scanner
+      '@stack/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@stack/spec':
         specifier: workspace:*
         version: link:../spec
@@ -236,10 +242,6 @@ importers:
       yaml:
         specifier: 2.9.1
         version: 2.9.1
-    devDependencies:
-      '@stack/shared':
-        specifier: workspace:*
-        version: link:../shared
 
   packages/scanner:
     dependencies:

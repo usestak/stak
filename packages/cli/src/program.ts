@@ -6,14 +6,18 @@ import { Command } from 'commander';
 
 import {
   diffMainEnvironment,
+  applyStackRemove,
+  applyStackUse,
   initializeMainEnvironment,
   loadMainEnvironment,
+  prepareStackRemove,
+  prepareStackUse,
   resolveStackHome,
-  StackStateError,
   statusMainEnvironment,
 } from '@stack/core';
 import { CodexAdapter } from '@stack/adapters';
 import type { InitializeMainEnvironmentResult } from '@stack/core';
+import type { StackRemoveProposal, StackUseProposal } from '@stack/core';
 import { resolveScanRoots, scanSkills } from '@stack/scanner';
 import type {
   AgentDetection,
@@ -32,6 +36,8 @@ import { registerInitCommand } from './commands/init.js';
 import { registerScanCommand } from './commands/scan.js';
 import { registerStatusCommand } from './commands/status.js';
 import { registerRunCommand } from './commands/run.js';
+import { registerUseCommand } from './commands/use.js';
+import { registerRemoveCommand } from './commands/remove.js';
 
 const require = createRequire(import.meta.url);
 const packageMetadata = require('../package.json') as { version: string };
@@ -41,6 +47,10 @@ export type ProgramDependencies = {
   initialize(scanResult: ScanResult): Promise<InitializeMainEnvironmentResult>;
   status(scanResult: ScanResult): Promise<EnvironmentStatus>;
   diff(scanResult: ScanResult): Promise<EnvironmentDiff>;
+  prepareUse(input: string): Promise<StackUseProposal>;
+  applyUse(proposal: StackUseProposal): Promise<unknown>;
+  prepareRemove(identifier: string): Promise<StackRemoveProposal>;
+  applyRemove(proposal: StackRemoveProposal): Promise<unknown>;
   loadRunEnvironment(): Promise<ResolvedLocalEnvironment>;
   detectCodex(): Promise<AgentDetection>;
   planCodexBindings(
@@ -68,21 +78,19 @@ const defaultDependencies: ProgramDependencies = {
   status: async (scanResult) =>
     statusMainEnvironment({ stackHome, scanResult }),
   diff: async (scanResult) => diffMainEnvironment({ stackHome, scanResult }),
+  prepareUse: (input) => prepareStackUse({ stackHome, input }),
+  applyUse: (proposal) => applyStackUse(proposal),
+  prepareRemove: (identifier) => prepareStackRemove({ stackHome, identifier }),
+  applyRemove: (proposal) => applyStackRemove(proposal),
   loadRunEnvironment: async () => {
     const state = await loadMainEnvironment({ stackHome });
     return {
       name: state.manifest.name,
       machineId: state.machine.machineId,
-      skills: state.manifest.skills.map((entry) => {
-        const locked = state.lock.skills[entry.id];
-        if (!locked)
-          throw new StackStateError(
-            'invalid-state',
-            `Environment entry ${entry.id} is absent from the lockfile.`,
-          );
+      skills: Object.entries(state.lock.skills).map(([entryId, locked]) => {
         return {
-          entryId: entry.id,
-          name: entry.name,
+          entryId,
+          name: locked.name,
           contentHash: locked.contentHash,
         };
       }),
@@ -120,6 +128,8 @@ export const createProgram = (
   registerInitCommand(program, dependencies);
   registerStatusCommand(program, dependencies);
   registerDiffCommand(program, dependencies);
+  registerUseCommand(program, dependencies);
+  registerRemoveCommand(program, dependencies);
   registerRunCommand(program, dependencies);
   return program;
 };

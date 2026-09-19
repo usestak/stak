@@ -140,6 +140,14 @@ const runProgram = async (
     }),
     status: async () => emptyStatus,
     diff: async () => emptyDiff,
+    prepareUse: async () => {
+      throw new Error('not configured');
+    },
+    applyUse: async () => undefined,
+    prepareRemove: async () => {
+      throw new Error('not configured');
+    },
+    applyRemove: async () => undefined,
     loadRunEnvironment: async () => resolvedEnvironment,
     detectCodex: async () => detection,
     planCodexBindings: async () => plan,
@@ -171,21 +179,21 @@ const runProgram = async (
 };
 
 describe('Stack CLI', () => {
-  it('prints root help with run but without Phase 5+ commands', async () => {
+  it('prints root help with composition commands but without Phase 6+ commands', async () => {
     const result = await runProgram(['--help']);
 
     expect(result.exit?.exitCode).toBe(0);
-    for (const command of ['scan', 'init', 'status', 'diff', 'run'])
-      expect(result.output).toContain(`  ${command}`);
     for (const command of [
+      'scan',
+      'init',
+      'status',
+      'diff',
       'use',
       'remove',
-      'try',
-      'restore',
-      'push',
-      'pull',
-      'publish',
-    ]) {
+      'run',
+    ])
+      expect(result.output).toContain(`  ${command}`);
+    for (const command of ['try', 'restore', 'push', 'pull', 'publish']) {
       expect(result.output).not.toContain(`  ${command}`);
     }
   });

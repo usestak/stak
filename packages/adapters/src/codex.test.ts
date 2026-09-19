@@ -562,6 +562,98 @@ describe('Codex adapter', () => {
     ).rejects.toBeInstanceOf(BindingConflictError);
   });
 
+  it('plans and transactionally removes a healthy stale managed binding', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const homeDir = path.join(root, 'home');
+    const stored = await createStoredSkill(stackHome, 'demo');
+    const adapter = new CodexAdapter({ stackHome, homeDir });
+    const machineId = '00000000-0000-4000-8000-000000000000';
+    const desired = environment(machineId, [
+      {
+        entryId: 'skill_12345678',
+        name: 'demo',
+        contentHash: stored.contentHash,
+      },
+    ]);
+    await adapter.applyBindings(await adapter.planBindings(desired), machineId);
+    const empty = environment(machineId, []);
+    const plan = await adapter.planBindings(empty);
+    expect(plan.operations).toMatchObject([
+      { state: 'remove-managed', stale: true },
+    ]);
+    const result = await adapter.applyBindings(plan, machineId);
+    expect(result.removed).toHaveLength(1);
+    await expect(
+      stat(path.join(homeDir, '.agents', 'skills', 'demo')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(
+      (
+        await readBindingRegistry({
+          stackHome,
+          machineId,
+          targetRoot: path.join(homeDir, '.agents', 'skills'),
+        })
+      ).bindings,
+    ).toEqual([]);
+  });
+
+  it('does not overwrite an unmanaged target that appears after planning', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const homeDir = path.join(root, 'home');
+    const stored = await createStoredSkill(stackHome, 'demo');
+    const adapter = new CodexAdapter({ stackHome, homeDir });
+    const machineId = '00000000-0000-4000-8000-000000000000';
+    const desired = environment(machineId, [
+      {
+        entryId: 'skill_12345678',
+        name: 'demo',
+        contentHash: stored.contentHash,
+      },
+    ]);
+    const plan = await adapter.planBindings(desired);
+    const target = path.join(homeDir, '.agents', 'skills', 'demo');
+    await mkdir(target, { recursive: true });
+    await writeFile(path.join(target, 'SKILL.md'), 'external');
+    await expect(adapter.applyBindings(plan, machineId)).rejects.toBeInstanceOf(
+      BindingApplyFailedError,
+    );
+    expect(await readFile(path.join(target, 'SKILL.md'), 'utf8')).toBe(
+      'external',
+    );
+  });
+
+  it('blocks removal when a stale managed binding was modified', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const homeDir = path.join(root, 'home');
+    const stored = await createStoredSkill(stackHome, 'demo');
+    const adapter = new CodexAdapter({ stackHome, homeDir });
+    const machineId = '00000000-0000-4000-8000-000000000000';
+    const desired = environment(machineId, [
+      {
+        entryId: 'skill_12345678',
+        name: 'demo',
+        contentHash: stored.contentHash,
+      },
+    ]);
+    await adapter.applyBindings(await adapter.planBindings(desired), machineId);
+    await writeFile(
+      path.join(homeDir, '.agents', 'skills', 'demo', 'extra.txt'),
+      'user change',
+    );
+    const plan = await adapter.planBindings(environment(machineId, []));
+    expect(plan.blocking).toBe(true);
+    expect(plan.operations[0]).toMatchObject({
+      state: 'managed-drift',
+      stale: true,
+    });
+    await expect(adapter.applyBindings(plan, machineId)).rejects.toBeInstanceOf(
+      BindingConflictError,
+    );
+  });
+
   it('launches directly with inherited environment, requested cwd, shell false, and exit status', async () => {
     const calls: unknown[] = [];
     const result = await launchCodex({

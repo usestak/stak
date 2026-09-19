@@ -1,0 +1,6 @@
+schemaVersion: 1
+name: cycle-a
+description: Cycle fixture A.
+extends:
+  - ../b
+skills: []

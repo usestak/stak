@@ -2705,3 +2705,40 @@ stack pull
 The user's Agent Skill Environment returns.
 
 That is Stack V0.
+
+---
+
+## 87. Phase 5 Local Stack Composition
+
+A local Stack is authored as a directory containing `stack.yaml`. Its `skills[].path`
+and local `extends` values are resolved relative to that manifest only while importing.
+They are never copied into portable Environment or lock state.
+
+An import produces an immutable resolved version at:
+
+```text
+$STACK_HOME/stacks/<stack-id>/versions/<version-hash>/
+```
+
+The logical `stack_<uuid>` identity is independent of its authoring path. The version
+hash is SHA-256 over canonical meaningful data: name, description, resolved
+requirements, requirement kinds, hashes, restoration metadata, inherited versions,
+and explicit optional skips. Paths, timestamps, Machine identity, and temporary state
+are excluded.
+
+`environment.yaml` keeps ordered Stack layers, while `stack.lock.json` is the complete
+resolved Environment. Resolution is direct Skills first, then Stack layers in manifest
+order and requirements in imported-version order. A name and exact content hash dedupe
+and retain every requirement origin. Required content beats optional content. Different
+required hashes in one name slot are a hard conflict; different optional hashes retain
+the first candidate and record the later candidate as skipped. Direct Skills are
+required. Persistent override UX is deferred.
+
+`stack use` and `stack remove` mutate desired Environment state only. Imported versions
+and content-store objects remain after removal. They never write agent roots. Agent
+bindings are reconciled later by `stack run <agent>`; for Codex this includes removal
+of healthy stale Stack-owned bindings, while modified or unmanaged content is retained
+and blocks destructive reconciliation.
+
+Phase 5 supports local filesystem bundles only. Registry identifiers, remote lookup,
+publishing, garbage collection, Stack update UX, and `stack try` remain deferred.
