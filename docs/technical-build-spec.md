@@ -2811,3 +2811,36 @@ every organization policy.
 `main` Environment. Environment status remains agent-neutral. The pre-release Codex-
 specific registry was replaced rather than migrated. `stack try` remains Codex-only;
 cross-agent trials and cloud work are deferred.
+
+---
+
+## 90. Phase 8 Cloud Portability
+
+Cloud stores portable desired state, never Machine installation state. The flow is
+frozen: Cloud Environment → local desired `main` → agent reconciliation → Machine
+bindings. `stack pull` restores desired state only; it never mutates agent Skill
+roots, which remain the job of `stack run <agent>`.
+
+The unit stored per Environment version is a cloud-neutral `CloudEnvironmentBundle`:
+the portable manifest, the resolved lock with snapshot restorations normalized to
+content hashes, every active imported Stack version, the private snapshot content
+requirements, and a deterministic digest over the manifest, resolution, and imported
+versions (excluding timestamps, Machine ids, and paths). Bundles never contain
+absolute paths, home/STACK_HOME/CODEX_HOME values, binding paths, credentials, or
+local snapshot ids. Reference Skills are reacquired from their exact Git
+remote+revision+path and hash-verified; private/local Skills travel as content-addressed
+snapshot archives in a private bucket. On pull, all content is acquired and verified
+into the immutable Store before any desired state is committed; local snapshot ids and
+the Machine baseline are regenerated for the pulling Machine, and imported Stack layers
+are reconstructed so `stack remove` still works.
+
+The CLI authenticates with a browser device flow (confidential device secret hashed
+server-side; human user code that cannot authorize on its own) and stores an opaque
+`stk_` token whose hash is all the server keeps. Authorization is always server-derived
+from the token; a user can never reach another user's Environment, version, snapshot,
+or machine metadata. Environment version commits are atomic and optimistic
+(`expectedLatestVersionId`) with idempotency keys; conflicts (`RemoteEnvironmentConflict`,
+`LocalEnvironmentConflict`, unsynced-remote/unsynced-local) block rather than overwrite,
+and `--yes` never bypasses them. Local commands remain fully functional without login,
+`STACK_API_URL`, or network. Public publishing, `@owner/name` resolution, marketplace,
+teams, billing, and `stack switch` remain deferred to later phases.

@@ -153,9 +153,15 @@ try {
 
   const tokenA = mintToken ? await mintToken() : '';
   const clientA = clientFor(tokenA);
-  const pushPlan = await preparePush({ stackHome: stackHomeA, client: clientA });
+  const pushPlan = await preparePush({
+    stackHome: stackHomeA,
+    client: clientA,
+  });
   assert(!pushPlan.conflict, 'Machine A push should not conflict.');
-  assert(!pushPlan.remoteExists, 'Cloud main should not exist before first push.');
+  assert(
+    !pushPlan.remoteExists,
+    'Cloud main should not exist before first push.',
+  );
   const pushResult = await applyPush({
     stackHome: stackHomeA,
     plan: pushPlan,
@@ -179,14 +185,20 @@ try {
 
   const tokenB = await mintToken();
   const clientB = clientFor(tokenB);
-  const pullPlan = await preparePull({ stackHome: stackHomeB, client: clientB });
+  const pullPlan = await preparePull({
+    stackHome: stackHomeB,
+    client: clientB,
+  });
   assert(pullPlan.mode === 'create', 'Machine B should plan a fresh create.');
   const pullResult = await applyPull({
     stackHome: stackHomeB,
     plan: pullPlan,
     client: clientB,
   });
-  assert(pullResult.status === 'restored', 'Machine B pull should restore main.');
+  assert(
+    pullResult.status === 'restored',
+    'Machine B pull should restore main.',
+  );
   console.log(
     `Machine B pulled main: ${pullResult.desiredSkills} Skills, ${pullResult.importedStackVersions} Stack versions, ${pullResult.snapshotsDownloaded} snapshots downloaded.`,
   );
@@ -253,7 +265,10 @@ try {
     stackHome: stackHomeB,
     identifier: 'frontend',
   });
-  assert(removal.layer.name === 'frontend', 'Stack remove must resolve after pull.');
+  assert(
+    removal.layer.name === 'frontend',
+    'Stack remove must resolve after pull.',
+  );
 
   // Project the restored Environment into Machine B's agent root.
   const codex = new CodexAdapter({ stackHome: stackHomeB, homeDir: homeB });
@@ -276,7 +291,10 @@ try {
     const start = await service.startCliAuth({});
     await service.approveCliAuth({
       userCode: start.userCode,
-      profile: { userId: '00000000-0000-4000-8000-0000000000b2', githubUsername: 'other' },
+      profile: {
+        userId: '00000000-0000-4000-8000-0000000000b2',
+        githubUsername: 'other',
+      },
     });
     const result = await service.pollCliToken(start.deviceSecret);
     return result.status === 'approved' ? result.token : '';
