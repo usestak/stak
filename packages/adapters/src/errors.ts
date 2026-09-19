@@ -46,3 +46,41 @@ export class AgentLaunchFailedError extends StackAdapterError {
     this.name = 'AgentLaunchFailedError';
   }
 }
+export class TryRuntimePreparationFailedError extends StackAdapterError {
+  constructor(
+    message = 'The isolated Codex trial runtime could not be prepared.',
+    options?: ErrorOptions,
+  ) {
+    super('try-runtime-preparation-failed', message, options);
+    this.name = 'TryRuntimePreparationFailedError';
+  }
+}
+export class TryRuntimeCleanupFailedError extends StackAdapterError {
+  constructor(options?: ErrorOptions) {
+    super(
+      'try-runtime-cleanup-failed',
+      'The isolated Codex trial runtime could not be cleaned.',
+      options,
+    );
+    this.name = 'TryRuntimeCleanupFailedError';
+  }
+}
+export class TryAuthBridgeFailedError extends StackAdapterError {
+  constructor(options?: ErrorOptions) {
+    super(
+      'try-auth-bridge-failed',
+      'Allowlisted Codex runtime state could not be copied.',
+      options,
+    );
+    this.name = 'TryAuthBridgeFailedError';
+  }
+}
+export class UnsafeRuntimePathError extends StackAdapterError {
+  constructor() {
+    super(
+      'unsafe-runtime-path',
+      'A trial Skill name is not a safe filesystem segment.',
+    );
+    this.name = 'UnsafeRuntimePathError';
+  }
+}

@@ -14,10 +14,21 @@ import {
   prepareStackUse,
   resolveStackHome,
   statusMainEnvironment,
+  preserveTrialStack,
+  resolveTrialStack,
 } from '@stack/core';
-import { CodexAdapter } from '@stack/adapters';
+import {
+  CodexAdapter,
+  cleanupCodexTryRuntime,
+  launchCodexTryRuntime,
+  prepareCodexTryRuntime,
+} from '@stack/adapters';
 import type { InitializeMainEnvironmentResult } from '@stack/core';
-import type { StackRemoveProposal, StackUseProposal } from '@stack/core';
+import type {
+  StackRemoveProposal,
+  StackUseProposal,
+  TrialStackResolution,
+} from '@stack/core';
 import { resolveScanRoots, scanSkills } from '@stack/scanner';
 import type {
   AgentDetection,
@@ -29,6 +40,8 @@ import type {
   LaunchResult,
   ResolvedLocalEnvironment,
   ScanResult,
+  TryExitResult,
+  TryPreparationResult,
 } from '@stack/spec';
 
 import { registerDiffCommand } from './commands/diff.js';
@@ -38,6 +51,7 @@ import { registerStatusCommand } from './commands/status.js';
 import { registerRunCommand } from './commands/run.js';
 import { registerUseCommand } from './commands/use.js';
 import { registerRemoveCommand } from './commands/remove.js';
+import { registerTryCommand } from './commands/try.js';
 
 const require = createRequire(import.meta.url);
 const packageMetadata = require('../package.json') as { version: string };
@@ -64,6 +78,14 @@ export type ProgramDependencies = {
     environment: ResolvedLocalEnvironment,
   ): Promise<BindingVerification>;
   launchCodex(): Promise<LaunchResult>;
+  resolveTry(input: string): Promise<TrialStackResolution>;
+  preserveTry(trial: TrialStackResolution): Promise<void>;
+  prepareTry(trial: TrialStackResolution): Promise<TryPreparationResult>;
+  cleanupTry(preparation: TryPreparationResult): Promise<void>;
+  launchTry(
+    preparation: TryPreparationResult,
+    detection: AgentDetection,
+  ): Promise<TryExitResult>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -101,6 +123,19 @@ const defaultDependencies: ProgramDependencies = {
   applyCodexBindings: (plan, machineId) => codex.applyBindings(plan, machineId),
   verifyCodexBindings: (environment) => codex.verifyBindings(environment),
   launchCodex: () => codex.launch({ cwd: process.cwd(), env: process.env }),
+  resolveTry: (input) => resolveTrialStack({ input }),
+  preserveTry: (trial) => preserveTrialStack({ stackHome, trial }),
+  prepareTry: (trial) =>
+    prepareCodexTryRuntime({
+      stackHome,
+      trial: trial.resolved,
+      homeDir: os.homedir(),
+      env: process.env,
+    }),
+  cleanupTry: (preparation) =>
+    cleanupCodexTryRuntime({ stackHome, session: preparation.session }),
+  launchTry: (preparation, detection) =>
+    launchCodexTryRuntime({ stackHome, preparation, detection }),
   confirm: async (message) => {
     if (!process.stdin.isTTY) return false;
     const prompt = createInterface({
@@ -131,5 +166,6 @@ export const createProgram = (
   registerUseCommand(program, dependencies);
   registerRemoveCommand(program, dependencies);
   registerRunCommand(program, dependencies);
+  registerTryCommand(program, dependencies);
   return program;
 };

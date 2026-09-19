@@ -197,6 +197,7 @@ const invalidBindingName = (name: string) =>
   [...name].some((character) => character.charCodeAt(0) <= 31) ||
   /[. ]$/.test(name) ||
   /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$/i.test(name);
+export const isSafeCodexSkillName = (name: string) => !invalidBindingName(name);
 const currentHash = async (target: string): Promise<string | undefined> =>
   (await exists(target)) ? (await hashSkillDirectory(target)).hash : undefined;
 const blockedStates = new Set([

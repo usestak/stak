@@ -2742,3 +2742,35 @@ and blocks destructive reconciliation.
 
 Phase 5 supports local filesystem bundles only. Registry identifiers, remote lookup,
 publishing, garbage collection, Stack update UX, and `stack try` remain deferred.
+
+---
+
+## 88. Phase 6 Ephemeral Codex Trials
+
+`stack try <local-stack> -- codex` resolves the requested Stack and its local extends
+graph as a temporary Environment. It does not inherit direct Skills, Stack layers, or
+overrides from `main`, and it does not persist an Environment layer or Machine baseline.
+
+Each run uses a unique directory beneath `$STACK_HOME/runtime/try_<id>/` containing a
+disposable scratch workspace, temporary user home, temporary `CODEX_HOME`, and validated
+session metadata. Trial Skills are real directories at
+`workspace/.agents/skills/<skill-name>` materialized from the immutable Store. The Store
+may retain newly ingested objects as a cache after the trial; this does not activate them.
+
+The Codex child process receives the scratch workspace as cwd and temporary `HOME`,
+`USERPROFILE`, and `CODEX_HOME` values. The parent environment is not mutated. Only
+allowlisted root Codex state is bridged: `config.toml`, `auth.json`, and root
+`*.config.toml` files. Skills, sessions, logs, history, plugin caches, and arbitrary
+directories are not copied, and runtime state is never synchronized back.
+
+This provides isolation from `main` and the user's normal user-level Skill environment.
+It is not full process isolation: Codex built-in/system capabilities, administrator
+configuration, and OS-keyring access may remain available. Normal user Skill roots,
+the normal Codex binding registry, portable Environment files, locks, and Machine
+baseline are byte-for-byte invariant across a trial.
+
+Dry-run performs detection, validation, hashing, and resolution only. It creates no
+runtime or Store content. Completed, failed, and non-zero-exit sessions are cleaned.
+Unknown or potentially live orphan runtime directories are not deleted automatically.
+Existing-project mode, keeping a scratch workspace, remote Stacks, and automatic Stack
+adoption remain deferred.

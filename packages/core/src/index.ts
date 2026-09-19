@@ -35,3 +35,5 @@ export {
   applyStackRemove,
 } from './composition.js';
 export type { StackUseProposal, StackRemoveProposal } from './composition.js';
+export { preserveTrialStack, resolveTrialStack } from './trial.js';
+export type { TrialStackResolution } from './trial.js';

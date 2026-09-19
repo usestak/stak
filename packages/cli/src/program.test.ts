@@ -14,6 +14,7 @@ import type {
 } from '@stack/spec';
 
 import { createProgram, type ProgramDependencies } from './program.js';
+import type { TrialStackResolution } from '@stack/core';
 
 const emptyResult: ScanResult = {
   roots: [
@@ -109,6 +110,52 @@ const launchResult: LaunchResult = {
   exitCode: 0,
   signal: null,
 };
+const trialResolution = {
+  loaded: {
+    version: {
+      schemaVersion: 1,
+      name: 'trial',
+      description: 'trial',
+      versionHash: `sha256:${'a'.repeat(64)}`,
+      requirements: [],
+      inheritedStacks: [],
+      skippedOptional: [],
+    },
+    sources: new Map(),
+  },
+  resolved: {
+    stackName: 'trial',
+    stackVersionHash: `sha256:${'a'.repeat(64)}`,
+    environment: { name: 'try:trial', skills: [], skipped: [], conflicts: [] },
+    skippedOptional: 0,
+    required: 0,
+    optionalIncluded: 0,
+    isolation: {
+      temporaryHome: true,
+      temporaryCodexHome: true,
+      scratchWorkspace: true,
+      normalBindingsUntouched: true,
+      mainUntouched: true,
+    },
+  },
+} satisfies TrialStackResolution;
+const tryPreparation = {
+  session: {
+    schemaVersion: 1 as const,
+    sessionId: 'try_12345678',
+    agent: 'codex' as const,
+    createdAt: '2026-09-19T12:00:00.000Z',
+    ownerPid: 1,
+    source: { type: 'local-stack' as const, displayName: 'trial' },
+    runtimeRootPath: '/runtime',
+    workspacePath: '/runtime/workspace',
+    runtimeHomePath: '/runtime/home',
+    runtimeCodexHomePath: '/runtime/codex-home',
+    resolvedSkills: [],
+    status: 'ready' as const,
+  },
+  bridgedFiles: [],
+};
 
 const runProgram = async (
   arguments_: string[],
@@ -154,6 +201,16 @@ const runProgram = async (
     applyCodexBindings: async () => applyResult,
     verifyCodexBindings: async () => verification,
     launchCodex: async () => launchResult,
+    resolveTry: async () => trialResolution,
+    preserveTry: async () => undefined,
+    prepareTry: async () => tryPreparation,
+    cleanupTry: async () => undefined,
+    launchTry: async () => ({
+      sessionId: 'try_12345678',
+      exitCode: 0,
+      signal: null,
+      cleaned: true,
+    }),
     confirm: async () => true,
     writeOut: (value) => {
       output += value;
@@ -179,7 +236,7 @@ const runProgram = async (
 };
 
 describe('Stack CLI', () => {
-  it('prints root help with composition commands but without Phase 6+ commands', async () => {
+  it('prints root help with try but without Phase 7+ commands', async () => {
     const result = await runProgram(['--help']);
 
     expect(result.exit?.exitCode).toBe(0);
@@ -191,11 +248,78 @@ describe('Stack CLI', () => {
       'use',
       'remove',
       'run',
+      'try',
     ])
       expect(result.output).toContain(`  ${command}`);
-    for (const command of ['try', 'restore', 'push', 'pull', 'publish']) {
+    for (const command of ['switch', 'restore', 'push', 'pull', 'publish']) {
       expect(result.output).not.toContain(`  ${command}`);
     }
+  });
+
+  it('supports canonical try dry-run syntax with parseable secret-free JSON', async () => {
+    const result = await runProgram([
+      'try',
+      './trial',
+      '--dry-run',
+      '--json',
+      '--',
+      'codex',
+    ]);
+    const parsed = JSON.parse(result.output);
+    expect(parsed).toMatchObject({
+      dryRun: true,
+      resolution: { stackName: 'trial' },
+      mutation: {
+        store: false,
+        runtime: false,
+        main: false,
+        normalBindings: false,
+      },
+    });
+    expect(result.output).not.toContain('auth');
+  });
+
+  it('preserves, prepares, launches, and reports cleanup for a normal try', async () => {
+    const calls: string[] = [];
+    const result = await runProgram(['try', './trial', '--', 'codex'], {
+      preserveTry: async () => {
+        calls.push('preserve');
+      },
+      prepareTry: async () => {
+        calls.push('prepare');
+        return tryPreparation;
+      },
+      launchTry: async () => {
+        calls.push('launch');
+        return {
+          sessionId: 'try_12345678',
+          exitCode: 0,
+          signal: null,
+          cleaned: true,
+        };
+      },
+      cleanupTry: async () => {
+        calls.push('cleanup');
+      },
+    });
+    expect(calls).toEqual(['preserve', 'prepare', 'launch', 'cleanup']);
+    expect(result.output).toContain('disposable scratch workspace');
+    expect(result.output).toContain('Temporary Environment cleaned');
+  });
+
+  it('cleans a prepared trial when rendering fails before launch', async () => {
+    let cleanupCalled = false;
+    await expect(
+      runProgram(['try', './trial', '--', 'codex'], {
+        writeOut: () => {
+          throw new Error('output failed');
+        },
+        cleanupTry: async () => {
+          cleanupCalled = true;
+        },
+      }),
+    ).rejects.toThrow('output failed');
+    expect(cleanupCalled).toBe(true);
   });
 
   it('documents Codex-only run options', async () => {
