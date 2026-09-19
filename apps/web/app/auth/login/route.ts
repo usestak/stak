@@ -1,11 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { safeNext } from '@/lib/safe-next';
 import { supabaseServerClient } from '@/lib/supabase-server';
 
 export const dynamic = 'force-dynamic';
 
 export const GET = async (request: NextRequest): Promise<Response> => {
-  const next = request.nextUrl.searchParams.get('next') ?? '/cli';
+  const next = safeNext(request.nextUrl.searchParams.get('next'));
   const supabase = await supabaseServerClient();
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'github',
