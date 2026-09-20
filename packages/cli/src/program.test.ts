@@ -664,7 +664,7 @@ describe('Stack CLI', () => {
     const result = await runProgram(['--version']);
 
     expect(result.exit?.exitCode).toBe(0);
-    expect(result.output).toBe('0.0.0\n');
+    expect(result.output).toBe('0.1.0\n');
   });
 
   const cloudBundle = {
