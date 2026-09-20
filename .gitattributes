@@ -1,0 +1,15 @@
+# Normalize all text to LF in the repository and on every checkout so tooling
+# (prettier, eslint) and CI behave identically on Linux, macOS, and Windows.
+* text=auto eol=lf
+
+# Binary assets must never be line-ending converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.tar binary
+*.tgz binary
+*.gz binary
