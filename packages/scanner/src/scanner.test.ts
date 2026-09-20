@@ -39,6 +39,16 @@ const root = (
 const copyFixture = async (name: string, destination: string) =>
   cp(path.join(fixtures, name), destination, { recursive: true });
 
+// Write a Skill whose declared name matches its directory (so no name-mismatch
+// warning) and whose body is unique (so its content hash is unique).
+const writeSkill = async (directory: string, name: string, body = name) => {
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    path.join(directory, 'SKILL.md'),
+    `---\nname: ${name}\ndescription: ${name} skill\n---\n\n# ${name}\n\n${body}\n`,
+  );
+};
+
 const snapshot = async (directory: string): Promise<string[]> => {
   const entries = await readdir(directory, { withFileTypes: true });
   const values: string[] = [];
@@ -289,5 +299,190 @@ describe('scanSkills', () => {
     expect(result.diagnostics).toContainEqual(
       expect.objectContaining({ code: 'nested-symlink-not-followed' }),
     );
+  });
+
+  describe('Claude vendor-managed reserved subtrees', () => {
+    it('discovers a Claude personal Skill directly under the Claude root', async () => {
+      const directory = await temp();
+      await writeSkill(path.join(directory, 'my-skill'), 'my-skill');
+
+      const result = await scanSkills({ roots: [root(directory, 'claude')] });
+
+      expect(result.skills.map((skill) => skill.metadata?.name)).toEqual([
+        'my-skill',
+      ]);
+    });
+
+    it('excludes account-synced Skills under the reserved synced/ subtree', async () => {
+      const directory = await temp();
+      await writeSkill(path.join(directory, 'personal'), 'personal');
+      await writeSkill(
+        path.join(directory, 'synced', 'sync-abc', 'pdf'),
+        'pdf',
+      );
+
+      const result = await scanSkills({ roots: [root(directory, 'claude')] });
+
+      expect(result.skills.map((skill) => skill.metadata?.name)).toEqual([
+        'personal',
+      ]);
+      expect(result.diagnostics).toEqual([]);
+    });
+
+    it('excludes multiple synced Skills under one sync id', async () => {
+      const directory = await temp();
+      const synced = path.join(directory, 'synced', 'sync-xyz');
+      for (const name of ['docs', 'docx', 'pdf', 'pptx', 'xlsx'])
+        await writeSkill(path.join(synced, name), name);
+      await writeSkill(path.join(directory, 'real'), 'real');
+
+      const result = await scanSkills({ roots: [root(directory, 'claude')] });
+
+      expect(result.skills.map((skill) => skill.metadata?.name)).toEqual([
+        'real',
+      ]);
+      expect(result.summary.uniqueSkillContents).toBe(1);
+    });
+
+    it('excludes Skills under the Claude .trash/ subtree', async () => {
+      const directory = await temp();
+      await writeSkill(
+        path.join(directory, '.trash', 'old-skill'),
+        'old-skill',
+      );
+      await writeSkill(path.join(directory, 'kept'), 'kept');
+
+      const result = await scanSkills({ roots: [root(directory, 'claude')] });
+
+      expect(result.skills.map((skill) => skill.metadata?.name)).toEqual([
+        'kept',
+      ]);
+    });
+
+    it('excludes the reserved synced subtree case-insensitively', async () => {
+      const directory = await temp();
+      await writeSkill(
+        path.join(directory, 'Synced', 'sync-1', 'skill'),
+        'skill',
+      );
+      await writeSkill(path.join(directory, 'personal'), 'personal');
+
+      const result = await scanSkills({ roots: [root(directory, 'claude')] });
+
+      expect(result.skills.map((skill) => skill.metadata?.name)).toEqual([
+        'personal',
+      ]);
+    });
+
+    it('does not exclude a nested folder named synced inside an ordinary Skill', async () => {
+      const directory = await temp();
+      // `wrapper` has no SKILL.md, so discovery recurses; the `synced` here is at
+      // depth 1 (not immediately under the root) and must NOT be excluded.
+      await writeSkill(path.join(directory, 'wrapper', 'synced'), 'synced');
+
+      const result = await scanSkills({ roots: [root(directory, 'claude')] });
+
+      expect(result.skills.map((skill) => skill.metadata?.name)).toEqual([
+        'synced',
+      ]);
+      expect(result.skills[0]?.locations[0]?.path).toBe(
+        path.join(directory, 'wrapper', 'synced'),
+      );
+    });
+
+    it('excludes the synced subtree under a project Claude root', async () => {
+      const directory = await temp();
+      await writeSkill(path.join(directory, 'proj-skill'), 'proj-skill');
+      await writeSkill(
+        path.join(directory, 'synced', 'sync-p', 'morning'),
+        'morning',
+      );
+
+      const result = await scanSkills({
+        roots: [root(directory, 'claude', 'project')],
+      });
+
+      expect(result.skills.map((skill) => skill.metadata?.name)).toEqual([
+        'proj-skill',
+      ]);
+    });
+
+    it('dedupes a Claude personal Skill against an identical shared .agents copy', async () => {
+      const claudeRoot = await temp();
+      const agentsRoot = await temp();
+      await writeSkill(
+        path.join(claudeRoot, 'design'),
+        'design',
+        'shared body',
+      );
+      await writeSkill(
+        path.join(agentsRoot, 'design'),
+        'design',
+        'shared body',
+      );
+
+      const result = await scanSkills({
+        roots: [root(agentsRoot, 'agents'), root(claudeRoot, 'claude')],
+      });
+
+      expect(result.skills).toHaveLength(1);
+      expect(result.skills[0]?.locations).toHaveLength(2);
+      expect(result.summary.exactDuplicateContents).toBe(1);
+    });
+
+    it('discovers only the 31 real Skills across a synced + .system fixture', async () => {
+      const claudeRoot = await temp();
+      const codexRoot = await temp();
+      // 31 real, unique-content personal Skills.
+      for (let index = 0; index < 31; index += 1)
+        await writeSkill(
+          path.join(claudeRoot, `real-${index}`),
+          `real-${index}`,
+        );
+      // 8 Claude account-synced Skills (must be excluded).
+      const synced = path.join(claudeRoot, 'synced', 'sync-id');
+      for (const name of [
+        'docs',
+        'docx',
+        'import-memory',
+        'morning',
+        'pdf',
+        'pptx',
+        'skill-creator',
+        'xlsx',
+      ])
+        await writeSkill(path.join(synced, name), name);
+      // 1 Codex bundled system Skill (must be excluded).
+      await writeSkill(
+        path.join(codexRoot, '.system', 'skill-creator'),
+        'skill-creator',
+      );
+
+      const result = await scanSkills({
+        roots: [root(claudeRoot, 'claude'), root(codexRoot, 'codex')],
+      });
+
+      expect(result.summary.uniqueSkillContents).toBe(31);
+      const claudeScanned = result.roots.find(
+        (entry) => entry.rootKind === 'claude',
+      );
+      const codexScanned = result.roots.find(
+        (entry) => entry.rootKind === 'codex',
+      );
+      expect(claudeScanned?.skillLocations).toBe(31);
+      expect(codexScanned?.skillLocations).toBe(0);
+    }, 30_000);
+
+    it('does not modify any source files when reserved subtrees are present', async () => {
+      const directory = await temp();
+      await writeSkill(path.join(directory, 'personal'), 'personal');
+      await writeSkill(path.join(directory, 'synced', 'sync-1', 'pdf'), 'pdf');
+      await writeSkill(path.join(directory, '.trash', 'gone'), 'gone');
+      const before = await snapshot(directory);
+
+      await scanSkills({ roots: [root(directory, 'claude')] });
+
+      expect(await snapshot(directory)).toEqual(before);
+    });
   });
 });

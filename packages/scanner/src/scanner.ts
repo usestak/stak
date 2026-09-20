@@ -16,6 +16,7 @@ import type {
 import { parseSkillFile } from './frontmatter.js';
 import { hashSkillDirectory } from './hash.js';
 import { detectProvenance } from './provenance.js';
+import { isReservedRootSubtree } from './roots.js';
 
 const maxDepth = 32;
 const sourceRank: Record<SkillSource['type'], number> = {
@@ -65,7 +66,7 @@ const discoverPaths = async (
     for (const entry of entries.sort((a, b) =>
       a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
     )) {
-      if (root.rootKind === 'codex' && depth === 0 && entry.name === '.system')
+      if (depth === 0 && isReservedRootSubtree(root.rootKind, entry.name))
         continue;
       if (
         entry.name !== '.git' &&

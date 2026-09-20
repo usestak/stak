@@ -11,6 +11,38 @@ export type ResolveScanRootsOptions = {
 };
 const rootKinds: SkillRootKind[] = ['agents', 'cursor', 'claude', 'codex'];
 
+/**
+ * Vendor-reserved subtrees that live immediately under an agent's Skill root.
+ * These are created and managed by the agent/vendor — not by Stack — so they must
+ * be excluded from Skill discovery and never become Stack-owned direct Skills.
+ *
+ * Only the reserved directory *immediately* under the Skill root is excluded; a
+ * directory that merely shares one of these names deeper inside an ordinary Skill
+ * is left untouched. Comparison is case-insensitive because vendors reserve these
+ * names regardless of capitalization.
+ */
+const reservedRootSubtrees: Partial<Record<SkillRootKind, readonly string[]>> =
+  {
+    // Codex bundles its own system Skills (e.g. skill-creator) under `.system`.
+    codex: ['.system'],
+    // Claude Code stores account-synced Skills downloaded from claude.ai under
+    // `synced`, and inactive/recoverable copies of disabled synced Skills under
+    // `.trash`. Both are managed by Claude and are not Stack inputs.
+    claude: ['synced', '.trash'],
+  };
+
+/**
+ * Whether `name`, an immediate child of a `rootKind` Skill root, is a
+ * vendor-reserved subtree that must be excluded from Skill discovery.
+ */
+export const isReservedRootSubtree = (
+  rootKind: SkillRootKind,
+  name: string,
+): boolean =>
+  (reservedRootSubtrees[rootKind] ?? []).some(
+    (reserved) => reserved.toLowerCase() === name.toLowerCase(),
+  );
+
 export const resolveScanRoots = (
   options: ResolveScanRootsOptions = {},
 ): SkillRoot[] => {

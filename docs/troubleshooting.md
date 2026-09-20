@@ -9,6 +9,14 @@ and the safe next step. Below are common situations.
   reported and skipped; scanning continues. Fix the front matter and re-scan.
 - **Unknown provenance** — a Skill with no clean Git source is preserved as a
   private snapshot. It works locally but cannot be published (see below).
+- **Claude synced Skills not counted** — Skills under `~/.claude/skills/synced/`
+  are Claude account Skills downloaded from claude.ai. Stack intentionally
+  excludes them from `stack scan`/`status`/`init`, so they are neither counted
+  nor reported as untracked, and are never backed up or published. This is
+  expected — Stack does not own or disable Claude syncing. Claude's
+  `~/.claude/skills/.trash/` (disabled synced Skills) is ignored for the same
+  reason. If you want a synced Skill managed by Stack, keep your own copy as a
+  personal Skill directly under the Skill root (not inside `synced/`).
 
 ## Composition and agents
 

@@ -1071,6 +1071,22 @@ the top-level `.system/` subtree because Codex owns those bundled Skills. Stack
 does not migrate legacy Skills automatically and does not scan or manage Codex
 admin/system locations such as `/etc/codex/skills` in V0.
 
+Each agent Skill root has a small, fixed set of **vendor-reserved subtrees** that
+Stack excludes from Skill discovery. These live immediately under the root, are
+matched case-insensitively, and are never treated as Stack-owned Skills:
+
+| Root kind | Reserved subtree     | Owner  | Contents                                            |
+| --------- | -------------------- | ------ | --------------------------------------------------- |
+| `codex`   | `.system/`           | Codex  | bundled system Skills (e.g. `skill-creator`)        |
+| `claude`  | `synced/`            | Claude | account Skills downloaded from claude.ai            |
+| `claude`  | `.trash/`            | Claude | inactive/recoverable copies of disabled synced Skills |
+
+The exclusion applies only to the reserved directory immediately under the Skill
+root (for both global and project Claude roots) — a directory that merely shares
+one of these names deeper inside an ordinary Skill is still discovered. Only these
+documented vendor-reserved locations are excluded; no Cursor exclusions are
+defined.
+
 Binding ownership is Machine-specific and stored under:
 
 ```text

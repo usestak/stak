@@ -12,6 +12,21 @@ Environment entry id, and installed content hash. Filesystem similarity alone
 never transfers ownership. Unmanaged or externally-modified content is never
 overwritten or deleted without explicit approval; conflicting states block.
 
+### Vendor-managed Skills
+
+Stack does not own, import, snapshot, back up, or publish Claude account-synced
+Skills under `~/.claude/skills/synced/` — these are managed by Claude/claude.ai
+and may be added, updated, or removed independently. The scanner excludes that
+reserved subtree from Skill discovery, so synced Skills never become Stack-owned
+direct Skills and never appear as untracked in `stack status`. Stack does not
+disable or interfere with Claude syncing; it simply ignores the reserved
+location. Claude's `~/.claude/skills/.trash/` is ignored for the same reason — it
+holds inactive/recoverable copies of disabled synced Skills. The Codex `.system/`
+bundled-Skill subtree is excluded on the same principle. Matching is
+case-insensitive and applies only to the reserved directory immediately under
+each Skill root. Stack never deletes or rewrites any of these vendor-managed
+files.
+
 ## Content integrity
 
 Skill content is content-addressed (`sha256:...`) over its files and symlinks.
