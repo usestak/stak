@@ -44,13 +44,39 @@ user-controlled string is ever concatenated into a shell command.
 | -------------- | ----------------------- | ----- | ------- | -------------------------------------------------------------------------------------------- |
 | `git`          | reference reacquisition | false | array   | remote/revision as discrete argv; `GIT_TERMINAL_PROMPT=0`; temp workdir; exact hash verified |
 | `git`          | provenance detection    | false | array   | `-C <dir>` read-only queries                                                                 |
-| agent CLI      | `stack run` launch      | false | inherit | interactive; inherits stdio; env preserved                                                   |
-| agent CLI      | detection (`--version`) | false | array   | 3s timeout; output validated                                                                 |
-| Codex          | `stack try` launch      | false | inherit | temporary HOME/CODEX_HOME                                                                    |
+| agent CLI      | `stack run` launch      | false | inherit | interactive; shim-safe launcher; inherits stdio; env & cwd preserved                         |
+| agent CLI      | detection (`--version`) | false | array   | shim-safe probe; 3s timeout; output validated                                                |
+| Codex          | `stack try` launch      | false | inherit | shim-safe launcher; temporary HOME/CODEX_HOME                                                |
 | browser opener | `stack login`           | false | array   | best-effort; URL also printed                                                                |
 
+### Windows npm shims
+
+Agent CLIs installed via npm (Codex, Cursor Agent, Claude Code) are frequently
+`.cmd`/`.bat` batch shims rather than native `.exe` files. Since the
+CVE-2024-27980 fix, Node refuses to spawn a batch file with `shell:false`
+(it throws `EINVAL`). Detection succeeds regardless because it only probes the
+filesystem, so the failure appears only at launch. The agent launcher therefore
+routes every launch and `--version` probe through
+[`cross-spawn`](https://github.com/moxystudio/node-cross-spawn), which is the
+sole launch path for all agents. On Windows cross-spawn invokes `cmd.exe`
+**itself with `shell:false`** and applies its own well-tested argument escaping
+(`windowsVerbatimArguments`), so:
+
+- **not every launched file is a native binary** — a launched target may be a
+  batch shim executed via `cmd.exe`, but never through an interpolated shell
+  command string;
+- argument-array semantics are preserved end to end — arguments reach the child
+  verbatim, and shell metacharacters (`&`, `;`, `|`, `>`) are never interpreted
+  (asserted by a no-injection test);
+- native `.exe` and Unix shebang executables are spawned directly, unchanged.
+
 A regression test asserts `git` is spawned with `shell:false` and argv arrays
-even for shell-metacharacter-laden remotes.
+even for shell-metacharacter-laden remotes. A cross-platform launcher test builds
+a real npm-style shim in a fenced temp directory (a `.cmd` on Windows, a shebang
+script on Unix — never a real global npm path) and verifies argument roundtrip,
+`cwd`/environment preservation, exit-code propagation, no shell injection, and —
+on Windows — that a direct `shell:false` `.cmd` spawn throws `EINVAL` while the
+shim-safe launcher succeeds.
 
 ## URLs
 

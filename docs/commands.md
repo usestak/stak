@@ -36,8 +36,14 @@ preserved.
 
 ### `stack run <codex|cursor|claude> [--dry-run] [--json] [--yes]`
 
-Reconcile `main` into an agent's Skill directory. Verifies the agent is installed
-first; protects unmanaged content; removes only healthy Stack-owned bindings.
+Reconcile `main` into an agent's Skill directory, then launch that agent's CLI
+with the Skills projected. Verifies the agent is installed first; protects
+unmanaged content; removes only healthy Stack-owned bindings. `stack run codex`
+launches the **Codex CLI** (`codex` on your `PATH`), not the ChatGPT desktop app.
+The launcher is shim-safe: on Windows an npm `.cmd`/`.bat` shim is executed
+without a shell and with argument-array semantics preserved (see
+[security](./security.md#windows-npm-shims)). `--dry-run` reconciles and previews
+without launching; add `--json` for structured output.
 
 ### `stack try <stack> -- codex [--dry-run] [--json]`
 

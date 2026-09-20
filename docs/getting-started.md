@@ -51,7 +51,12 @@ stack remove frontend          # drop a layer (shared Skills are preserved)
 ```
 
 `stack run` reconciles bindings only after verifying the agent is installed and
-never overwrites unmanaged content.
+never overwrites unmanaged content. `stack run codex` then launches the **Codex
+CLI** (the `codex` command on your `PATH`) with your Skills projected — it does
+not open the ChatGPT desktop app. On Windows the CLI is commonly an npm `.cmd`
+shim; Stack launches it safely without a shell (see
+[security](./security.md#windows-npm-shims)). `stack run cursor` and
+`stack run claude` behave the same for the Cursor Agent and Claude Code CLIs.
 
 ## Try before you adopt
 

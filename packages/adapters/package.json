@@ -21,6 +21,10 @@
   "dependencies": {
     "@stack/shared": "workspace:*",
     "@stack/spec": "workspace:*",
-    "@stack/store": "workspace:*"
+    "@stack/store": "workspace:*",
+    "cross-spawn": "7.0.6"
+  },
+  "devDependencies": {
+    "@types/cross-spawn": "6.0.6"
   }
 }

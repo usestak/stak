@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   access,
@@ -32,6 +31,7 @@ import type {
   ResolvedLocalEnvironment,
 } from '@stack/spec';
 import { materializeStoredSkill, verifyStoredSkill } from '@stack/store';
+import { probeVersion, spawnShimSafe } from './launcher.js';
 import {
   AgentLaunchFailedError,
   AgentNotInstalledError,
@@ -130,27 +130,7 @@ export const findExecutableOnPath = async (
     }
   return undefined;
 };
-const directVersion = async (
-  file: string,
-  args: string[],
-): Promise<string | undefined> =>
-  new Promise((resolve) => {
-    const child = spawn(file, args, {
-      shell: false,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    let output = '';
-    child.stdout?.on('data', (chunk: Buffer) => (output += chunk.toString()));
-    const timer = setTimeout(() => child.kill(), 3000);
-    child.once('error', () => {
-      clearTimeout(timer);
-      resolve(undefined);
-    });
-    child.once('close', () => {
-      clearTimeout(timer);
-      resolve(output.trim() || undefined);
-    });
-  });
+const directVersion = probeVersion;
 export const detectExecutableAgent = async (options: {
   agent: AgentId;
   candidates: string[];
@@ -672,12 +652,7 @@ export class CodexAdapter extends FilesystemSkillAdapter {
   }
 }
 
-const directSpawn: SpawnProcess = (file, args, options) =>
-  new Promise((resolve, reject) => {
-    const child = spawn(file, args, options);
-    child.once('error', reject);
-    child.once('close', (exitCode, signal) => resolve({ exitCode, signal }));
-  });
+const directSpawn: SpawnProcess = spawnShimSafe;
 export const launchCodex = async (options: {
   detection: AgentDetection;
   cwd?: string;
