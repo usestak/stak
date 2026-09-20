@@ -33,7 +33,9 @@ import type {
   CloudBlobStore,
   CloudProfile,
   CloudRepository,
+  PublicStackRepository,
 } from './repository.js';
+import { createPublicStackService } from './public-service.js';
 
 const USER_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const DEFAULT_SESSION_TTL_MS = 10 * 60 * 1000;
@@ -67,7 +69,7 @@ export type TicketPayload = {
 export type AuthenticatedUser = { userId: string; tokenId: string };
 
 export type CloudServiceConfig = {
-  repository: CloudRepository;
+  repository: CloudRepository & PublicStackRepository;
   blobStore: CloudBlobStore;
   appUrl: string;
   ticketSecret: string;
@@ -140,7 +142,15 @@ export const createCloudService = (config: CloudServiceConfig) => {
     ...(profile?.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}),
   });
 
+  const publicMethods = createPublicStackService({
+    repository: config.repository,
+    nowIso,
+    newId,
+    appUrl,
+  });
+
   return {
+    ...publicMethods,
     /** Bearer-token authentication. Derives identity server-side; never trusts the client. */
     authenticate: async (
       authorizationHeader: string | undefined,
@@ -283,11 +293,16 @@ export const createCloudService = (config: CloudServiceConfig) => {
       });
     },
 
-    me: async (user: AuthenticatedUser): Promise<MeResponse> =>
-      profileResponse(
-        await config.repository.getProfile(user.userId),
-        user.userId,
-      ),
+    me: async (user: AuthenticatedUser): Promise<MeResponse> => {
+      const handle = await config.repository.getHandleForUser(user.userId);
+      return {
+        ...profileResponse(
+          await config.repository.getProfile(user.userId),
+          user.userId,
+        ),
+        ...(handle ? { handle } : {}),
+      };
+    },
 
     getEnvironment: async (
       user: AuthenticatedUser,

@@ -1,9 +1,12 @@
 import type {
   ApplyPullResult,
   ApplyPushResult,
+  PublishPlan,
   PullPlan,
   PushPlan,
+  StackRemoteUseProposal,
 } from '@stack/core';
+import type { PublishPublicStackVersionResponse } from '@stack/spec';
 
 const shortDigest = (digest: string | null): string =>
   digest ? `${digest.slice(0, 22)}…` : '-';
@@ -155,3 +158,100 @@ export const renderPullResult = (result: ApplyPullResult): string => {
     '',
   ].join('\n');
 };
+
+const ownerLabel = (owner: string | null) => owner ?? '<you>';
+
+export const renderPublishPreview = (plan: PublishPlan): string => {
+  const lines = [
+    `Publishing Stack: ${plan.displayName}`,
+    '',
+    'Public ID',
+    `@${ownerLabel(plan.ownerHandle)}/${plan.slug}`,
+    '',
+    row('Skills', plan.skillCount).trimEnd(),
+    row('Reference-backed', plan.referenceCount).trimEnd(),
+    row('Snapshot-backed', 0).trimEnd(),
+    '',
+    'Sources',
+    ...plan.sourceRemotes.map((remote) => `  ${remote}`),
+    '',
+    'These source references will be public.',
+    'Repository accessibility is not verified by Stack.',
+    '',
+  ];
+  lines.push(
+    plan.noop
+      ? `@${ownerLabel(plan.ownerHandle)}/${plan.slug} is already up to date.`
+      : plan.remoteExists
+        ? 'A new public version will be created.'
+        : `Cloud Stack @${ownerLabel(plan.ownerHandle)}/${plan.slug} will be created.`,
+  );
+  return `${lines.join('\n')}\n`;
+};
+
+export const publishPlanJson = (plan: PublishPlan) => ({
+  dryRun: true,
+  slug: plan.slug,
+  owner: plan.ownerHandle,
+  displayName: plan.displayName,
+  skills: plan.skillCount,
+  referenceBacked: plan.referenceCount,
+  snapshotBacked: 0,
+  remoteExists: plan.remoteExists,
+  noop: plan.noop,
+  versionHash: plan.bundle.stack.versionHash,
+  sourceRemotes: plan.sourceRemotes,
+});
+
+export const renderPublishResult = (
+  result: PublishPublicStackVersionResponse,
+  plan: PublishPlan,
+): string =>
+  [
+    `Published @${result.owner}/${result.slug}`,
+    '',
+    row('Version', result.version.versionNumber).trimEnd(),
+    row('Skills', plan.skillCount).trimEnd(),
+    '',
+    'Use:',
+    `stack use @${result.owner}/${result.slug}`,
+    '',
+    'Try:',
+    `stack try @${result.owner}/${result.slug} -- codex`,
+    '',
+    result.url,
+    '',
+  ].join('\n');
+
+export const renderRemoteStackUse = (
+  proposal: StackRemoteUseProposal,
+  dryRun = false,
+): string =>
+  [
+    `${dryRun ? 'Previewing' : 'Using'} public Stack: ${proposal.source.ref}`,
+    '',
+    row('Stack Skills', proposal.source.version.requirements.length).trimEnd(),
+    row('Already satisfied', proposal.summary.alreadySatisfied).trimEnd(),
+    row('New desired Skills', proposal.summary.newSkills).trimEnd(),
+    row('References to restore', proposal.summary.references).trimEnd(),
+    row('Hard conflicts', proposal.summary.hardConflicts).trimEnd(),
+    '',
+    'main will become:',
+    row('Stack layers', proposal.summary.stackLayers).trimEnd(),
+    row('Resolved Skills', proposal.summary.resolvedSkills).trimEnd(),
+    '',
+  ].join('\n');
+
+export const remoteUseJson = (proposal: StackRemoteUseProposal) => ({
+  dryRun: true,
+  stack: proposal.source.version,
+  layer: proposal.layer,
+  resolution: proposal.resolved,
+  summary: proposal.summary,
+  source: {
+    ref: proposal.source.ref,
+    owner: proposal.source.owner,
+    slug: proposal.source.slug,
+    versionHash: proposal.source.versionHash,
+  },
+});

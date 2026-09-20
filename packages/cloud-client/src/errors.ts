@@ -101,6 +101,24 @@ export class CloudVersionCommitFailedError extends StackCloudError {
     this.name = 'CloudVersionCommitFailedError';
   }
 }
+export class PublicStackNotFoundError extends StackCloudError {
+  constructor(message = 'The public Stack does not exist.') {
+    super('public-stack-not-found', message);
+    this.name = 'PublicStackNotFoundError';
+  }
+}
+export class PublicStackConflictError extends StackCloudError {
+  constructor(message: string) {
+    super('public-stack-conflict', message);
+    this.name = 'PublicStackConflictError';
+  }
+}
+export class PublicationNotEligibleError extends StackCloudError {
+  constructor(message: string) {
+    super('publication-not-eligible', message);
+    this.name = 'PublicationNotEligibleError';
+  }
+}
 
 /** Map a server error code + status into a typed client error. */
 export const cloudErrorFromResponse = (
@@ -129,9 +147,17 @@ export const cloudErrorFromResponse = (
       return new CloudBundleInvalidError(message);
     case 'cloud-version-commit-failed':
       return new CloudVersionCommitFailedError(message);
+    case 'public-stack-not-found':
+      return new PublicStackNotFoundError(message);
+    case 'public-stack-conflict':
+      return new PublicStackConflictError(message);
+    case 'publication-not-eligible':
+      return new PublicationNotEligibleError(message);
     default:
       if (status === 401) return new NotAuthenticatedError(message);
       if (status === 403) return new CloudUnauthorizedError(message);
+      if (code)
+        return new StackCloudError(code, message || `Cloud error ${status}`);
       return new StackCloudError(
         'cloud-error',
         message || `Cloud error ${status}`,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { CloudEnvironmentBundle } from '@stack/spec';
+import { sha256CanonicalJson } from '@stack/shared';
+import type { CloudEnvironmentBundle, PublicStackBundle } from '@stack/spec';
 
 import {
   createCloudService,
@@ -359,5 +360,269 @@ describe('cloud snapshots', () => {
       },
     });
     expect(finalized.status).toBe(400);
+  });
+});
+
+const makePublicBundle = (options: {
+  versionHash: string;
+  remote?: string;
+  snapshot?: boolean;
+}): PublicStackBundle => {
+  const contentHash = `sha256:${'a'.repeat(64)}`;
+  const remote = options.remote ?? 'https://github.com/example/design.git';
+  const requirement = {
+    id: 'req_aaaaaaaa',
+    name: 'design',
+    requirement: 'required' as const,
+    contentHash,
+    metadata: { name: 'design', description: 'Design engineering' },
+    restoration: options.snapshot
+      ? ({
+          strategy: 'snapshot',
+          snapshotId: 'snap_aaaaaaaa',
+          reason: 'local',
+        } as never)
+      : {
+          strategy: 'reference' as const,
+          reference: {
+            remote,
+            revision: 'a'.repeat(40),
+            path: 'skills/design',
+            expectedContentHash: contentHash,
+          },
+        },
+    observedSources: [
+      {
+        type: 'git' as const,
+        remote,
+        revision: 'a'.repeat(40),
+        path: 'skills/design',
+        clean: true,
+      },
+    ],
+    originStackName: 'frontend',
+  };
+  const stack = {
+    name: 'frontend',
+    description: 'Frontend Stack',
+    versionHash: options.versionHash,
+  };
+  const inheritedStackMetadata: { name: string; versionHash: string }[] = [];
+  return {
+    schemaVersion: 1,
+    stack,
+    requirements: [requirement],
+    inheritedStackMetadata,
+    digest: sha256CanonicalJson({
+      stack,
+      requirements: [requirement],
+      inheritedStackMetadata,
+    }),
+  };
+};
+
+describe('public stacks', () => {
+  it('publishes, reads anonymously, and lists on the profile', async () => {
+    const { call, signIn } = setup();
+    const token = await signIn(USER_A, 'alice');
+    const publish = await call('POST', 'stacks/frontend/versions', {
+      token,
+      body: {
+        slug: 'frontend',
+        bundle: makePublicBundle({ versionHash: `sha256:${'1'.repeat(64)}` }),
+        expectedLatestVersionId: null,
+      },
+    });
+    expect(publish.status).toBe(200);
+    const published = publish.jsonBody as {
+      owner: string;
+      version: { versionNumber: number; versionId: string };
+      createdNew: boolean;
+    };
+    expect(published.owner).toBe('alice');
+    expect(published.version.versionNumber).toBe(1);
+    expect(published.createdNew).toBe(true);
+
+    // Anonymous reads (no token).
+    const read = await call('GET', 'stacks/alice/frontend');
+    expect(read.status).toBe(200);
+    expect((read.jsonBody as { latest: unknown }).latest).not.toBeNull();
+    const profile = await call('GET', 'profiles/alice');
+    expect(
+      (profile.jsonBody as { stacks: { slug: string }[] }).stacks.map(
+        (s) => s.slug,
+      ),
+    ).toEqual(['frontend']);
+    const unknown = await call('GET', 'stacks/alice/nope');
+    expect(unknown.status).toBe(404);
+  });
+
+  it('no-ops, versions, conflicts, and is idempotent', async () => {
+    const { call, signIn } = setup();
+    const token = await signIn(USER_A, 'alice');
+    const v1hash = `sha256:${'1'.repeat(64)}`;
+    const first = await call('POST', 'stacks/frontend/versions', {
+      token,
+      body: {
+        slug: 'frontend',
+        bundle: makePublicBundle({ versionHash: v1hash }),
+        expectedLatestVersionId: null,
+      },
+    });
+    const v1 = (first.jsonBody as { version: { versionId: string } }).version;
+
+    // No-op: same version hash + expected latest.
+    const noop = await call('POST', 'stacks/frontend/versions', {
+      token,
+      body: {
+        slug: 'frontend',
+        bundle: makePublicBundle({ versionHash: v1hash }),
+        expectedLatestVersionId: v1.versionId,
+      },
+    });
+    expect((noop.jsonBody as { createdNew: boolean }).createdNew).toBe(false);
+
+    // New version.
+    const second = await call('POST', 'stacks/frontend/versions', {
+      token,
+      body: {
+        slug: 'frontend',
+        bundle: makePublicBundle({ versionHash: `sha256:${'2'.repeat(64)}` }),
+        expectedLatestVersionId: v1.versionId,
+      },
+    });
+    expect(
+      (second.jsonBody as { version: { versionNumber: number } }).version
+        .versionNumber,
+    ).toBe(2);
+
+    // Stale base -> conflict.
+    const stale = await call('POST', 'stacks/frontend/versions', {
+      token,
+      body: {
+        slug: 'frontend',
+        bundle: makePublicBundle({ versionHash: `sha256:${'3'.repeat(64)}` }),
+        expectedLatestVersionId: v1.versionId,
+      },
+    });
+    expect(stale.status).toBe(409);
+
+    // Idempotent retry.
+    const key = '00000000-0000-4000-8000-0000000000ee';
+    const a = await call('POST', 'stacks/other/versions', {
+      token,
+      body: {
+        slug: 'other',
+        bundle: makePublicBundle({ versionHash: `sha256:${'4'.repeat(64)}` }),
+        expectedLatestVersionId: null,
+        idempotencyKey: key,
+      },
+    });
+    const b = await call('POST', 'stacks/other/versions', {
+      token,
+      body: {
+        slug: 'other',
+        bundle: makePublicBundle({ versionHash: `sha256:${'4'.repeat(64)}` }),
+        expectedLatestVersionId: null,
+        idempotencyKey: key,
+      },
+    });
+    expect(
+      (b.jsonBody as { version: { versionId: string } }).version.versionId,
+    ).toBe(
+      (a.jsonBody as { version: { versionId: string } }).version.versionId,
+    );
+  });
+
+  it('rejects snapshot-backed and credential-bearing bundles server-side', async () => {
+    const { call, signIn } = setup();
+    const token = await signIn(USER_A, 'alice');
+    const snapshot = await call('POST', 'stacks/frontend/versions', {
+      token,
+      body: {
+        slug: 'frontend',
+        bundle: makePublicBundle({
+          versionHash: `sha256:${'1'.repeat(64)}`,
+          snapshot: true,
+        }),
+        expectedLatestVersionId: null,
+      },
+    });
+    expect(snapshot.status).toBe(400); // schema rejects non-reference restoration
+    const credential = await call('POST', 'stacks/frontend/versions', {
+      token,
+      body: {
+        slug: 'frontend',
+        bundle: makePublicBundle({
+          versionHash: `sha256:${'1'.repeat(64)}`,
+          remote: 'https://tok@github.com/example/design.git',
+        }),
+        expectedLatestVersionId: null,
+      },
+    });
+    expect(credential.status).toBe(422);
+  });
+
+  it('derives the owner from the token and isolates users', async () => {
+    const { call, signIn } = setup();
+    const tokenA = await signIn(USER_A, 'alice');
+    const tokenB = await signIn(USER_B, 'bob');
+    await call('POST', 'stacks/frontend/versions', {
+      token: tokenA,
+      body: {
+        slug: 'frontend',
+        bundle: makePublicBundle({ versionHash: `sha256:${'1'.repeat(64)}` }),
+        expectedLatestVersionId: null,
+      },
+    });
+    // B publishes under its own handle; cannot expect A's version and cannot
+    // touch A's stack.
+    const bPublish = await call('POST', 'stacks/frontend/versions', {
+      token: tokenB,
+      body: {
+        slug: 'frontend',
+        bundle: makePublicBundle({ versionHash: `sha256:${'9'.repeat(64)}` }),
+        expectedLatestVersionId: null,
+      },
+    });
+    expect((bPublish.jsonBody as { owner: string }).owner).toBe('bob');
+    // A's stack still at version 1.
+    const aRead = await call('GET', 'stacks/alice/frontend');
+    expect(
+      (aRead.jsonBody as { latest: { version: { versionNumber: number } } })
+        .latest.version.versionNumber,
+    ).toBe(1);
+  });
+
+  it('public read never grants access to private snapshot downloads', async () => {
+    const { call } = setup();
+    const anon = await call(
+      'GET',
+      `snapshots/${encodeURIComponent(`sha256:${'a'.repeat(64)}`)}/download`,
+    );
+    expect(anon.status).toBe(401);
+  });
+
+  it('never exposes internal ids or emails in public responses', async () => {
+    const { call, signIn } = setup();
+    const token = await signIn(USER_A, 'alice');
+    await call('POST', 'stacks/frontend/versions', {
+      token,
+      body: {
+        slug: 'frontend',
+        bundle: makePublicBundle({ versionHash: `sha256:${'1'.repeat(64)}` }),
+        expectedLatestVersionId: null,
+      },
+    });
+    const stackJson = JSON.stringify(
+      (await call('GET', 'stacks/alice/frontend')).jsonBody,
+    );
+    const profileJson = JSON.stringify(
+      (await call('GET', 'profiles/alice')).jsonBody,
+    );
+    for (const secret of [USER_A, 'email', 'ownerUserId', 'user_id']) {
+      expect(stackJson).not.toContain(secret);
+      expect(profileJson).not.toContain(secret);
+    }
   });
 });

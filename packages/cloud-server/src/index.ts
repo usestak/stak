@@ -8,6 +8,10 @@ export {
 } from './service.js';
 export { createInMemoryRepository, createInMemoryBlobStore } from './memory.js';
 export {
+  createPublicStackService,
+  type PublicStackService,
+} from './public-service.js';
+export {
   handleCloudRequest,
   type CloudRequest,
   type CloudResponse,

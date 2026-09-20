@@ -1,4 +1,4 @@
-import type { CloudEnvironmentBundle } from '@stack/spec';
+import type { CloudEnvironmentBundle, PublicStackBundle } from '@stack/spec';
 
 export type CloudProfile = {
   userId: string;
@@ -144,6 +144,101 @@ export class RemoteConflict extends Error {
     super(message);
     this.name = 'RemoteConflict';
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Public Stack publishing                                                    */
+/* -------------------------------------------------------------------------- */
+
+export type PublicHandleRecord = {
+  userId: string;
+  handle: string;
+  createdAt: string;
+};
+
+export type PublicStackRecord = {
+  stackId: string;
+  ownerUserId: string;
+  ownerHandle: string;
+  slug: string;
+  displayName: string;
+  description: string;
+  latestVersionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PublicStackVersionRecord = {
+  versionId: string;
+  stackId: string;
+  ownerUserId: string;
+  versionNumber: number;
+  versionHash: string;
+  digest: string;
+  bundle: PublicStackBundle;
+  displayName: string;
+  description: string;
+  idempotencyKey?: string;
+  createdAt: string;
+};
+
+export type CommitPublicVersionInput = {
+  ownerUserId: string;
+  ownerHandle: string;
+  slug: string;
+  displayName: string;
+  description: string;
+  bundle: PublicStackBundle;
+  digest: string;
+  versionHash: string;
+  expectedLatestVersionId: string | null;
+  idempotencyKey?: string;
+  ids: { stackId: string; versionId: string };
+  now: string;
+};
+export type CommitPublicVersionOutcome = {
+  stack: PublicStackRecord;
+  version: PublicStackVersionRecord;
+  createdNew: boolean;
+};
+
+export class PublicStackConflict extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PublicStackConflict';
+  }
+}
+
+export interface PublicStackRepository {
+  getHandleForUser(userId: string): Promise<string | null>;
+  findHandleOwner(handle: string): Promise<string | null>;
+  reserveHandle(record: PublicHandleRecord): Promise<void>;
+
+  getProfileByHandle(handle: string): Promise<CloudProfile | null>;
+  getPublicStackByHandleSlug(
+    handle: string,
+    slug: string,
+  ): Promise<PublicStackRecord | null>;
+  getPublicStackByOwner(
+    ownerUserId: string,
+    slug: string,
+  ): Promise<PublicStackRecord | null>;
+  getPublicStackVersionById(
+    versionId: string,
+  ): Promise<PublicStackVersionRecord | null>;
+  getPublicStackVersionByNumber(
+    stackId: string,
+    versionNumber: number,
+  ): Promise<PublicStackVersionRecord | null>;
+  findPublicVersionByIdempotencyKey(
+    ownerUserId: string,
+    idempotencyKey: string,
+  ): Promise<PublicStackVersionRecord | null>;
+  /** Atomic create-or-append with optimistic latest-version protection. */
+  commitPublicStackVersion(
+    input: CommitPublicVersionInput,
+  ): Promise<CommitPublicVersionOutcome>;
+  listPublicStacksByHandle(handle: string): Promise<PublicStackRecord[]>;
 }
 
 export interface CloudBlobStore {

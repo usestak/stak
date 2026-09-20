@@ -76,3 +76,20 @@ export type {
   PullConflict,
   PullPlan,
 } from './cloud-pull.js';
+export {
+  buildPublicStackBundle,
+  publicBundleDigestInput,
+  resolvePublishSource,
+} from './public-stack.js';
+export type { PublishSource } from './public-stack.js';
+export {
+  publicBundleToImportedVersion,
+  resolvePublicStackSource,
+} from './remote-source.js';
+export type { ResolvedPublicStackSource } from './remote-source.js';
+export { applyRemoteStackUse, prepareRemoteStackUse } from './composition.js';
+export type { StackRemoteUseProposal } from './composition.js';
+export { applyPublish, preparePublish } from './cloud-publish.js';
+export type { PublishClient, PublishPlan } from './cloud-publish.js';
+export { preserveRemoteTrialStack, resolveRemoteTrialStack } from './trial.js';
+export type { RemoteTrialResolution } from './trial.js';

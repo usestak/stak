@@ -232,6 +232,12 @@ const runProgram = async (
     cloudApplyPull: async () => {
       throw new Error('not configured');
     },
+    cloudPreparePublish: async () => {
+      throw new Error('not configured');
+    },
+    cloudApplyPublish: async () => {
+      throw new Error('not configured');
+    },
     confirm: async () => true,
     writeOut: (value) => {
       output += value;
@@ -275,9 +281,10 @@ describe('Stack CLI', () => {
       'whoami',
       'push',
       'pull',
+      'publish',
     ])
       expect(result.output).toContain(`  ${command}`);
-    for (const command of ['switch', 'restore', 'publish']) {
+    for (const command of ['switch', 'restore']) {
       expect(result.output).not.toContain(`  ${command}`);
     }
   });

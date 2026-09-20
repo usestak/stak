@@ -273,6 +273,9 @@ importers:
 
   packages/cloud-server:
     dependencies:
+      '@stack/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@stack/spec':
         specifier: workspace:*
         version: link:../spec

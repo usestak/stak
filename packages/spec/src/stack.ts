@@ -49,11 +49,24 @@ export const importedStackSchema = z.object({
   version: importedStackVersionSchema,
 });
 
+export const environmentStackLayerSourceSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('local') }),
+  z.object({
+    kind: z.literal('public'),
+    ref: z.string().min(1),
+    owner: z.string().min(1),
+    slug: z.string().min(1),
+    publicStackId: z.uuid(),
+    publicVersionId: z.uuid(),
+    versionHash: contentHashSchema,
+  }),
+]);
 export const environmentStackLayerSchema = z.object({
   id: z.string().regex(/^layer_[A-Za-z0-9_-]{8,}$/),
   stackId: z.string().regex(/^stack_[A-Za-z0-9_-]{8,}$/),
   name: z.string().min(1),
   versionHash: contentHashSchema,
+  source: environmentStackLayerSourceSchema.optional(),
 });
 export const requirementOriginSchema = z.discriminatedUnion('type', [
   z.object({
@@ -108,6 +121,9 @@ export type StackSkillRequirement = z.infer<typeof stackSkillRequirementSchema>;
 export type ImportedStackVersion = z.infer<typeof importedStackVersionSchema>;
 export type ImportedStack = z.infer<typeof importedStackSchema>;
 export type EnvironmentStackLayer = z.infer<typeof environmentStackLayerSchema>;
+export type EnvironmentStackLayerSource = z.infer<
+  typeof environmentStackLayerSourceSchema
+>;
 export type RequirementOrigin = z.infer<typeof requirementOriginSchema>;
 export type ResolvedEnvironmentSkill = z.infer<
   typeof resolvedEnvironmentSkillSchema

@@ -1,7 +1,7 @@
 import type { Command } from 'commander';
 
 import { AgentNotInstalledError } from '@stack/adapters';
-import type { TrialStackResolution } from '@stack/core';
+import type { RemoteTrialResolution, TrialStackResolution } from '@stack/core';
 import type {
   AgentDetection,
   TryExitResult,
@@ -10,11 +10,13 @@ import type {
 
 import { renderTryDryRun, renderTryExit, renderTryReady } from '../ui/try.js';
 
+export type AnyTrialResolution = TrialStackResolution | RemoteTrialResolution;
+
 export type TryCommandDependencies = {
   detectCodex(): Promise<AgentDetection>;
-  resolveTry(input: string): Promise<TrialStackResolution>;
-  preserveTry(trial: TrialStackResolution): Promise<void>;
-  prepareTry(trial: TrialStackResolution): Promise<TryPreparationResult>;
+  resolveTry(input: string): Promise<AnyTrialResolution>;
+  preserveTry(trial: AnyTrialResolution): Promise<void>;
+  prepareTry(trial: AnyTrialResolution): Promise<TryPreparationResult>;
   cleanupTry(preparation: TryPreparationResult): Promise<void>;
   launchTry(
     preparation: TryPreparationResult,
@@ -29,7 +31,9 @@ export const registerTryCommand = (
 ) => {
   program
     .command('try <stack> [agent]')
-    .description('Run a local Stack in an isolated scratch Codex session')
+    .description(
+      'Run a local or public (@owner/name) Stack in an isolated scratch Codex session',
+    )
     .option(
       '--dry-run',
       'resolve and inspect isolation without persistent mutation',
@@ -42,7 +46,7 @@ export const registerTryCommand = (
         options: { dryRun?: boolean; json?: boolean },
       ) => {
         if (agent !== 'codex')
-          throw new Error('Use: stack try <local-stack> -- codex');
+          throw new Error('Use: stack try <stack> -- codex');
         const detection = await dependencies.detectCodex();
         if (!detection.installed) throw new AgentNotInstalledError();
         const trial = await dependencies.resolveTry(input);

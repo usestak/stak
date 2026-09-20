@@ -4,6 +4,7 @@ import {
   commitEnvironmentVersionRequestSchema,
   finalizeSnapshotRequestSchema,
   prepareSnapshotRequestSchema,
+  publishPublicStackVersionRequestSchema,
 } from '@stack/spec';
 
 import { CloudServiceError } from './errors.js';
@@ -166,6 +167,51 @@ export const handleCloudRequest = async (
         binaryBody: bytes,
       };
     }
+
+    // --- Public Stacks (reads are unauthenticated) ---
+    if (
+      method === 'POST' &&
+      segments.length === 3 &&
+      segments[0] === 'stacks' &&
+      segments[2] === 'versions'
+    ) {
+      const user = await authenticate();
+      const body = publishPublicStackVersionRequestSchema.parse(
+        request.jsonBody ?? {},
+      );
+      if (body.slug !== segments[1])
+        return errorResponse(
+          400,
+          'invalid-slug',
+          'Request slug does not match the route.',
+        );
+      return json(200, await service.publishPublicStackVersion(user, body));
+    }
+    if (method === 'GET' && segments.length === 3 && segments[0] === 'stacks')
+      return json(
+        200,
+        await service.getPublicStack(segments[1] ?? '', segments[2] ?? ''),
+      );
+    if (
+      method === 'GET' &&
+      segments.length === 5 &&
+      segments[0] === 'stacks' &&
+      segments[3] === 'versions'
+    ) {
+      const versionNumber = Number.parseInt(segments[4] ?? '', 10);
+      if (!Number.isInteger(versionNumber) || versionNumber < 1)
+        return errorResponse(400, 'invalid-request', 'Invalid version number.');
+      return json(
+        200,
+        await service.getPublicStackVersion(
+          segments[1] ?? '',
+          segments[2] ?? '',
+          versionNumber,
+        ),
+      );
+    }
+    if (method === 'GET' && segments.length === 2 && segments[0] === 'profiles')
+      return json(200, await service.getPublicProfile(segments[1] ?? ''));
 
     return errorResponse(404, 'not-found', 'Unknown Stack Cloud route.');
   } catch (error) {

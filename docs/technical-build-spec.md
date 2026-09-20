@@ -2844,3 +2844,59 @@ or machine metadata. Environment version commits are atomic and optimistic
 and `--yes` never bypasses them. Local commands remain fully functional without login,
 `STACK_API_URL`, or network. Public publishing, `@owner/name` resolution, marketplace,
 teams, billing, and `stack switch` remain deferred to later phases.
+---
+
+## 91. Phase 9 Public Stack Publishing
+
+Publication is not Environment sync. `stack push`/`stack pull` manage the user's
+private portable Environment; `stack publish <stack>` creates a separate, public,
+reusable Stack. `main` is never published automatically — publication always starts
+from an explicit local Stack source (a `stack.yaml` directory/file) or an active
+local Stack layer. Republishing a layer that was itself imported from a public
+Stack is refused in V0.
+
+Public Stack versions are reference-only. If any resolved requirement is
+snapshot-backed (local, modified, unknown, ambiguous, or otherwise non-portable),
+publication blocks with a clear privacy/reproducibility error — public snapshot
+byte publishing is intentionally unsupported in V0. Each published Skill carries an
+exact portable reference (remote, revision, repository-relative path, expected
+content hash). Source remotes are validated before publication: embedded
+credentials, `file://`, local paths, and loopback hosts are rejected (even with
+`--yes`), while SSH/SCP references are allowed and displayed as text. The preview
+states that source URLs will be public and that repository accessibility is not
+verified.
+
+Public identity is `@owner/name`. The owner handle is reserved (derived from the
+GitHub username, normalized) separately from the internal user UUID and is stable
+for V0; publication fails clearly if a unique handle cannot be obtained. Slugs use
+a conservative `[a-z0-9][a-z0-9-_]{0,62}` rule and must be given via `--slug` when
+the Stack name is not slug-safe. The immutable `PublicStackBundle` (name,
+description, reference-only requirements, inherited metadata, deterministic
+version hash, and integrity digest) is self-contained: it never carries authoring
+or machine paths, Machine IDs, local snapshot IDs, baselines, bindings,
+credentials, or private Environment metadata. Clients recompute the digest and
+version hash and reject inconsistent data before any Store or Environment change.
+
+Public API reads (`GET /api/v1/stacks/:owner/:slug`, `.../versions/:n`,
+`/api/v1/profiles/:owner`) are unauthenticated and expose only intentional public
+metadata; publishing (`POST /api/v1/stacks/:slug/versions`) requires the CLI token
+and derives the owner server-side — clients can never publish under another owner.
+Public versions are immutable and append-only; the latest pointer moves under
+atomic optimistic (`expectedLatestVersionId`) commits with idempotency keys, so
+concurrent publishers conflict rather than overwrite. Public read access never
+grants access to private Environments or snapshots, which remain a separate
+security domain.
+
+`stack use @owner/name` and `stack try @owner/name -- codex` resolve a public
+Stack through one internal source abstraction (local or public) that produces the
+same portable resolved version. Remote use fetches and verifies the version,
+reacquires every reference through the same Phase 8 exact, hash-verified,
+`shell:false` Git restoration component, ingests into the Store, persists the
+imported version locally, and adds the layer transactionally — any failure leaves
+`main` unchanged (Store cache objects may remain). After a successful import,
+`stack status`, `stack diff`, `stack remove`, and `stack run <agent>` work offline;
+an already-active public Stack is never silently updated (explicit updates are
+deferred). Remote trials reacquire references into the Store and run inside the
+Phase 6/6.1 isolated runtime without touching `main` or bindings. Using or trying a
+public Stack never executes the Skills' scripts as part of acquisition. Public
+snapshot storage, forking/republishing, and `stack switch` remain deferred.

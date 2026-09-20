@@ -31,3 +31,13 @@ export const bundleInvalid = (message: string) =>
   new CloudServiceError('cloud-bundle-invalid', 400, message);
 export const snapshotIntegrity = (message: string) =>
   new CloudServiceError('snapshot-integrity-mismatch', 400, message);
+export const publicStackNotFound = (message = 'Public Stack not found.') =>
+  new CloudServiceError('public-stack-not-found', 404, message);
+export const publicStackConflict = (message: string) =>
+  new CloudServiceError('public-stack-conflict', 409, message);
+export const publicationNotEligible = (message: string) =>
+  new CloudServiceError('publication-not-eligible', 422, message);
+export const invalidSlug = (message: string) =>
+  new CloudServiceError('invalid-slug', 400, message);
+export const handleUnavailable = (message: string) =>
+  new CloudServiceError('handle-unavailable', 409, message);

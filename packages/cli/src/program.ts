@@ -6,13 +6,19 @@ import { Command } from 'commander';
 
 import {
   diffMainEnvironment,
+  applyRemoteStackUse,
   applyStackRemove,
   applyStackUse,
   initializeMainEnvironment,
   loadMainEnvironment,
+  prepareRemoteStackUse,
   prepareStackRemove,
   prepareStackUse,
+  preserveRemoteTrialStack,
+  resolvePublicStackSource,
+  resolveRemoteTrialStack,
   resolveStackHome,
+  spawnGit,
   statusMainEnvironment,
   preserveTrialStack,
   resolveTrialStack,
@@ -27,11 +33,14 @@ import {
 } from '@stack/adapters';
 import type { InitializeMainEnvironmentResult } from '@stack/core';
 import type {
+  RemoteTrialResolution,
+  StackRemoteUseProposal,
   StackRemoveProposal,
   StackUseProposal,
   TrialStackResolution,
 } from '@stack/core';
 import { resolveScanRoots, scanSkills } from '@stack/scanner';
+import { isPublicStackRef } from '@stack/spec';
 import type {
   AgentDetection,
   AgentId,
@@ -41,6 +50,7 @@ import type {
   EnvironmentDiff,
   EnvironmentStatus,
   LaunchResult,
+  PublishPublicStackVersionResponse,
   ResolvedLocalEnvironment,
   ScanResult,
   TryExitResult,
@@ -50,6 +60,7 @@ import type {
 import type {
   ApplyPullResult,
   ApplyPushResult,
+  PublishPlan,
   PullPlan,
   PushPlan,
 } from '@stack/core';
@@ -67,15 +78,19 @@ import { registerLogoutCommand } from './commands/logout.js';
 import { registerWhoamiCommand } from './commands/whoami.js';
 import { registerPushCommand } from './commands/push.js';
 import { registerPullCommand } from './commands/pull.js';
+import { registerPublishCommand } from './commands/publish.js';
 import { fileCredentialStore } from './cloud/credentials.js';
 import {
+  cloudApplyPublish,
   cloudApplyPull,
   cloudApplyPush,
+  cloudPreparePublish,
   cloudPreparePull,
   cloudPreparePush,
   performLogin,
   performLogout,
   performWhoami,
+  publicReadClient,
   type CloudOperationsDeps,
   type LoginResult,
   type LogoutResult,
@@ -90,8 +105,10 @@ export type ProgramDependencies = {
   initialize(scanResult: ScanResult): Promise<InitializeMainEnvironmentResult>;
   status(scanResult: ScanResult): Promise<EnvironmentStatus>;
   diff(scanResult: ScanResult): Promise<EnvironmentDiff>;
-  prepareUse(input: string): Promise<StackUseProposal>;
-  applyUse(proposal: StackUseProposal): Promise<unknown>;
+  prepareUse(input: string): Promise<StackUseProposal | StackRemoteUseProposal>;
+  applyUse(
+    proposal: StackUseProposal | StackRemoteUseProposal,
+  ): Promise<unknown>;
   prepareRemove(identifier: string): Promise<StackRemoveProposal>;
   applyRemove(proposal: StackRemoveProposal): Promise<unknown>;
   loadRunEnvironment(): Promise<ResolvedLocalEnvironment>;
@@ -122,9 +139,15 @@ export type ProgramDependencies = {
     environment: ResolvedLocalEnvironment,
   ): Promise<BindingVerification>;
   launchAgent?(agent: AgentId): Promise<LaunchResult>;
-  resolveTry(input: string): Promise<TrialStackResolution>;
-  preserveTry(trial: TrialStackResolution): Promise<void>;
-  prepareTry(trial: TrialStackResolution): Promise<TryPreparationResult>;
+  resolveTry(
+    input: string,
+  ): Promise<TrialStackResolution | RemoteTrialResolution>;
+  preserveTry(
+    trial: TrialStackResolution | RemoteTrialResolution,
+  ): Promise<void>;
+  prepareTry(
+    trial: TrialStackResolution | RemoteTrialResolution,
+  ): Promise<TryPreparationResult>;
   cleanupTry(preparation: TryPreparationResult): Promise<void>;
   launchTry(
     preparation: TryPreparationResult,
@@ -141,6 +164,13 @@ export type ProgramDependencies = {
   cloudApplyPush(plan: PushPlan): Promise<ApplyPushResult>;
   cloudPreparePull(): Promise<PullPlan>;
   cloudApplyPull(plan: PullPlan): Promise<ApplyPullResult>;
+  cloudPreparePublish(options: {
+    input: string;
+    slug?: string;
+  }): Promise<PublishPlan>;
+  cloudApplyPublish(
+    plan: PublishPlan,
+  ): Promise<PublishPublicStackVersionResponse>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -164,8 +194,18 @@ const defaultDependencies: ProgramDependencies = {
   status: async (scanResult) =>
     statusMainEnvironment({ stackHome, scanResult }),
   diff: async (scanResult) => diffMainEnvironment({ stackHome, scanResult }),
-  prepareUse: (input) => prepareStackUse({ stackHome, input }),
-  applyUse: (proposal) => applyStackUse(proposal),
+  prepareUse: async (input) => {
+    if (!isPublicStackRef(input)) return prepareStackUse({ stackHome, input });
+    const source = await resolvePublicStackSource({
+      client: await publicReadClient(cloudDeps),
+      ref: input,
+    });
+    return prepareRemoteStackUse({ stackHome, source });
+  },
+  applyUse: (proposal) =>
+    'source' in proposal
+      ? applyRemoteStackUse(proposal, { gitExecutor: spawnGit })
+      : applyStackUse(proposal),
   prepareRemove: (identifier) => prepareStackRemove({ stackHome, identifier }),
   applyRemove: (proposal) => applyStackRemove(proposal),
   loadRunEnvironment: async () => {
@@ -196,8 +236,17 @@ const defaultDependencies: ProgramDependencies = {
     adapters[agent].verifyBindings(environment),
   launchAgent: (agent) =>
     adapters[agent].launch({ cwd: process.cwd(), env: process.env }),
-  resolveTry: (input) => resolveTrialStack({ input }),
-  preserveTry: (trial) => preserveTrialStack({ stackHome, trial }),
+  resolveTry: async (input) =>
+    isPublicStackRef(input)
+      ? resolveRemoteTrialStack({
+          ref: input,
+          client: await publicReadClient(cloudDeps),
+        })
+      : resolveTrialStack({ input }),
+  preserveTry: (trial) =>
+    'references' in trial
+      ? preserveRemoteTrialStack({ stackHome, trial, gitExecutor: spawnGit })
+      : preserveTrialStack({ stackHome, trial }),
   prepareTry: (trial) =>
     prepareCodexTryRuntime({
       stackHome,
@@ -216,6 +265,8 @@ const defaultDependencies: ProgramDependencies = {
   cloudApplyPush: (plan) => cloudApplyPush(cloudDeps, plan),
   cloudPreparePull: () => cloudPreparePull(cloudDeps),
   cloudApplyPull: (plan) => cloudApplyPull(cloudDeps, plan),
+  cloudPreparePublish: (options) => cloudPreparePublish(cloudDeps, options),
+  cloudApplyPublish: (plan) => cloudApplyPublish(cloudDeps, plan),
   confirm: async (message) => {
     if (!process.stdin.isTTY) return false;
     const prompt = createInterface({
@@ -252,5 +303,6 @@ export const createProgram = (
   registerWhoamiCommand(program, dependencies);
   registerPushCommand(program, dependencies);
   registerPullCommand(program, dependencies);
+  registerPublishCommand(program, dependencies);
   return program;
 };

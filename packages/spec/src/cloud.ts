@@ -144,6 +144,7 @@ export const meResponseSchema = z.object({
   githubUsername: z.string().optional(),
   displayName: z.string().optional(),
   avatarUrl: z.string().optional(),
+  handle: z.string().optional(),
 });
 
 export const remoteEnvironmentVersionSchema = z.object({
@@ -231,6 +232,11 @@ export const cloudErrorCodeSchema = z.enum([
   'snapshot-integrity-mismatch',
   'cloud-bundle-invalid',
   'cloud-version-commit-failed',
+  'public-stack-not-found',
+  'public-stack-conflict',
+  'publication-not-eligible',
+  'invalid-slug',
+  'handle-unavailable',
   'invalid-request',
   'not-found',
 ]);

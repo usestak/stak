@@ -1,10 +1,17 @@
 import type { Command } from 'commander';
-import type { StackUseProposal } from '@stack/core';
+import type { StackRemoteUseProposal, StackUseProposal } from '@stack/core';
 import { renderStackUse } from '../ui/stack.js';
+import { remoteUseJson, renderRemoteStackUse } from '../ui/cloud.js';
+
+export type AnyUseProposal = StackUseProposal | StackRemoteUseProposal;
+
+const isRemote = (
+  proposal: AnyUseProposal,
+): proposal is StackRemoteUseProposal => 'source' in proposal;
 
 export type UseCommandDependencies = {
-  prepareUse(input: string): Promise<StackUseProposal>;
-  applyUse(proposal: StackUseProposal): Promise<unknown>;
+  prepareUse(input: string): Promise<AnyUseProposal>;
+  applyUse(proposal: AnyUseProposal): Promise<unknown>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -14,8 +21,8 @@ export const registerUseCommand = (
   dependencies: UseCommandDependencies,
 ) => {
   program
-    .command('use <local-stack>')
-    .description('Add a local Stack to main (desired state only)')
+    .command('use <stack>')
+    .description('Add a local or public (@owner/name) Stack to main')
     .option('--dry-run', 'preview without persistent mutation')
     .option('--json', 'emit structured JSON (with --dry-run)')
     .option('--yes', 'approve the desired-state change')
@@ -29,11 +36,27 @@ export const registerUseCommand = (
           if (!options.dryRun)
             throw new Error('--json currently requires --dry-run.');
           dependencies.writeOut(
-            `${JSON.stringify({ dryRun: true, stack: proposal.loaded.version, layer: proposal.layer, resolution: proposal.resolved, summary: proposal.summary }, null, 2)}\n`,
+            `${JSON.stringify(
+              isRemote(proposal)
+                ? remoteUseJson(proposal)
+                : {
+                    dryRun: true,
+                    stack: proposal.loaded.version,
+                    layer: proposal.layer,
+                    resolution: proposal.resolved,
+                    summary: proposal.summary,
+                  },
+              null,
+              2,
+            )}\n`,
           );
           return;
         }
-        dependencies.writeOut(renderStackUse(proposal, options.dryRun));
+        dependencies.writeOut(
+          isRemote(proposal)
+            ? renderRemoteStackUse(proposal, options.dryRun)
+            : renderStackUse(proposal, options.dryRun),
+        );
         if (proposal.resolved.conflicts.length)
           throw new Error('Stack has required Skill conflicts.');
         if (options.dryRun) return;

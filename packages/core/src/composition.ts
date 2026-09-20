@@ -19,13 +19,15 @@ import type {
   MachineEnvironmentBaseline,
   ResolvedEnvironment,
 } from '@stack/spec';
-import { ingestSkill } from '@stack/store';
+import { ingestSkill, verifyStoredSkill } from '@stack/store';
 
 import { loadLocalStack, StackCompositionError } from './stack-loader.js';
 import type { LoadedLocalStack } from './stack-loader.js';
 import { importedVersionKey, resolveEnvironment } from './resolver.js';
 import { loadMainEnvironment, statePaths } from './state.js';
 import type { LoadedEnvironmentState } from './state.js';
+import { restoreReference, type GitExecutor } from './git-reference.js';
+import type { ResolvedPublicStackSource } from './remote-source.js';
 
 const versionDirectory = (
   stackHome: string,
@@ -473,5 +475,171 @@ export const applyStackRemove = async (
       ),
     ),
   );
+  return proposal;
+};
+
+/* -------------------------------------------------------------------------- */
+/* Remote (public) Stack use                                                  */
+/* -------------------------------------------------------------------------- */
+
+export type StackRemoteUseProposal = {
+  stackHome: string;
+  current: LoadedEnvironmentState;
+  source: ResolvedPublicStackSource;
+  layer: EnvironmentStackLayer;
+  resolved: ResolvedEnvironment;
+  summary: {
+    alreadySatisfied: number;
+    newSkills: number;
+    optionalSkipped: number;
+    hardConflicts: number;
+    stackLayers: number;
+    resolvedSkills: number;
+    references: number;
+  };
+};
+
+export const prepareRemoteStackUse = async (options: {
+  stackHome: string;
+  source: ResolvedPublicStackSource;
+  idFactory?: () => string;
+}): Promise<StackRemoteUseProposal> => {
+  const current = await loadMainEnvironment({ stackHome: options.stackHome });
+  const byRef = current.manifest.stacks.find(
+    (item) =>
+      item.source?.kind === 'public' &&
+      item.source.owner === options.source.owner &&
+      item.source.slug === options.source.slug,
+  );
+  if (byRef)
+    throw new StackCompositionError(
+      byRef.versionHash === options.source.versionHash
+        ? 'stack-already-active'
+        : 'stack-remote-version-active',
+      byRef.versionHash === options.source.versionHash
+        ? `${options.source.ref} is already active in main.`
+        : `${options.source.ref} is already active at a different version. A newer public version exists; explicit Stack updates are not implemented yet.`,
+    );
+  const sameName = current.manifest.stacks.find(
+    (item) => item.name === options.source.version.name,
+  );
+  if (sameName)
+    throw new StackCompositionError(
+      sameName.versionHash === options.source.versionHash
+        ? 'stack-already-active'
+        : 'stack-version-conflict',
+      sameName.versionHash === options.source.versionHash
+        ? `${options.source.version.name} is already active in main.`
+        : `${options.source.version.name} is active with a different version; explicit updates are not implemented.`,
+    );
+  const id = options.idFactory ?? randomUUID;
+  const stackId = `stack_${id()}`;
+  const layer: EnvironmentStackLayer = {
+    id: `layer_${id()}`,
+    stackId,
+    name: options.source.version.name,
+    versionHash: options.source.versionHash,
+    source: {
+      kind: 'public',
+      ref: options.source.ref,
+      owner: options.source.owner,
+      slug: options.source.slug,
+      publicStackId: options.source.publicStackId,
+      publicVersionId: options.source.publicVersionId,
+      versionHash: options.source.versionHash,
+    },
+  };
+  const manifest = {
+    ...current.manifest,
+    stacks: [...current.manifest.stacks, layer],
+  };
+  const versions = await loadVersions(
+    options.stackHome,
+    current.manifest.stacks,
+  );
+  versions.set(importedVersionKey(layer), options.source.version);
+  const resolved = resolveEnvironment({
+    manifest,
+    lock: current.lock,
+    versions,
+    idFactory: id,
+  });
+  const existing = new Set(
+    Object.values(current.lock.skills).map(
+      (item) => `${item.name}\0${item.contentHash}`,
+    ),
+  );
+  return {
+    stackHome: options.stackHome,
+    current,
+    source: options.source,
+    layer,
+    resolved,
+    summary: {
+      alreadySatisfied: resolved.skills.filter((item) =>
+        existing.has(`${item.name}\0${item.contentHash}`),
+      ).length,
+      newSkills: resolved.skills.filter(
+        (item) => !existing.has(`${item.name}\0${item.contentHash}`),
+      ).length,
+      optionalSkipped: resolved.skipped.length,
+      hardConflicts: resolved.conflicts.length,
+      stackLayers: manifest.stacks.length,
+      resolvedSkills: resolved.skills.length,
+      references: options.source.references.size,
+    },
+  };
+};
+
+export const applyRemoteStackUse = async (
+  proposal: StackRemoteUseProposal,
+  options: { gitExecutor?: GitExecutor; now?: () => Date } = {},
+): Promise<StackRemoteUseProposal> => {
+  if (proposal.resolved.conflicts.length)
+    throw new StackCompositionError(
+      'stack-resolution-conflict',
+      'Remote Stack has required Skill conflicts.',
+    );
+  await withMainMutationLock(proposal.stackHome, proposal.current, async () => {
+    // Acquire and verify every reference BEFORE persisting anything. A failure
+    // here throws, leaving main untouched (Store cache objects may remain).
+    for (const requirement of proposal.source.version.requirements) {
+      const verification = await verifyStoredSkill({
+        stackHome: proposal.stackHome,
+        contentHash: requirement.contentHash,
+      });
+      if (verification.state === 'available') continue;
+      const reference = proposal.source.references.get(requirement.id);
+      if (!reference)
+        throw new StackCompositionError(
+          'remote-reference-missing',
+          `No reference is available for ${requirement.name}.`,
+        );
+      await restoreReference({
+        stackHome: proposal.stackHome,
+        reference,
+        ...(options.gitExecutor ? { gitExecutor: options.gitExecutor } : {}),
+        ...(options.now ? { now: options.now } : {}),
+      });
+    }
+    await persistVersion(
+      proposal.stackHome,
+      proposal.layer.stackId,
+      proposal.source.version,
+    );
+    const manifest = {
+      ...proposal.current.manifest,
+      stacks: [...proposal.current.manifest.stacks, proposal.layer],
+    };
+    await persistMain(
+      proposal.stackHome,
+      buildState(
+        proposal.current,
+        manifest,
+        proposal.resolved,
+        (options.now ?? (() => new Date()))().toISOString(),
+      ),
+    );
+  });
   return proposal;
 };

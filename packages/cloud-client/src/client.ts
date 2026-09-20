@@ -4,8 +4,12 @@ import {
   commitEnvironmentVersionResponseSchema,
   finalizeSnapshotResponseSchema,
   getEnvironmentResponseSchema,
+  getPublicStackResponseSchema,
+  getPublicStackVersionResponseSchema,
   meResponseSchema,
   prepareSnapshotResponseSchema,
+  publicProfileResponseSchema,
+  publishPublicStackVersionResponseSchema,
   snapshotDownloadResponseSchema,
 } from '@stack/spec';
 import type {
@@ -18,9 +22,14 @@ import type {
   FinalizeSnapshotRequest,
   FinalizeSnapshotResponse,
   GetEnvironmentResponse,
+  GetPublicStackResponse,
+  GetPublicStackVersionResponse,
   MeResponse,
   PrepareSnapshotRequest,
   PrepareSnapshotResponse,
+  PublicProfileResponse,
+  PublishPublicStackVersionRequest,
+  PublishPublicStackVersionResponse,
 } from '@stack/spec';
 
 import {
@@ -61,6 +70,24 @@ export interface CloudAuthClient {
   authRevoke(): Promise<void>;
 }
 
+export interface PublicStackClient {
+  /** Anonymous read; resolves to null when the public Stack does not exist. */
+  getPublicStack(
+    owner: string,
+    slug: string,
+  ): Promise<GetPublicStackResponse | null>;
+  getPublicStackVersion(
+    owner: string,
+    slug: string,
+    versionNumber: number,
+  ): Promise<GetPublicStackVersionResponse>;
+  getPublicProfile(owner: string): Promise<PublicProfileResponse | null>;
+  publishPublicStackVersion(
+    slug: string,
+    request: PublishPublicStackVersionRequest,
+  ): Promise<PublishPublicStackVersionResponse>;
+}
+
 export type FetchLike = (
   input: string,
   init: {
@@ -93,7 +120,7 @@ const isLocalhost = (url: URL) =>
 
 export const createCloudClient = (
   options: CreateCloudClientOptions,
-): CloudClient & CloudAuthClient => {
+): CloudClient & CloudAuthClient & PublicStackClient => {
   const base = options.baseUrl.replace(/\/+$/, '');
   const parsedBase = new URL(base);
   if (
@@ -285,5 +312,58 @@ export const createCloudClient = (
         bytes: blob.bytes,
       };
     },
+    getPublicStack: async (owner, slug) => {
+      try {
+        return json(
+          getPublicStackResponseSchema,
+          await request(
+            'GET',
+            `stacks/${encodeURIComponent(owner)}/${encodeURIComponent(slug)}`,
+            { auth: false },
+          ),
+        );
+      } catch (error) {
+        if (
+          error instanceof StackCloudError &&
+          error.code === 'public-stack-not-found'
+        )
+          return null;
+        throw error;
+      }
+    },
+    getPublicStackVersion: async (owner, slug, versionNumber) =>
+      json(
+        getPublicStackVersionResponseSchema,
+        await request(
+          'GET',
+          `stacks/${encodeURIComponent(owner)}/${encodeURIComponent(slug)}/versions/${versionNumber}`,
+          { auth: false },
+        ),
+      ),
+    getPublicProfile: async (owner) => {
+      try {
+        return json(
+          publicProfileResponseSchema,
+          await request('GET', `profiles/${encodeURIComponent(owner)}`, {
+            auth: false,
+          }),
+        );
+      } catch (error) {
+        if (
+          error instanceof StackCloudError &&
+          error.code === 'public-stack-not-found'
+        )
+          return null;
+        throw error;
+      }
+    },
+    publishPublicStackVersion: async (slug, body) =>
+      json(
+        publishPublicStackVersionResponseSchema,
+        await request('POST', `stacks/${encodeURIComponent(slug)}/versions`, {
+          auth: true,
+          json: body,
+        }),
+      ),
   };
 };

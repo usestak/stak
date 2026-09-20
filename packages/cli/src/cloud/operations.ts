@@ -7,27 +7,35 @@ import {
   createCloudClient,
   type CloudAuthClient,
   type CloudClient,
+  type PublicStackClient,
 } from '@stack/cloud-client';
 import {
+  applyPublish,
   applyPull,
   applyPush,
   getOrCreateMachineIdentity,
+  preparePublish,
   preparePull,
   preparePush,
   type ApplyPullResult,
   type ApplyPushResult,
+  type PublishPlan,
   type PullPlan,
   type PushPlan,
 } from '@stack/core';
-import type { MeResponse } from '@stack/spec';
+import type {
+  MeResponse,
+  PublishPublicStackVersionResponse,
+} from '@stack/spec';
 
 import { resolveCloudBaseUrl } from './config.js';
 import type { CredentialStore } from './credentials.js';
 
+export type FullCloudClient = CloudClient & CloudAuthClient & PublicStackClient;
 export type CloudClientFactory = (options: {
   baseUrl: string;
   token?: string;
-}) => CloudClient & CloudAuthClient;
+}) => FullCloudClient;
 
 export type CloudOperationsDeps = {
   stackHome: string;
@@ -214,7 +222,7 @@ export const performWhoami = async (
 
 const authenticatedClient = async (
   deps: CloudOperationsDeps,
-): Promise<CloudClient> => {
+): Promise<FullCloudClient> => {
   const credential = await deps.credentials.read();
   if (!credential) throw new NotAuthenticatedError();
   const baseUrl = resolveCloudBaseUrl({
@@ -262,3 +270,38 @@ export const cloudApplyPull = async (
     plan,
     client: await authenticatedClient(deps),
   });
+
+/**
+ * Client for anonymous public reads. Uses a stored token when signed in (harmless)
+ * and the stored API URL when available; falls back to STACK_API_URL / dev.
+ */
+export const publicReadClient = async (
+  deps: CloudOperationsDeps,
+): Promise<FullCloudClient> => {
+  const credential = await deps.credentials.read();
+  const baseUrl = resolveCloudBaseUrl({
+    env: deps.env,
+    ...(credential?.apiUrl ? { storedApiUrl: credential.apiUrl } : {}),
+  });
+  return (deps.createClient ?? defaultCreateClient)({
+    baseUrl,
+    ...(credential?.token ? { token: credential.token } : {}),
+  });
+};
+
+export const cloudPreparePublish = async (
+  deps: CloudOperationsDeps,
+  options: { input: string; slug?: string },
+): Promise<PublishPlan> =>
+  preparePublish({
+    stackHome: deps.stackHome,
+    input: options.input,
+    ...(options.slug ? { slug: options.slug } : {}),
+    client: await authenticatedClient(deps),
+  });
+
+export const cloudApplyPublish = async (
+  deps: CloudOperationsDeps,
+  plan: PublishPlan,
+): Promise<PublishPublicStackVersionResponse> =>
+  applyPublish({ plan, client: await authenticatedClient(deps) });
