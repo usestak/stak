@@ -10,7 +10,27 @@ export const trySessionStatusSchema = z.enum([
   'exited',
   'failed',
   'cleaning',
+  'cleanup-failed',
 ]);
+export const tryCleanupComponentSchema = z.enum([
+  'workspace',
+  'home',
+  'codex-home',
+  'session-root',
+  'unexpected-entry',
+]);
+// Safe, secret-free diagnostic recorded when a runtime component could not be
+// removed. Contains only which component failed, a filesystem error code, and a
+// timestamp — never file contents, config, or auth material.
+export const tryCleanupDiagnosticSchema = z.object({
+  component: tryCleanupComponentSchema,
+  code: z
+    .string()
+    .max(64)
+    .regex(/^[A-Za-z0-9_-]+$/)
+    .optional(),
+  at: z.iso.datetime({ offset: true }),
+});
 export const trySessionSkillSchema = z.object({
   entryId: z.string().regex(/^skill_[A-Za-z0-9_-]{8,}$/),
   name: z.string().min(1),
@@ -33,6 +53,7 @@ export const trySessionSchema = z.object({
   runtimeCodexHomePath: z.string().min(1),
   resolvedSkills: z.array(trySessionSkillSchema),
   status: trySessionStatusSchema,
+  cleanup: tryCleanupDiagnosticSchema.optional(),
 });
 export const tryIsolationPlanSchema = z.object({
   temporaryHome: z.literal(true),
@@ -59,9 +80,15 @@ export const tryExitResultSchema = z.object({
   exitCode: z.number().int().nullable(),
   signal: z.string().nullable().optional(),
   cleaned: z.boolean(),
+  // Present only when cleaned === false: what was left behind and why, plus the
+  // retained (Stack-owned, under STACK_HOME) runtime path for a safe later retry.
+  cleanup: tryCleanupDiagnosticSchema.optional(),
+  retainedRuntimePath: z.string().min(1).optional(),
 });
 
 export type TrySessionStatus = z.infer<typeof trySessionStatusSchema>;
+export type TryCleanupComponent = z.infer<typeof tryCleanupComponentSchema>;
+export type TryCleanupDiagnostic = z.infer<typeof tryCleanupDiagnosticSchema>;
 export type TrySession = z.infer<typeof trySessionSchema>;
 export type TryIsolationPlan = z.infer<typeof tryIsolationPlanSchema>;
 export type TryResolvedEnvironment = z.infer<

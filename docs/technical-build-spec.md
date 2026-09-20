@@ -2786,10 +2786,22 @@ the normal Codex binding registry, portable Environment files, locks, and Machin
 baseline are byte-for-byte invariant across a trial.
 
 Dry-run performs detection, validation, hashing, and resolution only. It creates no
-runtime or Store content. Completed, failed, and non-zero-exit sessions are cleaned.
+runtime or Store content. Completed, failed, non-zero-exit, and signal-terminated
+sessions are cleaned, and cleanup begins only after the interactive child fully closes.
 Unknown or potentially live orphan runtime directories are not deleted automatically.
 Existing-project mode, keeping a scratch workspace, remote Stacks, and automatic Stack
 adoption remain deferred.
+
+Cleanup is **marker-last** and component-by-component. Owned children
+(`workspace/`, `home/`, `codex-home/`) are removed individually with bounded
+retries for transient Windows deletion errors (`EPERM`, `EBUSY`, `ENOTEMPTY`,
+never retried forever); the `session.json` ownership marker is written atomically
+and removed only after every other owned artifact is gone and no unexpected entry
+remains, followed by the empty session root. The marker can therefore never be
+lost while owned artifacts survive. If a component cannot be removed, the marker
+is preserved with `status: cleanup-failed` and a safe, secret-free diagnostic
+(component, filesystem error code, timestamp — never contents, config, or auth),
+leaving the runtime provably Stack-owned for a conservative later retry.
 
 ### Phase 6 filesystem safety fence
 

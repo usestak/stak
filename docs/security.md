@@ -50,6 +50,28 @@ roots are byte-for-byte invariant. This is isolation from your setup, not full
 process sandboxing: an agent's built-in/system capabilities, administrator
 configuration, and OS keyring access may remain available.
 
+### Runtime cleanup ownership
+
+The trial runtime lives entirely under `$STACK_HOME/runtime/<sessionId>/`
+(`session.json` marker plus `workspace/`, `home/`, and `codex-home/`). Cleanup is
+**marker-last** and component-by-component: after the child process fully closes,
+Stack removes each known owned child individually, verifies nothing unexpected
+remains, and only then deletes the `session.json` ownership marker and the empty
+session root. The trusted marker is therefore never lost while other owned
+artifacts remain — the state (runtime exists, marker gone) that Phase 6.1 safety
+rules refuse to auto-clean can no longer be created.
+
+Transient Windows deletion errors (`EPERM`, `EBUSY`, `ENOTEMPTY`, …) are retried
+a bounded number of times — never forever, and never by weakening path
+containment or force-deleting anything whose ownership cannot be proven. If a
+component still cannot be removed, the marker is preserved and its status set to
+`cleanup-failed` with a **safe, secret-free diagnostic** (failing component,
+filesystem error code, timestamp — never file contents, config, or auth
+material). The runtime stays provably Stack-owned so a later `stack try` can
+retry cleanup conservatively. Unknown, forged, or outside-`STACK_HOME` runtimes
+are still refused, and Phase 6.1 never auto-deletes an unmarked directory merely
+because it resembles a trial runtime.
+
 ## Child-process execution audit
 
 All external processes are spawned with `shell:false` and argument arrays — no

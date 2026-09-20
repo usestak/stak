@@ -10,5 +10,12 @@ export const renderTryDryRun = (trial: TryResolvedEnvironment) =>
 export const renderTryReady = (preparation: TryPreparationResult) =>
   `Trying Stack: ${preparation.session.source.displayName}\n\n${preparation.session.resolvedSkills.length} Skills resolved\n${preparation.session.resolvedSkills.length} Skills materialized into isolated workspace\n\nIsolation\n+ main unchanged\n+ normal Codex bindings untouched\n+ temporary user home\n+ temporary Codex home\n\nThis trial uses a disposable scratch workspace.\nFiles created here will be removed when the session ends.\n\nLaunching Codex...\n\nNote: Codex built-in/system Skills may still be available.\n`;
 
-export const renderTryExit = (result: TryExitResult) =>
-  `Trial ended.\n\nCodex exit code: ${result.exitCode ?? 'signal'}\nTemporary Environment cleaned.\n\nmain\n+ unchanged\n\nNormal Codex bindings\n+ unchanged\n`;
+export const renderTryExit = (result: TryExitResult) => {
+  const exit = result.exitCode ?? 'signal';
+  if (result.cleaned)
+    return `Trial ended.\n\nCodex exit code: ${exit}\nTemporary Environment cleaned.\n\nmain\n+ unchanged\n\nNormal Codex bindings\n+ unchanged\n`;
+  const component = result.cleanup?.component ?? 'workspace';
+  const code = result.cleanup?.code ?? 'unknown';
+  const retained = result.retainedRuntimePath ?? '(under STACK_HOME)';
+  return `Trial ended, but temporary cleanup was incomplete.\n\nCodex exit code: ${exit}\n\nComponent:\n${component}\n\nError:\n${code}\n\nRuntime retained safely:\n${retained}\n\nStack will retry cleanup on a future trial.\n\nmain was not changed.\nNormal Codex bindings were not changed.\n`;
+};

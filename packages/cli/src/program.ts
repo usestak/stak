@@ -254,8 +254,9 @@ const defaultDependencies: ProgramDependencies = {
       homeDir: os.homedir(),
       env: process.env,
     }),
-  cleanupTry: (preparation) =>
-    cleanupCodexTryRuntime({ stackHome, session: preparation.session }),
+  cleanupTry: async (preparation) => {
+    await cleanupCodexTryRuntime({ stackHome, session: preparation.session });
+  },
   launchTry: (preparation, detection) =>
     launchCodexTryRuntime({ stackHome, preparation, detection }),
   cloudLogin: (options) => performLogin(cloudDeps, options),

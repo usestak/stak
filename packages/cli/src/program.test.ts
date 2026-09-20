@@ -340,6 +340,30 @@ describe('Stack CLI', () => {
     expect(result.output).toContain('Temporary Environment cleaned');
   });
 
+  it('reports incomplete cleanup with a safe, secret-free diagnostic', async () => {
+    const result = await runProgram(['try', './trial', '--', 'codex'], {
+      launchTry: async () => ({
+        sessionId: 'try_12345678',
+        exitCode: 0,
+        signal: null,
+        cleaned: false,
+        cleanup: {
+          component: 'workspace',
+          code: 'EPERM',
+          at: '2026-09-20T00:00:00.000Z',
+        },
+        retainedRuntimePath: 'C:\\Users\\x\\.stack\\runtime\\try_12345678',
+      }),
+    });
+    expect(result.output).toContain('temporary cleanup was incomplete');
+    expect(result.output).toContain('workspace');
+    expect(result.output).toContain('EPERM');
+    expect(result.output).toContain('try_12345678');
+    expect(result.output).toContain('main was not changed');
+    expect(result.output).not.toContain('auth');
+    expect(result.output).not.toContain('token');
+  });
+
   it('cleans a prepared trial when rendering fails before launch', async () => {
     let cleanupCalled = false;
     await expect(

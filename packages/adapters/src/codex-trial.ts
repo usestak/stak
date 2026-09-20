@@ -6,7 +6,9 @@ import {
   mkdir,
   readFile,
   readdir,
+  rename,
   rm,
+  rmdir,
   writeFile,
 } from 'node:fs/promises';
 import os from 'node:os';
@@ -26,6 +28,8 @@ import {
 } from '@stack/spec';
 import type {
   AgentDetection,
+  TryCleanupComponent,
+  TryCleanupDiagnostic,
   TryExitResult,
   TryPreparationResult,
   TryResolvedEnvironment,
@@ -92,12 +96,76 @@ export const bridgeCodexRuntimeState = async (options: {
   }
 };
 
+// The ownership marker is written atomically (temp + rename) so it can never be
+// observed half-written during ready → running → cleaning → cleanup-failed.
 const writeSession = async (directory: string, session: TrySession) => {
-  await writeFile(
-    path.join(directory, 'session.json'),
-    `${JSON.stringify(trySessionSchema.parse(session), null, 2)}\n`,
-    'utf8',
-  );
+  const target = path.join(directory, 'session.json');
+  const temporary = path.join(directory, `.session.json.${randomUUID()}.tmp`);
+  const body = `${JSON.stringify(trySessionSchema.parse(session), null, 2)}\n`;
+  try {
+    await writeFile(temporary, body, 'utf8');
+    await rename(temporary, target);
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
+  }
+};
+
+// Entries permitted to remain in a session root alongside owned children: the
+// marker itself, and any leftover atomic-write temp file we created.
+const isOwnedMetadataEntry = (name: string) =>
+  name === 'session.json' ||
+  (name.startsWith('.session.json.') && name.endsWith('.tmp'));
+
+// Deletion errors that are commonly transient on Windows (a virus scanner,
+// indexer, or just-closed handle briefly holding a file) and worth retrying.
+const transientDeleteCodes = new Set([
+  'EPERM',
+  'EBUSY',
+  'ENOTEMPTY',
+  'EACCES',
+  'EMFILE',
+  'ENFILE',
+]);
+
+export type RemoveRuntimeEntry = (target: string) => Promise<void>;
+export type TryCleanupControls = {
+  now?: () => Date;
+  removeEntry?: RemoveRuntimeEntry;
+  maxRetries?: number;
+  retryDelayMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+};
+export type TryCleanupOutcome =
+  | { cleaned: true }
+  | { cleaned: false; diagnostic: TryCleanupDiagnostic; runtimePath: string };
+
+const realSleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+// Node's `rm` also accepts maxRetries/retryDelay; we run our own bounded loop so
+// the identical policy covers injected removers (tests) and the specific
+// transient codes above, and never retries forever.
+const defaultRemoveRuntimeEntry: RemoveRuntimeEntry = (target) =>
+  rm(target, { recursive: true, force: true });
+
+const removeWithBoundedRetry = async (
+  target: string,
+  remove: RemoveRuntimeEntry,
+  maxAttempts: number,
+  retryDelayMs: number,
+  sleep: (ms: number) => Promise<void>,
+): Promise<void> => {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await remove(target);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (attempt >= maxAttempts || !code || !transientDeleteCodes.has(code))
+        throw error;
+      await sleep(retryDelayMs);
+    }
+  }
 };
 
 const removeOwnedRuntimePath = async (
@@ -105,7 +173,12 @@ const removeOwnedRuntimePath = async (
   target: string,
 ): Promise<void> => {
   await assertPathWithin({ ownedRoot: runtimeRoot, proposedPath: target });
-  await rm(target, { recursive: true, force: true });
+  await rm(target, {
+    recursive: true,
+    force: true,
+    maxRetries: 3,
+    retryDelay: 100,
+  });
 };
 
 const assertCodexTryIsolation = async (options: {
@@ -293,16 +366,26 @@ export const prepareCodexTryRuntime = async (options: {
   }
 };
 
-export const cleanupCodexTryRuntime = async (options: {
-  stackHome: string;
-  session: TrySession;
-}): Promise<void> => {
+export const cleanupCodexTryRuntime = async (
+  options: {
+    stackHome: string;
+    session: TrySession;
+  } & TryCleanupControls,
+): Promise<TryCleanupOutcome> => {
   const { session } = options;
   const runtimeRoot = path.resolve(options.stackHome, 'runtime');
   const directory = path.resolve(runtimeRoot, session.sessionId);
   const expectedWorkspace = path.join(directory, 'workspace');
   const expectedHome = path.join(directory, 'home');
   const expectedCodexHome = path.join(directory, 'codex-home');
+  const remove = options.removeEntry ?? defaultRemoveRuntimeEntry;
+  const maxRetries = options.maxRetries ?? 3;
+  const retryDelayMs = options.retryDelayMs ?? 100;
+  const sleep = options.sleep ?? realSleep;
+  const now = options.now ?? (() => new Date());
+
+  // --- Safety gate: refuse to touch anything we cannot prove we own. ---
+  // These are hard refusals (unknown/forged/outside runtime) and still throw.
   const sessionPathsValid =
     (await pathsEqual({ left: session.runtimeRootPath, right: runtimeRoot })) &&
     (await pathsEqual({
@@ -326,12 +409,14 @@ export const cleanupCodexTryRuntime = async (options: {
   try {
     await lstat(directory);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+      return { cleaned: true };
     throw new TryRuntimeCleanupFailedError({ cause: error });
   }
+  let marker: TrySession;
   try {
     await assertPathWithin({ ownedRoot: runtimeRoot, proposedPath: directory });
-    const marker = trySessionSchema.parse(
+    marker = trySessionSchema.parse(
       JSON.parse(await readFile(path.join(directory, 'session.json'), 'utf8')),
     );
     if (marker.sessionId !== session.sessionId)
@@ -344,10 +429,84 @@ export const cleanupCodexTryRuntime = async (options: {
     ])
       if (!(await pathsEqual(pair)))
         throw new Error('Runtime marker does not match the requested session.');
-    await removeOwnedRuntimePath(runtimeRoot, directory);
   } catch (error) {
     throw new TryRuntimeCleanupFailedError({ cause: error });
   }
+
+  // --- Marker-last cleanup. Owned-child delete failures do NOT throw: they
+  // preserve the marker and return a `cleanup-failed` outcome for safe retry. ---
+  const recordFailure = async (
+    component: TryCleanupComponent,
+    error: unknown,
+  ): Promise<TryCleanupOutcome> => {
+    const code = (error as NodeJS.ErrnoException | undefined)?.code;
+    const diagnostic: TryCleanupDiagnostic = {
+      component,
+      ...(code && /^[A-Za-z0-9_-]{1,64}$/.test(code) ? { code } : {}),
+      at: now().toISOString(),
+    };
+    // Marker is preserved (still provably Stack-owned); only safe metadata added.
+    await writeSession(directory, {
+      ...marker,
+      status: 'cleanup-failed',
+      cleanup: diagnostic,
+    }).catch(() => undefined);
+    return { cleaned: false, diagnostic, runtimePath: directory };
+  };
+
+  // Signal cleanup-in-progress while the trusted marker is still present.
+  await writeSession(directory, { ...marker, status: 'cleaning' });
+
+  const components: Array<{ name: TryCleanupComponent; path: string }> = [
+    { name: 'workspace', path: expectedWorkspace },
+    { name: 'home', path: expectedHome },
+    { name: 'codex-home', path: expectedCodexHome },
+  ];
+  for (const component of components) {
+    try {
+      await removeWithBoundedRetry(
+        component.path,
+        remove,
+        maxRetries,
+        retryDelayMs,
+        sleep,
+      );
+    } catch (error) {
+      return recordFailure(component.name, error);
+    }
+  }
+
+  // Only the ownership marker (and our own atomic-write temp files) may remain.
+  // Any unexpected entry is left in place rather than silently deleted.
+  let residual: string[];
+  try {
+    residual = await readdir(directory);
+  } catch (error) {
+    return recordFailure('session-root', error);
+  }
+  if (residual.some((name) => !isOwnedMetadataEntry(name)))
+    return recordFailure('unexpected-entry', { code: 'EEXIST' });
+
+  // Remove the marker LAST (after any stray temp), then the now-empty root.
+  try {
+    for (const name of residual.filter((entry) => entry !== 'session.json'))
+      await remove(path.join(directory, name));
+    await remove(path.join(directory, 'session.json'));
+  } catch (error) {
+    return recordFailure('session-root', error);
+  }
+  try {
+    await removeWithBoundedRetry(
+      directory,
+      (target) => rmdir(target),
+      maxRetries,
+      retryDelayMs,
+      sleep,
+    );
+  } catch (error) {
+    return recordFailure('session-root', error);
+  }
+  return { cleaned: true };
 };
 
 export const launchCodexTryRuntime = async (options: {
@@ -356,6 +515,7 @@ export const launchCodexTryRuntime = async (options: {
   detection: AgentDetection;
   env?: NodeJS.ProcessEnv;
   spawnProcess?: SpawnProcess;
+  cleanup?: TryCleanupControls;
 }): Promise<TryExitResult> => {
   const session = options.preparation.session;
   const root = path.parse(session.runtimeHomePath).root;
@@ -371,10 +531,11 @@ export const launchCodexTryRuntime = async (options: {
         }
       : {}),
   };
-  let exitCode: number | null;
+  let exitCode: number | null = null;
   let signal: string | null | undefined;
   let isolationVerified = false;
   let ownershipVerified = false;
+  let launchError: unknown;
   try {
     await assertOwnedReadySession({
       stackHome: options.stackHome,
@@ -406,6 +567,9 @@ export const launchCodexTryRuntime = async (options: {
       ...session,
       status: 'running',
     });
+    // launchCodex resolves on the child `close` lifecycle (shim-safe,
+    // shell:false), so cleanup below only begins once the interactive child and
+    // its inherited stdio are fully closed — not on an earlier `exit`.
     const result = await launchCodex({
       detection: options.detection,
       cwd: session.workspacePath,
@@ -419,20 +583,34 @@ export const launchCodexTryRuntime = async (options: {
       status: 'exited',
     });
   } catch (error) {
+    launchError = error;
     if (isolationVerified)
       await writeSession(path.dirname(session.workspacePath), {
         ...session,
         status: 'failed',
       }).catch(() => undefined);
-    throw error;
-  } finally {
-    if (ownershipVerified)
-      await cleanupCodexTryRuntime({ stackHome: options.stackHome, session });
   }
+  // Clean up whenever we established ownership — for zero exits, non-zero exits,
+  // and launch failures alike. A safety refusal (unknown/forged/outside runtime)
+  // still throws; an owned-child delete failure returns a cleanup-failed outcome.
+  let cleanupOutcome: TryCleanupOutcome = { cleaned: true };
+  if (ownershipVerified)
+    cleanupOutcome = await cleanupCodexTryRuntime({
+      stackHome: options.stackHome,
+      session,
+      ...(options.cleanup ?? {}),
+    });
+  if (launchError) throw launchError;
   return tryExitResultSchema.parse({
     sessionId: session.sessionId,
     exitCode,
     signal: signal ?? null,
-    cleaned: true,
+    cleaned: cleanupOutcome.cleaned,
+    ...(cleanupOutcome.cleaned
+      ? {}
+      : {
+          cleanup: cleanupOutcome.diagnostic,
+          retainedRuntimePath: cleanupOutcome.runtimePath,
+        }),
   });
 };

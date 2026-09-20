@@ -1,7 +1,10 @@
 import {
   access,
+  chmod,
   mkdir as filesystemMkdir,
   readFile,
+  readdir,
+  rm,
   writeFile as filesystemWriteFile,
 } from 'node:fs/promises';
 import path from 'node:path';
@@ -704,5 +707,390 @@ describe('Codex trial runtime', () => {
     ).resolves.toBeUndefined();
     await cleanupCodexTryRuntime({ stackHome, session: first.session });
     await cleanupCodexTryRuntime({ stackHome, session: second.session });
+  });
+});
+
+const onWindows = process.platform === 'win32';
+const fsError = (code: string) =>
+  Object.assign(new Error(`simulated ${code}`), { code });
+// A remover that records call order/attempts and can simulate failures before
+// delegating to a real recursive delete.
+const recordingRemover = (
+  behavior?: (target: string, attempt: number) => void,
+) => {
+  const calls: string[] = [];
+  const attempts = new Map<string, number>();
+  const remove = async (target: string) => {
+    calls.push(target);
+    const attempt = (attempts.get(target) ?? 0) + 1;
+    attempts.set(target, attempt);
+    behavior?.(target, attempt);
+    await rm(target, { recursive: true, force: true });
+  };
+  return {
+    remove,
+    calls,
+    attemptsFor: (target: string) => attempts.get(target) ?? 0,
+  };
+};
+const fastControls = { retryDelayMs: 0, sleep: async () => undefined };
+// A real npm-style Codex shim (a .cmd on Windows, a shebang script on Unix)
+// that writes a marker into its cwd and exits 0.
+const makeCodexShim = async (directory: string) => {
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    path.join(directory, 'codex-impl.js'),
+    `require('fs').writeFileSync(require('path').join(process.cwd(),'ran.txt'),'ok');process.exit(0);\n`,
+  );
+  if (onWindows) {
+    const shim = path.join(directory, 'codex.cmd');
+    await writeFile(shim, '@echo off\r\nnode "%~dp0codex-impl.js" %*\r\n');
+    return shim;
+  }
+  const shim = path.join(directory, 'codex');
+  await writeFile(
+    shim,
+    `#!/bin/sh\nexec node "$(dirname "$0")/codex-impl.js" "$@"\n`,
+  );
+  await chmod(shim, 0o755);
+  return shim;
+};
+
+describe('Codex trial runtime cleanup hardening', () => {
+  const prepared = async (root: string, id: string) => {
+    const stackHome = path.join(root, 'stack');
+    const trial = await storedTrial(stackHome);
+    const preparation = await prepareCodexTryRuntime({
+      stackHome,
+      trial,
+      homeDir: path.join(root, 'real'),
+      env: {},
+      idFactory: () => id,
+    });
+    return { stackHome, session: preparation.session, preparation };
+  };
+
+  it('keeps the ownership marker present while the workspace is removed', async () => {
+    const { stackHome, session } = await prepared(await temp(), 'markerlive1');
+    const sessionRoot = path.dirname(session.workspacePath);
+    let markerPresent = false;
+    await cleanupCodexTryRuntime({
+      stackHome,
+      session,
+      ...fastControls,
+      removeEntry: async (target) => {
+        if (target === session.workspacePath)
+          markerPresent = await access(path.join(sessionRoot, 'session.json'))
+            .then(() => true)
+            .catch(() => false);
+        await rm(target, { recursive: true, force: true });
+      },
+    });
+    expect(markerPresent).toBe(true);
+  });
+
+  it('removes workspace, home, codex-home, then the marker last, then the root', async () => {
+    const { stackHome, session } = await prepared(await temp(), 'orderly1');
+    const { remove, calls } = recordingRemover();
+    const outcome = await cleanupCodexTryRuntime({
+      stackHome,
+      session,
+      ...fastControls,
+      removeEntry: remove,
+    });
+    const label = (target: string) =>
+      target === session.workspacePath
+        ? 'workspace'
+        : target === session.runtimeHomePath
+          ? 'home'
+          : target === session.runtimeCodexHomePath
+            ? 'codex-home'
+            : path.basename(target);
+    expect(outcome.cleaned).toBe(true);
+    expect(calls.map(label)).toEqual([
+      'workspace',
+      'home',
+      'codex-home',
+      'session.json',
+    ]);
+    await expect(
+      access(path.dirname(session.workspacePath)),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('a permanent workspace failure preserves a cleanup-failed marker with a safe, secret-free diagnostic', async () => {
+    const { stackHome, session } = await prepared(await temp(), 'permfail1');
+    // A secret living in the runtime must never appear in the retained marker.
+    await writeFile(
+      path.join(session.runtimeCodexHomePath, 'auth.json'),
+      'sentinel-secret',
+    );
+    const outcome = await cleanupCodexTryRuntime({
+      stackHome,
+      session,
+      ...fastControls,
+      maxRetries: 2,
+      now: () => new Date('2026-09-20T00:00:00.000Z'),
+      removeEntry: async (target) => {
+        if (target === session.workspacePath) throw fsError('EPERM');
+        await rm(target, { recursive: true, force: true });
+      },
+    });
+    expect(outcome).toMatchObject({ cleaned: false });
+    const sessionRoot = path.dirname(session.workspacePath);
+    const raw = await readFile(path.join(sessionRoot, 'session.json'), 'utf8');
+    expect(raw).not.toContain('sentinel-secret');
+    const marker = JSON.parse(raw);
+    expect(marker.status).toBe('cleanup-failed');
+    expect(marker.cleanup).toEqual({
+      component: 'workspace',
+      code: 'EPERM',
+      at: '2026-09-20T00:00:00.000Z',
+    });
+    expect(Object.keys(marker.cleanup).sort()).toEqual([
+      'at',
+      'code',
+      'component',
+    ]);
+  });
+
+  it('retries a transient EPERM and eventually completes cleanup', async () => {
+    const { stackHome, session } = await prepared(await temp(), 'transient1');
+    const { remove, attemptsFor } = recordingRemover((target, attempt) => {
+      if (target === session.workspacePath && attempt === 1)
+        throw fsError('EPERM');
+    });
+    const outcome = await cleanupCodexTryRuntime({
+      stackHome,
+      session,
+      ...fastControls,
+      maxRetries: 3,
+      removeEntry: remove,
+    });
+    expect(outcome.cleaned).toBe(true);
+    expect(attemptsFor(session.workspacePath)).toBe(2);
+    await expect(
+      access(path.dirname(session.workspacePath)),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('stops after the retry budget and retains the marked runtime', async () => {
+    const { stackHome, session } = await prepared(await temp(), 'exhausted1');
+    const { remove, attemptsFor } = recordingRemover((target) => {
+      if (target === session.workspacePath) throw fsError('EPERM');
+    });
+    const outcome = await cleanupCodexTryRuntime({
+      stackHome,
+      session,
+      ...fastControls,
+      maxRetries: 3,
+      removeEntry: remove,
+    });
+    expect(outcome.cleaned).toBe(false);
+    expect(attemptsFor(session.workspacePath)).toBe(3);
+    await expect(
+      access(path.join(path.dirname(session.workspacePath), 'session.json')),
+    ).resolves.toBeUndefined();
+  });
+
+  it.each(['ENOTEMPTY', 'EBUSY'])(
+    'retries a transient %s deletion error',
+    async (code) => {
+      const { stackHome, session } = await prepared(
+        await temp(),
+        `transient${code.toLowerCase()}1`,
+      );
+      const { remove } = recordingRemover((target, attempt) => {
+        if (target === session.workspacePath && attempt === 1)
+          throw fsError(code);
+      });
+      const outcome = await cleanupCodexTryRuntime({
+        stackHome,
+        session,
+        ...fastControls,
+        maxRetries: 3,
+        removeEntry: remove,
+      });
+      expect(outcome.cleaned).toBe(true);
+      await expect(
+        access(path.dirname(session.workspacePath)),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+    },
+  );
+
+  it('refuses cleanup when the on-disk marker sessionId is forged', async () => {
+    const { stackHome, session } = await prepared(await temp(), 'forgeid1');
+    const sessionRoot = path.dirname(session.workspacePath);
+    const marker = JSON.parse(
+      await readFile(path.join(sessionRoot, 'session.json'), 'utf8'),
+    );
+    await writeFile(
+      path.join(sessionRoot, 'session.json'),
+      JSON.stringify({ ...marker, sessionId: 'try_forged99' }),
+    );
+    await expect(
+      cleanupCodexTryRuntime({ stackHome, session }),
+    ).rejects.toMatchObject({ code: 'try-runtime-cleanup-failed' });
+    await expect(access(sessionRoot)).resolves.toBeUndefined();
+  });
+
+  it('refuses cleanup when the on-disk marker paths are forged', async () => {
+    const { stackHome, session } = await prepared(await temp(), 'forgepath1');
+    const sessionRoot = path.dirname(session.workspacePath);
+    const marker = JSON.parse(
+      await readFile(path.join(sessionRoot, 'session.json'), 'utf8'),
+    );
+    await writeFile(
+      path.join(sessionRoot, 'session.json'),
+      JSON.stringify({
+        ...marker,
+        workspacePath: path.join(sessionRoot, '..', 'elsewhere'),
+      }),
+    );
+    await expect(
+      cleanupCodexTryRuntime({ stackHome, session }),
+    ).rejects.toMatchObject({ code: 'try-runtime-cleanup-failed' });
+    await expect(access(sessionRoot)).resolves.toBeUndefined();
+  });
+
+  it('cleans only after the launched child has closed', async () => {
+    const { stackHome, session, preparation } = await prepared(
+      await temp(),
+      'lifecycle1',
+    );
+    let statusWhileRunning: string | undefined;
+    let workspaceExisted = false;
+    const result = await launchCodexTryRuntime({
+      stackHome,
+      preparation,
+      detection: { agent: 'codex', installed: true, executablePath: '/fake' },
+      spawnProcess: async (_file, _args, spawnOptions) => {
+        const marker = JSON.parse(
+          await readFile(
+            path.join(path.dirname(session.workspacePath), 'session.json'),
+            'utf8',
+          ),
+        );
+        statusWhileRunning = marker.status;
+        workspaceExisted = await access(spawnOptions.cwd)
+          .then(() => true)
+          .catch(() => false);
+        return { exitCode: 0, signal: null };
+      },
+    });
+    expect(statusWhileRunning).toBe('running');
+    expect(workspaceExisted).toBe(true);
+    expect(result.cleaned).toBe(true);
+    await expect(
+      access(path.dirname(session.workspacePath)),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('cleans safely when the child is terminated by a signal', async () => {
+    const { stackHome, session, preparation } = await prepared(
+      await temp(),
+      'signalpath1',
+    );
+    const result = await launchCodexTryRuntime({
+      stackHome,
+      preparation,
+      detection: { agent: 'codex', installed: true, executablePath: '/fake' },
+      spawnProcess: async () => ({ exitCode: null, signal: 'SIGINT' }),
+    });
+    expect(result).toMatchObject({
+      exitCode: null,
+      signal: 'SIGINT',
+      cleaned: true,
+    });
+    await expect(
+      access(path.dirname(session.workspacePath)),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('leaves zero runtime directories after a successful trial', async () => {
+    const { stackHome, preparation } = await prepared(
+      await temp(),
+      'zerodirs1',
+    );
+    await launchCodexTryRuntime({
+      stackHome,
+      preparation,
+      detection: { agent: 'codex', installed: true, executablePath: '/fake' },
+      spawnProcess: async () => ({ exitCode: 0, signal: null }),
+    });
+    expect(await readdir(path.join(stackHome, 'runtime'))).toEqual([]);
+  });
+
+  it('controlled reproduction: transient workspace failure retries, then fully cleans a real shim launch', async () => {
+    const root = await temp();
+    const shim = await makeCodexShim(path.join(root, 'bin'));
+    const { stackHome, session, preparation } = await prepared(
+      root,
+      'winrepro1',
+    );
+    const fencedHome = path.join(root, 'real');
+    const { remove, attemptsFor } = recordingRemover((target, attempt) => {
+      if (target === session.workspacePath && attempt === 1)
+        throw fsError('EPERM');
+    });
+    const result = await launchCodexTryRuntime({
+      stackHome,
+      preparation,
+      detection: { agent: 'codex', installed: true, executablePath: shim },
+      env: {
+        ...process.env,
+        HOME: fencedHome,
+        USERPROFILE: fencedHome,
+        CODEX_HOME: path.join(fencedHome, '.codex'),
+      },
+      cleanup: { removeEntry: remove, ...fastControls },
+    });
+    // The real shim actually ran inside the isolated workspace.
+    expect(result.cleaned).toBe(true);
+    expect(attemptsFor(session.workspacePath)).toBeGreaterThanOrEqual(2);
+    expect(await readdir(path.join(stackHome, 'runtime'))).toEqual([]);
+  });
+
+  it('controlled reproduction: permanent workspace failure retains a cleanup-failed runtime', async () => {
+    const root = await temp();
+    const shim = await makeCodexShim(path.join(root, 'bin'));
+    const { stackHome, session, preparation } = await prepared(
+      root,
+      'winrepro2',
+    );
+    const fencedHome = path.join(root, 'real');
+    const result = await launchCodexTryRuntime({
+      stackHome,
+      preparation,
+      detection: { agent: 'codex', installed: true, executablePath: shim },
+      env: {
+        ...process.env,
+        HOME: fencedHome,
+        USERPROFILE: fencedHome,
+        CODEX_HOME: path.join(fencedHome, '.codex'),
+      },
+      cleanup: {
+        ...fastControls,
+        maxRetries: 2,
+        removeEntry: async (target) => {
+          if (target === session.workspacePath) throw fsError('EPERM');
+          await rm(target, { recursive: true, force: true });
+        },
+      },
+    });
+    expect(result.cleaned).toBe(false);
+    expect(result.cleanup).toMatchObject({
+      component: 'workspace',
+      code: 'EPERM',
+    });
+    const sessionRoot = path.dirname(session.workspacePath);
+    expect(result.retainedRuntimePath).toBe(sessionRoot);
+    await expect(
+      access(path.join(sessionRoot, 'session.json')),
+    ).resolves.toBeUndefined();
+    const marker = JSON.parse(
+      await readFile(path.join(sessionRoot, 'session.json'), 'utf8'),
+    );
+    expect(marker.status).toBe('cleanup-failed');
   });
 });
