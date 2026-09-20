@@ -84,6 +84,44 @@ export function statePaths(stackHome: string, machineId?: string) {
 const readJson = async (file: string): Promise<unknown> =>
   JSON.parse(await readFile(file, 'utf8')) as unknown;
 
+const isNotFound = (error: unknown): boolean =>
+  (error as NodeJS.ErrnoException).code === 'ENOENT';
+
+/** Reject state written by a newer, unsupported Stack schema version. */
+const assertSupportedSchema = (
+  value: unknown,
+  label: string,
+  supported = 1,
+): void => {
+  if (value && typeof value === 'object' && 'schemaVersion' in value) {
+    const version = (value as { schemaVersion?: unknown }).schemaVersion;
+    if (typeof version === 'number' && version > supported)
+      throw new StackStateError(
+        'invalid-state',
+        `${label} was written by a newer version of Stack (schema v${version}); upgrade Stack. No changes were made.`,
+      );
+  }
+};
+
+/** Parse persisted state, converting corruption into a clear typed error. */
+const parseState = <T>(
+  schema: { parse(value: unknown): T },
+  value: unknown,
+  label: string,
+): T => {
+  assertSupportedSchema(value, label);
+  try {
+    return schema.parse(value);
+  } catch (error) {
+    if (error instanceof StackStateError) throw error;
+    throw new StackStateError(
+      'invalid-state',
+      `${label} is corrupt or unreadable. Stack made no changes.`,
+      { cause: error },
+    );
+  }
+};
+
 const atomicWrite = async (file: string, value: string): Promise<void> => {
   await mkdir(path.dirname(file), { recursive: true });
   const temporary = path.join(
@@ -112,9 +150,20 @@ export const getOrCreateMachineIdentity = async (
 ): Promise<MachineIdentity> => {
   const file = statePaths(options.stackHome).machine;
   try {
-    return machineIdentitySchema.parse(await readJson(file));
+    return parseState(
+      machineIdentitySchema,
+      await readJson(file),
+      'Machine identity',
+    );
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    if (error instanceof StackStateError) throw error;
+    if (error instanceof SyntaxError)
+      throw new StackStateError(
+        'invalid-state',
+        'Machine identity is corrupt or unreadable. Stack made no changes.',
+        { cause: error },
+      );
+    if (!isNotFound(error)) throw error;
   }
   const identity = machineIdentitySchema.parse({
     schemaVersion: 1,
@@ -146,8 +195,10 @@ export const loadMainEnvironment = async ({
   stackHome,
 }: LoadMainEnvironmentOptions): Promise<LoadedEnvironmentState> => {
   try {
-    const machine = machineIdentitySchema.parse(
+    const machine = parseState(
+      machineIdentitySchema,
       await readJson(statePaths(stackHome).machine),
+      'Machine identity',
     );
     const paths = statePaths(stackHome, machine.machineId);
     const [manifestText, lockValue, baselineValue] = await Promise.all([
@@ -157,9 +208,17 @@ export const loadMainEnvironment = async ({
     ]);
     const state = {
       machine,
-      manifest: environmentManifestSchema.parse(parseYaml(manifestText)),
-      lock: environmentLockSchema.parse(lockValue),
-      baseline: machineEnvironmentBaselineSchema.parse(baselineValue),
+      manifest: parseState(
+        environmentManifestSchema,
+        parseYaml(manifestText),
+        'Environment manifest',
+      ),
+      lock: parseState(environmentLockSchema, lockValue, 'Environment lock'),
+      baseline: parseState(
+        machineEnvironmentBaselineSchema,
+        baselineValue,
+        'Machine baseline',
+      ),
     };
     if (
       state.baseline.machineId !== machine.machineId ||
@@ -176,12 +235,17 @@ export const loadMainEnvironment = async ({
       );
     return state;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+    if (isNotFound(error))
       throw new StackStateError(
         'environment-not-found',
         'main does not exist. Run stack init first.',
         { cause: error },
       );
-    throw error;
+    if (error instanceof StackStateError) throw error;
+    throw new StackStateError(
+      'invalid-state',
+      'main state is corrupt or unreadable. Stack made no changes.',
+      { cause: error },
+    );
   }
 };

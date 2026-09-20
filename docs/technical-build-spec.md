@@ -2900,3 +2900,41 @@ deferred). Remote trials reacquire references into the Store and run inside the
 Phase 6/6.1 isolated runtime without touching `main` or bindings. Using or trying a
 public Stack never executes the Skills' scripts as part of acquisition. Public
 snapshot storage, forking/republishing, and `stack switch` remain deferred.
+
+---
+
+## 92. Phase 10 V0.1 Scope Reconciliation and Release Engineering
+
+V0.1 freezes the command set: scan, init, status, diff, use, remove, run, try,
+login, logout, whoami, push, pull, publish. Normal `run` supports codex, cursor,
+and claude; isolated `try` is Codex-only.
+
+`stack switch` is deferred from V0.1. The Product Foundation keeps multiple named
+persistent Environments in the long-term model, but V0.1 exposes only `main` and
+has no named-Environment lifecycle, so a switch command would be meaningless.
+`stack switch` returns when that lifecycle exists; the concept is not removed
+from the Product Foundation.
+
+Distribution: the CLI is bundled into a single self-contained ESM binary (tsup),
+so the published package needs no pnpm workspace links or unpublished `@stack/*`
+packages and has no runtime dependencies. The npm name `stack` is taken by an
+unrelated package, so `npx stack` is not this project; the public package name is
+an owner decision (verified-available candidates are recorded in the release
+checklist). The installed binary remains `stack`. Version is `0.1.0` from the CLI
+package.
+
+Cross-process safety: `main` Environment mutation is guarded by an atomic
+filesystem lock (`open(...,'wx')`), so concurrent mutating processes are
+serialized and stale proposals are rejected by a re-read state comparison.
+Binding-registry and sync writes are atomic (temp-file + rename). Content-store
+and public/environment version commits are atomic and optimistic.
+
+Persisted `schemaVersion` fields are validated on read; a file whose version
+exceeds the supported version is rejected clearly rather than parsed as current.
+No migration framework ships in V0; version checks are consistent and corruption
+fails loudly without destructive auto-repair.
+
+Release engineering (cross-platform CI matrix, packed-install smoke, dependency/
+license/secret audits, documentation set, and the human release blockers) is
+tracked in `docs/release-checklist.md`. Publishing, production Supabase
+migration, OAuth configuration, and web deployment remain manual human actions.

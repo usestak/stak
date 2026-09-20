@@ -16,7 +16,7 @@
     "@stack/spec": "workspace:*",
     "@supabase/ssr": "0.7.0",
     "@supabase/supabase-js": "2.58.0",
-    "next": "15.5.4",
+    "next": "15.5.25",
     "react": "19.2.0",
     "react-dom": "19.2.0"
   },

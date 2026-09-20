@@ -9,7 +9,12 @@ permissions:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    name: validate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -39,3 +44,58 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: CLI smoke (self-contained bundle)
+        run: node packages/cli/dist/bin.js --version
+
+  cli-package-smoke:
+    name: packed CLI install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Pack and install into an isolated directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          tgz="$(cd packages/cli && npm pack --pack-destination "$RUNNER_TEMP" | tail -1)"
+          mkdir -p "$RUNNER_TEMP/rc" && cd "$RUNNER_TEMP/rc"
+          echo '{"name":"rc","private":true}' > package.json
+          npm install "$RUNNER_TEMP/$tgz" --no-save
+          ./node_modules/.bin/stack --version
+          ./node_modules/.bin/stack scan --help
+
+  demos:
+    name: controlled demonstrations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Configure Git identity for demo authoring repos
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "Stack CI"
+      - name: Phase 7 multi-agent demo
+        run: node scripts/phase7-controlled-demo.mjs
+      - name: Phase 8 two-machine cloud demo
+        run: node scripts/phase8-controlled-demo.mjs
+      - name: Phase 9 public ecosystem demo
+        run: node scripts/phase9-controlled-demo.mjs
+      - name: Phase 10 comprehensive V0 demo
+        run: node scripts/phase10-controlled-demo.mjs
