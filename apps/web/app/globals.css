@@ -1,0 +1,252 @@
+/* Stack Cloud — a calm, developer-tool design system.
+   Minimal, dense, strong typography, restrained borders, light + dark. */
+
+:root {
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --panel-subtle: #fafafa;
+  --text: #1a1a1a;
+  --muted: #6b7280;
+  --faint: #9ca3af;
+  --border: #ececec;
+  --border-strong: #dcdcdc;
+  --accent: #1a1a1a;
+  --accent-text: #ffffff;
+  --link: #2563eb;
+  --radius: 10px;
+  --mono:
+    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono',
+    monospace;
+  --sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0b0c;
+    --panel: #111214;
+    --panel-subtle: #141517;
+    --text: #ededed;
+    --muted: #9aa0a6;
+    --faint: #6b7280;
+    --border: #232427;
+    --border-strong: #2f3033;
+    --accent: #ededed;
+    --accent-text: #0b0b0c;
+    --link: #7aa2f7;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  line-height: 1.55;
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--link);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  background: var(--panel-subtle);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.08em 0.36em;
+}
+
+pre {
+  font-family: var(--mono);
+  font-size: 0.86rem;
+  background: var(--panel-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* ---- shell ---- */
+.site-header {
+  border-bottom: 1px solid var(--border);
+}
+.site-header-inner,
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+.site-header-inner {
+  display: flex;
+  align-items: center;
+  height: 56px;
+}
+.wordmark {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  font-size: 0.98rem;
+}
+.wordmark:hover {
+  text-decoration: none;
+}
+.page {
+  padding-top: 2.5rem;
+  padding-bottom: 4rem;
+}
+
+h1 {
+  font-size: 1.5rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.25rem;
+}
+h2 {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 2rem 0 0.75rem;
+}
+p {
+  margin: 0.6rem 0;
+}
+
+.muted {
+  color: var(--muted);
+}
+.mono {
+  font-family: var(--mono);
+}
+.lead {
+  color: var(--muted);
+  font-size: 1rem;
+  max-width: 48ch;
+}
+
+/* ---- cards & meta ---- */
+.card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 1.1rem 1.25rem;
+}
+.card + .card {
+  margin-top: 0.75rem;
+}
+.card-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin-top: 0.35rem;
+}
+.meta .dot::before {
+  content: '·';
+  margin-right: 1rem;
+  color: var(--faint);
+}
+
+/* ---- skills list ---- */
+.skills {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.skills li {
+  padding: 0.7rem 1rem;
+  border-top: 1px solid var(--border);
+}
+.skills li:first-child {
+  border-top: none;
+}
+.skill-name {
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  font-weight: 550;
+}
+.skill-desc {
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin-top: 0.15rem;
+}
+.skill-source {
+  color: var(--faint);
+  font-size: 0.8rem;
+  margin-top: 0.3rem;
+}
+.skill-source a {
+  color: var(--muted);
+}
+
+/* ---- button ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font: inherit;
+  font-weight: 550;
+  padding: 0.55rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+.btn:hover {
+  opacity: 0.9;
+  text-decoration: none;
+}
+.btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.btn-secondary {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.codechip {
+  font-size: 1.35rem;
+  font-family: var(--mono);
+  letter-spacing: 0.18em;
+  font-weight: 600;
+}
+.error {
+  color: #dc2626;
+}

@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 
+import './globals.css';
+
 export const metadata = {
   title: 'Stack Cloud',
   description: 'Portable AI agent environments.',
@@ -8,18 +10,15 @@ export const metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body
-        style={{
-          fontFamily:
-            'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
-          maxWidth: 640,
-          margin: '4rem auto',
-          padding: '0 1.5rem',
-          lineHeight: 1.6,
-          color: '#111',
-        }}
-      >
-        {children}
+      <body>
+        <header className="site-header">
+          <div className="site-header-inner">
+            <a href="/" className="wordmark">
+              Stack
+            </a>
+          </div>
+        </header>
+        <div className="page">{children}</div>
       </body>
     </html>
   );

@@ -39,14 +39,16 @@ export const registerTryCommand = (
       'resolve and inspect isolation without persistent mutation',
     )
     .option('--json', 'emit structured JSON (with --dry-run)')
+    .option('--verbose', 'show detailed isolation and runtime internals')
     .action(
       async (
         input: string,
         agent: string | undefined,
-        options: { dryRun?: boolean; json?: boolean },
+        options: { dryRun?: boolean; json?: boolean; verbose?: boolean },
       ) => {
         if (agent !== 'codex')
           throw new Error('Use: stack try <stack> -- codex');
+        const verbose = options.verbose === true;
         const detection = await dependencies.detectCodex();
         if (!detection.installed) throw new AgentNotInstalledError();
         const trial = await dependencies.resolveTry(input);
@@ -65,9 +67,9 @@ export const registerTryCommand = (
         await dependencies.preserveTry(trial);
         const preparation = await dependencies.prepareTry(trial);
         try {
-          dependencies.writeOut(renderTryReady(preparation));
+          dependencies.writeOut(renderTryReady(preparation, { verbose }));
           const result = await dependencies.launchTry(preparation, detection);
-          dependencies.writeOut(renderTryExit(result));
+          dependencies.writeOut(renderTryExit(result, { verbose }));
         } finally {
           await dependencies.cleanupTry(preparation);
         }

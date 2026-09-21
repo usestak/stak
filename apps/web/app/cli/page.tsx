@@ -14,7 +14,7 @@ export default async function CliPage({
     return (
       <main>
         <h1>Device authorization</h1>
-        <p>
+        <p className="muted">
           No code provided. Start from your terminal with{' '}
           <code>stack login</code>.
         </p>
@@ -30,15 +30,16 @@ export default async function CliPage({
     const next = `/cli?code=${encodeURIComponent(code)}`;
     return (
       <main>
-        <h1>Authorize Stack CLI</h1>
-        <p>
-          Verification code: <strong>{code}</strong>
-        </p>
-        <p>
-          <a href={`/auth/login?next=${encodeURIComponent(next)}`}>
+        <h1>Authorize the Stack CLI</h1>
+        <p className="muted">Verification code</p>
+        <p className="codechip">{code}</p>
+        <p style={{ marginTop: '1.5rem' }}>
+          <a
+            className="btn"
+            href={`/auth/login?next=${encodeURIComponent(next)}`}
+          >
             Sign in with GitHub
-          </a>{' '}
-          to continue.
+          </a>
         </p>
       </main>
     );
@@ -46,14 +47,14 @@ export default async function CliPage({
 
   return (
     <main>
-      <h1>Authorize Stack CLI</h1>
-      <p>Confirm this matches the code shown in your terminal:</p>
-      <p>
-        <strong style={{ fontSize: '1.4rem', letterSpacing: '0.15rem' }}>
-          {code}
-        </strong>
+      <h1>Authorize the Stack CLI</h1>
+      <p className="muted">
+        Confirm this matches the code shown in your terminal:
       </p>
-      <AuthorizeButton userCode={code} />
+      <p className="codechip">{code}</p>
+      <div style={{ marginTop: '1.5rem' }}>
+        <AuthorizeButton userCode={code} />
+      </div>
     </main>
   );
 }

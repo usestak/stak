@@ -336,6 +336,23 @@ describe('Stack CLI', () => {
       },
     });
     expect(calls).toEqual(['preserve', 'prepare', 'launch', 'cleanup']);
+    expect(result.output).toContain('Trying trial with Codex...');
+    expect(result.output).toContain('temporary workspace');
+    expect(result.output).toContain('Your main Stack will not be changed.');
+    expect(result.output).toContain('Trial finished.');
+    expect(result.output).toContain('Temporary files cleaned up.');
+    // Internal isolation jargon stays out of default output.
+    expect(result.output).not.toContain('disposable scratch workspace');
+  });
+
+  it('shows detailed trial isolation under --verbose', async () => {
+    const result = await runProgram([
+      'try',
+      './trial',
+      '--verbose',
+      '--',
+      'codex',
+    ]);
     expect(result.output).toContain('disposable scratch workspace');
     expect(result.output).toContain('Temporary Environment cleaned');
   });
@@ -561,10 +578,14 @@ describe('Stack CLI', () => {
       },
     });
     expect(calls).toEqual(['apply', 'verify', 'launch']);
-    expect(result.output).toContain('Bindings applied and verified');
+    expect(result.output).toContain('Setting up Codex...');
+    expect(result.output).toContain('1 skill added.');
+    expect(result.output).toContain('Codex is ready.');
+    expect(result.output).toContain('Launching Codex');
+    expect(result.output).not.toContain('Binding root');
   });
 
-  it('renders dry-run additions and conflicts for humans', async () => {
+  it('renders a beginner-friendly run dry-run', async () => {
     const addPlan: BindingPlan = {
       ...plan,
       operations: [
@@ -577,13 +598,43 @@ describe('Stack CLI', () => {
         },
       ],
     };
-    expect(
-      (
-        await runProgram(['run', 'codex', '--dry-run'], {
-          planCodexBindings: async () => addPlan,
-        })
-      ).output,
-    ).toContain('Add      1');
+    const result = await runProgram(['run', 'codex', '--dry-run'], {
+      planCodexBindings: async () => addPlan,
+    });
+    expect(result.output).toContain('Codex will be set up with 1 skill.');
+    expect(result.output).toContain('No changes were made.');
+    expect(result.output).not.toContain('Binding root');
+  });
+
+  it('reports an already-set-up agent without jargon', async () => {
+    const result = await runProgram(['run', 'codex'], {
+      planCodexBindings: async () => plan,
+    });
+    expect(result.output).toContain('Codex is already set up with 0 skills.');
+    expect(result.output).toContain('Launching Codex');
+  });
+
+  it('exposes the detailed binding plan under --verbose', async () => {
+    const addPlan: BindingPlan = {
+      ...plan,
+      operations: [
+        {
+          state: 'add',
+          entryId: 'skill_12345678',
+          skillName: 'demo',
+          contentHash: `sha256:${'a'.repeat(64)}`,
+          targetPath: '/home/test/.agents/skills/demo',
+        },
+      ],
+    };
+    const result = await runProgram(
+      ['run', 'codex', '--dry-run', '--verbose'],
+      {
+        planCodexBindings: async () => addPlan,
+      },
+    );
+    expect(result.output).toContain('Add      1');
+    expect(result.output).toContain('Binding root');
   });
 
   it.each(['init', 'status', 'diff'])(
@@ -660,8 +711,57 @@ describe('Stack CLI', () => {
     });
     expect(project).toBe(false);
     expect(received).toBe(emptyResult);
-    expect(result.output).toContain('main created.');
+    expect(result.output).toContain('Initialized Stack.');
+    expect(result.output).toContain('No skills found yet.');
+    expect(result.output).not.toContain('Preservation');
+  });
+
+  it('reports a beginner-friendly init summary', async () => {
+    const result = await runProgram(['init'], {
+      initialize: async () => ({
+        environment: 'main',
+        importedSkills: 31,
+        excludedInvalid: 0,
+        excludedProject: 0,
+        physicalLocations: 31,
+        consolidatedDuplicates: 0,
+        nameCollisions: 0,
+        localOrUnknown: 0,
+        preservedContents: 31,
+        reusedContents: 0,
+        references: 0,
+        snapshots: 31,
+        integrityChecks: 31,
+        files: { manifest: '', lock: '', baseline: '', machine: '' },
+      }),
+    });
+    expect(result.output).toContain('Initialized Stack.');
+    expect(result.output).toContain('Found 31 skills.');
+    expect(result.output).toContain('Saved them to main.');
+    expect(result.output).not.toContain('integrity checks');
+  });
+
+  it('shows detailed init diagnostics under --verbose', async () => {
+    const result = await runProgram(['init', '--verbose'], {
+      initialize: async () => ({
+        environment: 'main',
+        importedSkills: 31,
+        excludedInvalid: 0,
+        excludedProject: 0,
+        physicalLocations: 31,
+        consolidatedDuplicates: 0,
+        nameCollisions: 0,
+        localOrUnknown: 0,
+        preservedContents: 31,
+        reusedContents: 0,
+        references: 0,
+        snapshots: 31,
+        integrityChecks: 31,
+        files: { manifest: '', lock: '', baseline: '', machine: '' },
+      }),
+    });
     expect(result.output).toContain('Preservation');
+    expect(result.output).toContain('main created.');
   });
 
   it.each([
@@ -673,15 +773,50 @@ describe('Stack CLI', () => {
     expect(result.output.trimStart().startsWith('{')).toBe(true);
   });
 
-  it('renders concise human status and diff with read-only assurance', async () => {
+  it('renders beginner-friendly status and diff without internal jargon', async () => {
     const status = await runProgram(['status']);
     const diff = await runProgram(['diff']);
+    expect(status.output).toContain('Stack: main');
+    expect(status.output).toContain('0 skills ready');
+    expect(status.output).not.toContain('Local preservation');
+    expect(status.output).not.toContain('Restoration strategy');
+    expect(status.output).not.toContain('placement');
+    expect(diff.output).toContain('No changes.');
+    expect(diff.output).not.toContain('Environment diff: main');
+    expect(diff.output).not.toContain('drift');
+  });
+
+  it('exposes internal state under --verbose for status and diff', async () => {
+    const status = await runProgram(['status', '--verbose']);
+    const diff = await runProgram(['diff', '--verbose']);
     expect(status.output).toContain('Environment: main');
     expect(status.output).toContain('Local preservation');
     expect(status.output).toContain('Restoration strategy');
-    expect(status.output).toContain('No changes were made.');
     expect(diff.output).toContain('Environment diff: main');
-    expect(diff.output).toContain('No changes were made.');
+  });
+
+  it('shows agent readiness in status when detection is available', async () => {
+    const result = await runProgram(['status'], {
+      detectAgents: async () => [
+        { agent: 'codex', ready: true },
+        { agent: 'claude', ready: false },
+      ],
+    });
+    expect(result.output).toContain('Codex');
+    expect(result.output).toContain('ready');
+    expect(result.output).toContain('not set up');
+  });
+
+  it('summarizes missing skills and points to diff', async () => {
+    const result = await runProgram(['status'], {
+      status: async () => ({
+        ...emptyStatus,
+        summary: { ...emptyStatus.summary, satisfied: 29, missing: 2 },
+      }),
+    });
+    expect(result.output).toContain('29 skills ready');
+    expect(result.output).toContain('2 skills missing');
+    expect(result.output).toContain('Run `stack diff` to see what changed.');
   });
 
   it('prints the package version', async () => {
@@ -781,12 +916,69 @@ describe('Stack CLI', () => {
     expect(applied).toBe(false);
   });
 
-  it('previews a pull without changing agent bindings', async () => {
+  it('previews a pull without changing agent setup', async () => {
     const result = await runProgram(['pull', '--dry-run'], {
+      cloudPreparePull: async () => basePullPlan,
+    });
+    expect(result.output).toContain('Pull preview');
+    expect(result.output).toContain('2 skills will be downloaded.');
+    expect(result.output).toContain('Your agent setup will not be changed.');
+    expect(result.output).not.toContain('Environment digest');
+  });
+
+  it('previews a pull with cloud internals under --verbose', async () => {
+    const result = await runProgram(['pull', '--dry-run', '--verbose'], {
       cloudPreparePull: async () => basePullPlan,
     });
     expect(result.output).toContain('Cloud main');
     expect(result.output).toContain('Agent bindings will not be changed.');
+    expect(result.output).toContain('Environment digest');
+  });
+
+  it('previews and applies a push in beginner-friendly language', async () => {
+    const preview = await runProgram(['push', '--dry-run'], {
+      cloudPreparePush: async () => basePushPlan,
+    });
+    expect(preview.output).toContain('Push preview');
+    expect(preview.output).toContain('2 skills will be uploaded.');
+    expect(preview.output).toContain('main will be created in the cloud.');
+    expect(preview.output).not.toContain('Environment digest');
+
+    const applied = await runProgram(['push', '--yes'], {
+      cloudPreparePush: async () => basePushPlan,
+      cloudApplyPush: async () => ({
+        environment: 'main',
+        versionId: '00000000-0000-4000-8000-000000000001',
+        versionNumber: 1,
+        digest: basePushPlan.digest,
+        createdNew: true,
+        uploaded: 2,
+      }),
+    });
+    expect(applied.output).toContain('Pushing main...');
+    expect(applied.output).toContain('2 skills uploaded.');
+    expect(applied.output).toContain('main created in the cloud.');
+  });
+
+  it('applies a pull with a beginner-friendly summary and next step', async () => {
+    const result = await runProgram(['pull', '--yes'], {
+      cloudPreparePull: async () => basePullPlan,
+      cloudApplyPull: async () => ({
+        status: 'restored',
+        environment: 'main',
+        desiredSkills: 31,
+        importedStackVersions: 1,
+        snapshotsDownloaded: 31,
+        referencesRestored: 0,
+        reusedFromStore: 0,
+        localSnapshotRecords: 31,
+        digest: basePullPlan.remoteDigest ?? `sha256:${'a'.repeat(64)}`,
+      }),
+    });
+    expect(result.output).toContain('Pulling main...');
+    expect(result.output).toContain('31 skills downloaded.');
+    expect(result.output).toContain('main is ready.');
+    expect(result.output).toContain('Run `stack run codex` to set up Codex.');
   });
 
   it('emits parseable pull dry-run JSON', async () => {
@@ -812,6 +1004,18 @@ describe('Stack CLI', () => {
     const parsed = JSON.parse(result.output);
     expect(parsed).toMatchObject({ githubUsername: 'temi' });
     expect(result.output).not.toContain('token');
+  });
+
+  it('renders a concise whoami with name and handle', async () => {
+    const result = await runProgram(['whoami'], {
+      cloudWhoami: async () => ({
+        userId: '00000000-0000-4000-8000-00000000aaaa',
+        githubUsername: 'stephentony100',
+        displayName: 'Temiloluwa',
+        source: 'server',
+      }),
+    });
+    expect(result.output).toBe('Temiloluwa\n@stephentony100\n');
   });
 
   it('reports logout outcomes', async () => {

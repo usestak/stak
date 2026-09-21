@@ -105,6 +105,7 @@ export type ProgramDependencies = {
   scan(options: { project: boolean }): Promise<ScanResult>;
   initialize(scanResult: ScanResult): Promise<InitializeMainEnvironmentResult>;
   status(scanResult: ScanResult): Promise<EnvironmentStatus>;
+  detectAgents?(): Promise<Array<{ agent: AgentId; ready: boolean }>>;
   diff(scanResult: ScanResult): Promise<EnvironmentDiff>;
   prepareUse(input: string): Promise<StackUseProposal | StackRemoteUseProposal>;
   applyUse(
@@ -194,6 +195,19 @@ const defaultDependencies: ProgramDependencies = {
     initializeMainEnvironment({ stackHome, scanResult }),
   status: async (scanResult) =>
     statusMainEnvironment({ stackHome, scanResult }),
+  detectAgents: async () => {
+    const detections = await Promise.all(
+      [codex, cursor, claude].map((adapter) =>
+        adapter.detect().catch(() => undefined),
+      ),
+    );
+    return detections
+      .filter((detection): detection is AgentDetection => detection != null)
+      .map((detection) => ({
+        agent: detection.agent,
+        ready: detection.installed,
+      }));
+  },
   diff: async (scanResult) => diffMainEnvironment({ stackHome, scanResult }),
   prepareUse: async (input) => {
     if (!isPublicStackRef(input)) return prepareStackUse({ stackHome, input });

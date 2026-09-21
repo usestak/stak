@@ -18,15 +18,22 @@ export const registerPullCommand = (
 ): void => {
   program
     .command('pull')
-    .description('Restore the main Environment from Stack Cloud')
+    .description('Download your main Stack from the Cloud')
     .option(
       '--dry-run',
       'preview the pull without downloading or mutating main',
     )
     .option('--json', 'emit structured JSON for dry-run')
     .option('--yes', 'restore local main non-interactively')
+    .option('--verbose', 'show detailed cloud internals')
     .action(
-      async (options: { dryRun?: boolean; json?: boolean; yes?: boolean }) => {
+      async (options: {
+        dryRun?: boolean;
+        json?: boolean;
+        yes?: boolean;
+        verbose?: boolean;
+      }) => {
+        const verbose = options.verbose === true;
         const plan = await dependencies.cloudPreparePull();
         if (options.json) {
           if (!options.dryRun)
@@ -39,15 +46,23 @@ export const registerPullCommand = (
         // A local conflict blocks pull, and --yes never bypasses it.
         if (plan.conflict)
           throw new LocalEnvironmentConflictError(plan.conflict.message);
-        dependencies.writeOut(renderPullPlan(plan));
-        if (options.dryRun) return;
-        if (plan.mode === 'noop') return;
+        if (options.dryRun) {
+          dependencies.writeOut(renderPullPlan(plan, { verbose }));
+          return;
+        }
+        if (plan.mode === 'noop') {
+          dependencies.writeOut(renderPullPlan(plan, { verbose }));
+          return;
+        }
         if (!options.yes && !(await dependencies.confirm('Pull main?'))) {
           dependencies.writeOut('Cancelled. No changes were made.\n');
           return;
         }
+        dependencies.writeOut('Pulling main...\n\n');
         dependencies.writeOut(
-          renderPullResult(await dependencies.cloudApplyPull(plan)),
+          renderPullResult(await dependencies.cloudApplyPull(plan), {
+            verbose,
+          }),
         );
       },
     );

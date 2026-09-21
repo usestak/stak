@@ -9,6 +9,7 @@ import { StackAdapterError } from '@stack/adapters';
 import { StackCloudError } from '@stack/cloud-client';
 
 import { createProgram } from './program.js';
+import { formatCliError } from './ui/errors.js';
 
 try {
   await createProgram().parseAsync(process.argv);
@@ -20,7 +21,9 @@ try {
     error instanceof StackAdapterError ||
     error instanceof StackCloudError
   ) {
-    process.stderr.write(`${error.message}\n`);
+    process.stderr.write(
+      `${formatCliError(error, { verbose: process.argv.includes('--verbose') })}\n`,
+    );
     process.exitCode = 1;
   } else throw error;
 }

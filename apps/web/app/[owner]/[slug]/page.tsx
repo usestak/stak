@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { isSafeDisplayUrl } from '@stack/spec';
 
 import { getCloudService } from '@/lib/cloud-service';
+import { relativeTime, skillCount } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,39 +29,43 @@ export default async function StackPage({
   return (
     <main>
       <h1>{stack.displayName}</h1>
-      <p>
-        <code>{ref}</code>
-        {stack.latest ? ` · v${stack.latest.version.versionNumber}` : ''}
-      </p>
-      {stack.description ? <p>{stack.description}</p> : null}
+      <div className="meta">
+        <span className="mono">{ref}</span>
+        <span className="dot">{skillCount(requirements.length)}</span>
+        {stack.latest ? (
+          <span className="dot">
+            Cloud version {stack.latest.version.versionNumber}
+          </span>
+        ) : null}
+        <span className="dot">Updated {relativeTime(stack.updatedAt)}</span>
+      </div>
+      {stack.description ? <p className="muted">{stack.description}</p> : null}
 
       <h2>Install</h2>
       <pre>
-        <code>{`stack use ${ref}`}</code>
+        <code>{`stack use ${ref}\nstack try ${ref} -- codex`}</code>
       </pre>
-      <pre>
-        <code>{`stack try ${ref} -- codex`}</code>
-      </pre>
-      <p>
-        Supported agents: Codex, Cursor, Claude Code. Isolated{' '}
-        <code>stack try</code> is Codex-only in V0.
+      <p className="muted">
+        Supported agents: Codex, Cursor, Claude. Isolated <code>stack try</code>{' '}
+        is Codex-only in V0.1.
       </p>
 
-      <h2>Skills ({requirements.length})</h2>
+      <h2>Skills</h2>
       {requirements.length === 0 ? (
-        <p>This Stack has no published versions yet.</p>
+        <p className="muted">This Stack has no published versions yet.</p>
       ) : (
-        <ul>
+        <ul className="skills">
           {requirements.map((requirement) => {
             const reference = requirement.restoration.reference;
             return (
               <li key={requirement.id}>
-                <strong>{requirement.name}</strong>
+                <div className="skill-name">{requirement.name}</div>
                 {requirement.metadata.description ? (
-                  <div>{requirement.metadata.description}</div>
+                  <div className="skill-desc">
+                    {requirement.metadata.description}
+                  </div>
                 ) : null}
-                <div>
-                  Source:{' '}
+                <div className="skill-source">
                   {isSafeDisplayUrl(reference.remote) ? (
                     <a
                       href={reference.remote}
@@ -69,17 +74,16 @@ export default async function StackPage({
                       {reference.remote}
                     </a>
                   ) : (
-                    <code>{reference.remote}</code>
+                    reference.remote
                   )}{' '}
-                  <code>{reference.path}</code> @{' '}
-                  <code>{reference.revision.slice(0, 12)}</code>
+                  · {reference.path} @ {reference.revision.slice(0, 12)}
                 </div>
               </li>
             );
           })}
         </ul>
       )}
-      <p>
+      <p className="muted" style={{ fontSize: '0.82rem', marginTop: '1rem' }}>
         Source references are provided by the author. Repository accessibility
         is not verified by Stack.
       </p>

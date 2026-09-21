@@ -18,10 +18,13 @@ export const registerInitCommand = (
   program
     .command('init')
     .description('Create main from currently discovered global Skills')
-    .action(async () => {
+    .option('--verbose', 'show detailed import diagnostics')
+    .action(async (options: { verbose?: boolean }) => {
       const result = await dependencies.initialize(
         await dependencies.scan({ project: false }),
       );
-      dependencies.writeOut(renderInitResult(result));
+      dependencies.writeOut(
+        renderInitResult(result, { verbose: options.verbose === true }),
+      );
     });
 };

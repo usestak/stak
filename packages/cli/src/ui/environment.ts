@@ -1,14 +1,22 @@
 import type { InitializeMainEnvironmentResult } from '@stack/core';
 import type {
+  AgentId,
   EnvironmentDiff,
   EnvironmentStatus,
   SkillStatus,
 } from '@stack/spec';
 
-export const renderInitResult = (
-  result: InitializeMainEnvironmentResult,
-): string => {
-  const lines = [
+import { agentLabel, block, changes, skills } from './format.js';
+
+export type RenderOptions = { verbose?: boolean };
+export type AgentReadiness = { agent: AgentId; ready: boolean };
+
+// ---------------------------------------------------------------------------
+// init
+// ---------------------------------------------------------------------------
+
+const renderInitVerbose = (result: InitializeMainEnvironmentResult): string =>
+  block([
     'Creating main...',
     '',
     `${result.importedSkills} valid global Skills imported`,
@@ -25,27 +33,44 @@ export const renderInitResult = (
     `${result.references} portable Git references`,
     `${result.snapshots} local snapshots`,
     `${result.integrityChecks}/${result.importedSkills} integrity checks passed`,
-  ];
-  lines.push(
     '',
     'main created.',
     '',
     'No source Skill files were modified.',
+  ]);
+
+export const renderInitResult = (
+  result: InitializeMainEnvironmentResult,
+  options: RenderOptions = {},
+): string => {
+  if (options.verbose) return renderInitVerbose(result);
+  if (result.importedSkills === 0)
+    return block([
+      'Initialized Stack.',
+      '',
+      'No skills found yet.',
+      'Add Skills to your agents, then run `stack init` again.',
+    ]);
+  return block([
+    'Initialized Stack.',
     '',
-  );
-  return lines.join('\n');
+    `Found ${skills(result.importedSkills)}.`,
+    'Saved them to main.',
+  ]);
 };
 
-const skillLines = (title: string, marker: string, skills: SkillStatus[]) => {
-  const matching = skills.filter(
-    (skill) => skill.state === title.toLowerCase(),
-  );
+// ---------------------------------------------------------------------------
+// status
+// ---------------------------------------------------------------------------
+
+const skillLines = (title: string, marker: string, list: SkillStatus[]) => {
+  const matching = list.filter((skill) => skill.state === title.toLowerCase());
   return matching.length === 0
     ? []
     : ['', title, ...matching.map((skill) => `${marker} ${skill.name}`)];
 };
 
-export const renderStatus = (status: EnvironmentStatus): string => {
+const renderStatusVerbose = (status: EnvironmentStatus): string => {
   const summary = status.summary;
   const lines = [
     `Environment: ${status.environment}`,
@@ -107,9 +132,38 @@ export const renderStatus = (status: EnvironmentStatus): string => {
       'Invalid discovered Skills',
       `${status.invalidSkills.length}`,
     );
-  lines.push('', 'No changes were made.', '');
-  return lines.join('\n');
+  lines.push('', 'No changes were made.');
+  return block(lines);
 };
+
+export const renderStatus = (
+  status: EnvironmentStatus,
+  options: RenderOptions & { agents?: AgentReadiness[] } = {},
+): string => {
+  if (options.verbose) return renderStatusVerbose(status);
+  const summary = status.summary;
+  const problems = summary.modified + summary.missing;
+  const lines: Array<string | false> = [
+    `Stack: ${status.environment}`,
+    '',
+    `${skills(summary.satisfied)} ready`,
+    summary.modified > 0 && `${skills(summary.modified)} modified`,
+    summary.missing > 0 && `${skills(summary.missing)} missing`,
+  ];
+  if (options.agents && options.agents.length > 0) {
+    lines.push('');
+    for (const agent of options.agents)
+      lines.push(
+        `${agentLabel(agent.agent).padEnd(9)}${agent.ready ? 'ready' : 'not set up'}`,
+      );
+  }
+  if (problems > 0) lines.push('', 'Run `stack diff` to see what changed.');
+  return block(lines);
+};
+
+// ---------------------------------------------------------------------------
+// diff
+// ---------------------------------------------------------------------------
 
 const sourceLabel = (source: SkillStatus['desiredSource']): string => {
   if (!source) return 'ambiguous or unavailable';
@@ -118,7 +172,7 @@ const sourceLabel = (source: SkillStatus['desiredSource']): string => {
   return source.type;
 };
 
-export const renderDiff = (diff: EnvironmentDiff): string => {
+const renderDiffVerbose = (diff: EnvironmentDiff): string => {
   const lines = [`Environment diff: ${diff.environment}`];
   for (const entry of diff.entries.filter(
     (item) =>
@@ -202,6 +256,32 @@ export const renderDiff = (diff: EnvironmentDiff): string => {
     diff.placementDrift.length === 0
   )
     lines.push('', 'No drift detected.');
-  lines.push('', 'No changes were made.', '');
-  return lines.join('\n');
+  lines.push('', 'No changes were made.');
+  return block(lines);
+};
+
+const groupNames = (diff: EnvironmentDiff, state: string): string[] =>
+  diff.entries
+    .filter((entry) => entry.state === state)
+    .map((entry) => entry.name)
+    .sort((a, b) => a.localeCompare(b));
+
+export const renderDiff = (
+  diff: EnvironmentDiff,
+  options: RenderOptions = {},
+): string => {
+  if (options.verbose) return renderDiffVerbose(diff);
+  const missing = groupNames(diff, 'missing');
+  const modified = groupNames(diff, 'modified');
+  const uncertain = groupNames(diff, 'uncertain');
+  const total = missing.length + modified.length + uncertain.length;
+  if (total === 0) return block(['No changes.']);
+  const group = (title: string, names: string[]) =>
+    names.length > 0 ? ['', title, ...names.map((name) => `  ${name}`)] : [];
+  return block([
+    changes(total),
+    ...group('Missing', missing),
+    ...group('Modified', modified),
+    ...group('Uncertain', uncertain),
+  ]);
 };

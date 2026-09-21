@@ -8,13 +8,17 @@ import type {
 } from '@stack/core';
 import type { PublishPublicStackVersionResponse } from '@stack/spec';
 
+import { block, skills } from './format.js';
+
+export type RenderOptions = { verbose?: boolean };
+
 const shortDigest = (digest: string | null): string =>
   digest ? `${digest.slice(0, 22)}…` : '-';
 
 const row = (label: string, value: string | number): string =>
   `${label.padEnd(24)}${value}\n`;
 
-export const renderPushPlan = (plan: PushPlan, dryRun: boolean): string => {
+const renderPushPlanVerbose = (plan: PushPlan, dryRun: boolean): string => {
   const lines = [
     'Environment: main',
     '',
@@ -54,6 +58,27 @@ export const renderPushPlan = (plan: PushPlan, dryRun: boolean): string => {
   return `${lines.join('\n')}\n`;
 };
 
+export const renderPushPlan = (
+  plan: PushPlan,
+  dryRun: boolean,
+  options: RenderOptions = {},
+): string => {
+  if (options.verbose) return renderPushPlanVerbose(plan, dryRun);
+  if (plan.noop) return block(['Everything is already up to date.']);
+  return block([
+    'Push preview',
+    '',
+    plan.remoteExists
+      ? `${skills(plan.snapshotsToUpload.length)} changed.`
+      : `${skills(plan.desiredSkills)} will be uploaded.`,
+    plan.remoteExists
+      ? 'main will be updated.'
+      : 'main will be created in the cloud.',
+    '',
+    'No changes were made.',
+  ]);
+};
+
 export const pushPlanJson = (plan: PushPlan) => ({
   environment: 'main',
   dryRun: true,
@@ -74,17 +99,27 @@ export const pushPlanJson = (plan: PushPlan) => ({
   snapshotsToUpload: plan.snapshotsToUpload,
 });
 
-export const renderPushResult = (result: ApplyPushResult): string =>
-  [
-    'main pushed successfully.',
-    '',
-    row('Cloud version', result.versionNumber).trimEnd(),
-    row('Environment digest', shortDigest(result.digest)).trimEnd(),
-    row('Private snapshots uploaded', result.uploaded).trimEnd(),
-    '',
-  ].join('\n');
+export const renderPushResult = (
+  result: ApplyPushResult,
+  options: RenderOptions = {},
+): string => {
+  if (options.verbose)
+    return [
+      'main pushed successfully.',
+      '',
+      row('Cloud version', result.versionNumber).trimEnd(),
+      row('Environment digest', shortDigest(result.digest)).trimEnd(),
+      row('Private snapshots uploaded', result.uploaded).trimEnd(),
+      '',
+    ].join('\n');
+  const location = result.versionNumber === 1 ? 'created' : 'updated';
+  return block([
+    result.uploaded > 0 && `${skills(result.uploaded)} uploaded.`,
+    `main ${location} in the cloud.`,
+  ]);
+};
 
-export const renderPullPlan = (plan: PullPlan): string => {
+const renderPullPlanVerbose = (plan: PullPlan): string => {
   const lines = [
     'Cloud main',
     '',
@@ -125,6 +160,22 @@ export const renderPullPlan = (plan: PullPlan): string => {
   return `${lines.join('\n')}\n`;
 };
 
+export const renderPullPlan = (
+  plan: PullPlan,
+  options: RenderOptions = {},
+): string => {
+  if (options.verbose) return renderPullPlanVerbose(plan);
+  if (plan.mode === 'noop') return block(['Everything is already up to date.']);
+  return block([
+    'Pull preview',
+    '',
+    `${skills(plan.restore?.desiredSkills ?? 0)} will be downloaded.`,
+    'Your agent setup will not be changed.',
+    '',
+    'No changes were made.',
+  ]);
+};
+
 export const pullPlanJson = (plan: PullPlan) => ({
   environment: 'main',
   dryRun: true,
@@ -143,20 +194,31 @@ export const pullPlanJson = (plan: PullPlan) => ({
   alreadyPresent: plan.restore?.alreadyPresent ?? [],
 });
 
-export const renderPullResult = (result: ApplyPullResult): string => {
-  if (result.status === 'noop') return 'main is already up to date.\n';
-  return [
-    'main pulled successfully.',
+export const renderPullResult = (
+  result: ApplyPullResult,
+  options: RenderOptions = {},
+): string => {
+  if (result.status === 'noop')
+    return block(['Everything is already up to date.']);
+  if (options.verbose)
+    return [
+      'main pulled successfully.',
+      '',
+      row('Desired Skills', result.desiredSkills).trimEnd(),
+      row('Imported Stack versions', result.importedStackVersions).trimEnd(),
+      row('Snapshots downloaded', result.snapshotsDownloaded).trimEnd(),
+      row('References restored', result.referencesRestored).trimEnd(),
+      row('Environment digest', shortDigest(result.digest)).trimEnd(),
+      '',
+      'Local desired state restored. Run stack run <agent> to project it into agent directories.',
+      '',
+    ].join('\n');
+  return block([
+    `${skills(result.desiredSkills)} downloaded.`,
+    'main is ready.',
     '',
-    row('Desired Skills', result.desiredSkills).trimEnd(),
-    row('Imported Stack versions', result.importedStackVersions).trimEnd(),
-    row('Snapshots downloaded', result.snapshotsDownloaded).trimEnd(),
-    row('References restored', result.referencesRestored).trimEnd(),
-    row('Environment digest', shortDigest(result.digest)).trimEnd(),
-    '',
-    'Local desired state restored. Run stack run <agent> to project it into agent directories.',
-    '',
-  ].join('\n');
+    'Run `stack run codex` to set up Codex.',
+  ]);
 };
 
 const ownerLabel = (owner: string | null) => owner ?? '<you>';

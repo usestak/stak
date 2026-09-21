@@ -21,12 +21,19 @@ export const registerPushCommand = (
 ): void => {
   program
     .command('push')
-    .description('Push the local main Environment to Stack Cloud')
+    .description('Upload your main Stack to the Cloud')
     .option('--dry-run', 'preview the push without uploading or committing')
     .option('--json', 'emit structured JSON for dry-run')
     .option('--yes', 'create the cloud version non-interactively')
+    .option('--verbose', 'show detailed cloud internals')
     .action(
-      async (options: { dryRun?: boolean; json?: boolean; yes?: boolean }) => {
+      async (options: {
+        dryRun?: boolean;
+        json?: boolean;
+        yes?: boolean;
+        verbose?: boolean;
+      }) => {
+        const verbose = options.verbose === true;
         const plan = await dependencies.cloudPreparePush();
         if (options.json) {
           if (!options.dryRun)
@@ -41,15 +48,23 @@ export const registerPushCommand = (
           throw plan.conflict.kind === 'remote-newer'
             ? new RemoteEnvironmentConflictError(plan.conflict.message)
             : new LocalEnvironmentConflictError(plan.conflict.message);
-        dependencies.writeOut(renderPushPlan(plan, options.dryRun === true));
-        if (options.dryRun) return;
-        if (plan.noop) return;
+        if (options.dryRun) {
+          dependencies.writeOut(renderPushPlan(plan, true, { verbose }));
+          return;
+        }
+        if (plan.noop) {
+          dependencies.writeOut(renderPushPlan(plan, false, { verbose }));
+          return;
+        }
         if (!options.yes && !(await dependencies.confirm('Push main?'))) {
           dependencies.writeOut('Cancelled. No changes were made.\n');
           return;
         }
+        dependencies.writeOut('Pushing main...\n\n');
         dependencies.writeOut(
-          renderPushResult(await dependencies.cloudApplyPush(plan)),
+          renderPushResult(await dependencies.cloudApplyPush(plan), {
+            verbose,
+          }),
         );
       },
     );

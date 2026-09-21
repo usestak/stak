@@ -32,9 +32,7 @@ export const registerWhoamiCommand = (
         return;
       }
       const name = me.displayName ?? me.githubUsername ?? me.userId;
-      const github = me.githubUsername
-        ? `\nGitHub:\n@${me.githubUsername}\n`
-        : '';
-      dependencies.writeOut(`Signed in as:\n${name}\n${github}`);
+      const github = me.githubUsername ? `\n@${me.githubUsername}` : '';
+      dependencies.writeOut(`${name}${github}\n`);
     });
 };

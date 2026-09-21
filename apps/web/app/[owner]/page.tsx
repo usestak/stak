@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 
 import { getCloudService } from '@/lib/cloud-service';
+import { relativeTime } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,24 +24,42 @@ export default async function ProfilePage({
   return (
     <main>
       <h1>@{profile.owner}</h1>
-      {profile.displayName ? <p>{profile.displayName}</p> : null}
+      {profile.displayName ? (
+        <p className="muted">{profile.displayName}</p>
+      ) : null}
+
       <h2>Public Stacks</h2>
       {profile.stacks.length === 0 ? (
-        <p>No public Stacks yet.</p>
+        <p className="muted">No public Stacks yet.</p>
       ) : (
-        <ul>
-          {profile.stacks.map((stack) => (
-            <li key={stack.slug}>
-              <a href={`/@${profile.owner}/${stack.slug}`}>
-                {stack.displayName}
-              </a>
-              {stack.latestVersionNumber
-                ? ` · v${stack.latestVersionNumber}`
-                : ''}
-              {stack.description ? <div>{stack.description}</div> : null}
-            </li>
-          ))}
-        </ul>
+        profile.stacks.map((stack) => (
+          <a
+            key={stack.slug}
+            className="card"
+            href={`/@${profile.owner}/${stack.slug}`}
+            style={{ display: 'block', color: 'inherit' }}
+          >
+            <div className="card-title">{stack.displayName}</div>
+            <div className="meta">
+              <span className="mono">
+                @{profile.owner}/{stack.slug}
+              </span>
+              {stack.latestVersionNumber ? (
+                <span className="dot">
+                  Cloud version {stack.latestVersionNumber}
+                </span>
+              ) : null}
+              <span className="dot">
+                Updated {relativeTime(stack.updatedAt)}
+              </span>
+            </div>
+            {stack.description ? (
+              <div className="muted" style={{ marginTop: '0.4rem' }}>
+                {stack.description}
+              </div>
+            ) : null}
+          </a>
+        ))
       )}
     </main>
   );

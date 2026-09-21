@@ -92,6 +92,14 @@ const displayName = (user: {
   displayName?: string | undefined;
   userId: string;
 }) => user.displayName ?? user.githubUsername ?? user.userId;
+const signedInLabel = (user: {
+  githubUsername?: string | undefined;
+  displayName?: string | undefined;
+  userId: string;
+}) =>
+  user.githubUsername && user.displayName
+    ? `${user.displayName} (@${user.githubUsername})`
+    : displayName(user);
 
 export type LoginResult = { user: MeResponse; apiUrl: string };
 
@@ -115,7 +123,7 @@ export const performLogin = async (
     ...(options.label ? { label: options.label } : {}),
   });
   deps.writeOut(
-    `Opening Stack in your browser...\n\nIf it does not open, visit:\n\n${start.verificationUri}\n\nCode:\n${start.userCode}\n\nWaiting for authorization...\n`,
+    `Opening Stack in your browser...\n\nIf it does not open, visit ${start.verificationUri} and enter code ${start.userCode}.\n\nWaiting for approval...\n`,
   );
   if (options.openBrowser !== false)
     await (deps.openBrowser ?? defaultOpenBrowser)(
@@ -153,7 +161,7 @@ export const performLogin = async (
       apiUrl: baseUrl,
       createdAt: now().toISOString(),
     });
-    deps.writeOut(`\n✓ Signed in as ${displayName(result.user)}\n`);
+    deps.writeOut(`\nSigned in as ${signedInLabel(result.user)}.\n`);
     return { user: result.user, apiUrl: baseUrl };
   }
   throw new AuthenticationExpiredError(

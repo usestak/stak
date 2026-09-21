@@ -13,6 +13,7 @@ export function AuthorizeButton({ userCode }: { userCode: string }) {
   return (
     <div>
       <button
+        className="btn"
         disabled={state === 'working' || state === 'done'}
         onClick={async () => {
           setState('working');
@@ -24,16 +25,17 @@ export function AuthorizeButton({ userCode }: { userCode: string }) {
             setMessage(result.error ?? 'Approval failed.');
           }
         }}
-        style={{
-          padding: '0.6rem 1rem',
-          fontSize: '1rem',
-          cursor: state === 'done' ? 'default' : 'pointer',
-        }}
       >
-        {state === 'done' ? 'Authorized ✓' : 'Authorize this device'}
+        {state === 'done'
+          ? 'Authorized ✓'
+          : state === 'working'
+            ? 'Authorizing…'
+            : 'Authorize this device'}
       </button>
-      {state === 'done' && <p>You can return to your terminal.</p>}
-      {state === 'error' && <p style={{ color: 'crimson' }}>{message}</p>}
+      {state === 'done' && (
+        <p className="muted">You can return to your terminal.</p>
+      )}
+      {state === 'error' && <p className="error">{message}</p>}
     </div>
   );
 }
