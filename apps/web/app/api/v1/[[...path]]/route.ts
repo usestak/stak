@@ -1,7 +1,8 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import { type NextRequest } from 'next/server';
 
 import { handleCloudRequest, type CloudRequest } from '@stack/cloud-server';
 
+import { renderCloudResponse } from '@/lib/cloud-response';
 import { getCloudService } from '@/lib/cloud-service';
 
 export const dynamic = 'force-dynamic';
@@ -27,15 +28,7 @@ const run = async (request: NextRequest): Promise<Response> => {
     }
 
   const response = await handleCloudRequest(getCloudService(), cloudRequest);
-  if (response.binaryBody)
-    return new NextResponse(Buffer.from(response.binaryBody), {
-      status: response.status,
-      headers: response.headers,
-    });
-  return NextResponse.json(response.jsonBody ?? {}, {
-    status: response.status,
-    headers: response.headers,
-  });
+  return renderCloudResponse(response);
 };
 
 export const GET = run;
