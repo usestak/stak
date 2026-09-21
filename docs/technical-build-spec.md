@@ -2777,7 +2777,24 @@ The Codex child process receives the scratch workspace as cwd and temporary `HOM
 `USERPROFILE`, and `CODEX_HOME` values. The parent environment is not mutated. Only
 allowlisted root Codex state is bridged: `config.toml`, `auth.json`, and root
 `*.config.toml` files. Skills, sessions, logs, history, plugin caches, and arbitrary
-directories are not copied, and runtime state is never synchronized back.
+directories are not copied, and runtime state is never synchronized back. Bridged
+TOML config is sanitized before it is written into the trial `codex-home`:
+personal plugin/marketplace/hook tables (`[plugins]`, `[[marketplaces]]`,
+`[hooks]`, and root-scope `plugins`/`marketplaces` assignments) are stripped so
+the trial does not inherit personal plugin-marketplace sources — which Codex
+would otherwise refresh at startup by cloning them (background `git`) into the
+temporary `CODEX_HOME`, leaking the personal environment and keeping the
+disposable runtime busy. Auth and basic launch/model settings are preserved; the
+real `config.toml` is never modified. Disabling plugins is not relied upon
+because marketplace refresh can still run for disabled plugins.
+
+After the interactive child fully closes, cleanup applies a small bounded
+settling period, then bounded retries. Stack never terminates descendant
+processes. A runtime left `cleanup-failed` (e.g. a background descendant still
+holding it) keeps its valid marker and is conservatively retried before the next
+trial: `$STACK_HOME/runtime` is scanned and only valid, id-matching,
+`cleanup-failed` runtimes are re-cleaned — never unmarked, forged, or
+outside-root directories, and never by age.
 
 This provides isolation from `main` and the user's normal user-level Skill environment.
 It is not full process isolation: Codex built-in/system capabilities, administrator

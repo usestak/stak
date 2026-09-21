@@ -30,6 +30,7 @@ import {
   cleanupCodexTryRuntime,
   launchCodexTryRuntime,
   prepareCodexTryRuntime,
+  recoverStaleTryRuntimes,
 } from '@stack/adapters';
 import type { InitializeMainEnvironmentResult } from '@stack/core';
 import type {
@@ -247,13 +248,17 @@ const defaultDependencies: ProgramDependencies = {
     'references' in trial
       ? preserveRemoteTrialStack({ stackHome, trial, gitExecutor: spawnGit })
       : preserveTrialStack({ stackHome, trial }),
-  prepareTry: (trial) =>
-    prepareCodexTryRuntime({
+  prepareTry: async (trial) => {
+    // Conservatively retry any prior runtimes left in cleanup-failed before
+    // creating a new one (best-effort; never blocks the trial).
+    await recoverStaleTryRuntimes({ stackHome }).catch(() => undefined);
+    return prepareCodexTryRuntime({
       stackHome,
       trial: trial.resolved,
       homeDir: os.homedir(),
       env: process.env,
-    }),
+    });
+  },
   cleanupTry: async (preparation) => {
     await cleanupCodexTryRuntime({ stackHome, session: preparation.session });
   },

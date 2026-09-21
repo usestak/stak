@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import {
   access,
   chmod,
@@ -17,7 +18,7 @@ import {
   type OwnedTestRoot,
   pathIsWithin,
 } from '@stack/shared';
-import type { TryResolvedEnvironment } from '@stack/spec';
+import type { TryResolvedEnvironment, TrySession } from '@stack/spec';
 import { ingestSkill } from '@stack/store';
 
 import {
@@ -25,6 +26,8 @@ import {
   cleanupCodexTryRuntime,
   launchCodexTryRuntime,
   prepareCodexTryRuntime,
+  recoverStaleTryRuntimes,
+  sanitizeCodexConfigToml,
 } from './codex-trial.js';
 
 const ownedRoots: OwnedTestRoot[] = [];
@@ -1092,5 +1095,424 @@ describe('Codex trial runtime cleanup hardening', () => {
       await readFile(path.join(sessionRoot, 'session.json'), 'utf8'),
     );
     expect(marker.status).toBe('cleanup-failed');
+  });
+});
+
+const SAMPLE_CONFIG = [
+  '# personal Codex config',
+  'model = "gpt-5-codex"',
+  'model_provider = "openai"',
+  '',
+  '[model_providers.openai]',
+  'name = "OpenAI"',
+  '',
+  '[[marketplaces]]',
+  'name = "claude-mem"',
+  'source = "https://github.com/thedotmack/claude-mem.git"',
+  '',
+  '[plugins.claude-mem]',
+  'enabled = true',
+  '',
+  '[hooks]',
+  'on_start = "git pull"',
+  '',
+  '[history]',
+  'persistence = "save-all"',
+  '',
+].join('\n');
+
+describe('Codex config isolation (plugin marketplace leakage)', () => {
+  it('strips marketplace/plugin/hook tables but preserves model and other config', () => {
+    const sanitized = sanitizeCodexConfigToml(SAMPLE_CONFIG);
+    expect(sanitized).toContain('model = "gpt-5-codex"');
+    expect(sanitized).toContain('[model_providers.openai]');
+    expect(sanitized).toContain('name = "OpenAI"');
+    expect(sanitized).toContain('[history]');
+    expect(sanitized).toContain('# personal Codex config');
+    expect(sanitized).not.toContain('marketplaces');
+    expect(sanitized).not.toContain('claude-mem');
+    expect(sanitized).not.toContain('thedotmack');
+    expect(sanitized).not.toContain('[plugins');
+    expect(sanitized).not.toContain('[hooks]');
+    expect(sanitized).not.toContain('on_start');
+  });
+
+  it('strips a root-level plugins assignment and singular marketplace table', () => {
+    const sanitized = sanitizeCodexConfigToml(
+      [
+        'model = "x"',
+        'plugins = ["a", "b"]',
+        '[marketplace]',
+        'url = "https://example.com"',
+        '[keep]',
+        'value = 1',
+      ].join('\n'),
+    );
+    expect(sanitized).toContain('model = "x"');
+    expect(sanitized).toContain('[keep]');
+    expect(sanitized).toContain('value = 1');
+    expect(sanitized).not.toContain('plugins = ');
+    expect(sanitized).not.toContain('[marketplace]');
+    expect(sanitized).not.toContain('example.com');
+  });
+
+  it('does not strip an excluded key name used inside a kept table', () => {
+    const sanitized = sanitizeCodexConfigToml(
+      ['[registry]', 'marketplace = "internal"'].join('\n'),
+    );
+    expect(sanitized).toContain('[registry]');
+    expect(sanitized).toContain('marketplace = "internal"');
+  });
+
+  it('bridges a sanitized config, keeps auth verbatim, and never mutates the real config', async () => {
+    const root = await temp();
+    const source = path.join(root, 'source');
+    const target = path.join(root, 'target');
+    await mkdir(source, { recursive: true });
+    await writeFile(path.join(source, 'config.toml'), SAMPLE_CONFIG);
+    await writeFile(path.join(source, 'auth.json'), 'sentinel-secret');
+    const sourceConfigBefore = await readFile(
+      path.join(source, 'config.toml'),
+      'utf8',
+    );
+
+    const copied = await bridgeCodexRuntimeState({
+      sourceCodexHome: source,
+      runtimeCodexHome: target,
+    });
+    expect(copied).toEqual(['auth.json', 'config.toml']);
+
+    const bridgedConfig = await readFile(
+      path.join(target, 'config.toml'),
+      'utf8',
+    );
+    expect(bridgedConfig).toContain('model = "gpt-5-codex"');
+    expect(bridgedConfig).not.toContain('marketplaces');
+    expect(bridgedConfig).not.toContain('claude-mem');
+    expect(bridgedConfig).not.toContain('[plugins');
+    // auth.json copied byte-for-byte.
+    expect(await readFile(path.join(target, 'auth.json'), 'utf8')).toBe(
+      'sentinel-secret',
+    );
+    // Real user config is never modified.
+    expect(await readFile(path.join(source, 'config.toml'), 'utf8')).toBe(
+      sourceConfigBefore,
+    );
+  });
+
+  it('a prepared trial codex-home contains no personal marketplace/plugin config', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const realHome = path.join(root, 'real');
+    await mkdir(path.join(realHome, '.codex'), { recursive: true });
+    await writeFile(
+      path.join(realHome, '.codex', 'config.toml'),
+      SAMPLE_CONFIG,
+    );
+    await writeFile(
+      path.join(realHome, '.codex', 'auth.json'),
+      'sentinel-secret',
+    );
+    const trial = await storedTrial(stackHome);
+    const preparation = await prepareCodexTryRuntime({
+      stackHome,
+      trial,
+      homeDir: realHome,
+      idFactory: () => 'noplugins1',
+    });
+    const bridgedConfig = await readFile(
+      path.join(preparation.session.runtimeCodexHomePath, 'config.toml'),
+      'utf8',
+    );
+    expect(bridgedConfig).not.toContain('marketplaces');
+    expect(bridgedConfig).not.toContain('claude-mem');
+    expect(bridgedConfig).not.toContain('[plugins');
+    expect(bridgedConfig).toContain('model = "gpt-5-codex"');
+    // Trial Skills still materialized; auth still bridged.
+    expect(preparation.session.resolvedSkills).toHaveLength(1);
+    expect(
+      await readFile(
+        path.join(preparation.session.runtimeCodexHomePath, 'auth.json'),
+        'utf8',
+      ),
+    ).toBe('sentinel-secret');
+    // Real config untouched.
+    expect(
+      await readFile(path.join(realHome, '.codex', 'config.toml'), 'utf8'),
+    ).toBe(SAMPLE_CONFIG);
+    await cleanupCodexTryRuntime({
+      stackHome,
+      session: preparation.session,
+      ...fastControls,
+    });
+  });
+});
+
+describe('stale cleanup-failed runtime recovery', () => {
+  const preparedRuntime = async (root: string, id: string) => {
+    const stackHome = path.join(root, 'stack');
+    const trial = await storedTrial(stackHome);
+    const preparation = await prepareCodexTryRuntime({
+      stackHome,
+      trial,
+      homeDir: path.join(root, 'real'),
+      env: {},
+      idFactory: () => id,
+    });
+    return { stackHome, session: preparation.session };
+  };
+  const driveToCleanupFailed = async (
+    stackHome: string,
+    session: TrySession,
+  ) => {
+    const outcome = await cleanupCodexTryRuntime({
+      stackHome,
+      session,
+      ...fastControls,
+      maxRetries: 2,
+      removeEntry: async (target) => {
+        if (target === session.workspacePath) throw fsError('EBUSY');
+        await rm(target, { recursive: true, force: true });
+      },
+    });
+    expect(outcome.cleaned).toBe(false);
+  };
+
+  it('retries a valid cleanup-failed runtime and removes the marker last', async () => {
+    const { stackHome, session } = await preparedRuntime(
+      await temp(),
+      'stalerec01',
+    );
+    await driveToCleanupFailed(stackHome, session);
+    const { remove, calls } = recordingRemover();
+    const result = await recoverStaleTryRuntimes({
+      stackHome,
+      ...fastControls,
+      removeEntry: remove,
+    });
+    expect(result).toMatchObject({ scanned: 1, cleaned: 1, retained: 0 });
+    await expect(
+      access(path.dirname(session.workspacePath)),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(calls.at(-1)).toBe(
+      path.join(path.dirname(session.workspacePath), 'session.json'),
+    );
+  });
+
+  it('keeps a still-busy stale runtime marked', async () => {
+    const { stackHome, session } = await preparedRuntime(
+      await temp(),
+      'stalerec02',
+    );
+    await driveToCleanupFailed(stackHome, session);
+    const result = await recoverStaleTryRuntimes({
+      stackHome,
+      ...fastControls,
+      maxRetries: 2,
+      removeEntry: async (target) => {
+        if (target === session.workspacePath) throw fsError('EBUSY');
+        await rm(target, { recursive: true, force: true });
+      },
+    });
+    expect(result).toMatchObject({ scanned: 1, cleaned: 0, retained: 1 });
+    const marker = JSON.parse(
+      await readFile(
+        path.join(path.dirname(session.workspacePath), 'session.json'),
+        'utf8',
+      ),
+    );
+    expect(marker.status).toBe('cleanup-failed');
+  });
+
+  it('ignores an unmarked stale directory', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const junk = path.join(stackHome, 'runtime', 'try_unmarked1');
+    await mkdir(path.join(junk, 'workspace'), { recursive: true });
+    const result = await recoverStaleTryRuntimes({
+      stackHome,
+      ...fastControls,
+    });
+    expect(result.scanned).toBe(0);
+    await expect(access(junk)).resolves.toBeUndefined();
+  });
+
+  it('does not touch a ready (non-cleanup-failed) runtime', async () => {
+    const { stackHome, session } = await preparedRuntime(
+      await temp(),
+      'readyruntime1',
+    );
+    const result = await recoverStaleTryRuntimes({
+      stackHome,
+      ...fastControls,
+    });
+    expect(result.scanned).toBe(0);
+    await expect(
+      access(path.dirname(session.workspacePath)),
+    ).resolves.toBeUndefined();
+  });
+
+  it('ignores a runtime whose marker id is forged', async () => {
+    const { stackHome, session } = await preparedRuntime(
+      await temp(),
+      'forgedrec01',
+    );
+    await driveToCleanupFailed(stackHome, session);
+    const sessionRoot = path.dirname(session.workspacePath);
+    const marker = JSON.parse(
+      await readFile(path.join(sessionRoot, 'session.json'), 'utf8'),
+    );
+    await writeFile(
+      path.join(sessionRoot, 'session.json'),
+      JSON.stringify({ ...marker, sessionId: 'try_forged99' }),
+    );
+    const result = await recoverStaleTryRuntimes({
+      stackHome,
+      ...fastControls,
+    });
+    expect(result.scanned).toBe(0);
+    await expect(access(sessionRoot)).resolves.toBeUndefined();
+  });
+});
+
+describe('controlled descendant reproduction', () => {
+  const preparedRuntime = async (root: string, id: string) => {
+    const stackHome = path.join(root, 'stack');
+    const trial = await storedTrial(stackHome);
+    const preparation = await prepareCodexTryRuntime({
+      stackHome,
+      trial,
+      homeDir: path.join(root, 'real'),
+      env: {},
+      idFactory: () => id,
+    });
+    return { stackHome, session: preparation.session };
+  };
+
+  it('short-lived descendant: settle + bounded retry completes cleanup', async () => {
+    const { stackHome, session } = await preparedRuntime(
+      await temp(),
+      'shortlived1',
+    );
+    const { remove, attemptsFor } = recordingRemover((target, attempt) => {
+      if (target === session.workspacePath && attempt === 1)
+        throw fsError('EBUSY');
+    });
+    const outcome = await cleanupCodexTryRuntime({
+      stackHome,
+      session,
+      ...fastControls,
+      settleDelayMs: 0,
+      removeEntry: remove,
+    });
+    expect(outcome.cleaned).toBe(true);
+    expect(attemptsFor(session.workspacePath)).toBe(2);
+    await expect(
+      access(path.dirname(session.workspacePath)),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('long-lived descendant: retains marker, never terminates the process, recovers later', async () => {
+    const { stackHome, session } = await preparedRuntime(
+      await temp(),
+      'longlived01',
+    );
+    // A real detached descendant that outlives cleanup.
+    const sleeper = spawn(
+      process.execPath,
+      ['-e', 'setTimeout(() => {}, 5000)'],
+      { detached: true, stdio: 'ignore' },
+    );
+    sleeper.unref();
+    try {
+      const outcome = await cleanupCodexTryRuntime({
+        stackHome,
+        session,
+        ...fastControls,
+        maxRetries: 2,
+        removeEntry: async (target) => {
+          if (target === session.workspacePath) throw fsError('EBUSY');
+          await rm(target, { recursive: true, force: true });
+        },
+      });
+      expect(outcome.cleaned).toBe(false);
+      // Stack never force-terminates descendants.
+      expect(() => process.kill(sleeper.pid ?? -1, 0)).not.toThrow();
+      // Once the descendant is gone, a later trial's recovery cleans it up.
+      const result = await recoverStaleTryRuntimes({
+        stackHome,
+        ...fastControls,
+      });
+      expect(result).toMatchObject({ scanned: 1, cleaned: 1 });
+      await expect(
+        access(path.dirname(session.workspacePath)),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      try {
+        process.kill(sleeper.pid ?? -1, 'SIGKILL');
+      } catch {
+        // already exited
+      }
+    }
+  });
+
+  it('a later real-shim trial recovers a prior cleanup-failed runtime and proceeds', async () => {
+    const root = await temp();
+    const shim = await makeCodexShim(path.join(root, 'bin'));
+    const stackHome = path.join(root, 'stack');
+    const fenced = {
+      ...process.env,
+      HOME: path.join(root, 'real'),
+      USERPROFILE: path.join(root, 'real'),
+      CODEX_HOME: path.join(root, 'real', '.codex'),
+    };
+    const trial = await storedTrial(stackHome);
+    const first = await prepareCodexTryRuntime({
+      stackHome,
+      trial,
+      homeDir: path.join(root, 'real'),
+      env: {},
+      idFactory: () => 'crosstrialA',
+    });
+    const firstResult = await launchCodexTryRuntime({
+      stackHome,
+      preparation: first,
+      detection: { agent: 'codex', installed: true, executablePath: shim },
+      env: fenced,
+      cleanup: {
+        ...fastControls,
+        maxRetries: 2,
+        removeEntry: async (target) => {
+          if (target === first.session.workspacePath) throw fsError('EBUSY');
+          await rm(target, { recursive: true, force: true });
+        },
+      },
+    });
+    expect(firstResult.cleaned).toBe(false);
+    expect(await readdir(path.join(stackHome, 'runtime'))).toContain(
+      'try_crosstrialA',
+    );
+    // Later trial: recovery (as wired before prepare) clears the prior runtime.
+    const recovery = await recoverStaleTryRuntimes({
+      stackHome,
+      ...fastControls,
+    });
+    expect(recovery).toMatchObject({ scanned: 1, cleaned: 1 });
+    const second = await prepareCodexTryRuntime({
+      stackHome,
+      trial,
+      homeDir: path.join(root, 'real'),
+      env: {},
+      idFactory: () => 'crosstrialB',
+    });
+    const secondResult = await launchCodexTryRuntime({
+      stackHome,
+      preparation: second,
+      detection: { agent: 'codex', installed: true, executablePath: shim },
+      env: fenced,
+      cleanup: fastControls,
+    });
+    expect(secondResult.cleaned).toBe(true);
+    expect(await readdir(path.join(stackHome, 'runtime'))).toEqual([]);
   });
 });

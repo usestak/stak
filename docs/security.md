@@ -61,16 +61,40 @@ session root. The trusted marker is therefore never lost while other owned
 artifacts remain — the state (runtime exists, marker gone) that Phase 6.1 safety
 rules refuse to auto-clean can no longer be created.
 
-Transient Windows deletion errors (`EPERM`, `EBUSY`, `ENOTEMPTY`, …) are retried
-a bounded number of times — never forever, and never by weakening path
-containment or force-deleting anything whose ownership cannot be proven. If a
-component still cannot be removed, the marker is preserved and its status set to
-`cleanup-failed` with a **safe, secret-free diagnostic** (failing component,
-filesystem error code, timestamp — never file contents, config, or auth
-material). The runtime stays provably Stack-owned so a later `stack try` can
-retry cleanup conservatively. Unknown, forged, or outside-`STACK_HOME` runtimes
-are still refused, and Phase 6.1 never auto-deletes an unmarked directory merely
-because it resembles a trial runtime.
+After the child fully closes, cleanup waits a small bounded settling period
+before the first delete, then retries transient Windows deletion errors (`EPERM`,
+`EBUSY`, `ENOTEMPTY`, …) a bounded number of times — never forever, and never by
+weakening path containment or force-deleting anything whose ownership cannot be
+proven. Stack never terminates descendant processes: it does not kill by PID,
+by command line, or by resemblance to a trial. If a component still cannot be
+removed, the marker is preserved and its status set to `cleanup-failed` with a
+**safe, secret-free diagnostic** (failing component, filesystem error code,
+timestamp — never file contents, config, or auth material). The runtime stays
+provably Stack-owned so it can be retried later.
+
+Because the marker survives, cleanup is genuinely resumable: before creating a
+new runtime, `stack try` conservatively re-scans `$STACK_HOME/runtime` and
+retries only prior runtimes that carry a valid marker with status
+`cleanup-failed` and whose id matches the directory (paths re-validated, then the
+same marker-last cleanup). Unmarked, corrupt, forged, non-`cleanup-failed`, or
+outside-`STACK_HOME` directories are never touched, and Phase 6.1 never
+auto-deletes an unmarked directory merely because it resembles a trial runtime.
+There is no age-based deletion and no broad `stack clean` command.
+
+### Trial config isolation
+
+Only allowlisted Codex root state is bridged into the trial's temporary
+`codex-home` — `auth.json` (copied verbatim) and `config.toml` /
+`*.config.toml`. Bridged TOML is **sanitized**: personal plugin, marketplace,
+and hook tables (`[plugins]`, `[[marketplaces]]`, `[hooks]`, and root-scope
+`plugins`/`marketplaces` assignments) are stripped so a Skill trial never
+inherits personal plugin-marketplace sources. This matters because Codex
+refreshes configured marketplaces at startup — cloning them (background `git`)
+into `$CODEX_HOME` — which would both leak the personal environment into the
+trial and keep the disposable runtime busy. Only auth and basic launch/model
+settings survive; everything else in the file is preserved verbatim, and the
+user's real `config.toml` is never modified. Disabling plugins is deliberately
+not relied upon, since marketplace refresh can still run for disabled plugins.
 
 ## Child-process execution audit
 

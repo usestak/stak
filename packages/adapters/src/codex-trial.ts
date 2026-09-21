@@ -59,6 +59,61 @@ const bridgeNames = (names: string[]) =>
         !name.includes('/') &&
         !name.includes('\\')),
   );
+
+// Top-level Codex config tables never carried into an isolated Skill trial.
+// A trial only needs auth + basic launch/model settings; personal plugin
+// marketplace sources trigger background Git refresh/clone work inside the
+// temporary CODEX_HOME (which keeps the disposable runtime alive), and startup
+// hooks can spawn arbitrary background processes. Excluding these is isolation,
+// not a config-portability feature.
+const excludedConfigTables = new Set([
+  'marketplaces',
+  'marketplace',
+  'plugins',
+  'plugin',
+  'hooks',
+]);
+const configTableRootSegment = (header: string): string =>
+  (header.split('.')[0] ?? '').trim().replace(/^["']|["']$/g, '');
+const configKeyName = (line: string): string | undefined => {
+  const match = line.match(/^\s*("[^"]*"|'[^']*'|[A-Za-z0-9_-]+)\s*=/);
+  if (!match?.[1]) return undefined;
+  return match[1].replace(/^["']|["']$/g, '');
+};
+
+/**
+ * Strip personal plugin/marketplace/hook configuration from a bridged Codex
+ * `config.toml` while preserving every other key and table verbatim. Removes
+ * whole tables and array-of-tables whose top-level segment is excluded
+ * (`[plugins]`, `[plugins.x]`, `[[marketplaces]]`, `[hooks]`, …) and any
+ * root-scope bare assignment of an excluded key (`plugins = [...]`). Bytes
+ * outside those tables — including comments, ordering, and auth/model settings —
+ * are left untouched. The user's real config file is never modified.
+ */
+export const sanitizeCodexConfigToml = (text: string): string => {
+  const tableHeader = /^\s*\[\[?\s*([^\]]*?)\s*\]\]?\s*(?:#.*)?$/;
+  let currentRoot: string | null = null;
+  const kept: string[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const header = line.match(tableHeader);
+    if (header) {
+      currentRoot = configTableRootSegment(header[1] ?? '');
+      if (!excludedConfigTables.has(currentRoot.toLowerCase())) kept.push(line);
+      continue;
+    }
+    if (
+      currentRoot !== null &&
+      excludedConfigTables.has(currentRoot.toLowerCase())
+    )
+      continue;
+    if (currentRoot === null) {
+      const key = configKeyName(line);
+      if (key && excludedConfigTables.has(key.toLowerCase())) continue;
+    }
+    kept.push(line);
+  }
+  return kept.join('\n');
+};
 export const resolveUserCodexHome = (options: {
   homeDir?: string;
   env?: NodeJS.ProcessEnv;
@@ -86,7 +141,17 @@ export const bridgeCodexRuntimeState = async (options: {
       const source = path.join(options.sourceCodexHome, name);
       if (!(await lstat(source)).isFile()) continue;
       const target = path.join(options.runtimeCodexHome, name);
-      await copyFile(source, target);
+      // TOML config is sanitized (personal plugin/marketplace/hook tables
+      // removed); auth.json and other files are copied verbatim.
+      if (name.endsWith('.toml')) {
+        await writeFile(
+          target,
+          sanitizeCodexConfigToml(await readFile(source, 'utf8')),
+          'utf8',
+        );
+      } else {
+        await copyFile(source, target);
+      }
       if (process.platform !== 'win32') await chmod(target, 0o600);
       copied.push(name);
     }
@@ -134,6 +199,10 @@ export type TryCleanupControls = {
   removeEntry?: RemoveRuntimeEntry;
   maxRetries?: number;
   retryDelayMs?: number;
+  // Bounded grace period before the first delete attempt, giving any just-closed
+  // child's short-lived background descendants (e.g. a quick Git refresh) time to
+  // release handles on the runtime. Not a substitute for the bounded retries.
+  settleDelayMs?: number;
   sleep?: (ms: number) => Promise<void>;
 };
 export type TryCleanupOutcome =
@@ -381,6 +450,7 @@ export const cleanupCodexTryRuntime = async (
   const remove = options.removeEntry ?? defaultRemoveRuntimeEntry;
   const maxRetries = options.maxRetries ?? 3;
   const retryDelayMs = options.retryDelayMs ?? 100;
+  const settleDelayMs = options.settleDelayMs ?? 250;
   const sleep = options.sleep ?? realSleep;
   const now = options.now ?? (() => new Date());
 
@@ -457,6 +527,10 @@ export const cleanupCodexTryRuntime = async (
   // Signal cleanup-in-progress while the trusted marker is still present.
   await writeSession(directory, { ...marker, status: 'cleaning' });
 
+  // Small bounded grace period so a just-closed child's short-lived background
+  // descendants can release handles before the first delete attempt.
+  if (settleDelayMs > 0) await sleep(settleDelayMs);
+
   const components: Array<{ name: TryCleanupComponent; path: string }> = [
     { name: 'workspace', path: expectedWorkspace },
     { name: 'home', path: expectedHome },
@@ -507,6 +581,66 @@ export const cleanupCodexTryRuntime = async (
     return recordFailure('session-root', error);
   }
   return { cleaned: true };
+};
+
+export type TryRecoveryResult = {
+  scanned: number;
+  cleaned: number;
+  retained: number;
+};
+
+/**
+ * Before a new trial, conservatively retry cleanup of prior runtimes left in
+ * `cleanup-failed` (e.g. a background descendant briefly held the runtime). Only
+ * session roots that carry a valid Stack marker with status `cleanup-failed`,
+ * whose id matches the directory, are considered; `cleanupCodexTryRuntime` then
+ * re-validates containment/paths and performs marker-last cleanup. Unmarked,
+ * corrupt, forged, non-`cleanup-failed`, or outside-root directories are never
+ * touched, and nothing is force-terminated. Fully best-effort: any per-runtime
+ * error is swallowed so recovery can never block a new trial.
+ */
+export const recoverStaleTryRuntimes = async (
+  options: { stackHome: string } & TryCleanupControls,
+): Promise<TryRecoveryResult> => {
+  const runtimeRoot = path.resolve(options.stackHome, 'runtime');
+  let entries;
+  try {
+    entries = await readdir(runtimeRoot, { withFileTypes: true });
+  } catch {
+    return { scanned: 0, cleaned: 0, retained: 0 };
+  }
+  let scanned = 0;
+  let cleaned = 0;
+  let retained = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^try_[A-Za-z0-9_-]{8,}$/.test(entry.name))
+      continue;
+    const directory = path.join(runtimeRoot, entry.name);
+    let marker: TrySession;
+    try {
+      marker = trySessionSchema.parse(
+        JSON.parse(
+          await readFile(path.join(directory, 'session.json'), 'utf8'),
+        ),
+      );
+    } catch {
+      continue; // unmarked / corrupt / forged — never touch
+    }
+    if (marker.status !== 'cleanup-failed') continue;
+    if (marker.sessionId !== entry.name) continue;
+    scanned += 1;
+    try {
+      const outcome = await cleanupCodexTryRuntime({
+        ...options,
+        session: marker,
+      });
+      if (outcome.cleaned) cleaned += 1;
+      else retained += 1;
+    } catch {
+      retained += 1; // safety refusal or unexpected error — leave it in place
+    }
+  }
+  return { scanned, cleaned, retained };
 };
 
 export const launchCodexTryRuntime = async (options: {
