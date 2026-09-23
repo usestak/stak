@@ -40,6 +40,15 @@ import type {
   StackUseProposal,
   TrialStackResolution,
 } from '@stack/core';
+import {
+  createClaudeMemoryAdapter,
+  readMemoryStatus,
+  type BackupResult,
+  type ClaudeProjectInput,
+  type DiscoveredMemoryItem,
+  type MemoryStatus,
+  type RestorePlan,
+} from '@stack/memory';
 import { resolveScanRoots, scanSkills } from '@stack/scanner';
 import { isPublicStackRef } from '@stack/spec';
 import type {
@@ -80,6 +89,7 @@ import { registerWhoamiCommand } from './commands/whoami.js';
 import { registerPushCommand } from './commands/push.js';
 import { registerPullCommand } from './commands/pull.js';
 import { registerPublishCommand } from './commands/publish.js';
+import { registerMemoryCommand } from './commands/memory.js';
 import { fileCredentialStore } from './cloud/credentials.js';
 import {
   cloudApplyPublish,
@@ -173,9 +183,38 @@ export type ProgramDependencies = {
   cloudApplyPublish(
     plan: PublishPlan,
   ): Promise<PublishPublicStackVersionResponse>;
+  memoryScan(): Promise<DiscoveredMemoryItem[]>;
+  memoryBackup(): Promise<BackupResult>;
+  memoryStatus(): Promise<MemoryStatus | null>;
+  memoryRestore(options: { apply: boolean }): Promise<RestorePlan>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
+
+/**
+ * Resolve the local projects the memory adapter uses to attach a portable Git
+ * identity to project-scoped memory. Best-effort and read-only.
+ */
+const resolveMemoryProjects = async (): Promise<ClaudeProjectInput[]> => {
+  const dir = process.cwd();
+  try {
+    const result = await spawnGit(['config', '--get', 'remote.origin.url'], {
+      cwd: dir,
+      env: process.env,
+    });
+    const remote = result.stdout.trim();
+    return remote ? [{ dir, gitRemote: remote }] : [{ dir }];
+  } catch {
+    return [{ dir }];
+  }
+};
+
+const memoryAdapter = async () =>
+  createClaudeMemoryAdapter({
+    stackHome,
+    claudeHome: `${os.homedir()}/.claude`,
+    projects: await resolveMemoryProjects(),
+  });
 
 const stackHome = resolveStackHome();
 const codex = new CodexAdapter({ stackHome, homeDir: os.homedir() });
@@ -287,6 +326,11 @@ const defaultDependencies: ProgramDependencies = {
   cloudApplyPull: (plan) => cloudApplyPull(cloudDeps, plan),
   cloudPreparePublish: (options) => cloudPreparePublish(cloudDeps, options),
   cloudApplyPublish: (plan) => cloudApplyPublish(cloudDeps, plan),
+  memoryScan: async () => (await memoryAdapter()).discover(),
+  memoryBackup: async () => (await memoryAdapter()).backup(),
+  memoryStatus: async () => readMemoryStatus(stackHome),
+  memoryRestore: async ({ apply }) =>
+    (await memoryAdapter()).restore({ apply }),
   confirm: async (message) => {
     if (!process.stdin.isTTY) return false;
     const prompt = createInterface({
@@ -324,5 +368,6 @@ export const createProgram = (
   registerPushCommand(program, dependencies);
   registerPullCommand(program, dependencies);
   registerPublishCommand(program, dependencies);
+  registerMemoryCommand(program, dependencies);
   return program;
 };

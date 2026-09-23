@@ -51,6 +51,30 @@ Run a Stack in an isolated scratch Codex session (temporary HOME/`CODEX_HOME`).
 `<stack>` may be local or public. `main` and normal bindings are untouched.
 Isolated `try` is Codex-only in V0.1.
 
+## Memory (private, local)
+
+Private durable agent context — separate from shareable Skills and never
+publishable. See [memory](./memory.md).
+
+### `stack memory scan [--json] [--verbose]`
+
+Read-only discovery of portable Claude memory on this machine. Changes nothing.
+
+### `stack memory backup [--json]`
+
+Copy allowlisted memory into Stack's private store (read-only capture; native
+Claude files are never modified). Commits the manifest last.
+
+### `stack memory status [--json] [--verbose]`
+
+Show the last memory backup.
+
+### `stack memory restore [--dry-run] [--json] [--verbose]`
+
+Restore private memory. Only writes absent targets; a differing existing target
+is reported as a conflict and left untouched (never merged). Not uploaded to
+Cloud in V0.1.
+
 ## Cloud
 
 Require `STACK_API_URL`; mutations require `stack login`.

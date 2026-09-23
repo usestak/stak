@@ -22,6 +22,7 @@
     "@stack/cloud-client": "workspace:*",
     "@stack/cloud-server": "workspace:*",
     "@stack/core": "workspace:*",
+    "@stack/memory": "workspace:*",
     "@stack/scanner": "workspace:*",
     "@stack/shared": "workspace:*",
     "@stack/spec": "workspace:*",

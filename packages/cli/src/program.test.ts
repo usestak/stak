@@ -15,6 +15,34 @@ import type {
 
 import { createProgram, type ProgramDependencies } from './program.js';
 import type { PullPlan, PushPlan, TrialStackResolution } from '@stack/core';
+import type { DiscoveredMemoryItem } from '@stack/memory';
+
+const memItem = (
+  index: number,
+  scope: 'global' | 'project',
+  projectCanonical?: string,
+): DiscoveredMemoryItem => ({
+  provider: 'claude',
+  kind: scope === 'project' ? 'auto-memory' : 'agent-memory',
+  scope,
+  logicalId: `claude/${scope}/${index}`,
+  ...(projectCanonical
+    ? {
+        project: {
+          kind: 'git' as const,
+          host: 'github.com',
+          owner: 'me',
+          repo: projectCanonical,
+          canonical: `github.com/me/${projectCanonical}`,
+        },
+      }
+    : {}),
+  contentHash: `sha256:${'a'.repeat(64)}`,
+  restoreTarget: { base: 'claude-home', relativePath: `f${index}.md` },
+  source: { path: `/machine/local/f${index}.md` },
+  capturedAt: '2026-09-23T12:00:00.000Z',
+  sensitivity: 'private',
+});
 
 const emptyResult: ScanResult = {
   roots: [
@@ -238,6 +266,20 @@ const runProgram = async (
     cloudApplyPublish: async () => {
       throw new Error('not configured');
     },
+    memoryScan: async () => [],
+    memoryBackup: async () => ({
+      provider: 'claude',
+      files: 0,
+      projects: 0,
+      createdAt: '2026-09-23T12:00:00.000Z',
+    }),
+    memoryStatus: async () => null,
+    memoryRestore: async () => ({
+      provider: 'claude',
+      files: 0,
+      projects: 0,
+      items: [],
+    }),
     confirm: async () => true,
     writeOut: (value) => {
       output += value;
@@ -1027,5 +1069,103 @@ describe('Stack CLI', () => {
       cloudLogout: async () => ({ wasSignedIn: true, remoteRevoked: false }),
     });
     expect(offline.output).toContain('Signed out locally.');
+  });
+
+  it('documents the memory subcommands', async () => {
+    const result = await runProgram(['memory', '--help']);
+    for (const sub of ['scan', 'backup', 'status', 'restore'])
+      expect(result.output).toContain(sub);
+  });
+
+  const scanItems = [
+    memItem(0, 'project', 'alpha'),
+    memItem(1, 'project', 'beta'),
+    memItem(2, 'project', 'gamma'),
+    ...Array.from({ length: 9 }, (_, index) => memItem(index + 3, 'global')),
+  ];
+
+  it('renders a beginner-friendly memory scan without internal detail', async () => {
+    const result = await runProgram(['memory', 'scan'], {
+      memoryScan: async () => scanItems,
+    });
+    expect(result.output).toContain('Claude');
+    expect(result.output).toContain('3 projects with memory');
+    expect(result.output).toContain('12 memory files found');
+    expect(result.output).toContain('Nothing was changed.');
+    // No hashes or absolute native paths in default output.
+    expect(result.output).not.toContain('sha256:');
+    expect(result.output).not.toContain('/machine/local/');
+  });
+
+  it('emits memory scan JSON without absolute native paths', async () => {
+    const result = await runProgram(['memory', 'scan', '--json'], {
+      memoryScan: async () => scanItems,
+    });
+    const parsed = JSON.parse(result.output);
+    expect(parsed).toMatchObject({ provider: 'claude', files: 12 });
+    // Portable JSON must not carry machine-local source paths.
+    expect(result.output).not.toContain('/machine/local/');
+  });
+
+  it('reports an empty memory scan simply', async () => {
+    const result = await runProgram(['memory', 'scan'], {
+      memoryScan: async () => [],
+    });
+    expect(result.output).toContain('No memory found.');
+  });
+
+  it('backs up memory with plain output', async () => {
+    const result = await runProgram(['memory', 'backup'], {
+      memoryBackup: async () => ({
+        provider: 'claude',
+        files: 12,
+        projects: 3,
+        createdAt: '2026-09-23T12:00:00.000Z',
+      }),
+    });
+    expect(result.output).toContain('Backing up Claude memory...');
+    expect(result.output).toContain('12 memory files saved.');
+    expect(result.output).toContain('3 projects protected.');
+  });
+
+  it('shows memory status, including the empty state', async () => {
+    const empty = await runProgram(['memory', 'status'], {
+      memoryStatus: async () => null,
+    });
+    expect(empty.output).toContain('No backup yet.');
+    const present = await runProgram(['memory', 'status'], {
+      memoryStatus: async () => ({
+        provider: 'claude',
+        projects: 3,
+        files: 12,
+        lastBackupAt: new Date(Date.now() - 120_000).toISOString(),
+      }),
+    });
+    expect(present.output).toContain('3 projects protected');
+    expect(present.output).toContain('Last backup');
+  });
+
+  it('previews a memory restore without changing agent memory', async () => {
+    const result = await runProgram(['memory', 'restore', '--dry-run'], {
+      memoryRestore: async ({ apply }) => {
+        expect(apply).toBe(false);
+        return {
+          provider: 'claude',
+          files: 12,
+          projects: 3,
+          items: scanItems.map((item) => ({
+            logicalId: item.logicalId,
+            kind: item.kind,
+            scope: item.scope,
+            status: 'restorable' as const,
+          })),
+        };
+      },
+    });
+    expect(result.output).toContain('Memory restore preview');
+    expect(result.output).toContain(
+      'Existing agent memory will not be overwritten.',
+    );
+    expect(result.output).toContain('No changes were made.');
   });
 });

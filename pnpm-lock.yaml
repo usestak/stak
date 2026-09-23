@@ -262,6 +262,9 @@ importers:
       '@stack/core':
         specifier: workspace:*
         version: link:../core
+      '@stack/memory':
+        specifier: workspace:*
+        version: link:../memory
       '@stack/scanner':
         specifier: workspace:*
         version: link:../scanner
@@ -313,6 +316,15 @@ importers:
       yaml:
         specifier: 2.9.1
         version: 2.9.1
+
+  packages/memory:
+    dependencies:
+      '@stack/shared':
+        specifier: workspace:*
+        version: link:../shared
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
 
   packages/scanner:
     dependencies:
