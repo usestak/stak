@@ -10,16 +10,7 @@ export const metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>
-        <header className="site-header">
-          <div className="site-header-inner">
-            <a href="/" className="wordmark">
-              Stack
-            </a>
-          </div>
-        </header>
-        <div className="page">{children}</div>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

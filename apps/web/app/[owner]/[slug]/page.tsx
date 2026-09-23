@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 
 import { isSafeDisplayUrl } from '@stack/spec';
 
+import { SiteHeader } from '@/app/_components/site-header';
 import { getCloudService } from '@/lib/cloud-service';
 import { relativeTime, skillCount } from '@/lib/format';
 
@@ -27,66 +28,76 @@ export default async function StackPage({
   const requirements = stack.latest?.bundle.requirements ?? [];
 
   return (
-    <main>
-      <h1>{stack.displayName}</h1>
-      <div className="meta">
-        <span className="mono">{ref}</span>
-        <span className="dot">{skillCount(requirements.length)}</span>
-        {stack.latest ? (
-          <span className="dot">
-            Cloud version {stack.latest.version.versionNumber}
-          </span>
-        ) : null}
-        <span className="dot">Updated {relativeTime(stack.updatedAt)}</span>
+    <>
+      <SiteHeader />
+      <div className="page">
+        <main>
+          <h1>{stack.displayName}</h1>
+          <div className="meta">
+            <span className="mono">{ref}</span>
+            <span className="dot">{skillCount(requirements.length)}</span>
+            {stack.latest ? (
+              <span className="dot">
+                Cloud version {stack.latest.version.versionNumber}
+              </span>
+            ) : null}
+            <span className="dot">Updated {relativeTime(stack.updatedAt)}</span>
+          </div>
+          {stack.description ? (
+            <p className="muted">{stack.description}</p>
+          ) : null}
+
+          <h2>Install</h2>
+          <pre>
+            <code>{`stack use ${ref}\nstack try ${ref} -- codex`}</code>
+          </pre>
+          <p className="muted">
+            Supported agents: Codex, Cursor, Claude. Isolated{' '}
+            <code>stack try</code> is Codex-only in V0.1.
+          </p>
+
+          <h2>Skills</h2>
+          {requirements.length === 0 ? (
+            <p className="muted">This Stack has no published versions yet.</p>
+          ) : (
+            <ul className="skills">
+              {requirements.map((requirement) => {
+                const reference = requirement.restoration.reference;
+                return (
+                  <li key={requirement.id}>
+                    <div className="skill-name">{requirement.name}</div>
+                    {requirement.metadata.description ? (
+                      <div className="skill-desc">
+                        {requirement.metadata.description}
+                      </div>
+                    ) : null}
+                    <div className="skill-source">
+                      {isSafeDisplayUrl(reference.remote) ? (
+                        <a
+                          href={reference.remote}
+                          rel="noopener noreferrer nofollow"
+                        >
+                          {reference.remote}
+                        </a>
+                      ) : (
+                        reference.remote
+                      )}{' '}
+                      · {reference.path} @ {reference.revision.slice(0, 12)}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <p
+            className="muted"
+            style={{ fontSize: '0.82rem', marginTop: '1rem' }}
+          >
+            Source references are provided by the author. Repository
+            accessibility is not verified by Stack.
+          </p>
+        </main>
       </div>
-      {stack.description ? <p className="muted">{stack.description}</p> : null}
-
-      <h2>Install</h2>
-      <pre>
-        <code>{`stack use ${ref}\nstack try ${ref} -- codex`}</code>
-      </pre>
-      <p className="muted">
-        Supported agents: Codex, Cursor, Claude. Isolated <code>stack try</code>{' '}
-        is Codex-only in V0.1.
-      </p>
-
-      <h2>Skills</h2>
-      {requirements.length === 0 ? (
-        <p className="muted">This Stack has no published versions yet.</p>
-      ) : (
-        <ul className="skills">
-          {requirements.map((requirement) => {
-            const reference = requirement.restoration.reference;
-            return (
-              <li key={requirement.id}>
-                <div className="skill-name">{requirement.name}</div>
-                {requirement.metadata.description ? (
-                  <div className="skill-desc">
-                    {requirement.metadata.description}
-                  </div>
-                ) : null}
-                <div className="skill-source">
-                  {isSafeDisplayUrl(reference.remote) ? (
-                    <a
-                      href={reference.remote}
-                      rel="noopener noreferrer nofollow"
-                    >
-                      {reference.remote}
-                    </a>
-                  ) : (
-                    reference.remote
-                  )}{' '}
-                  · {reference.path} @ {reference.revision.slice(0, 12)}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      <p className="muted" style={{ fontSize: '0.82rem', marginTop: '1rem' }}>
-        Source references are provided by the author. Repository accessibility
-        is not verified by Stack.
-      </p>
-    </main>
+    </>
   );
 }

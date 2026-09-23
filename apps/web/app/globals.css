@@ -250,3 +250,106 @@ p {
 .error {
   color: #dc2626;
 }
+
+/* ---- product shell ---- */
+.site-header-inner {
+  justify-content: space-between;
+}
+.site-nav {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  font-size: 0.9rem;
+}
+.site-nav > a {
+  color: var(--muted);
+}
+.site-nav > a:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+
+/* account menu (native <details>) */
+.account {
+  position: relative;
+}
+.account > summary {
+  list-style: none;
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 550;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.account > summary::-webkit-details-marker {
+  display: none;
+}
+.account-caret {
+  color: var(--faint);
+  font-size: 0.7rem;
+}
+.account-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.5rem);
+  min-width: 200px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  z-index: 10;
+}
+.account-id {
+  padding: 0.4rem 0.6rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.25rem;
+}
+.account-name {
+  font-weight: 600;
+}
+.account-panel > a,
+.account-signout {
+  text-align: left;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  width: 100%;
+}
+.account-panel > a:hover,
+.account-signout:hover {
+  background: var(--panel-subtle);
+  text-decoration: none;
+}
+
+/* clickable cards + notices */
+.card-link {
+  display: block;
+  color: inherit;
+}
+.card-link:hover {
+  border-color: var(--border-strong);
+  text-decoration: none;
+}
+.notice {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-subtle);
+  padding: 1.25rem 1.5rem;
+  margin-top: 1rem;
+}
+.notice p {
+  margin: 0.35rem 0;
+}
+.notice pre {
+  background: var(--panel);
+  margin-top: 0.75rem;
+}

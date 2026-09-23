@@ -1,8 +1,20 @@
+import type { ReactNode } from 'react';
+
+import { SiteHeader } from '@/app/_components/site-header';
 import { supabaseServerClient } from '@/lib/supabase-server';
 
 import { AuthorizeButton } from './authorize-button';
 
 export const dynamic = 'force-dynamic';
+
+const Shell = ({ children }: { children: ReactNode }) => (
+  <>
+    <SiteHeader />
+    <div className="page">
+      <main>{children}</main>
+    </div>
+  </>
+);
 
 export default async function CliPage({
   searchParams,
@@ -12,13 +24,13 @@ export default async function CliPage({
   const { code } = await searchParams;
   if (!code)
     return (
-      <main>
+      <Shell>
         <h1>Device authorization</h1>
         <p className="muted">
           No code provided. Start from your terminal with{' '}
           <code>stack login</code>.
         </p>
-      </main>
+      </Shell>
     );
 
   const supabase = await supabaseServerClient();
@@ -29,7 +41,7 @@ export default async function CliPage({
   if (!user) {
     const next = `/cli?code=${encodeURIComponent(code)}`;
     return (
-      <main>
+      <Shell>
         <h1>Authorize the Stack CLI</h1>
         <p className="muted">Verification code</p>
         <p className="codechip">{code}</p>
@@ -41,12 +53,12 @@ export default async function CliPage({
             Sign in with GitHub
           </a>
         </p>
-      </main>
+      </Shell>
     );
   }
 
   return (
-    <main>
+    <Shell>
       <h1>Authorize the Stack CLI</h1>
       <p className="muted">
         Confirm this matches the code shown in your terminal:
@@ -55,6 +67,6 @@ export default async function CliPage({
       <div style={{ marginTop: '1.5rem' }}>
         <AuthorizeButton userCode={code} />
       </div>
-    </main>
+    </Shell>
   );
 }
