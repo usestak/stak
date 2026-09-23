@@ -44,6 +44,7 @@ export type ClaudeMemoryAdapterOptions = {
   claudeHome?: string;
   projects?: ClaudeProjectInput[];
   now?: () => Date;
+  platform?: NodeJS.Platform;
 };
 
 export const createClaudeMemoryAdapter = (
@@ -53,6 +54,7 @@ export const createClaudeMemoryAdapter = (
     ...(options.claudeHome ? { claudeHome: options.claudeHome } : {}),
     ...(options.projects ? { projects: options.projects } : {}),
     ...(options.now ? { now: options.now } : {}),
+    ...(options.platform ? { platform: options.platform } : {}),
   };
   return {
     provider: 'claude',

@@ -65,6 +65,19 @@ export const canonicalGitIdentity = (
 export const encodeClaudeProjectKey = (absolutePath: string): string =>
   absolutePath.replace(/[:\\/]/g, '-');
 
+/**
+ * Normalize a Claude vendor key for MATCHING against a known local project.
+ * On case-insensitive filesystems (Windows) the whole key is lowercased so a
+ * drive-letter or path-component casing difference — e.g. Claude's
+ * `c--Users-NT-Desktop-atlas-access-flow` vs a native `C:\Users\NT\Desktop\...`
+ * — still matches. On POSIX (case-sensitive) the key is compared verbatim.
+ * This only affects matching; the original vendor key is preserved as-is.
+ */
+export const normalizeVendorKey = (
+  key: string,
+  platform: NodeJS.Platform = process.platform,
+): string => (platform === 'win32' ? key.toLowerCase() : key);
+
 /** Stable key for grouping/logical-id purposes. */
 export const projectIdentityKey = (identity: ProjectIdentity): string =>
   identity.kind === 'git'

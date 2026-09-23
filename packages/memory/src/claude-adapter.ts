@@ -14,6 +14,7 @@ import { hashBytes } from './store.js';
 import {
   canonicalGitIdentity,
   encodeClaudeProjectKey,
+  normalizeVendorKey,
   projectIdentityKey,
 } from './project-identity.js';
 
@@ -23,6 +24,11 @@ export type ClaudeMemoryDiscoveryOptions = {
   claudeHome?: string;
   projects?: ClaudeProjectInput[];
   now?: () => Date;
+  /**
+   * Filesystem case sensitivity for vendor-key matching. Defaults to the host
+   * platform; injectable so matching semantics are deterministic in tests.
+   */
+  platform?: NodeJS.Platform;
 };
 
 export type MemoryDetection = { installed: boolean; reason?: string };
@@ -162,14 +168,18 @@ export const discoverClaudeMemory = async (
       }),
     );
 
-  // 3. Auto-memory per project. Match a known local project by its encoded key
-  //    to attach a portable identity; otherwise keep an unresolved local identity.
-  const byVendorKey = new Map<string, ProjectIdentity>();
+  // 3. Auto-memory per project. Match a known local project (by its
+  //    case-normalized encoded key) to attach a portable Git identity; a project
+  //    with no usable origin, or no local directory at all, stays unresolved
+  //    (local) with its real vendor key preserved.
+  const platform = options.platform ?? process.platform;
+  const gitByVendorKey = new Map<string, ProjectIdentity>();
   for (const project of options.projects ?? []) {
-    const key = encodeClaudeProjectKey(path.resolve(project.dir));
-    byVendorKey.set(
-      key,
-      canonicalGitIdentity(project.gitRemote) ?? localIdentity(key),
+    const git = canonicalGitIdentity(project.gitRemote);
+    if (!git) continue; // no origin → do not resolve; leave as local
+    gitByVendorKey.set(
+      normalizeVendorKey(encodeClaudeProjectKey(project.dir), platform),
+      git,
     );
   }
   const projectsRoot = path.join(home, 'projects');
@@ -177,7 +187,9 @@ export const discoverClaudeMemory = async (
     const memoryRoot = path.join(projectsRoot, vendorKey, 'memory');
     const files = await walkMemoryFiles(memoryRoot);
     if (files.length === 0) continue;
-    const identity = byVendorKey.get(vendorKey) ?? localIdentity(vendorKey);
+    const identity =
+      gitByVendorKey.get(normalizeVendorKey(vendorKey, platform)) ??
+      localIdentity(vendorKey);
     for (const { rel, abs } of files)
       items.push(
         await fileItem({

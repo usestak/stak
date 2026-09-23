@@ -138,6 +138,143 @@ describe('discoverClaudeMemory', () => {
     });
   });
 
+  // A Claude home whose auto-memory folder is keyed with a lowercase drive
+  // letter, exactly as observed on the real machine.
+  const homeWithVendorKey = async (root: string, vendorKey: string) => {
+    const home = path.join(root, '.claude');
+    await write(
+      path.join(home, 'projects', vendorKey, 'memory', 'fact.md'),
+      'a learned fact',
+    );
+    return home;
+  };
+  const gitIdentity = {
+    kind: 'git',
+    host: 'github.com',
+    owner: 'stephentony100',
+    repo: 'atlas-access-flow',
+    canonical: 'github.com/stephentony100/atlas-access-flow',
+  };
+
+  it.each([
+    [
+      'lowercase key vs uppercase drive path',
+      'c--Users-NT-Desktop-atlas-access-flow',
+      'C:\\Users\\NT\\Desktop\\atlas-access-flow',
+    ],
+    [
+      'uppercase key vs lowercase drive path',
+      'C--Users-NT-Desktop-atlas-access-flow',
+      'c:\\users\\nt\\desktop\\atlas-access-flow',
+    ],
+    [
+      'mixed-case components',
+      'c--users-nt-desktop-Atlas-Access-Flow',
+      'C:\\Users\\NT\\Desktop\\atlas-access-flow',
+    ],
+    [
+      'forward-slash native path',
+      'c--Users-NT-Desktop-atlas-access-flow',
+      'C:/Users/NT/Desktop/atlas-access-flow',
+    ],
+  ])(
+    'resolves the canonical Git identity on Windows (%s)',
+    async (_label, vendorKey, dir) => {
+      const home = await homeWithVendorKey(await temp(), vendorKey);
+      const items = await discoverClaudeMemory({
+        claudeHome: home,
+        platform: 'win32',
+        projects: [
+          {
+            dir,
+            gitRemote: 'git@github.com:stephentony100/atlas-access-flow.git',
+          },
+        ],
+      });
+      expect(items[0]?.project).toEqual(gitIdentity);
+    },
+  );
+
+  it('does not apply case-insensitive matching on POSIX', async () => {
+    const home = await homeWithVendorKey(
+      await temp(),
+      'c--Users-NT-Desktop-atlas-access-flow',
+    );
+    const items = await discoverClaudeMemory({
+      claudeHome: home,
+      platform: 'linux',
+      projects: [
+        {
+          dir: 'C:\\Users\\NT\\Desktop\\atlas-access-flow',
+          gitRemote: 'git@github.com:stephentony100/atlas-access-flow.git',
+        },
+      ],
+    });
+    // Casing differs and POSIX is case-sensitive → no match → stays local.
+    expect(items[0]?.project).toEqual({
+      kind: 'local',
+      vendorKey: 'c--Users-NT-Desktop-atlas-access-flow',
+    });
+  });
+
+  it('keeps a present Git repo without an origin unresolved (local)', async () => {
+    const home = await homeWithVendorKey(
+      await temp(),
+      'c--Users-NT-Desktop-stack',
+    );
+    const items = await discoverClaudeMemory({
+      claudeHome: home,
+      platform: 'win32',
+      projects: [{ dir: 'C:\\Users\\NT\\Desktop\\stack' }], // no gitRemote
+    });
+    expect(items[0]?.project).toEqual({
+      kind: 'local',
+      vendorKey: 'c--Users-NT-Desktop-stack',
+    });
+  });
+
+  it('keeps memory for a missing project unresolved (local)', async () => {
+    const home = await homeWithVendorKey(
+      await temp(),
+      'c--Users-NT-Desktop-dyces-landing',
+    );
+    // No matching project supplied at all.
+    const items = await discoverClaudeMemory({
+      claudeHome: home,
+      platform: 'win32',
+      projects: [
+        {
+          dir: 'C:\\Users\\NT\\Desktop\\atlas-access-flow',
+          gitRemote: 'git@github.com:stephentony100/atlas-access-flow.git',
+        },
+      ],
+    });
+    expect(items[0]?.project).toEqual({
+      kind: 'local',
+      vendorKey: 'c--Users-NT-Desktop-dyces-landing',
+    });
+  });
+
+  it('sanitizes credential-bearing Git origins during matching', async () => {
+    const home = await homeWithVendorKey(
+      await temp(),
+      'c--Users-NT-Desktop-atlas-access-flow',
+    );
+    const items = await discoverClaudeMemory({
+      claudeHome: home,
+      platform: 'win32',
+      projects: [
+        {
+          dir: 'C:\\Users\\NT\\Desktop\\atlas-access-flow',
+          gitRemote:
+            'https://user:ghp_supersecret@github.com/stephentony100/atlas-access-flow.git',
+        },
+      ],
+    });
+    expect(items[0]?.project).toEqual(gitIdentity);
+    expect(JSON.stringify(items)).not.toContain('ghp_supersecret');
+  });
+
   it('keeps an unresolved local identity when the project is unknown', async () => {
     const { home, key } = await makeClaudeHome(await temp());
     const items = await discoverClaudeMemory({ claudeHome: home });

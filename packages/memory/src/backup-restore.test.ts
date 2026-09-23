@@ -229,6 +229,51 @@ describe('restore', () => {
     expect(preview.items[0]?.status).toBe('project-not-found');
   });
 
+  it('carries a portable Git identity across a moved/cloned project path', async () => {
+    // Machine A: Claude keyed auto-memory with a lowercase drive letter; the
+    // present repo has a Git origin, so backup resolves the canonical identity.
+    const rootA = await temp();
+    const homeA = path.join(rootA, '.claude');
+    await write(
+      path.join(
+        homeA,
+        'projects',
+        'c--Users-NT-Desktop-atlas',
+        'memory',
+        'f.md',
+      ),
+      'a fact',
+    );
+    const stackHome = await temp();
+    const items = await discoverClaudeMemory({
+      claudeHome: homeA,
+      platform: 'win32',
+      projects: [
+        {
+          dir: 'C:\\Users\\NT\\Desktop\\atlas',
+          gitRemote: 'git@github.com:me/atlas.git',
+        },
+      ],
+    });
+    expect(items[0]?.project?.kind).toBe('git');
+    await runMemoryBackup({ stackHome, items });
+
+    // Machine B: the same repo cloned to a different path/drive matches by
+    // portable identity, so its memory is restorable (not project-not-found).
+    const rootB = await temp();
+    const preview = await planMemoryRestore({
+      stackHome,
+      claudeHome: path.join(rootB, '.claude'),
+      projects: [
+        {
+          dir: path.join(rootB, 'Projects', 'atlas'),
+          gitRemote: 'https://github.com/me/atlas.git',
+        },
+      ],
+    });
+    expect(preview.items[0]?.status).toBe('restorable');
+  });
+
   it('refuses a path-traversal restore target', async () => {
     const stackHome = await temp();
     const bytes = Buffer.from('evil');
