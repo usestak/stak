@@ -1,5 +1,7 @@
+import { readdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
+import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 
 import { Command } from 'commander';
@@ -44,11 +46,11 @@ import {
   createClaudeMemoryAdapter,
   readMemoryStatus,
   type BackupResult,
-  type ClaudeProjectInput,
   type DiscoveredMemoryItem,
   type MemoryStatus,
   type RestorePlan,
 } from '@stack/memory';
+import { resolveMemoryProjects } from './memory/resolve.js';
 import { resolveScanRoots, scanSkills } from '@stack/scanner';
 import { isPublicStackRef } from '@stack/spec';
 import type {
@@ -195,25 +197,41 @@ export type ProgramDependencies = {
  * Resolve the local projects the memory adapter uses to attach a portable Git
  * identity to project-scoped memory. Best-effort and read-only.
  */
-const resolveMemoryProjects = async (): Promise<ClaudeProjectInput[]> => {
-  const dir = process.cwd();
+const gitOriginOf = async (dir: string): Promise<string | undefined> => {
   try {
     const result = await spawnGit(['config', '--get', 'remote.origin.url'], {
       cwd: dir,
       env: process.env,
     });
     const remote = result.stdout.trim();
-    return remote ? [{ dir, gitRemote: remote }] : [{ dir }];
+    return remote || undefined;
   } catch {
-    return [{ dir }];
+    return undefined;
   }
 };
+
+const listChildDirs = async (dir: string): Promise<string[]> => {
+  try {
+    const entries = await readdir(dir, { withFileTypes: true });
+    return entries.filter((entry) => entry.isDirectory()).map((e) => e.name);
+  } catch {
+    return [];
+  }
+};
+
+const claudeHome = path.join(os.homedir(), '.claude');
 
 const memoryAdapter = async () =>
   createClaudeMemoryAdapter({
     stackHome,
-    claudeHome: `${os.homedir()}/.claude`,
-    projects: await resolveMemoryProjects(),
+    claudeHome,
+    platform: process.platform,
+    projects: await resolveMemoryProjects({
+      cwd: process.cwd(),
+      platform: process.platform,
+      listDirs: listChildDirs,
+      gitOrigin: gitOriginOf,
+    }),
   });
 
 const stackHome = resolveStackHome();
