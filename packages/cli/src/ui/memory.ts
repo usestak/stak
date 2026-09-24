@@ -4,7 +4,7 @@ import type {
   MemoryStatus,
   RestorePlan,
 } from '@stack/memory';
-import { projectIdentityKey } from '@stack/memory';
+import { countProjects, projectIdentityKey } from '@stack/memory';
 
 import { block } from './format.js';
 
@@ -12,6 +12,7 @@ type RenderOptions = { verbose?: boolean };
 
 const files = (count: number) =>
   `${count} memory file${count === 1 ? '' : 's'}`;
+const plainFiles = (count: number) => `${count} file${count === 1 ? '' : 's'}`;
 const projects = (count: number) => `${count} project${count === 1 ? '' : 's'}`;
 
 const relativeTime = (iso: string, nowMs = Date.now()): string => {
@@ -112,21 +113,31 @@ export const renderMemoryRestore = (
   );
   const identical = plan.items.filter((item) => item.status === 'identical');
 
+  // Counts are unique project identities, never one-per-file.
+  const projectsInBackup = plan.projects;
+  const unavailableProjects = countProjects(notFound);
+
   if (options.dryRun) {
     const lines = [
       'Memory restore preview',
       '',
       'Claude',
-      `${plan.projects} projects`,
-      `${files(restorable.length + identical.length + conflicts.length + notFound.length)}`,
+      '',
+      `${projects(projectsInBackup)} in backup`,
+      files(plan.files),
+      '',
+      `${plainFiles(restorable.length)} ready to restore`,
     ];
+    if (identical.length > 0)
+      lines.push(`${plainFiles(identical.length)} already up to date`);
     if (conflicts.length > 0)
       lines.push(
-        '',
-        `${conflicts.length} would conflict and be left unchanged.`,
+        `${plainFiles(conflicts.length)} would conflict and be left unchanged`,
       );
     if (notFound.length > 0)
-      lines.push(`${notFound.length} for projects not on this machine.`);
+      lines.push(
+        `${plainFiles(notFound.length)} from ${projects(unavailableProjects)} not found on this machine`,
+      );
     lines.push('', 'Existing agent memory will not be overwritten.', '');
     if (options.verbose)
       for (const item of plan.items)
@@ -135,13 +146,14 @@ export const renderMemoryRestore = (
     return block(lines);
   }
 
-  const lines = [`${files(restored.length)} restored.`];
-  if (identical.length > 0) lines.push(`${identical.length} already present.`);
+  const lines = [`${plainFiles(restored.length)} restored.`];
+  if (identical.length > 0)
+    lines.push(`${plainFiles(identical.length)} already up to date.`);
   if (conflicts.length > 0)
-    lines.push(`${conflicts.length} left unchanged (conflict).`);
+    lines.push(`${plainFiles(conflicts.length)} left unchanged (conflict).`);
   if (notFound.length > 0)
     lines.push(
-      `${notFound.length} skipped (project not found on this machine).`,
+      `${plainFiles(notFound.length)} from ${projects(unavailableProjects)} not found on this machine.`,
     );
   return block(lines);
 };

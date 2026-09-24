@@ -17,6 +17,7 @@ import type { ClaudeProjectInput } from './claude-adapter.js';
 import {
   canonicalGitIdentity,
   encodeClaudeProjectKey,
+  projectIdentityKey,
   projectIdentityMatches,
 } from './project-identity.js';
 import { hashBytes, readMemoryManifest, readMemoryObject } from './store.js';
@@ -34,9 +35,20 @@ export type RestoreItemResult = {
   kind: ManifestItem['kind'];
   scope: ManifestItem['scope'];
   status: RestoreStatus;
+  project?: ProjectIdentity; // portable identity, for unique-project aggregation
   targetPath?: string; // machine-local; verbose/JSON only
   reason?: string;
 };
+
+/** Unique project identities among project-scoped items (files never counted as projects). */
+export const countProjects = (items: RestoreItemResult[]): number =>
+  new Set(
+    items.flatMap((item) =>
+      item.scope === 'project' && item.project
+        ? [projectIdentityKey(item.project)]
+        : [],
+    ),
+  ).size;
 
 export type RestorePlan = {
   provider: 'claude';
@@ -126,6 +138,7 @@ const classify = async (
     logicalId: item.logicalId,
     kind: item.kind,
     scope: item.scope,
+    ...(item.project ? { project: item.project } : {}),
   };
   const resolvedTarget = await resolveTargetPath(item, claudeHome, resolved);
   if ('reason' in resolvedTarget)
@@ -148,11 +161,8 @@ const summarize = (
   items: RestoreItemResult[],
 ): { files: number; projects: number } => ({
   files: items.length,
-  projects: new Set(
-    items
-      .filter((item) => item.scope === 'project')
-      .map((item) => item.logicalId),
-  ).size,
+  // Unique project identities, NOT one-per-file.
+  projects: countProjects(items),
 });
 
 /** Preview a restore. Pure: reads the manifest and inspects targets, writes nothing. */

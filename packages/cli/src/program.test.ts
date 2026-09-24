@@ -1168,4 +1168,27 @@ describe('Stack CLI', () => {
     );
     expect(result.output).toContain('No changes were made.');
   });
+
+  it('emits restore JSON with the summary project count, not one-per-file', async () => {
+    const result = await runProgram(
+      ['memory', 'restore', '--dry-run', '--json'],
+      {
+        memoryRestore: async () => ({
+          provider: 'claude',
+          files: 24,
+          projects: 9,
+          items: Array.from({ length: 24 }, (_, index) => ({
+            logicalId: `claude/auto-memory/p/f${index}.md`,
+            kind: 'auto-memory' as const,
+            scope: 'project' as const,
+            status: 'project-not-found' as const,
+          })),
+        }),
+      },
+    );
+    const parsed = JSON.parse(result.output);
+    expect(parsed.projects).toBe(9);
+    expect(parsed.files).toBe(24);
+    expect(parsed.items).toHaveLength(24);
+  });
 });
