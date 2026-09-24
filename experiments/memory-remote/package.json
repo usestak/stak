@@ -1,0 +1,26 @@
+{
+  "name": "@stack/experiment-memory-remote",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 14B0 architecture spike: encrypted remote Memory backup & recovery. NOT production. Wired into nothing that ships.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint src",
+    "test": "vitest run src --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@stack/memory": "workspace:*",
+    "zod": "4.6.5"
+  }
+}

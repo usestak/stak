@@ -1,6 +1,9 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+  # Isolated architecture-spike prototypes (Phase 14B0). Validated by the normal
+  # turbo pipeline but imported by nothing that ships. See experiments/*/README.md.
+  - 'experiments/*'
 allowBuilds:
   esbuild: true
   sharp: false
