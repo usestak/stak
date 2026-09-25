@@ -6,6 +6,11 @@ import type {
 } from '@stack/memory';
 import { countProjects, projectIdentityKey } from '@stack/memory';
 
+import type {
+  CloudRecoverOutcome,
+  MemoryBackupOutcome,
+  MemoryCloudStatus,
+} from '../memory/cloud-ops.js';
 import { block } from './format.js';
 
 type RenderOptions = { verbose?: boolean };
@@ -75,8 +80,128 @@ export const renderMemoryScan = (
 export const renderMemoryBackup = (result: BackupResult): string =>
   block([
     `${files(result.files)} saved.`,
-    `${projects(result.projects)} protected.`,
+    `${projects(result.projects)} backed up.`,
   ]);
+
+/** Local-first backup with the Cloud outcome (Standard/Protected/skipped/failed). */
+export const renderMemoryCloudBackup = (
+  outcome: MemoryBackupOutcome,
+): string => {
+  const { local, cloud } = outcome;
+  const head = [`${files(local.files)} saved locally.`, ''];
+  if (cloud.status === 'skipped')
+    return block([
+      ...head,
+      'Cloud backup skipped.',
+      'Run `stack login` to protect this backup from machine loss.',
+    ]);
+  if (cloud.status === 'protected-locked')
+    return block([
+      ...head,
+      "Protected Cloud backup couldn't be created because this device",
+      'cannot unlock your protected Memory.',
+      '',
+      'Run:',
+      '  stack memory recover',
+    ]);
+  if (cloud.status === 'failed')
+    return block([
+      ...head,
+      'Cloud backup failed.',
+      'Your local backup is safe.',
+      '',
+      cloud.message,
+    ]);
+  if (cloud.status === 'protected')
+    return block([
+      ...head,
+      `${projects(local.projects)} backed up to Stack Cloud.`,
+      '',
+      'Privacy: Protected',
+    ]);
+  return block([
+    ...head,
+    `${projects(local.projects)} backed up to Stack Cloud.`,
+    '',
+    'Privacy: Standard',
+    '',
+    'For client-side encryption:',
+    '  stack memory protect',
+  ]);
+};
+
+/** Cloud → local private store recovery (does not touch native agent files). */
+export const renderMemoryRecover = (outcome: CloudRecoverOutcome): string => {
+  if (outcome.status === 'not-authenticated')
+    return block(['Not signed in.', 'Run `stack login` first.']);
+  if (outcome.status === 'no-backup')
+    return block(['No Cloud backup found for this account.']);
+  if (outcome.status === 'needs-recovery-method')
+    return block([
+      'Protected Memory found.',
+      '',
+      'This device can’t unlock it yet.',
+      'Recover with a passkey in your browser, or use a recovery file:',
+      '  stack memory recover --recovery-file <path>',
+    ]);
+  return block([
+    'Memory recovered.',
+    '',
+    `${plainFiles(outcome.objects)} available`,
+    `Privacy: ${outcome.privacyMode === 'protected' ? 'Protected' : 'Standard'}`,
+    '',
+    'Run `stack memory restore`.',
+  ]);
+};
+
+export const renderMemoryProtect = (result: {
+  migrated: number;
+  recoveryFilePath?: string;
+}): string =>
+  block([
+    'Protected backup enabled.',
+    '',
+    'Recovery',
+    'Recovery file    Ready',
+    result.recoveryFilePath ? `Saved to ${result.recoveryFilePath}` : false,
+    '',
+    'Keep this file safe — anyone with it can recover your Memory.',
+    result.migrated > 0
+      ? `${plainFiles(result.migrated)} migrated to Protected.`
+      : false,
+    '',
+    'Add another recovery method so losing one credential',
+    'doesn’t lose your Memory.',
+  ]);
+
+/** Cloud state appended to the local status view. */
+export const renderMemoryCloudStatus = (
+  local: MemoryStatus | null,
+  cloud: MemoryCloudStatus,
+): string => {
+  const lines = [
+    'Claude',
+    '',
+    `${projects(local?.projects ?? 0)} backed up`,
+    `${files(local?.files ?? 0)}`,
+  ];
+  if (!cloud.authenticated) {
+    lines.push('', 'Cloud             not signed in');
+    return block(lines);
+  }
+  lines.push(
+    '',
+    `Cloud             ${cloud.latestGeneration === null ? 'no backup yet' : 'up to date'}`,
+    `Privacy           ${cloud.privacyMode === 'protected' ? 'Protected' : 'Standard'}`,
+  );
+  if (cloud.recoveryMethodTypes.length > 0)
+    lines.push(
+      `Recovery          ${cloud.recoveryMethodTypes
+        .map((type) => (type === 'recovery-file' ? 'Recovery file' : 'Passkey'))
+        .join(', ')}`,
+    );
+  return block(lines);
+};
 
 export const renderMemoryStatus = (
   status: MemoryStatus | null,

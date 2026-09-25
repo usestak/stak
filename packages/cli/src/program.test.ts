@@ -280,6 +280,25 @@ const runProgram = async (
       projects: 0,
       items: [],
     }),
+    memoryCloudBackup: async () => ({
+      local: {
+        provider: 'claude',
+        files: 0,
+        projects: 0,
+        createdAt: '2026-09-25T12:00:00.000Z',
+      },
+      cloud: { status: 'skipped' },
+    }),
+    memoryCloudRecover: async () => ({ status: 'no-backup' }),
+    memoryCloudProtect: async () => ({ status: 'not-authenticated' }),
+    memoryCloudStatus: async () => ({
+      authenticated: false,
+      privacyMode: null,
+      latestGeneration: null,
+      lastCloudBackupAt: null,
+      recoveryMethodTypes: [],
+      deviceEnrolled: false,
+    }),
     confirm: async () => true,
     writeOut: (value) => {
       output += value;
@@ -1073,7 +1092,14 @@ describe('Stack CLI', () => {
 
   it('documents the memory subcommands', async () => {
     const result = await runProgram(['memory', '--help']);
-    for (const sub of ['scan', 'backup', 'status', 'restore'])
+    for (const sub of [
+      'scan',
+      'backup',
+      'protect',
+      'recover',
+      'status',
+      'restore',
+    ])
       expect(result.output).toContain(sub);
   });
 
@@ -1114,35 +1140,81 @@ describe('Stack CLI', () => {
     expect(result.output).toContain('No memory found.');
   });
 
-  it('backs up memory with plain output', async () => {
+  it('backs up locally and to Cloud (Standard) with calm output', async () => {
     const result = await runProgram(['memory', 'backup'], {
-      memoryBackup: async () => ({
-        provider: 'claude',
-        files: 12,
-        projects: 3,
-        createdAt: '2026-09-23T12:00:00.000Z',
+      memoryCloudBackup: async () => ({
+        local: {
+          provider: 'claude',
+          files: 12,
+          projects: 3,
+          createdAt: '2026-09-25T12:00:00.000Z',
+        },
+        cloud: { status: 'standard', generation: 0 },
       }),
     });
     expect(result.output).toContain('Backing up Claude memory...');
-    expect(result.output).toContain('12 memory files saved.');
-    expect(result.output).toContain('3 projects protected.');
+    expect(result.output).toContain('12 memory files saved locally.');
+    expect(result.output).toContain('3 projects backed up to Stack Cloud.');
+    expect(result.output).toContain('Privacy: Standard');
   });
 
-  it('shows memory status, including the empty state', async () => {
-    const empty = await runProgram(['memory', 'status'], {
-      memoryStatus: async () => null,
+  it('backs up locally and calmly skips Cloud when signed out', async () => {
+    const result = await runProgram(['memory', 'backup']); // default stub: skipped
+    expect(result.output).toContain('saved locally.');
+    expect(result.output).toContain('Cloud backup skipped.');
+    expect(result.output).toContain('stack login');
+  });
+
+  it('fails the Cloud backup closed for a Protected account with no local key', async () => {
+    const result = await runProgram(['memory', 'backup'], {
+      memoryCloudBackup: async () => ({
+        local: {
+          provider: 'claude',
+          files: 5,
+          projects: 2,
+          createdAt: '2026-09-25T12:00:00.000Z',
+        },
+        cloud: { status: 'protected-locked' },
+      }),
     });
-    expect(empty.output).toContain('No backup yet.');
+    expect(result.output).toContain('saved locally.');
+    expect(result.output).toContain('cannot unlock your protected Memory');
+    expect(result.output).not.toContain('Privacy: Standard');
+  });
+
+  it('shows memory status with Cloud state', async () => {
+    const signedOut = await runProgram(['memory', 'status']); // default stub
+    expect(signedOut.output).toContain('not signed in');
     const present = await runProgram(['memory', 'status'], {
       memoryStatus: async () => ({
         provider: 'claude',
         projects: 3,
         files: 12,
-        lastBackupAt: new Date(Date.now() - 120_000).toISOString(),
+        lastBackupAt: '2026-09-25T12:00:00.000Z',
+      }),
+      memoryCloudStatus: async () => ({
+        authenticated: true,
+        privacyMode: 'protected',
+        latestGeneration: 4,
+        lastCloudBackupAt: '2026-09-25T12:00:00.000Z',
+        recoveryMethodTypes: ['passkey'],
+        deviceEnrolled: true,
       }),
     });
-    expect(present.output).toContain('3 projects protected');
-    expect(present.output).toContain('Last backup');
+    expect(present.output).toContain('3 projects backed up');
+    expect(present.output).toContain('Privacy');
+    expect(present.output).toContain('Protected');
+    expect(present.output).toContain('Recovery');
+  });
+
+  it('protect reports not-signed-in without a session', async () => {
+    const result = await runProgram(['memory', 'protect']); // default: not-authenticated
+    expect(result.output).toContain('Not signed in.');
+  });
+
+  it('recover reports no Cloud backup for an empty account', async () => {
+    const result = await runProgram(['memory', 'recover']); // default: no-backup
+    expect(result.output).toContain('No Cloud backup found');
   });
 
   it('previews a memory restore without changing agent memory', async () => {

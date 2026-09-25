@@ -1,25 +1,43 @@
 import type { Command } from 'commander';
 
 import type {
-  BackupResult,
   DiscoveredMemoryItem,
   MemoryStatus,
   RestorePlan,
 } from '@stack/memory';
 import { toManifestItem } from '@stack/memory';
 
+import type {
+  CloudRecoverOutcome,
+  MemoryBackupOutcome,
+  MemoryCloudStatus,
+} from '../memory/cloud-ops.js';
 import {
-  renderMemoryBackup,
+  renderMemoryCloudBackup,
+  renderMemoryCloudStatus,
+  renderMemoryProtect,
+  renderMemoryRecover,
   renderMemoryRestore,
   renderMemoryScan,
-  renderMemoryStatus,
 } from '../ui/memory.js';
+
+export type MemoryProtectCommandResult =
+  | { migrated: number; recoveryFilePath?: string }
+  | { status: 'not-authenticated' };
 
 export type MemoryCommandDependencies = {
   memoryScan(): Promise<DiscoveredMemoryItem[]>;
-  memoryBackup(): Promise<BackupResult>;
   memoryStatus(): Promise<MemoryStatus | null>;
   memoryRestore(options: { apply: boolean }): Promise<RestorePlan>;
+  memoryCloudBackup(): Promise<MemoryBackupOutcome>;
+  memoryCloudRecover(options: {
+    generation?: number;
+    recoveryFile?: string;
+  }): Promise<CloudRecoverOutcome>;
+  memoryCloudProtect(options: {
+    recoveryFile?: string;
+  }): Promise<MemoryProtectCommandResult>;
+  memoryCloudStatus(): Promise<MemoryCloudStatus>;
   writeOut(value: string): void;
 };
 
@@ -34,7 +52,7 @@ export const registerMemoryCommand = (
 ): void => {
   const memory = program
     .command('memory')
-    .description('Back up and restore private agent memory (Claude)');
+    .description('Back up, protect, and recover private agent memory (Claude)');
 
   memory
     .command('scan')
@@ -44,7 +62,6 @@ export const registerMemoryCommand = (
     .action(async (options: Flags) => {
       const items = await dependencies.memoryScan();
       if (options.json) {
-        // Portable projection only — never absolute paths.
         emitJson(dependencies, {
           provider: 'claude',
           files: items.length,
@@ -60,38 +77,97 @@ export const registerMemoryCommand = (
   memory
     .command('backup')
     .description(
-      'Copy private memory into Stack’s private store (read-only capture)',
+      'Back up private memory locally and, when signed in, to Stack Cloud',
     )
     .option('--json', 'emit structured JSON only')
     .action(async (options: Flags) => {
-      dependencies.writeOut('Backing up Claude memory...\n\n');
-      const result = await dependencies.memoryBackup();
+      if (!options.json)
+        dependencies.writeOut('Backing up Claude memory...\n\n');
+      const outcome = await dependencies.memoryCloudBackup();
+      if (options.json) {
+        emitJson(dependencies, outcome);
+        return;
+      }
+      dependencies.writeOut(renderMemoryCloudBackup(outcome));
+    });
+
+  memory
+    .command('protect')
+    .description('Enable client-side encrypted (Protected) Cloud backup')
+    .option('--recovery-file <path>', 'where to write the recovery file')
+    .option('--json', 'emit structured JSON only')
+    .action(async (options: { recoveryFile?: string; json?: boolean }) => {
+      const result = await dependencies.memoryCloudProtect({
+        ...(options.recoveryFile ? { recoveryFile: options.recoveryFile } : {}),
+      });
       if (options.json) {
         emitJson(dependencies, result);
         return;
       }
-      dependencies.writeOut(renderMemoryBackup(result));
+      if ('status' in result) {
+        dependencies.writeOut('Not signed in.\nRun `stack login` first.\n');
+        return;
+      }
+      dependencies.writeOut(renderMemoryProtect(result));
     });
 
   memory
+    .command('recover')
+    .description('Recover the private memory store from Stack Cloud')
+    .option(
+      '--generation <n>',
+      'recover a specific generation (default: latest)',
+    )
+    .option(
+      '--recovery-file <path>',
+      'unlock Protected memory with a recovery file',
+    )
+    .option('--json', 'emit structured JSON only')
+    .action(
+      async (options: {
+        generation?: string;
+        recoveryFile?: string;
+        json?: boolean;
+      }) => {
+        const outcome = await dependencies.memoryCloudRecover({
+          ...(options.generation !== undefined
+            ? { generation: Number.parseInt(options.generation, 10) }
+            : {}),
+          ...(options.recoveryFile
+            ? { recoveryFile: options.recoveryFile }
+            : {}),
+        });
+        if (options.json) {
+          emitJson(dependencies, outcome);
+          return;
+        }
+        dependencies.writeOut(renderMemoryRecover(outcome));
+      },
+    );
+
+  memory
     .command('status')
-    .description('Show the last memory backup')
+    .description('Show local and Cloud memory backup status')
     .option('--json', 'emit structured JSON only')
     .option('--verbose', 'show detail')
     .action(async (options: Flags) => {
-      const status = await dependencies.memoryStatus();
+      const [local, cloud] = await Promise.all([
+        dependencies.memoryStatus(),
+        dependencies.memoryCloudStatus(),
+      ]);
       if (options.json) {
-        emitJson(dependencies, status ?? { provider: 'claude', files: 0 });
+        emitJson(dependencies, {
+          local: local ?? { provider: 'claude', files: 0, projects: 0 },
+          cloud,
+        });
         return;
       }
-      dependencies.writeOut(
-        renderMemoryStatus(status, { verbose: options.verbose === true }),
-      );
+      dependencies.writeOut(renderMemoryCloudStatus(local, cloud));
     });
 
   memory
     .command('restore')
-    .description('Restore private memory from Stack’s private store')
+    .description('Restore native agent memory from Stack’s private store')
     .option('--dry-run', 'preview without changing agent memory')
     .option('--json', 'emit structured JSON only')
     .option('--verbose', 'show per-item detail')

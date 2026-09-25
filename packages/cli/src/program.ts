@@ -1,4 +1,4 @@
-import { readdir } from 'node:fs/promises';
+import { readdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -44,13 +44,30 @@ import type {
 } from '@stack/core';
 import {
   createClaudeMemoryAdapter,
+  fileLocalMemoryKeyStore,
+  generateRecoveryKey,
   readMemoryStatus,
   type BackupResult,
   type DiscoveredMemoryItem,
   type MemoryStatus,
+  type RemoteMemoryBackend,
   type RestorePlan,
 } from '@stack/memory';
+import { createCloudClient } from '@stack/cloud-client';
 import { resolveMemoryProjects } from './memory/resolve.js';
+import { resolveCloudBaseUrl } from './cloud/config.js';
+import { stackCloudRemoteMemoryBackend } from './memory/cloud-backend.js';
+import {
+  readMemoryCloudStatus,
+  runMemoryCloudBackup,
+  runMemoryCloudProtect,
+  runMemoryCloudRecover,
+  type CloudRecoverOutcome,
+  type MemoryBackupOutcome,
+  type MemoryCloudDeps,
+  type MemoryCloudStatus,
+} from './memory/cloud-ops.js';
+import type { MemoryProtectCommandResult } from './commands/memory.js';
 import { resolveScanRoots, scanSkills } from '@stack/scanner';
 import { isPublicStackRef } from '@stack/spec';
 import type {
@@ -189,6 +206,15 @@ export type ProgramDependencies = {
   memoryBackup(): Promise<BackupResult>;
   memoryStatus(): Promise<MemoryStatus | null>;
   memoryRestore(options: { apply: boolean }): Promise<RestorePlan>;
+  memoryCloudBackup(): Promise<MemoryBackupOutcome>;
+  memoryCloudRecover(options: {
+    generation?: number;
+    recoveryFile?: string;
+  }): Promise<CloudRecoverOutcome>;
+  memoryCloudProtect(options: {
+    recoveryFile?: string;
+  }): Promise<MemoryProtectCommandResult>;
+  memoryCloudStatus(): Promise<MemoryCloudStatus>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -245,6 +271,42 @@ const cloudDeps: CloudOperationsDeps = {
   credentials: fileCredentialStore(stackHome),
   writeOut: (value) => process.stdout.write(value),
 };
+/**
+ * Build the remote-Memory operation deps: an authenticated per-user cloud backend
+ * (or null when signed out), the device-local key store, and the Phase 14A local
+ * backup runner.
+ */
+const buildMemoryCloudDeps = async (): Promise<MemoryCloudDeps> => {
+  const credential = await cloudDeps.credentials.read();
+  let backend: RemoteMemoryBackend | null = null;
+  if (credential) {
+    const baseUrl = resolveCloudBaseUrl({
+      env: process.env,
+      ...(credential.apiUrl ? { storedApiUrl: credential.apiUrl } : {}),
+    });
+    backend = stackCloudRemoteMemoryBackend(
+      createCloudClient({ baseUrl, token: credential.token }),
+    );
+  }
+  return {
+    stackHome,
+    backend,
+    localKeyStore: fileLocalMemoryKeyStore(stackHome),
+    runLocalBackup: async () => (await memoryAdapter()).backup(),
+  };
+};
+
+/** Write a `.stackkey` recovery file without overwriting, owner-only. */
+const writeRecoveryFile = async (
+  filePath: string,
+  file: unknown,
+): Promise<void> => {
+  await writeFile(filePath, `${JSON.stringify(file, null, 2)}\n`, {
+    flag: 'wx',
+    mode: 0o600,
+  });
+};
+
 const defaultDependencies: ProgramDependencies = {
   scan: async ({ project }) =>
     scanSkills({ roots: resolveScanRoots({ includeProject: project }) }),
@@ -349,6 +411,26 @@ const defaultDependencies: ProgramDependencies = {
   memoryStatus: async () => readMemoryStatus(stackHome),
   memoryRestore: async ({ apply }) =>
     (await memoryAdapter()).restore({ apply }),
+  memoryCloudBackup: async () =>
+    runMemoryCloudBackup(await buildMemoryCloudDeps()),
+  memoryCloudRecover: async (options) =>
+    runMemoryCloudRecover(await buildMemoryCloudDeps(), options),
+  memoryCloudStatus: async () =>
+    readMemoryCloudStatus(await buildMemoryCloudDeps()),
+  memoryCloudProtect: async (options) => {
+    const deps = await buildMemoryCloudDeps();
+    if (!deps.backend) return { status: 'not-authenticated' as const };
+    const recoveryKey = generateRecoveryKey();
+    const result = await runMemoryCloudProtect(
+      { ...deps, backend: deps.backend },
+      { recoveryKey },
+    );
+    const recoveryFilePath =
+      options.recoveryFile ??
+      path.join(process.cwd(), 'stack-memory-recovery.stackkey');
+    await writeRecoveryFile(recoveryFilePath, recoveryKey.file);
+    return { migrated: result.migrated, recoveryFilePath };
+  },
   confirm: async (message) => {
     if (!process.stdin.isTTY) return false;
     const prompt = createInterface({
