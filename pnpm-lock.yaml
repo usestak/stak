@@ -203,6 +203,9 @@ importers:
       '@stack/cloud-server':
         specifier: workspace:*
         version: link:../../packages/cloud-server
+      '@stack/memory':
+        specifier: workspace:*
+        version: link:../../packages/memory
       '@stack/spec':
         specifier: workspace:*
         version: link:../../packages/spec

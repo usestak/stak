@@ -2,6 +2,7 @@ import { createCloudService, type CloudService } from '@stack/cloud-server';
 
 import { supabaseBlobStore } from './blob';
 import { cloudEnv } from './env';
+import { supabaseRemoteMemoryBackend } from './memory-backend';
 import { supabaseRepository } from './repository';
 
 let cached: CloudService | undefined;
@@ -16,6 +17,7 @@ export const getCloudService = (): CloudService => {
       appUrl: env.appUrl,
       ticketSecret: env.ticketSecret,
       maxSnapshotBytes: env.maxSnapshotBytes,
+      memoryBackendFor: (userId) => supabaseRemoteMemoryBackend(userId),
     });
   }
   return cached;
