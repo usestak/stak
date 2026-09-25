@@ -41,10 +41,21 @@ story for the encrypted case that works for a normal developer with no wallet.
 - **Trust limitation:** the bridge does not defend against Stack serving malicious
   browser JavaScript; disclosed and accepted for V0, with future mitigations noted.
 - **Cross-device synced-PRF determinism is not guaranteed;** the design tolerates
-  this via per-authenticator wrappers + a recovery file. Confirm empirically via the
-  manual Windows dogfood page.
+  this via per-authenticator wrappers + a recovery file. It was NOT tested and must
+  not be assumed.
 - "Deletion" in migration is soft-delete + bounded retention, not instant global
   erasure; disclosed.
+
+## Evidence
+
+- **Single-device passkey PRF recovery: PROVEN (manual dogfood, 2026-09-25).**
+  Windows + Chrome + Google Password Manager (localhost, RP ID `localhost`). Real
+  passkey create + WebAuthn PRF `get()`; a synthetic random MMK was wrapped, the
+  plaintext discarded, and after a fresh authentication the MMK was recovered with a
+  matching hash. No real Memory; no key material displayed or logged. Scope is the
+  tested environment only — this does not imply all passkeys/providers support PRF,
+  nor that PRF reproduces across a genuinely different device. See the spike doc
+  §17.1 and decisions A/B/C.
 
 ## Alternatives considered
 

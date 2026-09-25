@@ -112,8 +112,9 @@ Key research facts driving the design:
 
 Prototype: `derivePasskeyKek` (`src/kdf.ts`) + `addPasskeyWrapper`/
 `unwrapWithPasskey` (`src/recovery-methods.ts`); the browser side is `dogfood/`.
-The Node tests prove the wrapping crypto **given** a PRF output; they do **not**
-claim a real browser produced it (that is the manual dogfood, §17).
+The Node tests prove the wrapping crypto **given** a PRF output; the real browser
+PRF flow was then verified manually and **recorded PASSED** in §17.1 (Windows +
+Chrome + Google Password Manager, single device).
 
 ---
 
@@ -322,6 +323,36 @@ Environment caveats from research (verify at run time): Windows Hello PRF needs 
 predictable PRF sources on Windows. If PRF is unavailable, use the recovery-file
 fallback.
 
+### 17.1 Recorded dogfood result — PASSED (2026-09-25)
+
+The manual dogfood was completed successfully.
+
+- **Environment:** Windows · Chrome · `http://localhost` secure context · RP ID
+  `localhost` · passkey provider **Google Password Manager**.
+- **Reported state:**
+
+  | Check                     | Result     |
+  | ------------------------- | ---------- |
+  | Passkeys supported        | supported  |
+  | Platform authenticator    | available  |
+  | PRF advertised            | advertised |
+  | Credential created        | created    |
+  | PRF usable (real `get()`) | usable     |
+  | MMK recovery              | passed     |
+
+- **Flow exercised:** capability detection → real passkey creation → real WebAuthn
+  PRF use → synthetic random MMK wrapped → plaintext MMK discarded → fresh passkey
+  authentication → PRF obtained again → MMK recovered → recovered MMK hash matched
+  the original. No real Claude Memory was used; no key material was displayed or
+  logged.
+
+**Scope of this evidence (do not over-generalize):** this proves PRF works and
+re-derives the same MMK **only for the exact environment tested** (Windows + Chrome
+
+- Google Password Manager). It does **not** prove that "all passkeys support PRF",
+  nor that Google Password Manager PRF is guaranteed to reproduce across a genuinely
+  different device (see decision C).
+
 ---
 
 ## 18. Proposed Phase 14B production scope (for later approval — not started here)
@@ -349,25 +380,23 @@ Out of scope for 14B: Seal/Walrus backends, semantic memory, passkey **login**
 ## Decision output
 
 **A. Does real WebAuthn PRF work in our current Windows/browser environment?**
-Not verifiable automatically in this session — no browser extension was connected,
-and a real ceremony triggers OS UI that must not be auto-driven. The dogfood page
-(§17) exists to answer this manually. Research says it is _expected_ to work on
-Windows only with a 2026 Windows Hello update (KB5077181) + recent Chrome (147+ for
-create-time; `get()` sooner), or via a YubiKey/1Password; otherwise PRF is
-unavailable and the fallback applies. **Status: pending manual dogfood.**
+**YES — proven manually (2026-09-25)** with Chrome + Google Password Manager on
+Windows (localhost secure context). The dogfood page (§17.1) reported PRF advertised
+and usable via a real `get()`. This confirms only the environment actually tested;
+it does not imply all passkeys/providers support PRF.
 
 **B. Can it reliably recover the same synthetic MMK after local MMK deletion?**
-The crypto is proven: given a stable PRF output, HKDF→KEK→AES-GCM wrap/unwrap
-recovers the exact MMK, and the browser page performs the full wrap→discard→
-re-authenticate→recover→hash-compare cycle. Whether the _authenticator_ returns a
-stable PRF output across authentications is what the manual dogfood confirms; on
-the same authenticator + same salt, research says yes.
+**YES — proven manually (2026-09-25).** After wrapping a synthetic random MMK and
+discarding the plaintext, a fresh passkey authentication produced the PRF output
+again and the MMK was recovered with a matching hash. (The wrapping crypto is also
+proven in Node: HKDF→KEK→AES-GCM wrap/unwrap round-trips the exact MMK.)
 
 **C. What remains unproven about cross-device synced-passkey recovery?**
-Whether a synced passkey yields the SAME PRF output on a second device. Specs and
-vendor docs are silent, and hybrid/QR flows are reported to differ or omit PRF.
-**Treat as not guaranteed.** The multi-wrapper MMK design means we never depend on
-it: enroll a wrapper per device/authenticator, plus a recovery file.
+Whether the SAME synced credential yields the SAME PRF output on a **genuinely
+different device**. This was NOT tested and **must not be guaranteed** — specs and
+vendor docs are silent, and hybrid/QR flows are reported to differ or omit PRF. The
+multi-wrapper MMK design means we never depend on it: enroll a wrapper per
+device/authenticator, plus a recovery file.
 
 **D. What fallback should Stack offer when PRF is unavailable?**
 The recovery file / high-entropy recovery key (§7), which wraps the same MMK via
