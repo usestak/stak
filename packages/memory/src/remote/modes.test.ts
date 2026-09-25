@@ -1,0 +1,336 @@
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { memoryStorePaths } from '../store.js';
+import { readMemoryObject } from '../store.js';
+import {
+  InMemoryRemoteMemoryStore,
+  RemoteMemoryError,
+  inMemoryRemoteMemoryBackend,
+  type RemoteMemoryBackend,
+} from './backend.js';
+import { generateMmk } from './mmk.js';
+import {
+  cloudRecover,
+  migrateStandardToProtected,
+  protectedCloudBackup,
+  standardCloudBackup,
+} from './modes.js';
+import { SECRET_MARKER, writeSyntheticStore } from './store.fixtures.js';
+
+const roots: string[] = [];
+const freshStore = async (): Promise<string> => {
+  const root = await mkdtemp(path.join(tmpdir(), 'stack-14b-dst-'));
+  roots.push(root);
+  return root;
+};
+afterEach(async () => {
+  await Promise.all(
+    roots.splice(0).map((r) => rm(r, { recursive: true, force: true })),
+  );
+});
+
+const backendFor = (
+  userId: string,
+): { store: InMemoryRemoteMemoryStore; backend: RemoteMemoryBackend } => {
+  const store = new InMemoryRemoteMemoryStore();
+  return { store, backend: inMemoryRemoteMemoryBackend(store, userId) };
+};
+
+const assertByteExact = async (
+  sourceHome: string,
+  destHome: string,
+  hashes: string[],
+) => {
+  const a = await readFile(memoryStorePaths(sourceHome).currentManifest);
+  const b = await readFile(memoryStorePaths(destHome).currentManifest);
+  expect(b.equals(a)).toBe(true);
+  for (const contentHash of hashes) {
+    const oa = await readMemoryObject({ stackHome: sourceHome, contentHash });
+    const ob = await readMemoryObject({ stackHome: destHome, contentHash });
+    expect(Buffer.from(ob).equals(Buffer.from(oa))).toBe(true);
+  }
+};
+
+describe('Standard cloud backup/recover', () => {
+  it('backs up and recovers byte-exactly on a fresh client', async () => {
+    const source = await writeSyntheticStore({
+      projects: 3,
+      filesPerProject: 3,
+    });
+    roots.push(source.stackHome);
+    const { backend } = backendFor('user-a');
+    const result = await standardCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+    });
+    expect(result.privacyMode).toBe('standard');
+    expect(result.generation).toBe(0);
+
+    const dest = await freshStore();
+    const recovered = await cloudRecover({ stackHome: dest, backend });
+    expect(recovered.objects).toBe(source.hashes.length);
+    await assertByteExact(source.stackHome, dest, source.hashes);
+  });
+
+  it('increments generations and tracks parent', async () => {
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
+    roots.push(source.stackHome);
+    const { backend } = backendFor('user-a');
+    const g0 = await standardCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+    });
+    const g1 = await standardCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+    });
+    expect(g0.generation).toBe(0);
+    expect(g1.generation).toBe(1);
+    const latest = await backend.getLatest();
+    expect(latest?.generation).toBe(1);
+    expect(latest?.parentGeneration).toBe(0);
+  });
+
+  it('rejects a stale parent (concurrent backup conflict, no last-writer-wins)', async () => {
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
+    roots.push(source.stackHome);
+    const { backend } = backendFor('user-a');
+    await standardCloudBackup({ stackHome: source.stackHome, backend }); // gen 0
+    // Another device committed gen 1 meanwhile; this device still thinks parent=null.
+    await standardCloudBackup({ stackHome: source.stackHome, backend }); // gen 1
+    await expect(
+      backend.createGeneration({
+        backupId: 'x',
+        expectedParent: 0, // stale (latest is now 1)
+        privacyMode: 'standard',
+        payload: Buffer.from('x'),
+        bundleFormatVersion: 'stack-mem-bundle-v1',
+      }),
+    ).rejects.toMatchObject({ code: 'conflict' });
+  });
+
+  it('does not let another user retrieve the payload', async () => {
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
+    roots.push(source.stackHome);
+    const store = new InMemoryRemoteMemoryStore();
+    const alice = inMemoryRemoteMemoryBackend(store, 'alice');
+    const mallory = inMemoryRemoteMemoryBackend(store, 'mallory');
+    const backup = await standardCloudBackup({
+      stackHome: source.stackHome,
+      backend: alice,
+    });
+    await expect(
+      (async () => mallory.getPayload(backup.backupId))(),
+    ).rejects.toMatchObject({ code: 'not-found' });
+    // Mallory sees none of Alice's generations.
+    expect(await mallory.listGenerations()).toHaveLength(0);
+  });
+
+  it('rejects a corrupted payload on recover', async () => {
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
+    roots.push(source.stackHome);
+    const { store, backend } = backendFor('user-a');
+    const backup = await standardCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+    });
+    store.corruptPayload(`mem/user-a/${backup.backupId}`);
+    const dest = await freshStore();
+    await expect(
+      cloudRecover({ stackHome: dest, backend }),
+    ).rejects.toMatchObject({
+      code: 'integrity',
+    });
+  });
+});
+
+describe('Protected cloud backup/recover', () => {
+  it('recovers byte-exactly; original hash == recovered hash', async () => {
+    const source = await writeSyntheticStore({
+      projects: 3,
+      filesPerProject: 3,
+    });
+    roots.push(source.stackHome);
+    const { backend } = backendFor('user-a');
+    const mmk = generateMmk();
+    const result = await protectedCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+      mmk,
+    });
+    expect(result.privacyMode).toBe('protected');
+
+    const dest = await freshStore();
+    const recovered = await cloudRecover({ stackHome: dest, backend, mmk });
+    expect(recovered.objects).toBe(source.hashes.length);
+    await assertByteExact(source.stackHome, dest, source.hashes);
+  });
+
+  it('uses a fresh DEK per generation (ciphertext differs for identical input)', async () => {
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
+    roots.push(source.stackHome);
+    const { backend } = backendFor('user-a');
+    const mmk = generateMmk();
+    const a = await protectedCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+      mmk,
+    });
+    const b = await protectedCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+      mmk,
+    });
+    const pa = await backend.getPayload(a.backupId);
+    const pb = await backend.getPayload(b.backupId);
+    expect(Buffer.from(pa).equals(Buffer.from(pb))).toBe(false);
+  });
+
+  it('stores ciphertext only — no plaintext or project identity on the server', async () => {
+    const source = await writeSyntheticStore({
+      projects: 2,
+      filesPerProject: 2,
+    });
+    roots.push(source.stackHome);
+    const { backend } = backendFor('user-a');
+    const backup = await protectedCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+      mmk: generateMmk(),
+    });
+    const payload = await backend.getPayload(backup.backupId);
+    const meta = await backend.getGenerationById(backup.backupId);
+    const haystack = `${Buffer.from(payload).toString('utf8')}\n${JSON.stringify(meta)}`;
+    expect(haystack).not.toContain(SECRET_MARKER);
+    expect(haystack).not.toContain('github.com/example');
+    expect(haystack).not.toContain('proj0');
+  });
+
+  it('a wrong MMK (Stack account access alone) cannot decrypt', async () => {
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
+    roots.push(source.stackHome);
+    const { backend } = backendFor('user-a');
+    await protectedCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+      mmk: generateMmk(),
+    });
+    const dest = await freshStore();
+    await expect(
+      cloudRecover({ stackHome: dest, backend, mmk: generateMmk() }),
+    ).rejects.toThrow();
+  });
+
+  it('protected recover without an MMK fails closed', async () => {
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
+    roots.push(source.stackHome);
+    const { backend } = backendFor('user-a');
+    await protectedCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+      mmk: generateMmk(),
+    });
+    const dest = await freshStore();
+    await expect(
+      cloudRecover({ stackHome: dest, backend }),
+    ).rejects.toMatchObject({
+      code: 'mmk-required',
+    });
+  });
+
+  it('rejects a tampered ciphertext payload', async () => {
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
+    roots.push(source.stackHome);
+    const { store, backend } = backendFor('user-a');
+    const mmk = generateMmk();
+    const backup = await protectedCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+      mmk,
+    });
+    store.corruptPayload(`mem/user-a/${backup.backupId}`);
+    const dest = await freshStore();
+    await expect(
+      cloudRecover({ stackHome: dest, backend, mmk }),
+    ).rejects.toMatchObject({
+      code: 'integrity',
+    });
+  });
+});
+
+describe('Standard → Protected migration', () => {
+  it('replaces payloads, verifies, retires Standard, and finalizes', async () => {
+    const source = await writeSyntheticStore({
+      projects: 2,
+      filesPerProject: 2,
+    });
+    roots.push(source.stackHome);
+    const { store, backend } = backendFor('user-a');
+    const std = await standardCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+    });
+    const mmk = generateMmk();
+
+    const result = await migrateStandardToProtected({ backend, mmk });
+    expect(result.finalized).toBe(true);
+    expect(result.migrated).toBe(1);
+    expect(store.hasPayload(`mem/user-a/${std.backupId}`)).toBe(false); // Standard retired
+    expect((await backend.getProfile())?.privacyMode).toBe('protected');
+
+    const dest = await freshStore();
+    const recovered = await cloudRecover({ stackHome: dest, backend, mmk });
+    expect(recovered.privacyMode).toBe('protected');
+    await assertByteExact(source.stackHome, dest, source.hashes);
+  });
+
+  it('a failed migration leaves the account Standard and the Standard payload usable', async () => {
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
+    roots.push(source.stackHome);
+    const { store, backend } = backendFor('user-a');
+    const std = await standardCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+    });
+    store.corruptPayload(`mem/user-a/${std.backupId}`); // pre-verify fails
+
+    await expect(
+      migrateStandardToProtected({ backend, mmk: generateMmk() }),
+    ).rejects.toBeInstanceOf(RemoteMemoryError);
+    expect((await backend.getProfile())?.privacyMode ?? 'standard').toBe(
+      'standard',
+    );
+    expect(store.hasPayload(`mem/user-a/${std.backupId}`)).toBe(true);
+  });
+});
