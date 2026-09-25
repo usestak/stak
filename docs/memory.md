@@ -84,9 +84,81 @@ Default output stays beginner-friendly (no hashes, object paths, vendor keys, or
 absolute paths). Use `--verbose` for diagnostics and `--json` for stable
 structured output.
 
-## Cloud
+## Cloud backup & recovery
 
-Memory is **not** uploaded to Stack Cloud in this phase. Remote Memory requires a
-separate end-to-end encryption and recovery-key design and will not reuse the
-plaintext private-Skill snapshot upload path. Local backup/restore is proven
-first.
+Once you `stack login`, `stack memory backup` also protects your Memory in Stack
+Cloud so it survives losing this machine. Local backup always happens first and
+never depends on the Cloud — if you are signed out, or the Cloud is unreachable,
+the local backup still succeeds and Stack says so calmly.
+
+There are **two privacy modes**, both fully private (per-user, never shared, never
+public):
+
+- **Standard** (default) — the simplest option. Your Memory is backed up privately
+  to Stack Cloud with authenticated access, TLS, strict per-user authorization, and
+  encryption at rest. Recovery on a new machine needs nothing but `stack login`.
+  Standard is **not** end-to-end encrypted: Stack's infrastructure is technically
+  capable of reading a Standard backup.
+- **Protected** — opt-in client-side encryption. Your Memory is encrypted on your
+  device before it leaves it; Stack Cloud stores only ciphertext and can never read
+  it. Recovery needs a recovery method (a passkey or a recovery file).
+
+### Commands
+
+- `stack memory backup` — local backup, then Cloud backup when signed in. Same
+  command for both modes; the complexity stays under the hood. On the first
+  Standard Cloud backup Stack shows `Privacy: Standard` and how to upgrade.
+- `stack memory protect` — turn on Protected mode once. Creates your encryption key,
+  sets up a recovery method (recovery file today; passkey via the browser), enrolls
+  this device so future backups need no prompt, and safely migrates existing
+  Standard backups to Protected (verify-before-delete).
+- `stack memory recover [--generation <n>] [--recovery-file <path>]` — rebuild the
+  private Memory **store** from Cloud on a new machine. It never writes native agent
+  files — run `stack memory restore` afterward for that.
+- `stack memory status` — shows local and Cloud state (privacy mode, recovery
+  methods, whether this device is enrolled).
+
+`recover` (Cloud → Stack's private store) is deliberately separate from `restore`
+(private store → native agent files); `restore` keeps all Phase 14A conflict
+protection.
+
+### Recovery methods (Protected)
+
+- **Recovery file** (`stack-memory-recovery.stackkey`) — a high-entropy secret,
+  generated on your device, saved once (never stored in Stack Cloud). Keep it in a
+  password manager or secure storage. **Anyone with this file can recover your
+  Memory; it is not secure by itself.** You don't memorize it.
+- **Passkey** — uses your passkey's WebAuthn PRF to unlock your Memory in the
+  browser. Requires a passkey provider that supports PRF; if PRF is unavailable
+  Stack tells you precisely and offers the recovery file instead.
+
+Each recovery method independently unlocks the **same** Memory Master Key, so you
+can have several (e.g. a passkey per device plus a recovery file) and remove one
+without affecting the others. **If you lose every recovery method, Protected Memory
+is unrecoverable — Stack has no backdoor.**
+
+### Important properties
+
+- **Account compromise:** a stolen Stack account can retrieve _Standard_ Memory,
+  but cannot decrypt _Protected_ Memory without a valid recovery method or an
+  enrolled device.
+- **No silent downgrade:** if your account is Protected but this device can't unlock
+  it, the Cloud backup fails closed — Stack never uploads readable Memory as a
+  fallback.
+- **Browser trust limit:** the passkey ceremony runs Stack-served JavaScript; it is
+  not defended against Stack shipping malicious client code (documented, accepted
+  for V0).
+- **Local device key:** an enrolled device stores your Memory Master Key in an
+  owner-only (0600) envelope under `$STACK_HOME/memory/keys/`. This keeps Stack
+  Cloud blind, but does **not** defend against full compromise of your local OS
+  account; OS-native secure storage is future hardening.
+- **Deletion:** retiring old Standard backups after migration is a soft-delete;
+  provider retention means bytes may persist for a bounded window.
+- **Rollback:** backups are immutable, numbered generations with optimistic
+  concurrency (no last-writer-wins). A brand-new device after total loss cannot, by
+  itself, detect a provider serving a valid-but-stale backup without an external
+  trusted anchor — a documented V0 limitation.
+
+Crypto internals (key hierarchy, envelope formats, the CLI↔browser bridge, the
+Cloud schema) are in
+[`architecture/memory-cloud-production.md`](./architecture/memory-cloud-production.md).
