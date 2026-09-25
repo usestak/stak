@@ -1,4 +1,10 @@
 import {
+  InMemoryRemoteMemoryStore,
+  inMemoryRemoteMemoryBackend,
+  type RemoteMemoryBackend,
+} from '@stack/memory';
+
+import {
   PublicStackConflict,
   RemoteConflict,
   type CliAuthSessionRecord,
@@ -236,6 +242,23 @@ export const createInMemoryRepository = (): CloudRepository &
         .filter((stack) => stack.ownerUserId === userId)
         .sort((a, b) => a.slug.localeCompare(b.slug));
     },
+  };
+};
+
+/**
+ * In-memory remote Memory backend factory for tests. Reuses the domain's
+ * content-addressed in-memory store; `memoryBackendFor(userId)` yields a per-user
+ * `RemoteMemoryBackend`, matching how a Supabase-backed factory would behave.
+ */
+export const createInMemoryMemoryBackends = (): {
+  store: InMemoryRemoteMemoryStore;
+  memoryBackendFor: (userId: string) => RemoteMemoryBackend;
+} => {
+  const store = new InMemoryRemoteMemoryStore();
+  return {
+    store,
+    memoryBackendFor: (userId: string) =>
+      inMemoryRemoteMemoryBackend(store, userId),
   };
 };
 

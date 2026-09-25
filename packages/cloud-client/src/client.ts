@@ -39,6 +39,10 @@ import {
   StackCloudError,
   cloudErrorFromResponse,
 } from './errors.js';
+import {
+  createMemoryClientMethods,
+  type CloudMemoryClient,
+} from './memory-client.js';
 
 export type DownloadedSnapshot = {
   contentHash: string;
@@ -120,7 +124,7 @@ const isLocalhost = (url: URL) =>
 
 export const createCloudClient = (
   options: CreateCloudClientOptions,
-): CloudClient & CloudAuthClient & PublicStackClient => {
+): CloudClient & CloudAuthClient & PublicStackClient & CloudMemoryClient => {
   const base = options.baseUrl.replace(/\/+$/, '');
   const parsedBase = new URL(base);
   if (
@@ -229,6 +233,7 @@ export const createCloudClient = (
   };
 
   return {
+    ...createMemoryClientMethods({ request, json }),
     authStart: async (body) =>
       json(
         cliAuthStartResponseSchema,

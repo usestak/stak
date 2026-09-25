@@ -239,6 +239,15 @@ export const cloudErrorCodeSchema = z.enum([
   'handle-unavailable',
   'invalid-request',
   'not-found',
+  'memory-not-found',
+  'memory-conflict',
+  'memory-too-large',
+  'memory-integrity',
+  'memory-not-protected',
+  'memory-session-consumed',
+  'memory-session-expired',
+  'memory-no-envelope',
+  'memory-not-configured',
 ]);
 export const cloudErrorResponseSchema = z.object({
   error: z.object({

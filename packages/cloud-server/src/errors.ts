@@ -41,3 +41,26 @@ export const invalidSlug = (message: string) =>
   new CloudServiceError('invalid-slug', 400, message);
 export const handleUnavailable = (message: string) =>
   new CloudServiceError('handle-unavailable', 409, message);
+
+// --- remote Memory ---
+export const memoryNotConfigured = (
+  message = 'Remote Memory is not enabled on this server.',
+) => new CloudServiceError('memory-not-configured', 501, message);
+export const memoryNotFound = (message = 'Memory backup not found.') =>
+  new CloudServiceError('memory-not-found', 404, message);
+export const memoryConflict = (message: string) =>
+  new CloudServiceError('memory-conflict', 409, message);
+export const memoryTooLarge = (message = 'Memory payload is too large.') =>
+  new CloudServiceError('memory-too-large', 413, message);
+export const memoryIntegrity = (message = 'Memory payload failed integrity.') =>
+  new CloudServiceError('memory-integrity', 400, message);
+export const memoryNotProtected = (message: string) =>
+  new CloudServiceError('memory-not-protected', 400, message);
+export const memorySessionConsumed = (
+  message = 'Recovery session already used.',
+) => new CloudServiceError('memory-session-consumed', 409, message);
+export const memorySessionExpired = (message = 'Recovery session expired.') =>
+  new CloudServiceError('memory-session-expired', 410, message);
+export const memoryNoEnvelope = (
+  message = 'No recovery envelope submitted yet.',
+) => new CloudServiceError('memory-no-envelope', 409, message);

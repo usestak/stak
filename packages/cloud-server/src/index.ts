@@ -6,7 +6,17 @@ export {
   type CloudService,
   type CloudServiceConfig,
 } from './service.js';
-export { createInMemoryRepository, createInMemoryBlobStore } from './memory.js';
+export {
+  createInMemoryRepository,
+  createInMemoryBlobStore,
+  createInMemoryMemoryBackends,
+} from './memory.js';
+export {
+  createMemoryMethods,
+  type MemoryService,
+  type MemoryServiceConfig,
+  type MemoryAuthenticatedUser,
+} from './memory-service.js';
 export {
   createPublicStackService,
   type PublicStackService,

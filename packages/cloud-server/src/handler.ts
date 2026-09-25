@@ -3,6 +3,12 @@ import {
   cliAuthTokenRequestSchema,
   commitEnvironmentVersionRequestSchema,
   finalizeSnapshotRequestSchema,
+  memoryAddRecoveryMethodRequestSchema,
+  memoryCreateGenerationRequestSchema,
+  memoryCreateSessionRequestSchema,
+  memoryEnsureProfileRequestSchema,
+  memorySetPrivacyModeRequestSchema,
+  memorySubmitEnvelopeRequestSchema,
   prepareSnapshotRequestSchema,
   publishPublicStackVersionRequestSchema,
 } from '@stack/spec';
@@ -212,6 +218,160 @@ export const handleCloudRequest = async (
     }
     if (method === 'GET' && segments.length === 2 && segments[0] === 'profiles')
       return json(200, await service.getPublicProfile(segments[1] ?? ''));
+
+    // --- Remote Memory (all authenticated) ---
+    if (segments[0] === 'memory') {
+      const rest = segments.slice(1);
+      if (method === 'GET' && matches(rest, ['profile']))
+        return json(200, await service.memoryGetProfile(await authenticate()));
+      if (method === 'POST' && matches(rest, ['profile-ensure'])) {
+        const user = await authenticate();
+        const body = memoryEnsureProfileRequestSchema.parse(
+          request.jsonBody ?? {},
+        );
+        return json(
+          200,
+          await service.memoryEnsureProfile(user, body.formatVersion),
+        );
+      }
+      if (method === 'POST' && matches(rest, ['privacy'])) {
+        const user = await authenticate();
+        const body = memorySetPrivacyModeRequestSchema.parse(
+          request.jsonBody ?? {},
+        );
+        return json(
+          200,
+          await service.memorySetPrivacyMode(user, body.privacyMode),
+        );
+      }
+      if (method === 'GET' && matches(rest, ['generations']))
+        return json(
+          200,
+          await service.memoryListGenerations(await authenticate()),
+        );
+      if (method === 'GET' && matches(rest, ['latest']))
+        return json(200, await service.memoryGetLatest(await authenticate()));
+      if (method === 'POST' && matches(rest, ['generations'])) {
+        const user = await authenticate();
+        const body = memoryCreateGenerationRequestSchema.parse(
+          request.jsonBody ?? {},
+        );
+        return json(200, await service.memoryCreateGeneration(user, body));
+      }
+      if (method === 'GET' && rest.length === 2 && rest[0] === 'by-number') {
+        const generation = Number.parseInt(rest[1] ?? '', 10);
+        if (!Number.isInteger(generation) || generation < 0)
+          return errorResponse(
+            400,
+            'invalid-request',
+            'Invalid generation number.',
+          );
+        return json(
+          200,
+          await service.memoryGetGeneration(await authenticate(), generation),
+        );
+      }
+      if (
+        method === 'GET' &&
+        rest.length === 3 &&
+        rest[0] === 'generations' &&
+        rest[2] === 'payload'
+      )
+        return json(
+          200,
+          await service.memoryGetPayload(await authenticate(), rest[1] ?? ''),
+        );
+      if (
+        method === 'POST' &&
+        rest.length === 3 &&
+        rest[0] === 'generations' &&
+        rest[2] === 'retire'
+      )
+        return json(
+          200,
+          await service.memoryRetireGeneration(
+            await authenticate(),
+            rest[1] ?? '',
+          ),
+        );
+      if (method === 'GET' && rest.length === 2 && rest[0] === 'generations')
+        return json(
+          200,
+          await service.memoryGetGenerationById(
+            await authenticate(),
+            rest[1] ?? '',
+          ),
+        );
+      if (method === 'GET' && matches(rest, ['recovery-methods']))
+        return json(
+          200,
+          await service.memoryListRecoveryMethods(await authenticate()),
+        );
+      if (method === 'POST' && matches(rest, ['recovery-methods'])) {
+        const user = await authenticate();
+        const body = memoryAddRecoveryMethodRequestSchema.parse(
+          request.jsonBody ?? {},
+        );
+        return json(200, await service.memoryAddRecoveryMethod(user, body));
+      }
+      if (
+        method === 'POST' &&
+        rest.length === 3 &&
+        rest[0] === 'recovery-methods' &&
+        rest[2] === 'revoke'
+      )
+        return json(
+          200,
+          await service.memoryRevokeRecoveryMethod(
+            await authenticate(),
+            rest[1] ?? '',
+          ),
+        );
+      if (method === 'POST' && matches(rest, ['sessions'])) {
+        const user = await authenticate();
+        const body = memoryCreateSessionRequestSchema.parse(
+          request.jsonBody ?? {},
+        );
+        return json(200, await service.memoryCreateSession(user, body));
+      }
+      if (method === 'GET' && rest.length === 2 && rest[0] === 'sessions')
+        return json(
+          200,
+          await service.memoryGetSession(await authenticate(), rest[1] ?? ''),
+        );
+      if (
+        method === 'POST' &&
+        rest.length === 3 &&
+        rest[0] === 'sessions' &&
+        rest[2] === 'envelope'
+      ) {
+        const user = await authenticate();
+        const body = memorySubmitEnvelopeRequestSchema.parse(
+          request.jsonBody ?? {},
+        );
+        return json(
+          200,
+          await service.memorySubmitEnvelope(
+            user,
+            rest[1] ?? '',
+            body.envelope,
+          ),
+        );
+      }
+      if (
+        method === 'POST' &&
+        rest.length === 3 &&
+        rest[0] === 'sessions' &&
+        rest[2] === 'consume'
+      )
+        return json(
+          200,
+          await service.memoryConsumeSession(
+            await authenticate(),
+            rest[1] ?? '',
+          ),
+        );
+    }
 
     return errorResponse(404, 'not-found', 'Unknown Stack Cloud route.');
   } catch (error) {

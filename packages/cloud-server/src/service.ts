@@ -28,6 +28,8 @@ import {
   snapshotIntegrity,
   unauthorized,
 } from './errors.js';
+import type { RemoteMemoryBackend } from '@stack/memory';
+
 import { RemoteConflict } from './repository.js';
 import type {
   CloudBlobStore,
@@ -36,6 +38,7 @@ import type {
   PublicStackRepository,
 } from './repository.js';
 import { createPublicStackService } from './public-service.js';
+import { createMemoryMethods } from './memory-service.js';
 
 const USER_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const DEFAULT_SESSION_TTL_MS = 10 * 60 * 1000;
@@ -80,6 +83,8 @@ export type CloudServiceConfig = {
   ticketTtlMs?: number;
   pollIntervalMs?: number;
   maxSnapshotBytes?: number;
+  /** Per-user remote Memory backend factory. Absent = Memory API returns 501. */
+  memoryBackendFor?: (userId: string) => RemoteMemoryBackend;
 };
 
 export type CloudService = ReturnType<typeof createCloudService>;
@@ -149,8 +154,16 @@ export const createCloudService = (config: CloudServiceConfig) => {
     appUrl,
   });
 
+  const memoryMethods = createMemoryMethods({
+    ...(config.memoryBackendFor
+      ? { memoryBackendFor: config.memoryBackendFor }
+      : {}),
+    now,
+  });
+
   return {
     ...publicMethods,
+    ...memoryMethods,
     /** Bearer-token authentication. Derives identity server-side; never trusts the client. */
     authenticate: async (
       authorizationHeader: string | undefined,
