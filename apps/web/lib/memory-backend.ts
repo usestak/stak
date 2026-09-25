@@ -17,7 +17,8 @@ import { serviceClient } from './supabase';
 const MEMORY_BUCKET = 'stack-memory';
 const REMOTE_FORMAT_VERSION = 'stack-mem-remote-v1';
 
-const locatorFor = (userId: string, backupId: string) => `mem/${userId}/${backupId}`;
+const locatorFor = (userId: string, backupId: string) =>
+  `mem/${userId}/${backupId}`;
 const sha256 = (bytes: Uint8Array) =>
   `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 
@@ -114,7 +115,8 @@ export const supabaseRemoteMemoryBackend = (
         )
         .select('*')
         .single();
-      if (error) throw new Error(`Memory profile create failed: ${error.message}`);
+      if (error)
+        throw new Error(`Memory profile create failed: ${error.message}`);
       return mapProfile(data);
     },
 
@@ -133,7 +135,8 @@ export const supabaseRemoteMemoryBackend = (
         )
         .select('*')
         .single();
-      if (error) throw new Error(`Memory privacy update failed: ${error.message}`);
+      if (error)
+        throw new Error(`Memory privacy update failed: ${error.message}`);
       return mapProfile(data);
     },
 
@@ -169,7 +172,8 @@ export const supabaseRemoteMemoryBackend = (
         .eq('generation', generation)
         .eq('state', 'committed')
         .maybeSingle();
-      if (error) throw new Error(`Memory generation read failed: ${error.message}`);
+      if (error)
+        throw new Error(`Memory generation read failed: ${error.message}`);
       return data ? mapGeneration(data) : null;
     },
 
@@ -180,7 +184,8 @@ export const supabaseRemoteMemoryBackend = (
         .eq('user_id', userId)
         .eq('backup_id', backupId)
         .maybeSingle();
-      if (error) throw new Error(`Memory generation read failed: ${error.message}`);
+      if (error)
+        throw new Error(`Memory generation read failed: ${error.message}`);
       return data ? mapGeneration(data) : null;
     },
 
@@ -256,7 +261,8 @@ export const supabaseRemoteMemoryBackend = (
         .insert(record)
         .select('*')
         .single();
-      if (error) throw new Error(`Recovery method add failed: ${error.message}`);
+      if (error)
+        throw new Error(`Recovery method add failed: ${error.message}`);
       return mapMethod(data);
     },
 
@@ -266,7 +272,8 @@ export const supabaseRemoteMemoryBackend = (
         .select('*')
         .eq('user_id', userId)
         .is('revoked_at', null);
-      if (error) throw new Error(`Recovery method list failed: ${error.message}`);
+      if (error)
+        throw new Error(`Recovery method list failed: ${error.message}`);
       return (data ?? []).map(mapMethod);
     },
 
@@ -277,7 +284,8 @@ export const supabaseRemoteMemoryBackend = (
         .update({ revoked_at: nowIso })
         .eq('user_id', userId)
         .eq('method_id', methodId);
-      if (error) throw new Error(`Recovery method revoke failed: ${error.message}`);
+      if (error)
+        throw new Error(`Recovery method revoke failed: ${error.message}`);
     },
 
     createRecoverySession: async (input: CreateRecoverySessionInput, now) => {
@@ -297,7 +305,8 @@ export const supabaseRemoteMemoryBackend = (
         .insert(record)
         .select('*')
         .single();
-      if (error) throw new Error(`Recovery session create failed: ${error.message}`);
+      if (error)
+        throw new Error(`Recovery session create failed: ${error.message}`);
       return mapSession(data);
     },
 
@@ -308,7 +317,8 @@ export const supabaseRemoteMemoryBackend = (
         .eq('user_id', userId)
         .eq('session_id', sessionId)
         .maybeSingle();
-      if (error) throw new Error(`Recovery session read failed: ${error.message}`);
+      if (error)
+        throw new Error(`Recovery session read failed: ${error.message}`);
       return data ? mapSession(data) : null;
     },
 
@@ -318,7 +328,8 @@ export const supabaseRemoteMemoryBackend = (
         .update({ envelope })
         .eq('user_id', userId)
         .eq('session_id', sessionId);
-      if (error) throw new Error(`Recovery envelope submit failed: ${error.message}`);
+      if (error)
+        throw new Error(`Recovery envelope submit failed: ${error.message}`);
     },
 
     consumeRecoverySession: async (sessionId, now) => {
@@ -328,19 +339,29 @@ export const supabaseRemoteMemoryBackend = (
         .eq('user_id', userId)
         .eq('session_id', sessionId)
         .maybeSingle();
-      if (error) throw new Error(`Recovery session read failed: ${error.message}`);
+      if (error)
+        throw new Error(`Recovery session read failed: ${error.message}`);
       if (!data)
         throw new RemoteMemoryError('not-found', 'Recovery session not found.');
       const record = mapSession(data);
       if (record.consumedAt !== null)
-        throw new RemoteMemoryError('session-consumed', 'Recovery session already used.');
+        throw new RemoteMemoryError(
+          'session-consumed',
+          'Recovery session already used.',
+        );
       if (
         (now ?? (() => new Date()))().getTime() >
         new Date(record.expiresAt).getTime()
       )
-        throw new RemoteMemoryError('session-expired', 'Recovery session expired.');
+        throw new RemoteMemoryError(
+          'session-expired',
+          'Recovery session expired.',
+        );
       if (record.envelope === null)
-        throw new RemoteMemoryError('no-envelope', 'No envelope submitted yet.');
+        throw new RemoteMemoryError(
+          'no-envelope',
+          'No envelope submitted yet.',
+        );
       const nowIso = (now ?? (() => new Date()))().toISOString();
       const { error: updateError } = await db()
         .from('memory_recovery_sessions')
@@ -348,7 +369,9 @@ export const supabaseRemoteMemoryBackend = (
         .eq('user_id', userId)
         .eq('session_id', sessionId);
       if (updateError)
-        throw new Error(`Recovery session consume failed: ${updateError.message}`);
+        throw new Error(
+          `Recovery session consume failed: ${updateError.message}`,
+        );
       return { session: record, envelope: record.envelope };
     },
   };
