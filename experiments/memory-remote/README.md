@@ -40,6 +40,27 @@ pnpm --filter @stack/experiment-memory-remote lint
 pnpm --filter @stack/experiment-memory-remote build
 ```
 
+## Phase 14B1 — Standard/Protected modes + passkey recovery
+
+Full write-up: [`docs/architecture/memory-protection-modes-spike.md`](../../docs/architecture/memory-protection-modes-spike.md)
+and [ADR 0003](../../docs/architecture/adr/0003-protection-modes-and-passkey-recovery.md).
+
+| Module                | Concern                                                                          |
+| --------------------- | -------------------------------------------------------------------------------- |
+| `kdf.ts`              | HKDF-SHA-256 with versioned domain separation (for high-entropy material)        |
+| `mmk.ts`              | Memory Master Key + keyring of recovery-method wrappers + per-backup DEK         |
+| `recovery-methods.ts` | recovery-file (high-entropy key) and passkey (PRF) wrappers                      |
+| `modes.ts`            | Standard & Protected backup/recover, remote schema, Standard→Protected migration |
+| `bridge.ts`           | CLI↔browser zero-knowledge bridge (ECDH P-256 + HKDF + AES-GCM)                  |
+| `dogfood/`            | real-browser WebAuthn PRF capability page (manual; synthetic MMK; no secrets)    |
+
+Manual Windows passkey dogfood (does NOT auto-run):
+
+```
+node experiments/memory-remote/dogfood/server.mjs
+# open http://localhost:4599 in Chrome on Windows; follow the on-page steps
+```
+
 ## Opt-in Option B/C integration (developer's own testnet; no secrets committed)
 
 Integration tests are skipped unless you set env vars pointing at YOUR OWN setup,

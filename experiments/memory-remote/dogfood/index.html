@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stack Memory — Passkey Capability Dogfood</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family:
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 2rem;
+        max-width: 40rem;
+      }
+      h1 {
+        font-size: 1.25rem;
+      }
+      p.note {
+        color: #666;
+        font-size: 0.85rem;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 1rem 0;
+      }
+      td {
+        padding: 0.4rem 0.6rem;
+        border-bottom: 1px solid #ccc3;
+      }
+      td.k {
+        color: #555;
+      }
+      td.v {
+        font-weight: 600;
+        text-align: right;
+      }
+      .ok {
+        color: #157f3b;
+      }
+      .no {
+        color: #b3261e;
+      }
+      .pending {
+        color: #999;
+      }
+      button {
+        font: inherit;
+        padding: 0.5rem 0.9rem;
+        margin: 0.25rem 0.25rem 0.25rem 0;
+        border-radius: 0.5rem;
+        border: 1px solid #8886;
+        cursor: pointer;
+      }
+      #log {
+        white-space: pre-wrap;
+        font-size: 0.8rem;
+        color: #555;
+        margin-top: 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Stack Memory — Passkey Capability Dogfood</h1>
+    <p class="note">
+      SPIKE ONLY. Uses a SYNTHETIC random key. No real Memory is involved. This
+      page reports only capability/state — it never displays or logs key
+      material. Serve over <code>http://localhost</code> (a secure context).
+    </p>
+
+    <table>
+      <tbody>
+        <tr>
+          <td class="k">Passkeys supported</td>
+          <td class="v pending" id="s-passkey">—</td>
+        </tr>
+        <tr>
+          <td class="k">Platform authenticator</td>
+          <td class="v pending" id="s-platform">—</td>
+        </tr>
+        <tr>
+          <td class="k">PRF advertised (getClientCapabilities)</td>
+          <td class="v pending" id="s-prf-adv">—</td>
+        </tr>
+        <tr>
+          <td class="k">Credential created</td>
+          <td class="v pending" id="s-cred">—</td>
+        </tr>
+        <tr>
+          <td class="k">PRF usable (real get)</td>
+          <td class="v pending" id="s-prf-use">—</td>
+        </tr>
+        <tr>
+          <td class="k">MMK recovery</td>
+          <td class="v pending" id="s-recover">—</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <button id="btn-detect">1. Detect capabilities</button>
+    <button id="btn-enroll">2. Create passkey + wrap synthetic MMK</button>
+    <button id="btn-recover">3. Recover MMK (re-authenticate)</button>
+
+    <div id="log"></div>
+
+    <script type="module" src="./passkey.js"></script>
+  </body>
+</html>
