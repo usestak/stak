@@ -62,11 +62,17 @@ import {
   runMemoryCloudBackup,
   runMemoryCloudProtect,
   runMemoryCloudRecover,
+  runPasskeyProtect,
+  runPasskeyRecover,
   type CloudRecoverOutcome,
   type MemoryBackupOutcome,
   type MemoryCloudDeps,
   type MemoryCloudStatus,
+  type PasskeyBridgeDeps,
+  type PasskeyProtectResult,
+  type PasskeyRecoverResult,
 } from './memory/cloud-ops.js';
+import { defaultOpenBrowser } from './cloud/operations.js';
 import type { MemoryProtectCommandResult } from './commands/memory.js';
 import { resolveScanRoots, scanSkills } from '@stack/scanner';
 import { isPublicStackRef } from '@stack/spec';
@@ -214,6 +220,8 @@ export type ProgramDependencies = {
   memoryCloudProtect(options: {
     recoveryFile?: string;
   }): Promise<MemoryProtectCommandResult>;
+  memoryProtectPasskey(): Promise<PasskeyProtectResult>;
+  memoryRecoverPasskey(): Promise<PasskeyRecoverResult>;
   memoryCloudStatus(): Promise<MemoryCloudStatus>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
@@ -293,6 +301,29 @@ const buildMemoryCloudDeps = async (): Promise<MemoryCloudDeps> => {
     backend,
     localKeyStore: fileLocalMemoryKeyStore(stackHome),
     runLocalBackup: async () => (await memoryAdapter()).backup(),
+  };
+};
+
+/** Passkey bridge deps: the cloud backend + device key store + a browser opener. */
+const buildPasskeyDeps = async (): Promise<PasskeyBridgeDeps> => {
+  const base = await buildMemoryCloudDeps();
+  const credential = await cloudDeps.credentials.read();
+  const webBaseUrl =
+    credential !== null
+      ? resolveCloudBaseUrl({
+          env: process.env,
+          ...(credential.apiUrl ? { storedApiUrl: credential.apiUrl } : {}),
+        })
+      : '';
+  return {
+    stackHome: base.stackHome,
+    backend: base.backend,
+    localKeyStore: base.localKeyStore,
+    webBaseUrl,
+    openBrowser: async (url) => {
+      process.stdout.write(`Opening ${url}\n`);
+      await defaultOpenBrowser(url);
+    },
   };
 };
 
@@ -431,6 +462,8 @@ const defaultDependencies: ProgramDependencies = {
     await writeRecoveryFile(recoveryFilePath, recoveryKey.file);
     return { migrated: result.migrated, recoveryFilePath };
   },
+  memoryProtectPasskey: async () => runPasskeyProtect(await buildPasskeyDeps()),
+  memoryRecoverPasskey: async () => runPasskeyRecover(await buildPasskeyDeps()),
   confirm: async (message) => {
     if (!process.stdin.isTTY) return false;
     const prompt = createInterface({

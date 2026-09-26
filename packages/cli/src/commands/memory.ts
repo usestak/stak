@@ -37,6 +37,14 @@ export type MemoryCommandDependencies = {
   memoryCloudProtect(options: {
     recoveryFile?: string;
   }): Promise<MemoryProtectCommandResult>;
+  memoryProtectPasskey(): Promise<
+    { status: 'not-authenticated' } | { status: 'protected'; migrated: number }
+  >;
+  memoryRecoverPasskey(): Promise<
+    | { status: 'not-authenticated' }
+    | { status: 'no-backup' }
+    | { status: 'recovered'; objects: number; generation: number }
+  >;
   memoryCloudStatus(): Promise<MemoryCloudStatus>;
   writeOut(value: string): void;
 };
@@ -94,22 +102,46 @@ export const registerMemoryCommand = (
   memory
     .command('protect')
     .description('Enable client-side encrypted (Protected) Cloud backup')
+    .option('--passkey', 'set up a passkey recovery method in the browser')
     .option('--recovery-file <path>', 'where to write the recovery file')
     .option('--json', 'emit structured JSON only')
-    .action(async (options: { recoveryFile?: string; json?: boolean }) => {
-      const result = await dependencies.memoryCloudProtect({
-        ...(options.recoveryFile ? { recoveryFile: options.recoveryFile } : {}),
-      });
-      if (options.json) {
-        emitJson(dependencies, result);
-        return;
-      }
-      if ('status' in result) {
-        dependencies.writeOut('Not signed in.\nRun `stack login` first.\n');
-        return;
-      }
-      dependencies.writeOut(renderMemoryProtect(result));
-    });
+    .action(
+      async (options: {
+        passkey?: boolean;
+        recoveryFile?: string;
+        json?: boolean;
+      }) => {
+        if (options.passkey) {
+          const result = await dependencies.memoryProtectPasskey();
+          if (options.json) {
+            emitJson(dependencies, result);
+            return;
+          }
+          if (result.status === 'not-authenticated') {
+            dependencies.writeOut('Not signed in.\nRun `stack login` first.\n');
+            return;
+          }
+          dependencies.writeOut(
+            renderMemoryProtect({ migrated: result.migrated }),
+          );
+          return;
+        }
+        const result = await dependencies.memoryCloudProtect({
+          ...(options.recoveryFile
+            ? { recoveryFile: options.recoveryFile }
+            : {}),
+        });
+        if (options.json) {
+          emitJson(dependencies, result);
+          return;
+        }
+        if ('status' in result) {
+          dependencies.writeOut('Not signed in.\nRun `stack login` first.\n');
+          return;
+        }
+        dependencies.writeOut(renderMemoryProtect(result));
+      },
+    );
 
   memory
     .command('recover')
@@ -119,6 +151,10 @@ export const registerMemoryCommand = (
       'recover a specific generation (default: latest)',
     )
     .option(
+      '--passkey',
+      'unlock Protected memory with a passkey in the browser',
+    )
+    .option(
       '--recovery-file <path>',
       'unlock Protected memory with a recovery file',
     )
@@ -126,9 +162,34 @@ export const registerMemoryCommand = (
     .action(
       async (options: {
         generation?: string;
+        passkey?: boolean;
         recoveryFile?: string;
         json?: boolean;
       }) => {
+        if (options.passkey) {
+          const result = await dependencies.memoryRecoverPasskey();
+          if (options.json) {
+            emitJson(dependencies, result);
+            return;
+          }
+          if (result.status === 'not-authenticated') {
+            dependencies.writeOut('Not signed in.\nRun `stack login` first.\n');
+            return;
+          }
+          if (result.status === 'no-backup') {
+            dependencies.writeOut('No Cloud backup found for this account.\n');
+            return;
+          }
+          dependencies.writeOut(
+            renderMemoryRecover({
+              status: 'recovered',
+              privacyMode: 'protected',
+              objects: result.objects,
+              generation: result.generation,
+            }),
+          );
+          return;
+        }
         const outcome = await dependencies.memoryCloudRecover({
           ...(options.generation !== undefined
             ? { generation: Number.parseInt(options.generation, 10) }

@@ -291,6 +291,8 @@ const runProgram = async (
     }),
     memoryCloudRecover: async () => ({ status: 'no-backup' }),
     memoryCloudProtect: async () => ({ status: 'not-authenticated' }),
+    memoryProtectPasskey: async () => ({ status: 'not-authenticated' }),
+    memoryRecoverPasskey: async () => ({ status: 'not-authenticated' }),
     memoryCloudStatus: async () => ({
       authenticated: false,
       privacyMode: null,

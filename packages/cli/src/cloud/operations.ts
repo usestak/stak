@@ -56,7 +56,7 @@ export type CloudOperationsDeps = {
 const defaultCreateClient: CloudClientFactory = (options) =>
   createCloudClient(options);
 
-const defaultOpenBrowser = async (url: string): Promise<void> => {
+export const defaultOpenBrowser = async (url: string): Promise<void> => {
   try {
     const command =
       process.platform === 'win32'

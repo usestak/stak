@@ -18,13 +18,16 @@ import {
   CIPHER_VERSION,
   addRecoveryFileWrapper,
   cloudRecover,
+  createRecoverySession,
   generateMmk,
   migrateStandardToProtected,
   newKeyring,
+  openMmkFromEnvelope,
   protectedCloudBackup,
   standardCloudBackup,
   unwrapWithRecoveryKey,
   type BackupResult,
+  type BridgeEnvelope,
   type LocalMemoryKeyStore,
   type MmkKeyring,
   type MmkWrapper,
@@ -256,5 +259,188 @@ export const readMemoryCloudStatus = async (
     lastCloudBackupAt: latest?.createdAt ?? null,
     recoveryMethodTypes: [...new Set(methods.map((method) => method.type))],
     deviceEnrolled,
+  };
+};
+
+/* -------------------------------------------------------------------------- */
+/* Passkey flows via the CLI↔browser bridge (server relays opaque only)        */
+/* -------------------------------------------------------------------------- */
+
+export type BrowserOpener = (url: string) => Promise<void> | void;
+
+export type PasskeyBridgeDeps = {
+  stackHome: string;
+  backend: RemoteMemoryBackend | null;
+  localKeyStore: LocalMemoryKeyStore;
+  webBaseUrl: string;
+  openBrowser: BrowserOpener;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => Date;
+  ttlMs?: number;
+  timeoutMs?: number;
+  pollMs?: number;
+};
+
+const defaultSleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+const errorCode = (error: unknown): string =>
+  error && typeof error === 'object' && 'code' in error
+    ? String((error as { code: unknown }).code)
+    : '';
+
+/**
+ * Poll the one-time relay for the browser's opaque envelope. The relay reports
+ * `no-envelope` until the browser submits, `session-expired` on timeout, and marks
+ * the session consumed on the first successful read.
+ */
+const pollForEnvelope = async (
+  backend: RemoteMemoryBackend,
+  sessionId: string,
+  options: {
+    sleep: (ms: number) => Promise<void>;
+    now: () => Date;
+    timeoutMs: number;
+    pollMs: number;
+  },
+): Promise<unknown> => {
+  const deadline = options.now().getTime() + options.timeoutMs;
+  for (;;) {
+    try {
+      const { envelope } = await backend.consumeRecoverySession(
+        sessionId,
+        options.now,
+      );
+      return envelope;
+    } catch (error) {
+      const code = errorCode(error);
+      if (code.endsWith('no-envelope')) {
+        if (options.now().getTime() > deadline)
+          throw new Error('Timed out waiting for the browser to finish.', {
+            cause: error,
+          });
+        await options.sleep(options.pollMs);
+        continue;
+      }
+      if (code.endsWith('session-expired'))
+        throw new Error('The recovery session expired before it completed.', {
+          cause: error,
+        });
+      throw error;
+    }
+  }
+};
+
+export type PasskeyProtectResult =
+  { status: 'not-authenticated' } | { status: 'protected'; migrated: number };
+
+/**
+ * Enable Protected via a passkey: create a one-time enrollment session, open the
+ * browser (which creates the passkey, generates the MMK, stores its passkey wrapper,
+ * and seals the MMK back), receive the MMK over the bridge, enroll this device, and
+ * migrate existing Standard backups.
+ */
+export const runPasskeyProtect = async (
+  deps: PasskeyBridgeDeps,
+): Promise<PasskeyProtectResult> => {
+  if (!deps.backend) return { status: 'not-authenticated' };
+  const now = deps.now ?? (() => new Date());
+  const sleep = deps.sleep ?? defaultSleep;
+  const { session, initiatorPrivateKey } = await createRecoverySession({
+    userId: 'stack-memory',
+    ttlMs: deps.ttlMs ?? 5 * 60_000,
+    direction: 'enrollment',
+    now,
+  });
+  await deps.backend.createRecoverySession(
+    {
+      sessionId: session.sessionId,
+      direction: 'enrollment',
+      session,
+      expiresAt: session.expiresAt,
+    },
+    now,
+  );
+  await deps.openBrowser(
+    `${deps.webBaseUrl}/memory/protect?session=${encodeURIComponent(session.sessionId)}`,
+  );
+  const envelope = await pollForEnvelope(deps.backend, session.sessionId, {
+    sleep,
+    now,
+    timeoutMs: deps.timeoutMs ?? 5 * 60_000,
+    pollMs: deps.pollMs ?? 1500,
+  });
+  const mmk = await openMmkFromEnvelope({
+    session,
+    initiatorPrivateKey,
+    envelope: envelope as BridgeEnvelope,
+    now,
+  });
+  await deps.localKeyStore.saveMmk(mmk);
+  const migration = await migrateStandardToProtected({
+    backend: deps.backend,
+    mmk,
+    now,
+  });
+  return { status: 'protected', migrated: migration.migrated };
+};
+
+export type PasskeyRecoverResult =
+  | { status: 'not-authenticated' }
+  | { status: 'no-backup' }
+  | { status: 'recovered'; objects: number; generation: number };
+
+/**
+ * Recover Protected Memory via a passkey: create a one-time recovery session, open
+ * the browser (which authenticates the passkey, unwraps the MMK via PRF, and seals
+ * it back), receive the MMK, enroll this device, and rebuild the local store.
+ */
+export const runPasskeyRecover = async (
+  deps: PasskeyBridgeDeps,
+): Promise<PasskeyRecoverResult> => {
+  if (!deps.backend) return { status: 'not-authenticated' };
+  const now = deps.now ?? (() => new Date());
+  const sleep = deps.sleep ?? defaultSleep;
+  if (!(await deps.backend.getLatest())) return { status: 'no-backup' };
+  const { session, initiatorPrivateKey } = await createRecoverySession({
+    userId: 'stack-memory',
+    ttlMs: deps.ttlMs ?? 5 * 60_000,
+    direction: 'recovery',
+    now,
+  });
+  await deps.backend.createRecoverySession(
+    {
+      sessionId: session.sessionId,
+      direction: 'recovery',
+      session,
+      expiresAt: session.expiresAt,
+    },
+    now,
+  );
+  await deps.openBrowser(
+    `${deps.webBaseUrl}/memory/recover?session=${encodeURIComponent(session.sessionId)}`,
+  );
+  const envelope = await pollForEnvelope(deps.backend, session.sessionId, {
+    sleep,
+    now,
+    timeoutMs: deps.timeoutMs ?? 5 * 60_000,
+    pollMs: deps.pollMs ?? 1500,
+  });
+  const mmk = await openMmkFromEnvelope({
+    session,
+    initiatorPrivateKey,
+    envelope: envelope as BridgeEnvelope,
+    now,
+  });
+  await deps.localKeyStore.saveMmk(mmk);
+  const result = await cloudRecover({
+    stackHome: deps.stackHome,
+    backend: deps.backend,
+    mmk,
+  });
+  return {
+    status: 'recovered',
+    objects: result.objects,
+    generation: result.generation,
   };
 };
