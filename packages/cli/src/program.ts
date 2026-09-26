@@ -456,6 +456,10 @@ const defaultDependencies: ProgramDependencies = {
       { ...deps, backend: deps.backend },
       { recoveryKey },
     );
+    // Fail closed: if local key storage couldn't be secured, do NOT write the
+    // recovery file and report the insecure-local-key status.
+    if (result.status === 'insecure-local-key')
+      return { status: 'insecure-local-key' as const };
     const recoveryFilePath =
       options.recoveryFile ??
       path.join(process.cwd(), 'stack-memory-recovery.stackkey');

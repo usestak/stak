@@ -19,6 +19,7 @@ import {
   addRecoveryFileWrapper,
   cloudRecover,
   createRecoverySession,
+  LocalKeyStoreError,
   generateMmk,
   migrateStandardToProtected,
   newKeyring,
@@ -58,6 +59,28 @@ export type MemoryBackupOutcome = {
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : 'Unknown error.';
+
+const isInsecureLocalKey = (error: unknown): boolean =>
+  error instanceof LocalKeyStoreError && error.code === 'insecure-permissions';
+
+/**
+ * Enroll this device with the MMK, tolerating a fail-closed permission error: on
+ * insecure local storage nothing is persisted (saveMmk cleaned up) and we report
+ * not-enrolled rather than aborting a recovery that already succeeded. Other errors
+ * propagate.
+ */
+const enrollDeviceSafe = async (
+  localKeyStore: LocalMemoryKeyStore,
+  mmk: Buffer,
+): Promise<boolean> => {
+  try {
+    await localKeyStore.saveMmk(mmk);
+    return true;
+  } catch (error) {
+    if (isInsecureLocalKey(error)) return false;
+    throw error;
+  }
+};
 
 /** How the MMK wrapper is stored inside a cloud recovery method (opaque to server). */
 type StoredWrapper = { mmkId: string; wrapper: MmkWrapper };
@@ -146,9 +169,10 @@ export const runMemoryCloudRecover = async (
 
   // Protected: obtain the MMK from this device or an offered recovery key.
   let mmk = await deps.localKeyStore.loadMmk();
+  let unlockedViaRecoveryKey = false;
   if (!mmk && options.recoveryKey) {
     mmk = await unlockMmkWithRecoveryKey(deps.backend, options.recoveryKey);
-    if (mmk) await deps.localKeyStore.saveMmk(mmk); // enroll this device
+    unlockedViaRecoveryKey = mmk !== null;
   }
   if (!mmk) return { status: 'needs-recovery-method' };
 
@@ -160,6 +184,9 @@ export const runMemoryCloudRecover = async (
       ? { generation: options.generation }
       : {}),
   });
+  // Recovery already succeeded; enrolling this device is best-effort and must not
+  // persist insecure key material (enrollDeviceSafe fails closed internally).
+  if (unlockedViaRecoveryKey) await enrollDeviceSafe(deps.localKeyStore, mmk);
   return {
     status: 'recovered',
     privacyMode: 'protected',
@@ -194,10 +221,9 @@ const unlockMmkWithRecoveryKey = async (
   return null;
 };
 
-export type ProtectOutcome = {
-  migrated: number;
-  recoveryMethod: 'recovery-file';
-};
+export type ProtectOutcome =
+  | { status: 'protected'; migrated: number; recoveryMethod: 'recovery-file' }
+  | { status: 'insecure-local-key' };
 
 /** Enable Protected: new MMK + recovery-file method + device enrollment + migrate. */
 export const runMemoryCloudProtect = async (
@@ -205,6 +231,10 @@ export const runMemoryCloudProtect = async (
   options: { recoveryKey: RecoveryKeyArtifacts },
 ): Promise<ProtectOutcome> => {
   const mmk = generateMmk();
+  // Enroll this device FIRST and fail closed: if local key storage can't be
+  // secured, persist nothing and finalize nothing in Cloud.
+  if (!(await enrollDeviceSafe(deps.localKeyStore, mmk)))
+    return { status: 'insecure-local-key' };
   const keyring = newKeyring();
   const { wrapper } = addRecoveryFileWrapper({
     keyring,
@@ -218,13 +248,16 @@ export const runMemoryCloudProtect = async (
     mmkWrapper: stored,
     cryptoVersion: CIPHER_VERSION,
   });
-  await deps.localKeyStore.saveMmk(mmk); // this device can now back up Protected
   const migration = await migrateStandardToProtected({
     backend: deps.backend,
     mmk,
     ...(deps.now ? { now: deps.now } : {}),
   });
-  return { migrated: migration.migrated, recoveryMethod: 'recovery-file' };
+  return {
+    status: 'protected',
+    migrated: migration.migrated,
+    recoveryMethod: 'recovery-file',
+  };
 };
 
 export type MemoryCloudStatus = {
@@ -332,7 +365,9 @@ const pollForEnvelope = async (
 };
 
 export type PasskeyProtectResult =
-  { status: 'not-authenticated' } | { status: 'protected'; migrated: number };
+  | { status: 'not-authenticated' }
+  | { status: 'insecure-local-key' }
+  | { status: 'protected'; migrated: number };
 
 /**
  * Enable Protected via a passkey: create a one-time enrollment session, open the
@@ -376,7 +411,9 @@ export const runPasskeyProtect = async (
     envelope: envelope as BridgeEnvelope,
     now,
   });
-  await deps.localKeyStore.saveMmk(mmk);
+  // Fail closed: do not finalize Protected if this device's key store can't be secured.
+  if (!(await enrollDeviceSafe(deps.localKeyStore, mmk)))
+    return { status: 'insecure-local-key' };
   const migration = await migrateStandardToProtected({
     backend: deps.backend,
     mmk,
@@ -432,12 +469,13 @@ export const runPasskeyRecover = async (
     envelope: envelope as BridgeEnvelope,
     now,
   });
-  await deps.localKeyStore.saveMmk(mmk);
   const result = await cloudRecover({
     stackHome: deps.stackHome,
     backend: deps.backend,
     mmk,
   });
+  // Recovery already succeeded; enroll best-effort (never persists insecure state).
+  await enrollDeviceSafe(deps.localKeyStore, mmk);
   return {
     status: 'recovered',
     objects: result.objects,

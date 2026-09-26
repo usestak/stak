@@ -27,6 +27,11 @@ import {
 } from './cloud-ops.js';
 
 const USER = 'user-ops';
+const secureKeys = (dir: string) =>
+  fileLocalMemoryKeyStore(dir, {
+    harden: () => Promise.resolve(true),
+    verify: () => Promise.resolve(true),
+  });
 const roots: string[] = [];
 const temp = async (prefix: string): Promise<string> => {
   const root = await mkdtemp(path.join(tmpdir(), prefix));
@@ -106,7 +111,7 @@ const assertByteExact = async (a: string, b: string, hashes: string[]) => {
 describe('memory cloud operations', () => {
   it('backup succeeds locally and skips Cloud when not authenticated', async () => {
     const source = await writeStore();
-    const keys = fileLocalMemoryKeyStore(await temp('stack-ops-keys-'));
+    const keys = secureKeys(await temp('stack-ops-keys-'));
     const outcome = await runMemoryCloudBackup({
       stackHome: source.stackHome,
       backend: null,
@@ -121,7 +126,7 @@ describe('memory cloud operations', () => {
     const source = await writeStore();
     const store = new InMemoryRemoteMemoryStore();
     const backend = inMemoryRemoteMemoryBackend(store, USER);
-    const keys = fileLocalMemoryKeyStore(await temp('stack-ops-keys-'));
+    const keys = secureKeys(await temp('stack-ops-keys-'));
     const out = await runMemoryCloudBackup({
       stackHome: source.stackHome,
       backend,
@@ -145,7 +150,7 @@ describe('memory cloud operations', () => {
     const source = await writeStore();
     const store = new InMemoryRemoteMemoryStore();
     const backend = inMemoryRemoteMemoryBackend(store, USER);
-    const keys = fileLocalMemoryKeyStore(await temp('stack-ops-keys-'));
+    const keys = secureKeys(await temp('stack-ops-keys-'));
     // Seed a Standard backup so migration has something to convert.
     await runMemoryCloudBackup({
       stackHome: source.stackHome,
@@ -163,7 +168,9 @@ describe('memory cloud operations', () => {
       },
       { recoveryKey },
     );
-    expect(protectResult.migrated).toBe(1);
+    expect(protectResult.status).toBe('protected');
+    if (protectResult.status === 'protected')
+      expect(protectResult.migrated).toBe(1);
     expect(await keys.hasKey()).toBe(true);
     expect((await backend.getProfile())?.privacyMode).toBe('protected');
 
@@ -181,7 +188,7 @@ describe('memory cloud operations', () => {
     const source = await writeStore();
     const store = new InMemoryRemoteMemoryStore();
     const backend = inMemoryRemoteMemoryBackend(store, USER);
-    const deviceA = fileLocalMemoryKeyStore(await temp('stack-ops-a-'));
+    const deviceA = secureKeys(await temp('stack-ops-a-'));
     await runMemoryCloudProtect(
       {
         stackHome: source.stackHome,
@@ -192,7 +199,7 @@ describe('memory cloud operations', () => {
       { recoveryKey: generateRecoveryKey() },
     );
     // Device B: authenticated, account is Protected, but holds no MMK.
-    const deviceB = fileLocalMemoryKeyStore(await temp('stack-ops-b-'));
+    const deviceB = secureKeys(await temp('stack-ops-b-'));
     const out = await runMemoryCloudBackup({
       stackHome: source.stackHome,
       backend,
@@ -207,7 +214,7 @@ describe('memory cloud operations', () => {
     const source = await writeStore();
     const store = new InMemoryRemoteMemoryStore();
     const backend = inMemoryRemoteMemoryBackend(store, USER);
-    const deviceA = fileLocalMemoryKeyStore(await temp('stack-ops-a-'));
+    const deviceA = secureKeys(await temp('stack-ops-a-'));
     await runMemoryCloudBackup({
       stackHome: source.stackHome,
       backend,
@@ -226,7 +233,7 @@ describe('memory cloud operations', () => {
     );
 
     // Fresh device: no local MMK. Recovery key unlocks and enrolls it.
-    const deviceB = fileLocalMemoryKeyStore(await temp('stack-ops-b-'));
+    const deviceB = secureKeys(await temp('stack-ops-b-'));
     const dest = await temp('stack-ops-dst-');
     const locked = await runMemoryCloudRecover({
       stackHome: dest,
@@ -255,7 +262,7 @@ describe('memory cloud operations', () => {
     const source = await writeStore();
     const store = new InMemoryRemoteMemoryStore();
     const backend = inMemoryRemoteMemoryBackend(store, USER);
-    const keys = fileLocalMemoryKeyStore(await temp('stack-ops-keys-'));
+    const keys = secureKeys(await temp('stack-ops-keys-'));
     await runMemoryCloudBackup({
       stackHome: source.stackHome,
       backend,
@@ -271,5 +278,42 @@ describe('memory cloud operations', () => {
     expect(status.authenticated).toBe(true);
     expect(status.privacyMode).toBe('standard');
     expect(status.latestGeneration).toBe(0);
+  });
+
+  it('protect fails closed and does not finalize Protected when the local key cannot be secured', async () => {
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = fileLocalMemoryKeyStore(await temp('stack-ops-insecure-'), {
+      harden: () => Promise.resolve(false),
+      verify: () => Promise.resolve(false),
+    });
+    // Seed a Standard backup so a false "Protected" would be observable.
+    await runMemoryCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    });
+
+    const result = await runMemoryCloudProtect(
+      {
+        stackHome: source.stackHome,
+        backend,
+        localKeyStore: keys,
+        runLocalBackup: fakeBackup,
+      },
+      { recoveryKey: generateRecoveryKey() },
+    );
+
+    expect(result.status).toBe('insecure-local-key');
+    // Cloud is NOT finalized Protected, no recovery method is stored, device not enrolled.
+    expect((await backend.getProfile())?.privacyMode ?? 'standard').toBe(
+      'standard',
+    );
+    expect(await backend.listRecoveryMethods()).toHaveLength(0);
+    expect(await keys.hasKey()).toBe(false);
+    // The Standard backup remains usable.
+    expect((await backend.getLatest())?.privacyMode).toBe('standard');
   });
 });

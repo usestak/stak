@@ -6,12 +6,15 @@
  * restore.ts keep their own copies unchanged (this file only serves new code).
  */
 import { execFile } from 'node:child_process';
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
+
+const system32Path = (exe: string): string =>
+  path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', exe);
 
 /** Create a directory (recursive). */
 export const secureMkdir = async (directory: string): Promise<void> => {
@@ -34,12 +37,8 @@ export const hardenOwnerOnly = async (directory: string): Promise<boolean> => {
   if (process.platform !== 'win32') return false;
   // Use absolute System32 paths so a shell's PATH (e.g. Git Bash's Unix `whoami`)
   // cannot shadow the real Windows tools.
-  const system32 = path.join(
-    process.env.SystemRoot ?? 'C:\\Windows',
-    'System32',
-  );
   try {
-    const { stdout } = await execFileAsync(path.join(system32, 'whoami.exe'), [
+    const { stdout } = await execFileAsync(system32Path('whoami.exe'), [
       '/user',
       '/fo',
       'csv',
@@ -47,7 +46,7 @@ export const hardenOwnerOnly = async (directory: string): Promise<boolean> => {
     ]);
     const sid = stdout.trim().split(',').pop()?.replace(/"/g, '').trim();
     if (!sid || !/^S-1-/.test(sid)) return false;
-    await execFileAsync(path.join(system32, 'icacls.exe'), [
+    await execFileAsync(system32Path('icacls.exe'), [
       directory,
       '/inheritance:r',
       '/grant:r',
@@ -57,7 +56,48 @@ export const hardenOwnerOnly = async (directory: string): Promise<boolean> => {
     ]);
     return true;
   } catch {
-    // Best-effort only: never block enrollment on ACL hardening.
+    return false;
+  }
+};
+
+/**
+ * Verify that key material is readable ONLY by the current user (no accidental
+ * access by unrelated local principals). This is the fail-closed check enrollment
+ * relies on — it does not defend against a compromised local OS account.
+ *
+ *  - POSIX: every file must be mode 0o600 (no group/other bits).
+ *  - Windows: the keys directory's DACL, after hardening, must have exactly one
+ *    (non-inherited) principal ACE — the current user we just granted — with no
+ *    remaining inherited ACEs. SID/name display is not parsed (locale-agnostic);
+ *    we assert structure: inheritance removed + a single principal.
+ *
+ * Returns false (fail-closed) on any inability to verify.
+ */
+export const verifyOwnerOnly = async (options: {
+  keysDir: string;
+  files: string[];
+  platform?: NodeJS.Platform;
+}): Promise<boolean> => {
+  const platform = options.platform ?? process.platform;
+  if (platform === 'win32') {
+    try {
+      const { stdout } = await execFileAsync(system32Path('icacls.exe'), [
+        options.keysDir,
+      ]);
+      const aceLines = stdout.split(/\r?\n/).filter((line) => /:\(/.test(line));
+      const hasInheritedAce = /\(I\)/.test(stdout);
+      return aceLines.length === 1 && !hasInheritedAce;
+    } catch {
+      return false;
+    }
+  }
+  try {
+    for (const file of options.files) {
+      const info = await stat(file);
+      if ((info.mode & 0o077) !== 0) return false;
+    }
+    return true;
+  } catch {
     return false;
   }
 };

@@ -23,7 +23,13 @@ import {
 
 export type MemoryProtectCommandResult =
   | { migrated: number; recoveryFilePath?: string }
-  | { status: 'not-authenticated' };
+  | { status: 'not-authenticated' }
+  | { status: 'insecure-local-key' };
+
+const INSECURE_LOCAL_KEY_MESSAGE =
+  'Could not secure local Memory key storage on this device.\n' +
+  'Protected Memory was not enabled.\n' +
+  'Check the permissions on your Stack home directory and try again.\n';
 
 export type MemoryCommandDependencies = {
   memoryScan(): Promise<DiscoveredMemoryItem[]>;
@@ -38,7 +44,9 @@ export type MemoryCommandDependencies = {
     recoveryFile?: string;
   }): Promise<MemoryProtectCommandResult>;
   memoryProtectPasskey(): Promise<
-    { status: 'not-authenticated' } | { status: 'protected'; migrated: number }
+    | { status: 'not-authenticated' }
+    | { status: 'insecure-local-key' }
+    | { status: 'protected'; migrated: number }
   >;
   memoryRecoverPasskey(): Promise<
     | { status: 'not-authenticated' }
@@ -121,6 +129,10 @@ export const registerMemoryCommand = (
             dependencies.writeOut('Not signed in.\nRun `stack login` first.\n');
             return;
           }
+          if (result.status === 'insecure-local-key') {
+            dependencies.writeOut(INSECURE_LOCAL_KEY_MESSAGE);
+            return;
+          }
           dependencies.writeOut(
             renderMemoryProtect({ migrated: result.migrated }),
           );
@@ -136,7 +148,11 @@ export const registerMemoryCommand = (
           return;
         }
         if ('status' in result) {
-          dependencies.writeOut('Not signed in.\nRun `stack login` first.\n');
+          dependencies.writeOut(
+            result.status === 'insecure-local-key'
+              ? INSECURE_LOCAL_KEY_MESSAGE
+              : 'Not signed in.\nRun `stack login` first.\n',
+          );
           return;
         }
         dependencies.writeOut(renderMemoryProtect(result));

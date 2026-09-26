@@ -29,6 +29,11 @@ import {
 import { runPasskeyProtect, runPasskeyRecover } from './cloud-ops.js';
 
 const USER = 'user-passkey';
+const secureKeys = (dir: string) =>
+  fileLocalMemoryKeyStore(dir, {
+    harden: () => Promise.resolve(true),
+    verify: () => Promise.resolve(true),
+  });
 const roots: string[] = [];
 const temp = async (p: string) => {
   const r = await mkdtemp(path.join(tmpdir(), p));
@@ -91,7 +96,7 @@ describe('passkey bridge flows (CLI ↔ relay ↔ simulated browser)', () => {
     const store = new InMemoryRemoteMemoryStore();
     const backend = inMemoryRemoteMemoryBackend(store, USER);
     const prf = randomBytes(32); // stands in for the passkey PRF output
-    const deviceA = fileLocalMemoryKeyStore(await temp('stack-pk-a-'));
+    const deviceA = secureKeys(await temp('stack-pk-a-'));
 
     // Seed a Standard backup so protect has something to migrate.
     await standardCloudBackup({ stackHome: source.stackHome, backend });
@@ -148,7 +153,7 @@ describe('passkey bridge flows (CLI ↔ relay ↔ simulated browser)', () => {
     };
 
     // Fresh device B: no local MMK.
-    const deviceB = fileLocalMemoryKeyStore(await temp('stack-pk-b-'));
+    const deviceB = secureKeys(await temp('stack-pk-b-'));
     const dest = await temp('stack-pk-dst-');
     const backendB: RemoteMemoryBackend = inMemoryRemoteMemoryBackend(
       store,
@@ -191,7 +196,7 @@ describe('passkey bridge flows (CLI ↔ relay ↔ simulated browser)', () => {
     const result = await runPasskeyProtect({
       stackHome: await temp('stack-pk-'),
       backend: null,
-      localKeyStore: fileLocalMemoryKeyStore(await temp('stack-pk-k-')),
+      localKeyStore: secureKeys(await temp('stack-pk-k-')),
       webBaseUrl: 'http://localhost:3000',
       openBrowser: () => undefined,
     });

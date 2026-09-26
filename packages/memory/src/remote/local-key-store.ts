@@ -9,10 +9,16 @@
  *
  * V0 implementation: the MMK is stored as an AEAD envelope under a locally
  * generated device key, both under `$STACK_HOME/memory/keys/`. On POSIX they are
- * written owner-only (mode 0o600). On Windows, `mode` does NOT set NTFS ACLs, so
- * after writing we best-effort restrict the keys directory to the current user's
- * SID via the built-in `icacls` (breaking inherited ACEs); Administrators/SYSTEM
- * always retain access on Windows. Honest security boundary:
+ * written owner-only (mode 0o600). On Windows, `mode` does NOT set NTFS ACLs, so we
+ * restrict the keys directory to the current user's SID via the built-in `icacls`
+ * (breaking inherited ACEs); Administrators/SYSTEM always retain access on Windows.
+ *
+ * FAIL-CLOSED: after writing, `saveMmk` verifies the result is owner-only (POSIX:
+ * mode has no group/other bits; Windows: the dir DACL has a single non-inherited
+ * principal). If verification fails, the partially-written key state is removed and
+ * `saveMmk` throws — Stack never persists usable-but-insecure device key material,
+ * so enrollment cannot silently succeed with weaker permissions than it claims.
+ * Honest security boundary:
  *   - It PRESERVES Stack Cloud server-blindness: the MMK never leaves the device.
  *   - Anyone who can read BOTH files (the device key AND the envelope) can decrypt
  *     the MMK — the device-key indirection is for future OS-keystore migration, not
@@ -34,6 +40,7 @@ import {
   atomicWriteFile,
   hardenOwnerOnly,
   secureMkdir,
+  verifyOwnerOnly,
 } from './secure-file.js';
 
 const DEVICE_MMK_VERSION = 'stack-mem-device-mmk-v1' as const;
@@ -41,7 +48,7 @@ const DEVICE_MMK_AAD = Buffer.from(DEVICE_MMK_VERSION, 'utf8');
 
 export class LocalKeyStoreError extends Error {
   constructor(
-    public readonly code: 'corrupt' | 'bad-device-key',
+    public readonly code: 'corrupt' | 'bad-device-key' | 'insecure-permissions',
     message: string,
     options?: ErrorOptions,
   ) {
@@ -64,6 +71,15 @@ export interface LocalMemoryKeyStore {
   clear(): Promise<void>;
 }
 
+/**
+ * Platform hooks, injected so the fail-closed permission logic is testable without
+ * real OS ACLs. Defaults call the real (icacls / stat-based) implementations.
+ */
+export type LocalKeyStoreHooks = {
+  harden?: (directory: string) => Promise<boolean>;
+  verify?: (options: { keysDir: string; files: string[] }) => Promise<boolean>;
+};
+
 const keyPaths = (stackHome: string) => {
   const keysDir = path.join(memoryStorePaths(stackHome).root, 'keys');
   return {
@@ -85,8 +101,11 @@ const readIfExists = async (file: string): Promise<Buffer | null> => {
 /** File-based device MMK store (0600). See module header for the boundary. */
 export const fileLocalMemoryKeyStore = (
   stackHome: string,
+  hooks: LocalKeyStoreHooks = {},
 ): LocalMemoryKeyStore => {
   const paths = keyPaths(stackHome);
+  const harden = hooks.harden ?? hardenOwnerOnly;
+  const verify = hooks.verify ?? verifyOwnerOnly;
 
   const loadDeviceKey = async (): Promise<Buffer | null> => {
     const bytes = await readIfExists(paths.deviceKey);
@@ -146,7 +165,7 @@ export const fileLocalMemoryKeyStore = (
       // inherit an owner-only ACL (on Windows; a no-op on POSIX). Doing it before
       // the writes avoids leaving a file with an empty/ineffective DACL.
       await secureMkdir(paths.keysDir);
-      await hardenOwnerOnly(paths.keysDir);
+      await harden(paths.keysDir);
       const deviceKey = (await loadDeviceKey()) ?? randomKey();
       await atomicWriteFile(paths.deviceKey, deviceKey, { mode: 0o600 });
       const sealed = seal(mmk, deviceKey, DEVICE_MMK_AAD);
@@ -161,6 +180,22 @@ export const fileLocalMemoryKeyStore = (
         Buffer.from(`${JSON.stringify(envelope, null, 2)}\n`, 'utf8'),
         { mode: 0o600 },
       );
+      // FAIL CLOSED: if we cannot verify owner-only permissions, remove the
+      // partially-written key state and refuse — never persist usable but
+      // insecurely-permissioned device key material.
+      const secure = await verify({
+        keysDir: paths.keysDir,
+        files: [paths.deviceKey, paths.envelope],
+      });
+      if (!secure) {
+        await rm(paths.deviceKey, { force: true }).catch(() => undefined);
+        await rm(paths.envelope, { force: true }).catch(() => undefined);
+        throw new LocalKeyStoreError(
+          'insecure-permissions',
+          `Could not secure local Memory key storage on this device. ` +
+            `Protected Memory was not enabled. Check permissions for: ${paths.keysDir}`,
+        );
+      }
     },
 
     async clear(): Promise<void> {

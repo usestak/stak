@@ -216,15 +216,23 @@ inheritable current-user-only grant). Verified result: `device-key.bin` and
 
 Threat statement (explicit): **an attacker who can read BOTH the device key AND the
 envelope file can decrypt the MMK.** The device-key indirection is for future
-OS-keystore migration, not protection against local theft of both files.
-Guarantees by platform:
+OS-keystore migration, not protection against local theft of both files. This is
+distinct from **accidental access by unrelated local principals** (e.g. an inherited
+group ACE), which Protected enrollment now actively prevents. Guarantees by platform:
 
 - **POSIX (macOS/Linux):** owner-only via `mode 0o600` (`rw-------`).
-- **Windows:** best-effort owner-only via `icacls` (Administrators/SYSTEM always
-  retain access; best-effort means a failure never blocks enrollment).
+- **Windows:** owner-only via `icacls` (Administrators/SYSTEM always retain access).
+- **Fail-closed (14B.2.1):** after writing, `saveMmk` **verifies** the result is
+  owner-only (POSIX: no group/other mode bits; Windows: a single non-inherited DACL
+  principal). If it cannot verify, the partial key state is removed and enrollment
+  **fails** — Protected is not enabled, the Cloud profile is not finalized Protected,
+  no recovery-file is written, and there is no downgrade to Standard. Recovery that
+  has already restored the store enrolls best-effort and never persists insecure key
+  material. Platform calls sit behind an injectable abstraction so the fail-closed
+  logic is unit-tested; the real ACL result is confirmed by the manual procedure.
 - **All platforms:** V0 does NOT protect against full compromise of the local OS
-  account. Future hardening (follow-up): OS-native secret storage — Windows
-  Credential Manager / DPAPI, macOS Keychain, Linux Secret Service.
+  account (or a local Administrator). Future hardening (follow-up): OS-native secret
+  storage — Windows Credential Manager / DPAPI, macOS Keychain, Linux Secret Service.
 
 Windows ACL verification (read-only, manual): after enrolling a device
 (`stack memory protect`), inspect the key files without revealing contents:
