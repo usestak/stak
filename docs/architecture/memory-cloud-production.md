@@ -251,6 +251,11 @@ queries, and rollback SQL. The migration is not applied automatically.
 
 ### Manual production-page dogfood (prepare; do NOT auto-run; no real Memory)
 
+> **Completed 2026-09-26 — PASS.** This was run end-to-end against a linked hosted
+> Supabase project with synthetic data (Standard + Protected, fresh-machine passkey
+> recovery, post-recovery continuity, and a second total-loss recovery). Full recorded
+> evidence is in [`memory-cloud-deployment.md` §4](./memory-cloud-deployment.md).
+
 Stronger than the isolated 14B1 dogfood because it exercises the real UI/API/bridge.
 
 **A. Passkey enrollment (synthetic MMK):**
