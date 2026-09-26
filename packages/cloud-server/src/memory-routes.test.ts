@@ -269,7 +269,9 @@ describe('remote Memory routes', () => {
         expiresAt: '2099-01-01T00:00:00.000Z',
       },
     });
-    const fetchedByB = await call('GET', 'memory/sessions/s-a', { token: tokenB });
+    const fetchedByB = await call('GET', 'memory/sessions/s-a', {
+      token: tokenB,
+    });
     expect((fetchedByB.jsonBody as { session: unknown }).session).toBeNull();
     const submitByB = await call('POST', 'memory/sessions/s-a/envelope', {
       token: tokenB,
