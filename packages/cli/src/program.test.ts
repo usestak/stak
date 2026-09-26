@@ -1214,6 +1214,60 @@ describe('Stack CLI', () => {
     expect(result.output).toContain('Not signed in.');
   });
 
+  it('protect --passkey shows the Passkey method and no recovery-file copy', async () => {
+    const result = await runProgram(['memory', 'protect', '--passkey'], {
+      memoryProtectPasskey: async () => ({ status: 'protected', migrated: 1 }),
+    });
+    expect(result.output).toContain('Protected backup enabled.');
+    expect(result.output).toContain('Passkey    Ready');
+    expect(result.output).toContain('1 file migrated to Protected.');
+    // The recovery-file wording must NOT appear for the passkey path.
+    expect(result.output).not.toContain('Recovery file');
+    expect(result.output).not.toContain('Keep this file safe');
+  });
+
+  it('protect (recovery file) still shows the recovery-file method and warning', async () => {
+    const result = await runProgram(['memory', 'protect'], {
+      memoryCloudProtect: async () => ({
+        migrated: 1,
+        recoveryFilePath: '/tmp/stack-memory-recovery.stackkey',
+      }),
+    });
+    expect(result.output).toContain('Recovery file    Ready');
+    expect(result.output).toContain('Keep this file safe');
+    expect(result.output).not.toContain('Passkey    Ready');
+  });
+
+  it('protect --passkey JSON reports recoveryMethod passkey (no file warning)', async () => {
+    const result = await runProgram(
+      ['memory', 'protect', '--passkey', '--json'],
+      {
+        memoryProtectPasskey: async () => ({
+          status: 'protected',
+          migrated: 2,
+        }),
+      },
+    );
+    const parsed = JSON.parse(result.output) as { recoveryMethod?: string };
+    expect(parsed.recoveryMethod).toBe('passkey');
+    expect(result.output).not.toContain('Keep this file safe');
+  });
+
+  it('protect (recovery file) JSON reports recoveryMethod recovery-file', async () => {
+    const result = await runProgram(['memory', 'protect', '--json'], {
+      memoryCloudProtect: async () => ({
+        migrated: 0,
+        recoveryFilePath: '/tmp/stack-memory-recovery.stackkey',
+      }),
+    });
+    const parsed = JSON.parse(result.output) as {
+      recoveryMethod?: string;
+      recoveryFilePath?: string;
+    };
+    expect(parsed.recoveryMethod).toBe('recovery-file');
+    expect(parsed.recoveryFilePath).toBe('/tmp/stack-memory-recovery.stackkey');
+  });
+
   it('recover reports no Cloud backup for an empty account', async () => {
     const result = await runProgram(['memory', 'recover']); // default: no-backup
     expect(result.output).toContain('No Cloud backup found');

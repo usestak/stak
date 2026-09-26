@@ -7,3 +7,5 @@ coverage
 pnpm-lock.yaml
 docs/product-foundation.md
 docs/technical-build-spec.md
+
+supabase/.temp

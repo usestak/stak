@@ -155,24 +155,37 @@ export const renderMemoryRecover = (outcome: CloudRecoverOutcome): string => {
 };
 
 export const renderMemoryProtect = (result: {
+  recoveryMethod: 'passkey' | 'recovery-file';
   migrated: number;
   recoveryFilePath?: string;
-}): string =>
-  block([
+}): string => {
+  const isFile = result.recoveryMethod === 'recovery-file';
+  const lines: Array<string | false> = [
     'Protected backup enabled.',
     '',
     'Recovery',
-    'Recovery file    Ready',
-    result.recoveryFilePath ? `Saved to ${result.recoveryFilePath}` : false,
-    '',
-    'Keep this file safe — anyone with it can recover your Memory.',
-    result.migrated > 0
-      ? `${plainFiles(result.migrated)} migrated to Protected.`
-      : false,
+  ];
+  if (isFile) {
+    lines.push('Recovery file    Ready');
+    if (result.recoveryFilePath)
+      lines.push(`Saved to ${result.recoveryFilePath}`);
+    // The recovery-file warning is shown ONLY for the recovery-file method.
+    lines.push(
+      '',
+      'Keep this file safe — anyone with it can recover your Memory.',
+    );
+  } else {
+    lines.push('Passkey    Ready', '');
+  }
+  if (result.migrated > 0)
+    lines.push(`${plainFiles(result.migrated)} migrated to Protected.`);
+  lines.push(
     '',
     'Add another recovery method so losing one credential',
     'doesn’t lose your Memory.',
-  ]);
+  );
+  return block(lines);
+};
 
 /** Cloud state appended to the local status view. */
 export const renderMemoryCloudStatus = (

@@ -122,7 +122,12 @@ export const registerMemoryCommand = (
         if (options.passkey) {
           const result = await dependencies.memoryProtectPasskey();
           if (options.json) {
-            emitJson(dependencies, result);
+            emitJson(
+              dependencies,
+              result.status === 'protected'
+                ? { ...result, recoveryMethod: 'passkey' }
+                : result,
+            );
             return;
           }
           if (result.status === 'not-authenticated') {
@@ -134,7 +139,10 @@ export const registerMemoryCommand = (
             return;
           }
           dependencies.writeOut(
-            renderMemoryProtect({ migrated: result.migrated }),
+            renderMemoryProtect({
+              recoveryMethod: 'passkey',
+              migrated: result.migrated,
+            }),
           );
           return;
         }
@@ -144,7 +152,12 @@ export const registerMemoryCommand = (
             : {}),
         });
         if (options.json) {
-          emitJson(dependencies, result);
+          emitJson(
+            dependencies,
+            'status' in result
+              ? result
+              : { ...result, recoveryMethod: 'recovery-file' },
+          );
           return;
         }
         if ('status' in result) {
@@ -155,7 +168,9 @@ export const registerMemoryCommand = (
           );
           return;
         }
-        dependencies.writeOut(renderMemoryProtect(result));
+        dependencies.writeOut(
+          renderMemoryProtect({ ...result, recoveryMethod: 'recovery-file' }),
+        );
       },
     );
 

@@ -10,3 +10,6 @@ coverage/
 Thumbs.db
 .worktrees/
 
+
+# Supabase CLI generated temp state
+supabase/.temp
