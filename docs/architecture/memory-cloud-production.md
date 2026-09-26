@@ -187,3 +187,76 @@ Supabase migration and the browser passkey ceremony page — the Supabase backen
 bridge crypto are implemented and typechecked; the ceremony reuses the proven 14B1
 PRF+bridge flow (`experiments/memory-remote/dogfood/`). See the final report for the
 exact remaining deployment steps.
+
+## 13. Phase 14B.2 closure — passkey ceremony, device-key hardening, deploy readiness
+
+**Passkey web ceremony (built).** `apps/web/app/memory/protect` and
+`.../recover` are minimal authenticated pages that run the WebAuthn PRF ceremony in
+the browser and drive the one-time relay via cookie-authenticated server actions
+(`app/memory/actions.ts` → `lib/recovery-actions.ts`). The browser crypto
+(`lib/recovery-webcrypto.ts`, Web Crypto only) is the SAME construction as
+`@stack/memory`; `lib/recovery-webcrypto.interop.test.ts` proves envelopes/wrappers
+it produces are decrypted by the Node/CLI domain and vice-versa. The CLI side is
+`stack memory protect --passkey` / `stack memory recover --passkey` (create session
+→ open browser → poll relay → `openMmkFromEnvelope` → enroll device → migrate/
+recover). Strict PRF detection: passkey support ≠ usable PRF; the ground truth is a
+real `get()` returning `prf.results`. When PRF is unavailable the UI says exactly
+that and points to the recovery file — never a silent Standard downgrade. The server
+only ever relays the opaque session + envelope; it never sees the MMK. **Trust
+limit unchanged:** a malicious Stack-served browser bundle could exfiltrate the MMK
+in the browser — not defended in V0.
+
+**Local device-key threat (measured).** Verified on Windows with `icacls`: Node's
+`mode: 0o600` does NOT set NTFS ACLs — key files inherited the parent directory's
+ACL (granting other principals read/modify). Fix: `LocalMemoryKeyStore` now locks
+the keys directory to the current user's SID before writing (best-effort, via
+built-in `whoami.exe`/`icacls.exe` at absolute System32 paths; `/inheritance:r` +
+inheritable current-user-only grant). Verified result: `device-key.bin` and
+`device-mmk.json` become `<user>:(I)(F)` only, and read-back still works.
+
+Threat statement (explicit): **an attacker who can read BOTH the device key AND the
+envelope file can decrypt the MMK.** The device-key indirection is for future
+OS-keystore migration, not protection against local theft of both files.
+Guarantees by platform:
+
+- **POSIX (macOS/Linux):** owner-only via `mode 0o600` (`rw-------`).
+- **Windows:** best-effort owner-only via `icacls` (Administrators/SYSTEM always
+  retain access; best-effort means a failure never blocks enrollment).
+- **All platforms:** V0 does NOT protect against full compromise of the local OS
+  account. Future hardening (follow-up): OS-native secret storage — Windows
+  Credential Manager / DPAPI, macOS Keychain, Linux Secret Service.
+
+Windows ACL verification (read-only, manual): after enrolling a device
+(`stack memory protect`), inspect the key files without revealing contents:
+
+```
+icacls "%STACK_HOME%\memory\keys\device-key.bin"
+icacls "%STACK_HOME%\memory\keys\device-mmk.json"
+```
+
+Expect only the current user (e.g. `DOMAIN\User:(I)(F)`), no inherited group ACEs.
+
+**Deployment readiness.** See
+[`memory-cloud-deployment.md`](./memory-cloud-deployment.md) for the migration
+review checklist, the exact manual `supabase db push` / psql procedure, verification
+queries, and rollback SQL. The migration is not applied automatically.
+
+### Manual production-page dogfood (prepare; do NOT auto-run; no real Memory)
+
+Stronger than the isolated 14B1 dogfood because it exercises the real UI/API/bridge.
+
+**A. Passkey enrollment (synthetic MMK):**
+
+1. Apply migration 0003 to a staging project; run the web app; `stack login` (synthetic account).
+2. `stack memory backup` (seeds a Standard backup).
+3. `stack memory protect --passkey` → browser opens `/memory/protect` → create passkey (Google Password Manager / Windows Hello) → real PRF → wrapper stored → MMK sealed to CLI → device enrolled + migrated to Protected.
+4. Confirm `stack memory status` shows Privacy: Protected, Recovery: Passkey.
+
+**B. Passkey recovery (synthetic MMK, fresh device):**
+
+1. On a fenced fresh `$STACK_HOME`: `stack login` → `stack memory recover --passkey`.
+2. Browser opens `/memory/recover` → authenticate the synced passkey → real PRF → MMK unwrapped → sealed to CLI → downloaded/decrypted → local store reconstructed.
+3. Verify byte-exact recovery (`stack memory restore --dry-run`), then confirm the CLI's recovered MMK hash matches (synthetic).
+
+No real Claude Memory is used in A or B. Real-Memory dogfood (C) requires explicit
+user approval and is not part of this phase.

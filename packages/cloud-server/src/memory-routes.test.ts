@@ -233,6 +233,51 @@ describe('remote Memory routes', () => {
     );
   });
 
+  it('rejects consuming an expired recovery session', async () => {
+    const { call, signIn } = setup();
+    const token = await signIn(USER_A);
+    await call('POST', 'memory/sessions', {
+      token,
+      body: {
+        sessionId: 's-exp',
+        direction: 'recovery',
+        session: { hello: 'x' },
+        expiresAt: '2000-01-01T00:00:00.000Z',
+      },
+    });
+    await call('POST', 'memory/sessions/s-exp/envelope', {
+      token,
+      body: { envelope: { ct: 'x' } },
+    });
+    const res = await call('POST', 'memory/sessions/s-exp/consume', { token });
+    expect(res.status).toBe(410);
+    expect((res.jsonBody as { error: { code: string } }).error.code).toBe(
+      'memory-session-expired',
+    );
+  });
+
+  it('does not expose another user’s recovery session or accept their submit', async () => {
+    const { call, signIn } = setup();
+    const tokenA = await signIn(USER_A);
+    const tokenB = await signIn(USER_B);
+    await call('POST', 'memory/sessions', {
+      token: tokenA,
+      body: {
+        sessionId: 's-a',
+        direction: 'recovery',
+        session: { hello: 'a' },
+        expiresAt: '2099-01-01T00:00:00.000Z',
+      },
+    });
+    const fetchedByB = await call('GET', 'memory/sessions/s-a', { token: tokenB });
+    expect((fetchedByB.jsonBody as { session: unknown }).session).toBeNull();
+    const submitByB = await call('POST', 'memory/sessions/s-a/envelope', {
+      token: tokenB,
+      body: { envelope: { ct: 'x' } },
+    });
+    expect(submitByB.status).toBe(404);
+  });
+
   it('stores and lists recovery-method envelopes opaquely', async () => {
     const { call, signIn } = setup();
     const token = await signIn(USER_A);
