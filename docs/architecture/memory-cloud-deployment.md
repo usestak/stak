@@ -178,3 +178,87 @@ rollback protection after total loss of trusted local state. (See the limitation
 Running `next build` while the Next.js dev server is alive can leave stale
 `apps/web/.next` artifacts and cause missing-generated-chunk errors. Stop the dev
 server before building, and remove `apps/web/.next` before restarting if needed.
+
+## 5. Real Memory acceptance (2026-09-26)
+
+The full Stack Memory V0 path was dogfooded with the user's **real Claude project
+Memory** (documentation-only record; no private Memory contents or project
+implementation details are reproduced here, and no payload bytes are recorded).
+
+**Source dataset (metadata only):** Claude provider · 9 projects · 27 Memory files,
+all classified `auto-memory` / project. One project had a portable Git identity
+(`github.com/reymiahthesun-bit/atlas-access-flow`); the other 8 were local-only
+identities. The run used the real HOME/USERPROFILE (so Stack could discover the real
+Claude Memory) with an **isolated temporary STACK_HOME** (the normal Stack state was
+untouched). The temporary environment enrolled into the existing Protected profile via
+the existing passkey recovery method.
+
+**Real Protected Cloud backup — PASS.** `stack memory backup` uploaded 9 projects /
+27 files as **Protected** with no passkey ceremony (the source environment already
+held the MMK). Cloud metadata verified: generation 3, parent 2, `privacy_mode`
+protected, committed, `payload_bytes 73126`, crypto metadata + wrapped DEK present,
+profile `latest_generation 3`. (Payload contents intentionally not recorded.)
+
+**Fresh-machine recovery — PASS.** A fenced Machine E (empty HOME/STACK_HOME, no
+Stack/Claude state, no login, empty Atlas repo dir with only the Git remote for the
+portable identity) authenticated and ran `stack memory recover --passkey` via the real
+production route + enrolled passkey: 27 files / 9 projects recovered, Privacy
+Protected, native Claude Memory still absent before restore.
+
+**Project-identity behavior — correct/safe.** `restore --dry-run --verbose` reported
+**7 files ready** (the `atlas-access-flow` portable-Git-identity project) and **20
+files from 8 projects not found on this machine** (the local-only identities). Stack
+did **not** guess destinations for unresolved projects. Native restore: 7 restored,
+20 unresolved; a second restore reported 0 ready / 7 already up to date / 20 unresolved
+— **idempotent** and safe. This confirms Memory portability is now constrained mainly
+by _project-identity_ portability, not Cloud recovery or encryption (see the follow-up
+below).
+
+**Semantic recall — PASS.** Claude was launched in the fresh Atlas directory (no real
+source checkout beyond the Git identity) and instructed not to inspect repository
+files, Git history, or external sources. It attributed its answer to saved project
+memory and recalled multiple concrete project-specific details — demonstrating
+functional semantic continuity, not merely filesystem restoration. (Recalled details
+are intentionally not reproduced.)
+
+**Cleanup — verified.** Claude was exited; HOME/USERPROFILE restored to the normal
+profile; the temporary STACK_HOME and the whole temporary real-Memory dogfood
+directory were deleted (`Test-Path` → False). The Protected Cloud generation is
+intentionally retained as the user's real encrypted backup.
+
+### Acceptance statement
+
+**Stack Memory V0 is accepted for the tested environment and supported
+provider/recovery path.** Real evidence now exists for: native Claude Memory
+discovery; local private backup; Standard Cloud backup/recovery; Standard→Protected
+migration; real WebAuthn PRF passkey protection; fresh-machine Protected recovery;
+normal Protected backup after recovery; a second synthetic total-loss recovery; a real
+27-file Protected Cloud backup; real fresh-machine recovery; portable Git project
+identity matching; safe unresolved-project handling; native restore idempotency; actual
+Claude semantic recall after restore; and temporary plaintext/device-state cleanup.
+
+**Product claim (scoped to the tested environment + supported provider/recovery
+path):** Stack can preserve supported Claude project Memory, protect it with
+client-side encryption, recover it on a fresh machine through a supported passkey
+recovery flow, map Memory back to a project with a portable identity, restore it into
+Claude's native Memory structure, and let Claude continue with prior project context.
+
+### Known limitations (unchanged, plus identity portability)
+
+- Not all passkeys support PRF; synced-passkey PRF cross-device determinism is not
+  guaranteed.
+- Protected mode does not defend against full local-OS-account compromise, nor against
+  malicious Stack-served recovery JavaScript (V0 browser trust boundary).
+- Strong rollback detection after complete loss of all trusted local state is not
+  guaranteed.
+- **Local-only project identities are not automatically portable across machines** —
+  Memory for such projects recovers to the private store but cannot be auto-mapped to a
+  native destination without a portable identity.
+
+### Follow-up (not implemented here): Portable Project Identity & Recovery Mapping
+
+Allow a local-only project from an old machine to be safely matched or explicitly
+mapped to its equivalent on a new machine without absolute filesystem paths and without
+silent guessing. Possible future mechanisms: Git identity where available, explicit
+project aliases, recovery-time project mapping, and user confirmation for ambiguous
+matches. Not designed or implemented in this phase.
