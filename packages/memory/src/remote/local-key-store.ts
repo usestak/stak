@@ -8,16 +8,20 @@
  * Manager / DPAPI, macOS Keychain, Linux Secret Service) without changing callers.
  *
  * V0 implementation: the MMK is stored as an AEAD envelope under a locally
- * generated device key, both written with owner-only (0600) permissions under
- * `$STACK_HOME/memory/keys/`. Honest security boundary:
+ * generated device key, both under `$STACK_HOME/memory/keys/`. On POSIX they are
+ * written owner-only (mode 0o600). On Windows, `mode` does NOT set NTFS ACLs, so
+ * after writing we best-effort restrict the keys directory to the current user's
+ * SID via the built-in `icacls` (breaking inherited ACEs); Administrators/SYSTEM
+ * always retain access on Windows. Honest security boundary:
  *   - It PRESERVES Stack Cloud server-blindness: the MMK never leaves the device.
- *   - It does NOT claim protection against full compromise of the local OS account
- *     (an attacker with the user's OS session can read both files). OS-native
- *     secure storage is documented future hardening.
+ *   - Anyone who can read BOTH files (the device key AND the envelope) can decrypt
+ *     the MMK — the device-key indirection is for future OS-keystore migration, not
+ *     added protection against local theft of both files.
+ *   - It does NOT protect against full compromise of the local OS account (or a
+ *     local Administrator). OS-native secure storage (DPAPI / Keychain / Secret
+ *     Service) is documented future hardening.
  *   - The raw MMK is never written in plaintext, never placed in config files, and
  *     never logged.
- * The device-key indirection exists so the envelope format stays stable when the
- * device key later moves into OS-native storage.
  */
 import { readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
@@ -26,7 +30,11 @@ import { z } from 'zod';
 
 import { memoryStorePaths } from '../store.js';
 import { KEY_BYTES, open, randomKey, seal } from './cipher.js';
-import { atomicWriteFile } from './secure-file.js';
+import {
+  atomicWriteFile,
+  hardenOwnerOnly,
+  secureMkdir,
+} from './secure-file.js';
 
 const DEVICE_MMK_VERSION = 'stack-mem-device-mmk-v1' as const;
 const DEVICE_MMK_AAD = Buffer.from(DEVICE_MMK_VERSION, 'utf8');
@@ -134,6 +142,11 @@ export const fileLocalMemoryKeyStore = (
     },
 
     async saveMmk(mmk: Buffer): Promise<void> {
+      // Lock the keys directory to the current user FIRST so files written into it
+      // inherit an owner-only ACL (on Windows; a no-op on POSIX). Doing it before
+      // the writes avoids leaving a file with an empty/ineffective DACL.
+      await secureMkdir(paths.keysDir);
+      await hardenOwnerOnly(paths.keysDir);
       const deviceKey = (await loadDeviceKey()) ?? randomKey();
       await atomicWriteFile(paths.deviceKey, deviceKey, { mode: 0o600 });
       const sealed = seal(mmk, deviceKey, DEVICE_MMK_AAD);
