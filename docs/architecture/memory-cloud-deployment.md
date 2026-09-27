@@ -262,3 +262,18 @@ mapped to its equivalent on a new machine without absolute filesystem paths and 
 silent guessing. Possible future mechanisms: Git identity where available, explicit
 project aliases, recovery-time project mapping, and user confirmation for ambiguous
 matches. Not designed or implemented in this phase.
+
+### Clarification (2026-09-27, added in Phase 15A)
+
+The original counts above are unchanged and accurate: 7 files restored, 20 files from 8
+projects retained as not found on this machine. A later review refined the
+_interpretation_ of the unresolved set — it is not proof that all 8 projects were
+identity-portability failures. At least one of them (**Nexus**) had actually been
+**intentionally deleted** locally before the dogfood, and others may also no longer exist
+on this machine. So the 20 unresolved files represented a **mixture** of unknown
+machine-availability and lifecycle states — projects with no portable identity, projects
+not checked out on this machine, and projects deleted locally — rather than a single
+identity failure. Stack correctly wrote nothing for all of them. Phase 15A separates these
+dimensions; see [`project-identity.md`](./project-identity.md),
+[`project-lifecycle.md`](./project-lifecycle.md), and
+[`project-recovery-mapping.md`](./project-recovery-mapping.md).
