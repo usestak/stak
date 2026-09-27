@@ -62,9 +62,60 @@ canonical Git remote (`github.com/owner/repo`, normalized across https/ssh forms
 absolute filesystem path. So a project cloned to a different directory on another
 machine is still recognized. When no portable Git identity exists, the identity
 is `local` and unresolved, and restore must rebind it to a real local project;
-if the project is not present, restore reports **"Project not found on this
-machine."** rather than inventing a destination. Absolute source paths are
+if the project is not present, restore reports it as **not available on this
+machine** rather than inventing a destination. Absolute source paths are
 machine-local metadata and never appear in the portable manifest.
+
+### Logical projects and Project IDs
+
+Each project Stack knows about has a stable, opaque **Project ID**
+(`prj_…`) — a random identifier that stays the same no matter how the folder is
+renamed, moved, or cloned, and that never encodes a path, username, machine, or
+folder name. A logical project can carry identity claims (its canonical Git
+remote, and a compatibility reference for older path-derived identities), a
+machine-local binding to a directory on _this_ machine, and (in the future) a
+lifecycle state.
+
+- **`stack project`** lists the logical projects Stack knows, each with its
+  identity, whether it is available on this machine, how many memory files it has,
+  and any mapping. It never shows memory contents.
+- **`stack project map <project> <directory>`** authorizes a directory on this
+  machine as the restore destination for a recovered project. This is a
+  **machine-local binding only** — it does not turn the directory's path into a
+  shared/portable identity, and it never silently merges two projects. If the
+  directory is a different Git repository than the project, the map is refused
+  (repository transfers are not reconciled automatically yet).
+
+**Why a project can stay "not available on this machine."** After recovering on a
+fresh machine, a project without a portable Git identity has no automatic
+destination. Stack keeps its memory safely in the private store and simply reports
+it as unavailable — recovered memory does not need a destination to be preserved.
+Map it later with `stack project map`, or leave it; Stack will not nag or guess.
+
+**Why Stack won't restore based on an old path.** A recovered legacy project is
+never auto-restored just because a directory happens to sit at the same path it
+once used. Paths get reused for unrelated projects, so an old path is treated only
+as a weak hint — restoring there requires an explicit `stack project map` (or an
+independent strong Git identity). This prevents one project's memory from leaking
+into another.
+
+**When a mapping becomes portable.** Project IDs and identity claims travel to the
+Cloud **inside your next Memory backup** — there is no separate project-sync
+service. So after you map or identify a project, run `stack memory backup` to
+capture the updated registry; a later recovery on another machine then sees the
+same Project IDs. Machine-local bindings (the actual directory paths) are **never**
+uploaded.
+
+**Standard vs Protected registry privacy.** The portable project registry rides
+inside the Memory bundle, so it follows the same privacy mode as the rest of your
+Memory: in **Protected** mode it is client-side encrypted and the Stack server
+never sees your Project IDs, Git identities, or claims; in **Standard** mode it is
+server-readable exactly like the rest of a Standard backup. Filesystem paths and
+bindings stay on your machine in either mode.
+
+_Not yet available:_ archiving/retiring projects, deleting a project's memory, an
+optional in-repo project marker, and repository-transfer reconciliation are
+designed in the architecture docs but not implemented in this release.
 
 ## Backup and restore
 

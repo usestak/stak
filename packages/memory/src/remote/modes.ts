@@ -27,6 +27,7 @@ import {
   type SealedBytes,
 } from './cipher.js';
 import { unwrapDekWithMmk, wrapDekWithMmk } from './mmk.js';
+import { reconcileRegistryAfterRecover } from '../project/registry-store.js';
 import {
   REMOTE_FORMAT_VERSION,
   RemoteMemoryError,
@@ -163,6 +164,9 @@ export const cloudRecover = async (options: {
     bytes: bundleBytes,
     stackHome: options.stackHome,
   });
+  // Phase 15B: reconcile the portable project registry the bundle carried (or lazily
+  // migrate legacy identities when it carried none). Never creates a path binding.
+  await reconcileRegistryAfterRecover({ stackHome: options.stackHome });
   return {
     generation: meta.generation,
     privacyMode: meta.privacyMode,

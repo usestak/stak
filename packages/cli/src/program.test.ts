@@ -301,6 +301,8 @@ const runProgram = async (
       recoveryMethodTypes: [],
       deviceEnrolled: false,
     }),
+    projectList: async () => [],
+    projectMap: async () => ({ status: 'project-not-found' }),
     confirm: async () => true,
     writeOut: (value) => {
       output += value;

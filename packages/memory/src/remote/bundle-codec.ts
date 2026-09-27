@@ -51,6 +51,16 @@ const bundleSchema = z.object({
   manifestSha256: z.string().regex(/^sha256:[a-f0-9]{64}$/),
   manifestB64: z.string(),
   objects: z.array(bundleObjectSchema),
+  // Phase 15B: OPTIONAL portable project-registry snapshot. Backward-compatible —
+  // historical bundles (generation 3 and earlier) omit it and still decode. When
+  // present it is byte-verified and rebuilt into the store on restore. The bundle
+  // is the unit that is encrypted (Protected) or stored (Standard), so this rides
+  // in the same privacy mode as the rest of the bundle; the server never inspects it.
+  registrySha256: z
+    .string()
+    .regex(/^sha256:[a-f0-9]{64}$/)
+    .optional(),
+  registryB64: z.string().optional(),
 });
 
 export type MemoryBackupBundle = z.infer<typeof bundleSchema>;
@@ -68,6 +78,13 @@ const serialize = (bundle: MemoryBackupBundle): Buffer => {
         contentHash: object.contentHash,
         bytesB64: object.bytesB64,
       })),
+    // Registry fields appear only when present, keeping historical bundles byte-stable.
+    ...(bundle.registrySha256 && bundle.registryB64
+      ? {
+          registrySha256: bundle.registrySha256,
+          registryB64: bundle.registryB64,
+        }
+      : {}),
   };
   return Buffer.from(JSON.stringify(canonical), 'utf8');
 };
@@ -94,12 +111,25 @@ export const bundleFromStore = async (
       bytesB64: Buffer.from(bytes).toString('base64'),
     });
   }
+  // Include the portable project-registry snapshot when the store has one.
+  const registryBytes = await readFile(
+    memoryStorePaths(stackHome).projectRegistrySnapshot,
+  ).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined;
+    throw error;
+  });
   const bundle: MemoryBackupBundle = {
     bundleFormat: BUNDLE_FORMAT,
     provider: 'claude',
     manifestSha256: hashBytes(manifestBytes),
     manifestB64: manifestBytes.toString('base64'),
     objects,
+    ...(registryBytes
+      ? {
+          registrySha256: hashBytes(registryBytes),
+          registryB64: registryBytes.toString('base64'),
+        }
+      : {}),
   };
   return { bundle, bytes: serialize(bundle) };
 };
@@ -159,6 +189,19 @@ export const restoreBundleToStore = async (options: {
       'restore-verify',
       'Restored manifest failed byte-exact verification.',
     );
+  // Rebuild the portable project-registry snapshot when the bundle carried one.
+  if (bundle.registryB64 && bundle.registrySha256) {
+    const registryBytes = Buffer.from(bundle.registryB64, 'base64');
+    if (hashBytes(registryBytes) !== bundle.registrySha256)
+      throw new BundleError(
+        'manifest-hash-mismatch',
+        'The bundled project registry does not match its hash.',
+      );
+    await atomicWriteFile(
+      memoryStorePaths(options.stackHome).projectRegistrySnapshot,
+      registryBytes,
+    );
+  }
   return {
     objects: bundle.objects.length,
     manifestSha256: bundle.manifestSha256,

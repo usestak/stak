@@ -115,6 +115,13 @@ import { registerPushCommand } from './commands/push.js';
 import { registerPullCommand } from './commands/pull.js';
 import { registerPublishCommand } from './commands/publish.js';
 import { registerMemoryCommand } from './commands/memory.js';
+import { registerProjectCommand } from './commands/project.js';
+import {
+  listProjects,
+  mapProject,
+  type MapProjectResult,
+  type ProjectListRow,
+} from './memory/project-ops.js';
 import { fileCredentialStore } from './cloud/credentials.js';
 import {
   cloudApplyPublish,
@@ -223,6 +230,11 @@ export type ProgramDependencies = {
   memoryProtectPasskey(): Promise<PasskeyProtectResult>;
   memoryRecoverPasskey(): Promise<PasskeyRecoverResult>;
   memoryCloudStatus(): Promise<MemoryCloudStatus>;
+  projectList(): Promise<ProjectListRow[]>;
+  projectMap(options: {
+    project: string;
+    dir: string;
+  }): Promise<MapProjectResult>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -468,6 +480,18 @@ const defaultDependencies: ProgramDependencies = {
   },
   memoryProtectPasskey: async () => runPasskeyProtect(await buildPasskeyDeps()),
   memoryRecoverPasskey: async () => runPasskeyRecover(await buildPasskeyDeps()),
+  projectList: async () =>
+    listProjects({
+      stackHome,
+      projects: await resolveMemoryProjects({
+        cwd: process.cwd(),
+        platform: process.platform,
+        listDirs: listChildDirs,
+        gitOrigin: gitOriginOf,
+      }),
+    }),
+  projectMap: async ({ project, dir }) =>
+    mapProject({ stackHome, selector: project, dir, gitOrigin: gitOriginOf }),
   confirm: async (message) => {
     if (!process.stdin.isTTY) return false;
     const prompt = createInterface({
@@ -506,5 +530,6 @@ export const createProgram = (
   registerPullCommand(program, dependencies);
   registerPublishCommand(program, dependencies);
   registerMemoryCommand(program, dependencies);
+  registerProjectCommand(program, dependencies);
   return program;
 };

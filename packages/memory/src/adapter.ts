@@ -17,6 +17,10 @@ import {
   type RestorePlan,
 } from './restore.js';
 import { readMemoryManifest } from './store.js';
+import {
+  readLocalRegistry,
+  syncRegistryForBackup,
+} from './project/registry-store.js';
 
 export type MemoryVerifyResult = {
   ok: boolean;
@@ -62,22 +66,29 @@ export const createClaudeMemoryAdapter = (
     discover: () => discoverClaudeMemory(discoveryOptions),
     planBackup: async () =>
       planMemoryBackup(await discoverClaudeMemory(discoveryOptions)),
-    backup: async () =>
-      runMemoryBackup({
+    backup: async () => {
+      const result = await runMemoryBackup({
         stackHome: options.stackHome,
         items: await discoverClaudeMemory(discoveryOptions),
         ...(options.now ? { now: options.now } : {}),
-      }),
-    planRestore: () =>
+      });
+      // Phase 15B: resolve/mint stable Project IDs and refresh the portable
+      // registry snapshot the next Cloud bundle will carry (paths never included).
+      await syncRegistryForBackup({ stackHome: options.stackHome });
+      return result;
+    },
+    planRestore: async () =>
       planMemoryRestore({
         stackHome: options.stackHome,
+        registry: await readLocalRegistry(options.stackHome),
         ...(options.claudeHome ? { claudeHome: options.claudeHome } : {}),
         ...(options.projects ? { projects: options.projects } : {}),
       }),
-    restore: ({ apply }) =>
+    restore: async ({ apply }) =>
       runMemoryRestore({
         stackHome: options.stackHome,
         apply,
+        registry: await readLocalRegistry(options.stackHome),
         ...(options.claudeHome ? { claudeHome: options.claudeHome } : {}),
         ...(options.projects ? { projects: options.projects } : {}),
       }),

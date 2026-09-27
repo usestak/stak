@@ -20,13 +20,20 @@ import {
   projectIdentityKey,
   projectIdentityMatches,
 } from './project-identity.js';
+import {
+  bindingFor,
+  emptyRegistry,
+  resolveProjectForIdentity,
+  type LocalRegistry,
+} from './project/registry.js';
 import { hashBytes, readMemoryManifest, readMemoryObject } from './store.js';
 
 export type RestoreStatus =
   | 'identical' // target exists with the same content — no-op
   | 'conflict' // target exists with different content — refused (V0 never merges)
   | 'restorable' // target absent — may be restored on apply
-  | 'project-not-found' // project item whose project is not on this machine
+  | 'project-not-found' // project item whose project is not available on this machine
+  | 'identity-conflict' // strong identity claimed by >1 logical project — refuse
   | 'restored'
   | 'skipped';
 
@@ -61,6 +68,8 @@ export type RestoreOptions = {
   stackHome: string;
   claudeHome?: string;
   projects?: ClaudeProjectInput[];
+  /** Machine-local project registry (Project IDs + bindings). Defaults to empty. */
+  registry?: LocalRegistry;
 };
 
 type ResolvedProject = { dir: string; identity: ProjectIdentity };
@@ -76,42 +85,85 @@ const resolveProjects = (projects: ClaudeProjectInput[]): ResolvedProject[] =>
     };
   });
 
-const findProject = (
+type DirResolution =
+  { dir: string } | { unresolved: 'not-found' | 'identity-conflict' };
+
+/**
+ * Resolve a project identity to an authorized local destination directory (Phase 15B):
+ *
+ *  1. If the registry shows the identity's strong claim belongs to more than one
+ *     logical project → identity-conflict; refuse (never silently merge).
+ *  2. A GIT identity may auto-match a live candidate directory by canonical remote —
+ *     path-independent, the behavior proven by the Atlas dogfood.
+ *  3. Otherwise, only an explicit machine-local BINDING authorizes a destination.
+ *
+ * A legacy `local:` identity is NEVER matched by re-encoding a directory's path to its
+ * vendor key: path reuse must not resurrect unrelated Memory. Legacy identities resolve
+ * only through an explicit binding (`stack project map`).
+ */
+const resolveProjectDir = (
   identity: ProjectIdentity | undefined,
+  registry: LocalRegistry,
   resolved: ResolvedProject[],
-): ResolvedProject | null => {
-  if (!identity) return null;
-  return (
-    resolved.find((project) =>
-      projectIdentityMatches(project.identity, identity),
-    ) ?? null
-  );
+): DirResolution => {
+  if (!identity) return { unresolved: 'not-found' };
+  const reg = resolveProjectForIdentity(registry, identity);
+  if (reg.status === 'conflict') return { unresolved: 'identity-conflict' };
+
+  if (identity.kind === 'git') {
+    const candidate = resolved.find(
+      (project) =>
+        project.identity.kind === 'git' &&
+        projectIdentityMatches(project.identity, identity),
+    );
+    if (candidate) return { dir: candidate.dir };
+  }
+
+  if (reg.status === 'resolved') {
+    const binding = bindingFor(registry, reg.projectId);
+    if (binding) return { dir: path.resolve(binding.dir) };
+  }
+  return { unresolved: 'not-found' };
 };
 
-/** Resolve a portable restore target to a fenced absolute path, or a reason it can't be. */
+/** Resolve a portable restore target to a fenced absolute path, or why it can't be. */
 const resolveTargetPath = async (
   item: ManifestItem,
   claudeHome: string,
+  registry: LocalRegistry,
   resolved: ResolvedProject[],
-): Promise<{ targetPath: string } | { reason: string }> => {
+): Promise<
+  | { targetPath: string }
+  | { status: 'project-not-found' | 'identity-conflict'; reason: string }
+> => {
   const target = item.restoreTarget;
   if (target.base === 'claude-home') {
     const abs = path.join(claudeHome, target.relativePath);
     await assertPathWithin({ ownedRoot: claudeHome, proposedPath: abs });
     return { targetPath: abs };
   }
-  const project = findProject(item.project, resolved);
-  if (!project) return { reason: 'Project not found on this machine.' };
+  const dir = resolveProjectDir(item.project, registry, resolved);
+  if ('unresolved' in dir)
+    return dir.unresolved === 'identity-conflict'
+      ? {
+          status: 'identity-conflict',
+          reason:
+            'This project’s identity is claimed by more than one project; map it explicitly.',
+        }
+      : {
+          status: 'project-not-found',
+          reason: 'Project is not available on this machine.',
+        };
   if (target.base === 'project') {
-    const abs = path.join(project.dir, target.relativePath);
-    await assertPathWithin({ ownedRoot: project.dir, proposedPath: abs });
+    const abs = path.join(dir.dir, target.relativePath);
+    await assertPathWithin({ ownedRoot: dir.dir, proposedPath: abs });
     return { targetPath: abs };
   }
-  // claude-project-memory: recompute the vendor key for THIS machine's project.
+  // claude-project-memory: recompute the vendor key for THIS machine's directory.
   const memoryRoot = path.join(
     claudeHome,
     'projects',
-    encodeClaudeProjectKey(project.dir),
+    encodeClaudeProjectKey(dir.dir),
     'memory',
   );
   const abs = path.join(memoryRoot, target.relativePath);
@@ -132,6 +184,7 @@ const currentHash = async (target: string): Promise<string | null> => {
 const classify = async (
   item: ManifestItem,
   claudeHome: string,
+  registry: LocalRegistry,
   resolved: ResolvedProject[],
 ): Promise<RestoreItemResult> => {
   const base = {
@@ -140,11 +193,16 @@ const classify = async (
     scope: item.scope,
     ...(item.project ? { project: item.project } : {}),
   };
-  const resolvedTarget = await resolveTargetPath(item, claudeHome, resolved);
-  if ('reason' in resolvedTarget)
+  const resolvedTarget = await resolveTargetPath(
+    item,
+    claudeHome,
+    registry,
+    resolved,
+  );
+  if ('status' in resolvedTarget)
     return {
       ...base,
-      status: 'project-not-found',
+      status: resolvedTarget.status,
       reason: resolvedTarget.reason,
     };
   const existing = await currentHash(resolvedTarget.targetPath);
@@ -173,11 +231,12 @@ export const planMemoryRestore = async (
     options.claudeHome ?? path.join(os.homedir(), '.claude'),
   );
   const resolved = resolveProjects(options.projects ?? []);
+  const registry = options.registry ?? emptyRegistry();
   const manifest = await readMemoryManifest(options.stackHome);
   const items = manifest?.items ?? [];
   const results = [];
   for (const item of items)
-    results.push(await classify(item, claudeHome, resolved));
+    results.push(await classify(item, claudeHome, registry, resolved));
   return { provider: 'claude', ...summarize(results), items: results };
 };
 

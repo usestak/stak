@@ -25,6 +25,15 @@ export const memoryStorePaths = (stackHome: string) => {
     objects: path.join(root, 'objects'),
     manifests: path.join(root, 'manifests'),
     currentManifest: path.join(root, 'manifests', 'current.json'),
+    // Portable project-registry snapshot: lives under the manifests dir so it is
+    // captured into the (mode-following) Memory bundle alongside the manifest.
+    projectRegistrySnapshot: path.join(
+      root,
+      'manifests',
+      'project-registry.json',
+    ),
+    // Machine-local project registry (bindings + paths). NEVER bundled/uploaded.
+    localProjectRegistry: path.join(root, 'projects-local.json'),
   };
 };
 

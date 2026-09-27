@@ -41,7 +41,7 @@ describe('renderMemoryRestore', () => {
     expect(output).toContain('24 memory files');
     expect(output).toContain('4 files ready to restore');
     expect(output).toContain(
-      '20 files from 8 projects not found on this machine',
+      '20 files retained from 8 projects not available on this machine',
     );
     expect(output).toContain('Existing agent memory will not be overwritten.');
     expect(output).toContain('No changes were made.');

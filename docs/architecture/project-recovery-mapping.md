@@ -393,3 +393,48 @@ For the eventual implementation (not this phase):
     hardening, gen-3 overlay. Later: lifecycle + private sync, Git transfer reconciliation,
     opt-in marker, multi-checkout primary, multi-provider, hard-delete/crypto-shred
     (mapping §11).
+
+---
+
+## Appendix B — Phase 15B implementation notes (2026-09-27)
+
+The first runtime slice (branch `phase-15b-project-identity-runtime`) implements the
+foundation described above. Concrete choices, recorded for future phases:
+
+- **Project ID** (`packages/memory/src/project/project-id.ts`): `prj_` + 128 bits of
+  CSPRNG entropy encoded as 26 Crockford-base32 symbols. `mintProjectId(entropy?)`
+  takes only optional raw entropy (for deterministic tests) — no path/name/content
+  parameter exists, so an ID cannot be path-derived.
+- **Registry model** (`project/registry.ts`): a pure module with a portable tier
+  (`PortableProjectRecord` = Project ID + typed claims: `git` | `legacy-compat`) and a
+  machine-local tier (`MachineBinding` = Project ID → absolute dir). Legacy path-derived
+  identities travel as a **domain-separated digest** (`legacyCompatKey`,
+  `stack-project-compat-v1`) so the raw absolute path is not emitted into new portable
+  metadata; this is an opacity measure, explicitly **not** claimed to be secret (a digest
+  of a guessable path is guessable — Protected mode still encrypts the whole bundle).
+- **Bundle carriage** (`remote/bundle-codec.ts`): chose **strategy A** — a
+  backward-compatible OPTIONAL `registrySha256`/`registryB64` pair on the existing
+  `stack-mem-bundle-v1`. Old bundles (generation 3 and earlier) omit it and still decode;
+  the snapshot file lives under the store's `manifests/` dir so it rides in the
+  mode-following bundle automatically, and the server never inspects it. No Cloud schema,
+  migration, table, or crypto change.
+- **Backup** attaches the snapshot via `syncRegistryForBackup` (called from the Claude
+  adapter's `backup()`), resolving/minting Project IDs from the manifest — including lazy
+  IDs for legacy projects whose directories no longer exist. **Recover** calls
+  `reconcileRegistryAfterRecover` inside `cloudRecover`: it merges a carried snapshot
+  (preserving IDs, detecting strong-identity conflicts, never creating a binding) or lazily
+  migrates from the manifest when none is present (generation-3 path).
+- **Restore resolution** (`restore.ts`): a git identity may auto-match a live candidate
+  directory by canonical remote (the proven Atlas behavior); a legacy `local:` identity is
+  **never** matched by re-encoding a directory's path — it resolves only through an explicit
+  binding. A strong identity claimed by two Project IDs yields the new `identity-conflict`
+  status (refuse, don't merge). Existing `identical`/`conflict`/`restorable` no-overwrite
+  semantics are unchanged; unresolved projects are retained (`project-not-found`) and never
+  turned into errors.
+- **CLI**: `stack project` (read-only list) and `stack project map <project> <directory>`
+  (explicit, confirmed machine-local binding; refuses a directory whose Git identity
+  conflicts). No archive/unarchive, delete, or merge commands in this slice.
+- **Deferred to 15C+** (unchanged from §11): archive/retire lifecycle + private
+  cross-machine convergence, Git transfer/rename reconciliation, opt-in
+  `.stack/project.json` marker, multiple-checkout primary selection, multi-provider
+  manifests, and hard-delete / crypto-shred.

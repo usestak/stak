@@ -249,11 +249,15 @@ export const renderMemoryRestore = (
   const notFound = plan.items.filter(
     (item) => item.status === 'project-not-found',
   );
+  const identityConflicts = plan.items.filter(
+    (item) => item.status === 'identity-conflict',
+  );
   const identical = plan.items.filter((item) => item.status === 'identical');
 
   // Counts are unique project identities, never one-per-file.
   const projectsInBackup = plan.projects;
   const unavailableProjects = countProjects(notFound);
+  const conflictedProjects = countProjects(identityConflicts);
 
   if (options.dryRun) {
     const lines = [
@@ -274,9 +278,15 @@ export const renderMemoryRestore = (
       );
     if (notFound.length > 0)
       lines.push(
-        `${plainFiles(notFound.length)} from ${projects(unavailableProjects)} not found on this machine`,
+        `${plainFiles(notFound.length)} retained from ${projects(unavailableProjects)} not available on this machine`,
+      );
+    if (identityConflicts.length > 0)
+      lines.push(
+        `${plainFiles(identityConflicts.length)} from ${projects(conflictedProjects)} need explicit mapping (identity conflict)`,
       );
     lines.push('', 'Existing agent memory will not be overwritten.', '');
+    if (notFound.length > 0 || identityConflicts.length > 0)
+      lines.push('Run `stack project` to review them.');
     if (options.verbose)
       for (const item of plan.items)
         lines.push(`${item.status}  ${item.logicalId}`);
@@ -291,7 +301,13 @@ export const renderMemoryRestore = (
     lines.push(`${plainFiles(conflicts.length)} left unchanged (conflict).`);
   if (notFound.length > 0)
     lines.push(
-      `${plainFiles(notFound.length)} from ${projects(unavailableProjects)} not found on this machine.`,
+      `${plainFiles(notFound.length)} retained from ${projects(unavailableProjects)} not available on this machine.`,
     );
+  if (identityConflicts.length > 0)
+    lines.push(
+      `${plainFiles(identityConflicts.length)} from ${projects(conflictedProjects)} need explicit mapping (identity conflict).`,
+    );
+  if (notFound.length > 0 || identityConflicts.length > 0)
+    lines.push('Run `stack project` to review them.');
   return block(lines);
 };
