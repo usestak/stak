@@ -303,6 +303,18 @@ const runProgram = async (
     }),
     projectList: async () => [],
     projectMap: async () => ({ status: 'project-not-found' }),
+    memoryBackupPreview: async () => ({
+      provider: 'claude',
+      native: [],
+      carriedForward: [],
+      nativeFiles: 0,
+      nativeProjects: 0,
+      retainedFiles: 0,
+      retainedProjects: 0,
+      finalFiles: 0,
+      finalProjects: 0,
+      privacy: null,
+    }),
     confirm: async () => true,
     writeOut: (value) => {
       output += value;
@@ -1320,5 +1332,61 @@ describe('Stack CLI', () => {
     expect(parsed.projects).toBe(9);
     expect(parsed.files).toBe(24);
     expect(parsed.items).toHaveLength(24);
+  });
+
+  it('memory backup --dry-run previews the 9 + 18 → 27 composition without mutating', async () => {
+    const preview = {
+      provider: 'claude' as const,
+      native: [],
+      carriedForward: [],
+      nativeFiles: 9,
+      nativeProjects: 2,
+      retainedFiles: 18,
+      retainedProjects: 7,
+      finalFiles: 27,
+      finalProjects: 9,
+      privacy: 'protected' as const,
+    };
+    const result = await runProgram(['memory', 'backup', '--dry-run'], {
+      memoryBackupPreview: async () => preview,
+      // If a real backup were attempted this would throw, proving no mutation.
+      memoryCloudBackup: async () => {
+        throw new Error('dry-run must not run a real backup');
+      },
+    });
+    expect(result.output).toContain('Memory backup preview');
+    expect(result.output).toContain('27 memory files');
+    expect(result.output).toContain('18 memory files carried forward');
+    expect(result.output).toContain('No changes were made.');
+    expect(result.output).toContain('Privacy: Protected');
+  });
+
+  it('memory backup --dry-run --json emits deterministic composition counts', async () => {
+    const result = await runProgram(
+      ['memory', 'backup', '--dry-run', '--json'],
+      {
+        memoryBackupPreview: async () => ({
+          provider: 'claude',
+          native: [],
+          carriedForward: [],
+          nativeFiles: 9,
+          nativeProjects: 2,
+          retainedFiles: 18,
+          retainedProjects: 7,
+          finalFiles: 27,
+          finalProjects: 9,
+          privacy: 'protected',
+        }),
+      },
+    );
+    const parsed = JSON.parse(result.output);
+    expect(parsed).toMatchObject({
+      nativeFiles: 9,
+      retainedFiles: 18,
+      finalFiles: 27,
+      finalProjects: 9,
+      privacy: 'protected',
+      dryRun: true,
+    });
   });
 });

@@ -74,6 +74,7 @@ import {
 } from './memory/cloud-ops.js';
 import { defaultOpenBrowser } from './cloud/operations.js';
 import type { MemoryProtectCommandResult } from './commands/memory.js';
+import type { MemoryBackupPreview } from './ui/memory.js';
 import { resolveScanRoots, scanSkills } from '@stack/scanner';
 import { isPublicStackRef } from '@stack/spec';
 import type {
@@ -219,6 +220,7 @@ export type ProgramDependencies = {
   memoryBackup(): Promise<BackupResult>;
   memoryStatus(): Promise<MemoryStatus | null>;
   memoryRestore(options: { apply: boolean }): Promise<RestorePlan>;
+  memoryBackupPreview(): Promise<MemoryBackupPreview>;
   memoryCloudBackup(): Promise<MemoryBackupOutcome>;
   memoryCloudRecover(options: {
     generation?: number;
@@ -454,6 +456,17 @@ const defaultDependencies: ProgramDependencies = {
   memoryStatus: async () => readMemoryStatus(stackHome),
   memoryRestore: async ({ apply }) =>
     (await memoryAdapter()).restore({ apply }),
+  memoryBackupPreview: async () => {
+    // Non-mutating: preview composition locally, read Cloud privacy without writing.
+    const composition = await (await memoryAdapter()).previewBackup();
+    const cloud = await buildMemoryCloudDeps();
+    let privacy: 'standard' | 'protected' | null = null;
+    if (cloud.backend) {
+      const profile = await cloud.backend.getProfile();
+      privacy = profile?.privacyMode ?? 'standard';
+    }
+    return { ...composition, privacy };
+  },
   memoryCloudBackup: async () =>
     runMemoryCloudBackup(await buildMemoryCloudDeps()),
   memoryCloudRecover: async (options) =>

@@ -120,10 +120,12 @@ designed in the architecture docs but not implemented in this release.
 ## Backup and restore
 
 - `stack memory scan` — read-only discovery of portable memory. Changes nothing.
-- `stack memory backup` — copies allowlisted memory into the private store and
-  commits the manifest last. Read-only against native agent state: it never
-  modifies, reformats, deletes, or invokes Claude. A failed backup leaves the
-  previous backup valid and commits nothing.
+- `stack memory backup [--dry-run]` — copies allowlisted memory into the private
+  store and commits the manifest last. Read-only against native agent state: it
+  never modifies, reformats, deletes, or invokes Claude. A failed backup leaves
+  the previous backup valid and commits nothing. `--dry-run` previews the backup
+  composition (native + carried-forward counts, final total, privacy mode) without
+  writing anything, creating a Cloud generation, or touching the registry.
 - `stack memory status` — shows the last backup.
 - `stack memory restore [--dry-run]` — resolves, previews, and applies. It only
   writes to **absent** targets; an existing target with different content is a
@@ -134,6 +136,29 @@ designed in the architecture docs but not implemented in this release.
 Default output stays beginner-friendly (no hashes, object paths, vendor keys, or
 absolute paths). Use `--verbose` for diagnostics and `--json` for stable
 structured output.
+
+### Backup continuity for unavailable projects
+
+A backup **preserves previously recovered Memory that belongs to projects which are
+not available on this machine.** After recovering on a fresh machine, only the
+projects you can resolve here (a Git-backed project, or one you `stack project map`)
+appear in your native agent Memory; the rest stay safely in Stack's private store.
+The next `stack memory backup` **carries those unresolved files forward unchanged**
+into the new backup — it does not drop them just because they aren't checked out
+here. So a machine that natively holds 9 files but recovered 27 still backs up 27.
+
+- **Unavailable is not deleted.** Absence from the native scan (or a project that
+  isn't checked out here) is never treated as a deletion signal for unresolved
+  projects; preservation is preferred over silent loss.
+- Carried-forward Memory stays **private inside Stack** — it is not restored into
+  Claude, no directories are created, no machine bindings are made, and old paths do
+  not become authoritative. Mappings you make remain machine-local.
+- For projects that **are** available here, your current native Memory is the source
+  (a changed file's current version wins), matching the existing model.
+- Use `stack memory backup --dry-run` to see the composition (native vs
+  carried-forward vs final) before creating a new backup.
+- There is **no archive or delete** yet: intentionally removing one old project's
+  Memory is deferred to later lifecycle/deletion design.
 
 ## Cloud backup & recovery
 

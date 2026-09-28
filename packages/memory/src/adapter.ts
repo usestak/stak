@@ -7,7 +7,9 @@ import {
 } from './claude-adapter.js';
 import {
   planMemoryBackup,
+  planMemoryBackupComposition,
   runMemoryBackup,
+  type BackupComposition,
   type BackupPlan,
   type BackupResult,
 } from './backup.js';
@@ -37,6 +39,8 @@ export interface MemoryAdapter {
   detect(): Promise<MemoryDetection>;
   discover(): Promise<DiscoveredMemoryItem[]>;
   planBackup(): Promise<BackupPlan>;
+  /** Non-mutating preview of the next backup's composition (Phase 15B.3). */
+  previewBackup(): Promise<BackupComposition>;
   backup(): Promise<BackupResult>;
   planRestore(): Promise<RestorePlan>;
   restore(options: { apply: boolean }): Promise<RestorePlan>;
@@ -66,10 +70,30 @@ export const createClaudeMemoryAdapter = (
     discover: () => discoverClaudeMemory(discoveryOptions),
     planBackup: async () =>
       planMemoryBackup(await discoverClaudeMemory(discoveryOptions)),
+    previewBackup: async () =>
+      planMemoryBackupComposition({
+        stackHome: options.stackHome,
+        nativeItems: await discoverClaudeMemory(discoveryOptions),
+        registry: await readLocalRegistry(options.stackHome),
+        ...(options.claudeHome ? { claudeHome: options.claudeHome } : {}),
+        ...(options.projects ? { projects: options.projects } : {}),
+      }),
     backup: async () => {
+      const nativeItems = await discoverClaudeMemory(discoveryOptions);
+      // Phase 15B.3: compose the next backup as the native scan PLUS previously
+      // backed-up Memory whose project is unavailable on this machine, so a new
+      // generation never silently drops unresolved Memory.
+      const composition = await planMemoryBackupComposition({
+        stackHome: options.stackHome,
+        nativeItems,
+        registry: await readLocalRegistry(options.stackHome),
+        ...(options.claudeHome ? { claudeHome: options.claudeHome } : {}),
+        ...(options.projects ? { projects: options.projects } : {}),
+      });
       const result = await runMemoryBackup({
         stackHome: options.stackHome,
-        items: await discoverClaudeMemory(discoveryOptions),
+        items: nativeItems,
+        carryForward: composition.carriedForward,
         ...(options.now ? { now: options.now } : {}),
       });
       // Phase 15B: resolve/mint stable Project IDs and refresh the portable
@@ -124,6 +148,17 @@ export const unsupportedMemoryAdapter = (
   detect: async () => ({ installed: false, reason }),
   discover: async () => [],
   planBackup: async () => ({ provider: 'claude', files: 0, projects: 0 }),
+  previewBackup: async () => ({
+    provider: 'claude',
+    native: [],
+    carriedForward: [],
+    nativeFiles: 0,
+    nativeProjects: 0,
+    retainedFiles: 0,
+    retainedProjects: 0,
+    finalFiles: 0,
+    finalProjects: 0,
+  }),
   backup: async () => ({
     provider: 'claude',
     files: 0,

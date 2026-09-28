@@ -1,4 +1,5 @@
 import type {
+  BackupComposition,
   BackupResult,
   DiscoveredMemoryItem,
   MemoryStatus,
@@ -309,5 +310,51 @@ export const renderMemoryRestore = (
     );
   if (notFound.length > 0 || identityConflicts.length > 0)
     lines.push('Run `stack project` to review them.');
+  return block(lines);
+};
+
+export type MemoryBackupPreview = BackupComposition & {
+  privacy: 'standard' | 'protected' | null;
+};
+
+const privacyLabel = (privacy: MemoryBackupPreview['privacy']): string =>
+  privacy === 'protected'
+    ? 'Protected'
+    : privacy === 'standard'
+      ? 'Standard'
+      : 'local backup only (sign in to back up to Cloud)';
+
+/** Non-mutating preview of the next backup's composition (`--dry-run`). */
+export const renderMemoryBackupPreview = (
+  preview: MemoryBackupPreview,
+  options: RenderOptions = {},
+): string => {
+  const lines = [
+    'Memory backup preview',
+    '',
+    'Claude',
+    '',
+    `${projects(preview.nativeProjects)} available on this machine`,
+    `${files(preview.nativeFiles)} to capture`,
+  ];
+  if (preview.retainedFiles > 0)
+    lines.push(
+      `${projects(preview.retainedProjects)} not available on this machine`,
+      `${files(preview.retainedFiles)} carried forward unchanged`,
+    );
+  lines.push(
+    '',
+    'Next backup',
+    `${projects(preview.finalProjects)}`,
+    files(preview.finalFiles),
+    `Privacy: ${privacyLabel(preview.privacy)}`,
+  );
+  if (options.verbose) {
+    lines.push('', 'Carried forward:');
+    if (preview.carriedForward.length === 0) lines.push('  (none)');
+    for (const item of preview.carriedForward)
+      lines.push(`  retained  ${item.logicalId}`);
+  }
+  lines.push('', 'No changes were made.');
   return block(lines);
 };

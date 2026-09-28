@@ -13,12 +13,14 @@ import type {
   MemoryCloudStatus,
 } from '../memory/cloud-ops.js';
 import {
+  renderMemoryBackupPreview,
   renderMemoryCloudBackup,
   renderMemoryCloudStatus,
   renderMemoryProtect,
   renderMemoryRecover,
   renderMemoryRestore,
   renderMemoryScan,
+  type MemoryBackupPreview,
 } from '../ui/memory.js';
 
 export type MemoryProtectCommandResult =
@@ -35,6 +37,7 @@ export type MemoryCommandDependencies = {
   memoryScan(): Promise<DiscoveredMemoryItem[]>;
   memoryStatus(): Promise<MemoryStatus | null>;
   memoryRestore(options: { apply: boolean }): Promise<RestorePlan>;
+  memoryBackupPreview(): Promise<MemoryBackupPreview>;
   memoryCloudBackup(): Promise<MemoryBackupOutcome>;
   memoryCloudRecover(options: {
     generation?: number;
@@ -95,8 +98,36 @@ export const registerMemoryCommand = (
     .description(
       'Back up private memory locally and, when signed in, to Stack Cloud',
     )
+    .option(
+      '--dry-run',
+      'preview the backup composition without changing anything',
+    )
+    .option('--verbose', 'show per-item detail (with --dry-run)')
     .option('--json', 'emit structured JSON only')
     .action(async (options: Flags) => {
+      if (options.dryRun) {
+        const preview = await dependencies.memoryBackupPreview();
+        if (options.json) {
+          emitJson(dependencies, {
+            provider: preview.provider,
+            nativeFiles: preview.nativeFiles,
+            nativeProjects: preview.nativeProjects,
+            retainedFiles: preview.retainedFiles,
+            retainedProjects: preview.retainedProjects,
+            finalFiles: preview.finalFiles,
+            finalProjects: preview.finalProjects,
+            privacy: preview.privacy,
+            dryRun: true,
+          });
+          return;
+        }
+        dependencies.writeOut(
+          renderMemoryBackupPreview(preview, {
+            verbose: options.verbose === true,
+          }),
+        );
+        return;
+      }
       if (!options.json)
         dependencies.writeOut('Backing up Claude memory...\n\n');
       const outcome = await dependencies.memoryCloudBackup();

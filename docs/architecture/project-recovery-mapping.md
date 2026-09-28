@@ -492,3 +492,46 @@ manifest at list time. It is informational provenance only:
   Protected-mode privacy are unchanged.
 
 `historical recovery reference ≠ restore authority.` No Phase 15 architecture change.
+
+### 15B.3 note — unresolved Memory continuity across backups (2026-09-28)
+
+Real Phase 15B dogfood recovered the real Protected generation on a fresh machine
+(27 files / 9 projects), natively restored only the resolvable projects (9 files / 2
+projects: a Git-backed project + one explicitly mapped legacy project), and correctly
+retained the other 18 files across 7 unavailable projects in Stack's private store. The
+open risk before creating a new generation: the pre-15B.3 `stack memory backup` rebuilt
+its manifest **solely from the native scan**, so the next backup would have silently
+dropped those 18 unresolved files (their content-addressed objects survive on disk, but
+an unreferenced object is not bundled).
+
+Fix (continuity composition): the next backup is composed as the current native scan
+**plus** previously backed-up Memory whose project resolves as unavailable/unresolved on
+this machine, carried forward **unchanged**. Selection reuses the exact restore authority
+(`planMemoryRestore`): a previous item is retained only when its project classifies as
+`project-not-found` or `identity-conflict`; items whose project is available are covered
+by the fresh native scan (current versions win — the existing model; no new deletion
+semantics are introduced for available projects). Carry-forward:
+
+- operates through the logical Project model, never by old-path/folder/vendor-key
+  matching; it preserves the Project ID, bytes/hash, and portable claims, and creates
+  **no** binding and marks nothing available. A path-reused Nexus-style project stays
+  unresolved yet its Memory survives into the new bundle.
+- is **preservation only** — it never restores unavailable Memory into Claude, never
+  recreates source-machine paths, and identity-conflict Memory is retained without being
+  resolved.
+- fails **closed**: `runMemoryBackup` verifies every carried-forward object is present
+  before committing the manifest (written last, atomically), so a composition/validation
+  failure leaves the previous local backup intact and no partial Cloud generation is
+  created.
+
+The new backup still carries the portable registry snapshot (all Project IDs
+represented; machine bindings/paths never included), works under both Standard and
+Protected privacy, and upgrades an old no-registry bundle to a registry-bearing one
+without losing unresolved Memory. `stack memory backup --dry-run` previews the
+composition (native / carried-forward / final counts + privacy) without any mutation.
+`unavailable != deleted`; intentional deletion of an unavailable project's Memory is
+deferred to later lifecycle/deletion design. No Phase 15 architecture change.
+
+A non-blocking dogfood note was also recorded: the first `memory recover --passkey`
+attempt hit an expired recovery session and an immediate retry succeeded (see
+`memory-cloud-deployment.md`); passkey/session behavior was not changed here.

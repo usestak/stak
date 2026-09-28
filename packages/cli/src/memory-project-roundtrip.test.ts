@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -18,10 +18,14 @@ import {
   generateMmk,
   hashBytes,
   memoryStorePaths,
+  planMemoryBackupComposition,
+  planMemoryRestore,
   protectedCloudBackup,
   readLocalRegistry,
   readPortableSnapshot,
   registryConflicts,
+  resolveProjectForIdentity,
+  runMemoryBackup,
   standardCloudBackup,
   syncRegistryForBackup,
   writeMemoryManifest,
@@ -29,6 +33,7 @@ import {
   runMemoryRestore,
   setBinding,
   writeLocalRegistry,
+  type DiscoveredMemoryItem,
   type ManifestItem,
   type MemoryManifest,
 } from '@stack/memory';
@@ -440,4 +445,272 @@ describe('Phase 15B project-identity acceptance (Machine F → map → new backu
     const local = await readFile(paths.localProjectRegistry, 'utf8');
     expect(local).toContain('bindings');
   });
+
+  it('15B.3 continuity: unresolved Memory survives backup and a fresh recovery; dry-run is non-mutating', async () => {
+    const cloud = makeCloud();
+    const backend = cloud.backendForToken(await cloud.signIn(USER));
+    const mmk = generateMmk();
+
+    // OLD pre-registry bundle: Atlas (git, 2) + Stack (local, 2) + Nexus (local, 4)
+    // + Other (local, 2) = 10 files / 4 projects, no portable registry snapshot.
+    const stackKey = 'C--Users-OLD-Desktop-stack';
+    const bodies = new Map<string, string>();
+    const items: ManifestItem[] = [];
+    const add = (item: ManifestItem, body: string) => {
+      bodies.set(item.logicalId, body);
+      items.push(item);
+    };
+    add(gitItem('github.com/acme/atlas', 'a1.md', 'A1'), 'A1');
+    add(gitItem('github.com/acme/atlas', 'a2.md', 'A2'), 'A2');
+    add(localItemFor(stackKey, 's1.md', 'S1'), 'S1');
+    add(localItemFor(stackKey, 's2.md', 'S2'), 'S2');
+    for (let i = 1; i <= 4; i += 1)
+      add(localItemFor('C--legacy-nexus', `n${i}.md`, `N${i}`), `N${i}`);
+    add(localItemFor('C--legacy-other', 'o1.md', 'O1'), 'O1');
+    add(localItemFor('C--legacy-other', 'o2.md', 'O2'), 'O2');
+    const machineA = await writeStoreItems(items, bodies);
+    expect(await readPortableSnapshot(machineA)).toBeNull();
+    await protectedCloudBackup({ stackHome: machineA, backend, mmk });
+
+    // Machine F: recover the OLD bundle → 10 items / 4 lazily-minted projects.
+    const machineF = await tempDir('stack-F3-');
+    await cloudRecover({ stackHome: machineF, backend, mmk });
+    const regF0 = await readLocalRegistry(machineF);
+    expect(regF0.projects).toHaveLength(4);
+
+    // Map the Stack-like legacy project to a real directory on F.
+    const stackDir = await tempDir('stack-here-');
+    const stackRes = resolveProjectForIdentity(regF0, {
+      kind: 'local',
+      vendorKey: stackKey,
+    });
+    await mapProject({
+      stackHome: machineF,
+      selector: stackRes.status === 'resolved' ? stackRes.projectId : '',
+      dir: stackDir,
+      gitOrigin: async () => undefined,
+    });
+    const regF = await readLocalRegistry(machineF);
+
+    // The available projects' current native Memory (Atlas via Git, Stack via binding),
+    // under their recovered identities.
+    const atlasDir = await tempDir('atlas-F3-');
+    const nativeItems: DiscoveredMemoryItem[] = [];
+    for (const [canonicalOrKey, rel, body, kind] of [
+      ['github.com/acme/atlas', 'a1.md', 'A1', 'git'],
+      ['github.com/acme/atlas', 'a2.md', 'A2', 'git'],
+      [stackKey, 's1.md', 'S1', 'local'],
+      [stackKey, 's2.md', 'S2', 'local'],
+    ] as const)
+      nativeItems.push(await makeNative(canonicalOrKey, rel, body, kind));
+
+    // Dry-run preview must be non-mutating and idempotent.
+    const beforeStore = await readFile(
+      memoryStorePaths(machineF).currentManifest,
+    );
+    const beforeRegistry = await readFile(
+      memoryStorePaths(machineF).localProjectRegistry,
+    );
+    const preview = await planMemoryBackupComposition({
+      stackHome: machineF,
+      nativeItems,
+      registry: regF,
+      projects: [
+        { dir: atlasDir, gitRemote: 'https://github.com/acme/atlas.git' },
+      ],
+    });
+    const preview2 = await planMemoryBackupComposition({
+      stackHome: machineF,
+      nativeItems,
+      registry: regF,
+      projects: [
+        { dir: atlasDir, gitRemote: 'https://github.com/acme/atlas.git' },
+      ],
+    });
+    expect(preview.nativeFiles).toBe(4);
+    expect(preview.retainedFiles).toBe(6); // Nexus(4) + Other(2)
+    expect(preview.finalFiles).toBe(10);
+    expect(preview.finalProjects).toBe(4);
+    expect(preview2).toEqual(preview); // idempotent
+    // No store or registry file changed by previewing.
+    expect(
+      (await readFile(memoryStorePaths(machineF).currentManifest)).equals(
+        beforeStore,
+      ),
+    ).toBe(true);
+    expect(
+      (await readFile(memoryStorePaths(machineF).localProjectRegistry)).equals(
+        beforeRegistry,
+      ),
+    ).toBe(true);
+
+    // Real backup: compose, commit, and push a NEW registry-bearing generation.
+    await runMemoryBackup({
+      stackHome: machineF,
+      items: nativeItems,
+      carryForward: preview.carriedForward,
+    });
+    await syncRegistryForBackup({ stackHome: machineF });
+    const composed = await readPortableSnapshot(machineF);
+    expect(composed?.projects).toHaveLength(4); // all 4 project IDs represented
+    const newBackup = await protectedCloudBackup({
+      stackHome: machineF,
+      backend,
+      mmk,
+    });
+
+    // Protected: ciphertext exposes no registry/Memory plaintext.
+    const payload = await backend.getPayload(newBackup.backupId);
+    const payloadText = Buffer.from(payload).toString('utf8');
+    expect(payloadText).not.toContain('snapshotVersion');
+    expect(payloadText).not.toContain('N1'); // Nexus memory body
+    expect(payloadText).not.toContain(stackKey);
+
+    // Machine G: fresh recovery receives ALL 10 items (unresolved Memory survived).
+    const machineG = await tempDir('stack-G3-');
+    await cloudRecover({ stackHome: machineG, backend, mmk });
+    const manifestG = memoryStorePaths(machineG).currentManifest;
+    const parsedG = JSON.parse(await readFile(manifestG, 'utf8')) as {
+      items: ManifestItem[];
+    };
+    expect(parsedG.items).toHaveLength(10);
+    const regG = await readLocalRegistry(machineG);
+    expect(regG.projects.map((r) => r.projectId).sort()).toEqual(
+      (composed?.projects ?? []).map((r) => r.projectId).sort(),
+    );
+    expect(regG.bindings).toEqual([]); // no Machine F filesystem bindings
+
+    // Resolution on G: Atlas auto-resolves by Git; the rest stay unavailable.
+    const atlasDirG = await tempDir('atlas-G3-');
+    const planG = await planMemoryRestore({
+      stackHome: machineG,
+      claudeHome: await tempDir('claude-G3-'),
+      registry: regG,
+      projects: [
+        { dir: atlasDirG, gitRemote: 'https://github.com/acme/atlas.git' },
+      ],
+    });
+    const statusByRel = new Map(
+      planG.items.map((i) => [i.logicalId.split('/').pop(), i.status]),
+    );
+    expect(statusByRel.get('a1.md')).toBe('restorable'); // Git resolves
+    expect(statusByRel.get('s1.md')).toBe('project-not-found'); // mapped-only, unbound on G
+    expect(statusByRel.get('n1.md')).toBe('project-not-found'); // Nexus unresolved
+    expect(statusByRel.get('o1.md')).toBe('project-not-found');
+  });
+
+  it('15B.3 continuity holds under Standard privacy too', async () => {
+    const cloud = makeCloud();
+    const backend = cloud.backendForToken(await cloud.signIn(USER));
+
+    const bodies = new Map<string, string>();
+    const items: ManifestItem[] = [];
+    const add = (item: ManifestItem, body: string) => {
+      bodies.set(item.logicalId, body);
+      items.push(item);
+    };
+    add(gitItem('github.com/acme/atlas', 'a.md', 'A'), 'A');
+    add(localItemFor('C--legacy-nexus', 'n1.md', 'N1'), 'N1');
+    add(localItemFor('C--legacy-nexus', 'n2.md', 'N2'), 'N2');
+    const machineA = await writeStoreItems(items, bodies);
+    await standardCloudBackup({ stackHome: machineA, backend });
+
+    const machineF = await tempDir('stack-Fs-');
+    await cloudRecover({ stackHome: machineF, backend });
+    const regF = await readLocalRegistry(machineF);
+    // Native scan finds only Atlas; Nexus is unresolved and must be carried forward.
+    const native = [
+      await makeNative('github.com/acme/atlas', 'a.md', 'A', 'git'),
+    ];
+    const preview = await planMemoryBackupComposition({
+      stackHome: machineF,
+      nativeItems: native,
+      registry: regF,
+      projects: [
+        {
+          dir: await tempDir('atlas-Fs-'),
+          gitRemote: 'https://github.com/acme/atlas.git',
+        },
+      ],
+    });
+    expect(preview.retainedFiles).toBe(2); // Nexus
+    await runMemoryBackup({
+      stackHome: machineF,
+      items: native,
+      carryForward: preview.carriedForward,
+    });
+    await syncRegistryForBackup({ stackHome: machineF });
+    await standardCloudBackup({ stackHome: machineF, backend });
+
+    const machineG = await tempDir('stack-Gs-');
+    await cloudRecover({ stackHome: machineG, backend });
+    const parsedG = JSON.parse(
+      await readFile(memoryStorePaths(machineG).currentManifest, 'utf8'),
+    ) as { items: ManifestItem[] };
+    expect(parsedG.items).toHaveLength(3); // Atlas + Nexus(2) survived
+  });
 });
+
+/** Write a store from explicit manifest items + bodies (objects included). */
+const writeStoreItems = async (
+  items: ManifestItem[],
+  bodies: Map<string, string>,
+): Promise<string> => {
+  const stackHome = await mkdtemp(path.join(tmpdir(), 'stack-Aitems-'));
+  roots.push(stackHome);
+  for (const item of items) {
+    const body = bodies.get(item.logicalId) as string;
+    await writeMemoryObject({
+      stackHome,
+      contentHash: item.contentHash,
+      bytes: Buffer.from(body, 'utf8'),
+    });
+  }
+  await writeMemoryManifest({
+    stackHome,
+    manifest: {
+      schemaVersion: 1,
+      provider: 'claude',
+      createdAt: '2026-09-28T00:00:00.000Z',
+      items,
+    },
+  });
+  return stackHome;
+};
+
+/** A native (freshly discovered) item backed by a real temp file. */
+const makeNative = async (
+  canonicalOrKey: string,
+  rel: string,
+  body: string,
+  kind: 'git' | 'local',
+): Promise<DiscoveredMemoryItem> => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'native3-'));
+  roots.push(dir);
+  const file = path.join(dir, rel);
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, body, 'utf8');
+  const project: ManifestItem['project'] =
+    kind === 'git'
+      ? {
+          kind: 'git',
+          canonical: canonicalOrKey,
+          host: canonicalOrKey.split('/')[0] as string,
+          owner: canonicalOrKey.split('/')[1] as string,
+          repo: canonicalOrKey.split('/')[2] as string,
+        }
+      : { kind: 'local', vendorKey: canonicalOrKey };
+  const key = kind === 'git' ? canonicalOrKey : `local:${canonicalOrKey}`;
+  return {
+    provider: 'claude',
+    kind: 'auto-memory',
+    scope: 'project',
+    logicalId: `claude/auto-memory/${key}/${rel}`,
+    project,
+    contentHash: hashBytes(Buffer.from(body, 'utf8')),
+    restoreTarget: { base: 'claude-project-memory', relativePath: rel },
+    source: { path: file },
+    capturedAt: '2026-09-28T00:00:00.000Z',
+    sensitivity: 'private',
+  };
+};
