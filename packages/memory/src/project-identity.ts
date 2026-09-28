@@ -87,15 +87,75 @@ export const projectIdentityKey = (identity: ProjectIdentity): string =>
     : `local:${identity.vendorKey ?? 'unresolved'}`;
 
 /**
- * Best-effort reconstruction of the absolute project directory a Claude auto-memory
- * vendor key was derived from (the inverse of `encodeClaudeProjectKey`, which is lossy
- * because `:`, `\`, and `/` all become `-`). Resolution is filesystem-validated: it
- * walks real directories, trying the longest name join first so path components that
- * themselves contain hyphens (e.g. `atlas-access-flow`) reconstruct correctly. Returns
- * the resolved directory, or null when it cannot be recovered.
+ * Enumerate EVERY existing absolute directory that a Claude auto-memory vendor key
+ * could decode to. `encodeClaudeProjectKey` is lossy (`:`, `\`, `/` all become `-`),
+ * so a key such as `...-foo-bar-baz` may correspond to `foo-bar\baz`, `foo\bar-baz`,
+ * etc. This walks the real filesystem and returns all distinct paths that fully
+ * decode to existing directory chains — the raw material for a SAFE, unique-only
+ * resolution (see `reconstructProjectDir`). On probe-limit overflow it returns `[]`
+ * (fail closed) rather than a partial/biased set.
+ */
+export const reconstructProjectDirs = async (options: {
+  vendorKey: string;
+  isDirectory: (candidate: string) => Promise<boolean>;
+  platform?: NodeJS.Platform;
+  maxProbes?: number;
+}): Promise<string[]> => {
+  const platform = options.platform ?? process.platform;
+  const p = platform === 'win32' ? path.win32 : path.posix;
+  let root: string;
+  let rest: string;
+  if (platform === 'win32') {
+    const match = /^([A-Za-z])--(.*)$/.exec(options.vendorKey);
+    if (!match) return [];
+    root = `${match[1]}:\\`;
+    rest = match[2] ?? '';
+  } else {
+    if (!options.vendorKey.startsWith('-')) return [];
+    root = '/';
+    rest = options.vendorKey.slice(1);
+  }
+  const tokens = rest.length > 0 ? rest.split('-') : [];
+  if (tokens.length === 0)
+    return (await options.isDirectory(root)) ? [root] : [];
+
+  const results = new Set<string>();
+  let probes = 0;
+  let overflow = false;
+  const limit = options.maxProbes ?? 4000;
+  // Enumerate ALL complete decodings (no ordering preference — order must never
+  // decide identity). Every split point is explored so ambiguity is detectable.
+  const walk = async (base: string, index: number): Promise<void> => {
+    if (overflow) return;
+    if (index >= tokens.length) {
+      results.add(base);
+      return;
+    }
+    for (let end = index; end < tokens.length; end += 1) {
+      if (probes >= limit) {
+        overflow = true;
+        return;
+      }
+      probes += 1;
+      const name = tokens.slice(index, end + 1).join('-');
+      const candidate = p.join(base, name);
+      if (await options.isDirectory(candidate)) await walk(candidate, end + 1);
+    }
+  };
+  await walk(root, 0);
+  return overflow ? [] : [...results];
+};
+
+/**
+ * Resolve a vendor key to its project directory ONLY when the decoding is
+ * unambiguous — exactly one existing directory chain matches. Because
+ * `encodeClaudeProjectKey` is lossy, multiple real directories can match one key; in
+ * that case this returns `null` (fail closed) so an ambiguous inverse can never
+ * silently authorize a strong project identity. Callers must not pick a winner by
+ * length, order, or name preference.
  *
- * This lets Git identity be resolved from the project's own checkout independent of the
- * current working directory, so `scan` and `backup` agree (Phase 15B.4).
+ * Used to resolve a native project's Git identity from its own checkout independent of
+ * the current working directory, so `scan` and `backup` agree (Phase 15B.4).
  */
 export const reconstructProjectDir = async (options: {
   vendorKey: string;
@@ -103,42 +163,8 @@ export const reconstructProjectDir = async (options: {
   platform?: NodeJS.Platform;
   maxProbes?: number;
 }): Promise<string | null> => {
-  const platform = options.platform ?? process.platform;
-  const p = platform === 'win32' ? path.win32 : path.posix;
-  let root: string;
-  let rest: string;
-  if (platform === 'win32') {
-    const match = /^([A-Za-z])--(.*)$/.exec(options.vendorKey);
-    if (!match) return null;
-    root = `${match[1]}:\\`;
-    rest = match[2] ?? '';
-  } else {
-    if (!options.vendorKey.startsWith('-')) return null;
-    root = '/';
-    rest = options.vendorKey.slice(1);
-  }
-  const tokens = rest.length > 0 ? rest.split('-') : [];
-  if (tokens.length === 0)
-    return (await options.isDirectory(root)) ? root : null;
-
-  let probes = 0;
-  const limit = options.maxProbes ?? 4000;
-  const walk = async (base: string, index: number): Promise<string | null> => {
-    if (index >= tokens.length) return base;
-    // Longest name join first so hyphenated directory names win over prefixes.
-    for (let end = tokens.length - 1; end >= index; end -= 1) {
-      if (probes >= limit) return null;
-      probes += 1;
-      const name = tokens.slice(index, end + 1).join('-');
-      const candidate = p.join(base, name);
-      if (await options.isDirectory(candidate)) {
-        const resolved = await walk(candidate, end + 1);
-        if (resolved) return resolved;
-      }
-    }
-    return null;
-  };
-  return walk(root, 0);
+  const dirs = await reconstructProjectDirs(options);
+  return dirs.length === 1 ? (dirs[0] as string) : null;
 };
 
 /** Whether two identities refer to the same project. */

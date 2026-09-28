@@ -4,14 +4,16 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createClaudeMemoryAdapter } from './adapter.js';
+import { createClaudeMemoryAdapter, readMemoryStatus } from './adapter.js';
 import { planMemoryBackupComposition } from './backup.js';
 import { discoverClaudeMemory } from './claude-adapter.js';
 import { readLocalRegistry } from './project/registry-store.js';
+import { memoryStorePaths } from './store.js';
 import type { ManifestItem, MemoryManifest } from './domain.js';
 import {
   encodeClaudeProjectKey,
   reconstructProjectDir,
+  reconstructProjectDirs,
 } from './project-identity.js';
 import { syncRegistryForBackup } from './project/registry-store.js';
 import { hashBytes, writeMemoryManifest, writeMemoryObject } from './store.js';
@@ -63,6 +65,143 @@ describe('reconstructProjectDir', () => {
       platform: process.platform,
     });
     expect(resolved).toBeNull();
+  });
+});
+
+describe('reconstructProjectDir ambiguity (15B.4 closure)', () => {
+  // Deterministic, cross-platform: a synthetic win32 filesystem given as an exact set
+  // of existing directories, so ordering/host FS never influences the result.
+  const win = path.win32;
+  const fakeDirs = (existing: string[]) => {
+    const set = new Set(existing);
+    return async (candidate: string) => set.has(candidate);
+  };
+
+  it('1. resolves one unambiguous hyphenated project path', async () => {
+    const isDir = fakeDirs([
+      win.join('C:\\', 'repos'),
+      win.join('C:\\', 'repos', 'atlas-access-flow'),
+    ]);
+    const resolved = await reconstructProjectDir({
+      vendorKey: 'C--repos-atlas-access-flow',
+      isDirectory: isDir,
+      platform: 'win32',
+    });
+    expect(resolved).toBe(win.join('C:\\', 'repos', 'atlas-access-flow'));
+  });
+
+  it('2. resolves nested hyphenated directories unambiguously', async () => {
+    const isDir = fakeDirs([
+      win.join('C:\\', 'my-repos'),
+      win.join('C:\\', 'my-repos', 'atlas-access-flow'),
+    ]);
+    const resolved = await reconstructProjectDir({
+      vendorKey: 'C--my-repos-atlas-access-flow',
+      isDirectory: isDir,
+      platform: 'win32',
+    });
+    expect(resolved).toBe(win.join('C:\\', 'my-repos', 'atlas-access-flow'));
+  });
+
+  it('3. picks no arbitrary winner when two reconstructions both exist', async () => {
+    // Key "C--a-b-c" decodes to BOTH C:\a-b\c and C:\a\b-c.
+    const isDir = fakeDirs([
+      win.join('C:\\', 'a-b'),
+      win.join('C:\\', 'a-b', 'c'),
+      win.join('C:\\', 'a'),
+      win.join('C:\\', 'a', 'b-c'),
+    ]);
+    const all = await reconstructProjectDirs({
+      vendorKey: 'C--a-b-c',
+      isDirectory: isDir,
+      platform: 'win32',
+    });
+    expect(all.sort()).toEqual(
+      [win.join('C:\\', 'a-b', 'c'), win.join('C:\\', 'a', 'b-c')].sort(),
+    );
+    // Fail closed: no single winner is chosen.
+    expect(
+      await reconstructProjectDir({
+        vendorKey: 'C--a-b-c',
+        isDirectory: isDir,
+        platform: 'win32',
+      }),
+    ).toBeNull();
+  });
+
+  it('4/5. ambiguous decodings never authorize a Git identity (probe is not consulted)', async () => {
+    // Two real, simultaneously existing decodings of one vendor key. Discovery must
+    // fall back to a local identity and must NOT call the Git probe.
+    const claudeHome = await tempDir('claude-');
+    const base = await tempDir('base-');
+    // base/a-b/c  and  base/a/b-c both exist → both encode to the same vendor key.
+    const decodeA = path.join(base, 'a-b', 'c');
+    const decodeB = path.join(base, 'a', 'b-c');
+    await mkdir(decodeA, { recursive: true });
+    await mkdir(decodeB, { recursive: true });
+    expect(encodeClaudeProjectKey(decodeA)).toBe(
+      encodeClaudeProjectKey(decodeB),
+    );
+    const vendorKey = encodeClaudeProjectKey(decodeA);
+    const memoryDir = path.join(claudeHome, 'projects', vendorKey, 'memory');
+    await mkdir(memoryDir, { recursive: true });
+    await writeFile(path.join(memoryDir, 'm.md'), 'm\n', 'utf8');
+
+    let probed = false;
+    const items = await discoverClaudeMemory({
+      claudeHome,
+      gitRemoteOf: async () => {
+        probed = true;
+        return 'https://github.com/example/whatever.git';
+      },
+      isDirectory,
+      platform: process.platform,
+    });
+    expect(items[0]?.project?.kind).toBe('local'); // conservative fallback
+    expect(probed).toBe(false); // ambiguity resolved before any Git probe
+  });
+
+  it('6. non-existent path yields no reconstruction', async () => {
+    const none = fakeDirs([]);
+    expect(
+      await reconstructProjectDirs({
+        vendorKey: 'C--no-such-place',
+        isDirectory: none,
+        platform: 'win32',
+      }),
+    ).toEqual([]);
+  });
+
+  it('7. resolves an ordinary Windows drive path', async () => {
+    const isDir = fakeDirs([
+      win.join('C:\\', 'Users'),
+      win.join('C:\\', 'Users', 'NT'),
+      win.join('C:\\', 'Users', 'NT', 'project'),
+    ]);
+    expect(
+      await reconstructProjectDir({
+        vendorKey: 'C--Users-NT-project',
+        isDirectory: isDir,
+        platform: 'win32',
+      }),
+    ).toBe(win.join('C:\\', 'Users', 'NT', 'project'));
+  });
+
+  it('8. matching is delegated to isDirectory (no case folding of its own)', async () => {
+    // The reconstructor never case-folds; case behavior is whatever the injected
+    // predicate (the real filesystem) does. A case-sensitive predicate that only
+    // knows the lowercase path does not match a differently-cased key.
+    const isDir = fakeDirs([
+      win.join('C:\\', 'repos'),
+      win.join('C:\\', 'repos', 'atlas'),
+    ]);
+    expect(
+      await reconstructProjectDir({
+        vendorKey: 'C--Repos-Atlas',
+        isDirectory: isDir,
+        platform: 'win32',
+      }),
+    ).toBeNull();
   });
 });
 
@@ -281,6 +420,81 @@ describe('Git identity continuity across restored native memory (15B.4)', () => 
       r.claims.some((c) => c.type === 'git'),
     );
     expect(gitProjects).toHaveLength(1);
+  });
+
+  it('read-only handlers (scan, backup preview, restore dry-run, status) never mutate registry files', async () => {
+    const { claudeHome, gitRemoteOf } = await seedNativeClaude();
+    const stackHome = await tempDir('stack-');
+    // A prior backup exists so the registry + snapshot files are present.
+    const bytes = Buffer.from('# atlas 1\n', 'utf8');
+    await writeMemoryObject({
+      stackHome,
+      contentHash: hashBytes(bytes),
+      bytes,
+    });
+    await writeMemoryManifest({
+      stackHome,
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-09-28T00:00:00.000Z',
+        items: [
+          {
+            provider: 'claude',
+            kind: 'auto-memory',
+            scope: 'project',
+            logicalId: 'claude/auto-memory/github.com/example/atlas/a1.md',
+            project: {
+              kind: 'git',
+              canonical: 'github.com/example/atlas',
+              host: 'github.com',
+              owner: 'example',
+              repo: 'atlas',
+            },
+            contentHash: hashBytes(bytes),
+            restoreTarget: {
+              base: 'claude-project-memory',
+              relativePath: 'a1.md',
+            },
+            capturedAt: '2026-09-28T00:00:00.000Z',
+            sensitivity: 'private',
+          },
+        ],
+      },
+    });
+    await syncRegistryForBackup({ stackHome });
+
+    const adapter = createClaudeMemoryAdapter({
+      stackHome,
+      claudeHome,
+      gitRemoteOf,
+      isDirectory,
+      platform: process.platform,
+    });
+    const paths = memoryStorePaths(stackHome);
+    const capture = async () => ({
+      local: await (
+        await import('node:fs/promises')
+      ).readFile(paths.localProjectRegistry),
+      snapshot: await (
+        await import('node:fs/promises')
+      ).readFile(paths.projectRegistrySnapshot),
+      manifest: await (
+        await import('node:fs/promises')
+      ).readFile(paths.currentManifest),
+    });
+    const before = await capture();
+    for (let i = 0; i < 2; i += 1) {
+      await adapter.discover(); // memory scan
+      await adapter.previewBackup(); // memory backup --dry-run
+      await adapter.planRestore(); // memory restore --dry-run
+      await adapter.restore({ apply: false }); // dry-run apply=false
+      await readMemoryStatus(stackHome); // memory status
+    }
+    const after = await capture();
+    expect(after.local.equals(before.local)).toBe(true);
+    expect(after.snapshot.equals(before.snapshot)).toBe(true);
+    expect(after.manifest.equals(before.manifest)).toBe(true);
   });
 
   it('falls back to a local identity when the checkout has no Git remote (mapping/legacy unaffected)', async () => {

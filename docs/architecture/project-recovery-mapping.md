@@ -575,3 +575,37 @@ Environment note (not a code change): during diagnostics `git -C <repo>` reporte
 ownership because the fenced dogfood HOME lacked the user's normal Git `safe.directory`
 context. This is separate from the identity bug; no Git global configuration or
 `safe.directory` change was made in this patch.
+
+### 15B.4 closure — ambiguity hardening + corrected forensics (2026-09-28)
+
+Two closure items from review of commit `153a6cc`:
+
+**Vendor-key reconstruction is fail-closed on ambiguity.** `encodeClaudeProjectKey` is
+lossy (`:`, `\`, `/` all become `-`), so a key can decode to more than one real
+directory (e.g. `…-a-b-c` → `a-b\c` or `a\b-c`). `reconstructProjectDirs` now enumerates
+**every** existing directory chain a key decodes to (no ordering/length/name preference,
+probe-capped and fail-closed to `[]` on overflow), and `reconstructProjectDir` returns a
+path **only when exactly one** exists — otherwise `null`. Discovery therefore probes a
+checkout's Git remote only for an unambiguous reconstruction; any ambiguity falls back to
+the conservative local identity and the Git probe is not even consulted. A lossy inverse
+can never authorize a strong project identity (even when multiple candidates would share a
+Git remote — the conservative policy is preferred). Private Memory is never bound or
+restored to a different project via an ambiguous inverse.
+
+**Forensic correction.** The prior report attributed the contaminated Machine F registry to
+"a real `stack memory backup`." That is **retracted** — the exact live writer cannot be
+proven from the recorded evidence. Tracing every production writer of `projects-local.json`
+and `project-registry.json` shows only three: `cloudRecover` (recover), `adapter.backup()`
+(a real backup's local step), and `mapProject` (`stack project map`). None of the commands
+in the actual dogfood sequence (`stack project`, `memory scan`, `memory restore`
+[+`--dry-run`], `memory backup --dry-run` [+`--verbose`/`--json`], `memory backup --help`,
+`memory status`) writes either file — verified in code and locked by handler-level purity
+tests. A real `stack memory backup` was not run and Cloud stayed at generation 3. The
+`stack project` = 10 vs `memory status` = 9 divergence is expected and not proof of a
+writer: `stack project` counts registry records (`registry.projects.length`), while
+`memory status` counts distinct project-identity keys in the current manifest. A registry
+can hold a record the current manifest no longer references (a stale Atlas record left from
+an earlier resolution), so the two sources legitimately differ. The precise write sequence
+that produced the extra record is not recoverable from the available evidence; the 15B.4
+fix is prevention (cwd-independent, ambiguity-safe resolution), not repair. Machine F will
+be discarded and recreated as F2 from generation 3.
