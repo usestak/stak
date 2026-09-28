@@ -16,6 +16,7 @@ import {
   canonicalGitIdentity,
   bindingFor,
   gitClaimOf,
+  projectIdentityKey,
   readLocalRegistry,
   recordFor,
   resolveProjectForIdentity,
@@ -30,6 +31,16 @@ import {
 export type ProjectIdentityView =
   { kind: 'git'; canonical: string } | { kind: 'local' };
 
+/**
+ * Informational-only provenance for a recovered legacy project, correlated LOCALLY
+ * from the recovered private Memory manifest so a human can tell two "local project"
+ * rows apart. It is NOT identity authority: it never authorizes a restore, never
+ * enters the portable registry/bundle/public artifacts, and a live directory at this
+ * historical reference is still not auto-resolved (path reuse stays unsafe). It is
+ * `null` for Git-backed projects and when no legacy reference is available.
+ */
+export type RecoveryReference = { kind: 'legacy-local'; value: string };
+
 export type ProjectListRow = {
   projectId: string;
   identity: ProjectIdentityView;
@@ -37,6 +48,7 @@ export type ProjectListRow = {
   files: number;
   availability: 'present' | 'unavailable';
   conflict: boolean;
+  recoveryReference: RecoveryReference | null;
 };
 
 const identityView = (record: PortableProjectRecord): ProjectIdentityView => {
@@ -56,12 +68,21 @@ const candidateGitCanonicals = (
   return set;
 };
 
-/** Count manifest files attributable to each logical project. */
-const filesByProject = async (
+/**
+ * Correlate each logical project with LOCAL manifest facts: its file count and, for
+ * legacy projects, the historical recovery reference (`local:<vendorKey>`) read from
+ * the locally recovered Memory manifest. The reference is computed at list time and
+ * never persisted; it is informational provenance, not identity authority.
+ */
+const manifestFacts = async (
   stackHome: string,
   registry: LocalRegistry,
-): Promise<Map<string, number>> => {
+): Promise<{
+  counts: Map<string, number>;
+  references: Map<string, string>;
+}> => {
   const counts = new Map<string, number>();
+  const references = new Map<string, string>();
   const manifest = await readMemoryManifest(stackHome);
   for (const item of manifest?.items ?? []) {
     if (item.scope !== 'project' || !item.project) continue;
@@ -71,8 +92,12 @@ const filesByProject = async (
       resolution.projectId,
       (counts.get(resolution.projectId) ?? 0) + 1,
     );
+    // Only legacy (local) identities carry a distinguishing recovery reference;
+    // Git-backed projects already show their canonical remote as identity.
+    if (item.project.kind === 'local' && !references.has(resolution.projectId))
+      references.set(resolution.projectId, projectIdentityKey(item.project));
   }
-  return counts;
+  return { counts, references };
 };
 
 export const listProjects = async (deps: {
@@ -80,7 +105,7 @@ export const listProjects = async (deps: {
   projects?: ClaudeProjectInput[];
 }): Promise<ProjectListRow[]> => {
   const registry = await readLocalRegistry(deps.stackHome);
-  const counts = await filesByProject(deps.stackHome, registry);
+  const { counts, references } = await manifestFacts(deps.stackHome, registry);
   const candidateGit = candidateGitCanonicals(deps.projects ?? []);
   const conflicted = new Set(
     registryConflicts(registry).flatMap((conflict) => conflict.projectIds),
@@ -91,6 +116,8 @@ export const listProjects = async (deps: {
       const binding = bindingFor(registry, record.projectId);
       const gitAutoMatch =
         view.kind === 'git' && candidateGit.has(view.canonical.toLowerCase());
+      const reference =
+        view.kind === 'local' ? references.get(record.projectId) : undefined;
       return {
         projectId: record.projectId,
         identity: view,
@@ -99,6 +126,9 @@ export const listProjects = async (deps: {
         availability: (binding || gitAutoMatch ? 'present' : 'unavailable') as
           'present' | 'unavailable',
         conflict: conflicted.has(record.projectId),
+        recoveryReference: reference
+          ? ({ kind: 'legacy-local', value: reference } as const)
+          : null,
       };
     })
     .sort((a, b) => (a.projectId < b.projectId ? -1 : 1));

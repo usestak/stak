@@ -277,3 +277,11 @@ identity failure. Stack correctly wrote nothing for all of them. Phase 15A separ
 dimensions; see [`project-identity.md`](./project-identity.md),
 [`project-lifecycle.md`](./project-lifecycle.md), and
 [`project-recovery-mapping.md`](./project-recovery-mapping.md).
+
+### Dogfood observation (2026-09-28, Phase 15B)
+
+During the Phase 15B legacy-identification dogfood, the first
+`stack memory recover --passkey` attempt reported an expired recovery session; an
+immediate retry succeeded and no partial or corrupt recovery state was observed. Recorded
+as an observation only — passkey/session behavior was not investigated or changed in
+Phase 15B (it did not block recovery).

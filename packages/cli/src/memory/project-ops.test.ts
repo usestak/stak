@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -6,11 +6,17 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ManifestItem, MemoryManifest } from '@stack/memory';
 import {
+  encodeClaudeProjectKey,
+  hashBytes,
   readLocalRegistry,
+  readPortableSnapshot,
+  runMemoryRestore,
   syncRegistryForBackup,
   writeMemoryManifest,
+  writeMemoryObject,
 } from '@stack/memory';
 
+import { renderProjectList } from '../commands/project.js';
 import { listProjects, mapProject } from './project-ops.js';
 
 const roots: string[] = [];
@@ -41,6 +47,13 @@ const gitItem = (canonical: string, rel: string): ManifestItem => ({
   restoreTarget: { base: 'claude-project-memory', relativePath: rel },
   capturedAt: '2026-09-27T00:00:00.000Z',
   sensitivity: 'private',
+});
+const gitProject = (canonical: string) => ({
+  kind: 'git' as const,
+  canonical,
+  host: canonical.split('/')[0] as string,
+  owner: canonical.split('/')[1] as string,
+  repo: canonical.split('/')[2] as string,
 });
 const localItem = (vendorKey: string, rel: string): ManifestItem => ({
   provider: 'claude',
@@ -163,5 +176,250 @@ describe('stack project ops', () => {
         })
       ).status,
     ).toBe('not-a-directory');
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* 15B.2 — legacy project identification UX                                     */
+/* -------------------------------------------------------------------------- */
+
+const seedWithObjects = async (
+  specs: Array<{ project: ManifestItem['project']; rel: string; body: string }>,
+): Promise<string> => {
+  const stackHome = await tempDir('stack-pops2-');
+  const items: ManifestItem[] = [];
+  for (const { project, rel, body } of specs) {
+    const bytes = Buffer.from(body, 'utf8');
+    const contentHash = hashBytes(bytes);
+    await writeMemoryObject({ stackHome, contentHash, bytes });
+    const key =
+      project?.kind === 'git'
+        ? project.canonical
+        : `local:${project?.kind === 'local' ? project.vendorKey : ''}`;
+    items.push({
+      provider: 'claude',
+      kind: 'auto-memory',
+      scope: 'project',
+      logicalId: `claude/auto-memory/${key}/${rel}`,
+      ...(project ? { project } : {}),
+      contentHash,
+      restoreTarget: { base: 'claude-project-memory', relativePath: rel },
+      capturedAt: '2026-09-28T00:00:00.000Z',
+      sensitivity: 'private',
+    });
+  }
+  const manifest: MemoryManifest = {
+    schemaVersion: 1,
+    provider: 'claude',
+    createdAt: '2026-09-28T00:00:00.000Z',
+    items,
+  };
+  await writeMemoryManifest({ stackHome, manifest });
+  let counter = 0;
+  await syncRegistryForBackup({
+    stackHome,
+    mint: () => `prj_${(counter++).toString(36).padStart(26, '0')}`,
+  });
+  return stackHome;
+};
+
+const autoMemoryPath = (claudeHome: string, dir: string, rel: string) =>
+  path.join(
+    claudeHome,
+    'projects',
+    encodeClaudeProjectKey(path.resolve(dir)),
+    'memory',
+    rel,
+  );
+
+describe('legacy project identification (15B.2)', () => {
+  it('shows a legacy project’s historical recovery reference in list output and JSON', async () => {
+    const stackHome = await seedRegistry([
+      localItem('C--Users-NT-Desktop-stack', 's.md'),
+    ]);
+    const rows = await listProjects({ stackHome });
+    expect(rows[0]?.recoveryReference).toEqual({
+      kind: 'legacy-local',
+      value: 'local:C--Users-NT-Desktop-stack',
+    });
+    // Human output surfaces it as informational provenance.
+    expect(renderProjectList(rows)).toContain(
+      'recovered from: local:C--Users-NT-Desktop-stack',
+    );
+  });
+
+  it('keeps two same-file-count legacy projects distinguishable by their references', async () => {
+    const stackHome = await seedRegistry([
+      localItem('C--Users-NT-Desktop-stack', 'a.md'),
+      localItem('C--Users-NT-Desktop-stack', 'b.md'),
+      localItem('C--Users-NT-Desktop-widget', 'a.md'),
+      localItem('C--Users-NT-Desktop-widget', 'b.md'),
+    ]);
+    const rows = await listProjects({ stackHome });
+    const locals = rows.filter((r) => r.identity.kind === 'local');
+    expect(locals).toHaveLength(2);
+    // Same file count, yet the references tell them apart.
+    expect(new Set(locals.map((r) => r.files))).toEqual(new Set([2]));
+    expect(new Set(locals.map((r) => r.recoveryReference?.value)).size).toBe(2);
+  });
+
+  it('a Git-backed project has no recovery reference', async () => {
+    const stackHome = await seedRegistry([
+      gitItem('github.com/acme/atlas', 'a.md'),
+    ]);
+    const rows = await listProjects({ stackHome });
+    expect(rows[0]?.identity.kind).toBe('git');
+    expect(rows[0]?.recoveryReference).toBeNull();
+  });
+
+  it('the recovery reference is never written to the portable registry snapshot', async () => {
+    const stackHome = await seedRegistry([
+      localItem('C--Users-NT-Desktop-stack', 's.md'),
+    ]);
+    // Listing computes the reference locally; it must not have been persisted.
+    await listProjects({ stackHome });
+    const snapshot = JSON.stringify(await readPortableSnapshot(stackHome));
+    expect(snapshot).not.toContain('C--Users-NT-Desktop-stack');
+    expect(snapshot).not.toContain('recoveryReference');
+    expect(snapshot).not.toContain('recovered from');
+  });
+
+  it('showing the reference does not change restore resolution; path reuse stays non-authoritative', async () => {
+    // The legacy project's historical reference IS shown, and a live directory sits at
+    // the exact historical path — restore must still refuse without an explicit map.
+    const historicalDir = await tempDir('shown-history-');
+    const vendorKey = encodeClaudeProjectKey(path.resolve(historicalDir));
+    const stackHome = await seedWithObjects([
+      {
+        project: { kind: 'local', vendorKey },
+        rel: 'h.md',
+        body: 'legacy body',
+      },
+    ]);
+    const rows = await listProjects({
+      stackHome,
+      projects: [{ dir: historicalDir }],
+    });
+    expect(rows[0]?.recoveryReference?.value).toBe(`local:${vendorKey}`);
+
+    const claudeHome = await tempDir('claude-');
+    const registry = await readLocalRegistry(stackHome);
+    const plan = await runMemoryRestore({
+      stackHome,
+      claudeHome,
+      apply: true,
+      registry,
+      projects: [{ dir: historicalDir }], // live dir at the shown historical path
+    });
+    expect(plan.items[0]?.status).toBe('project-not-found');
+    await expect(
+      readFile(autoMemoryPath(claudeHome, historicalDir, 'h.md'), 'utf8'),
+    ).rejects.toThrow();
+  });
+
+  it('dogfood fixture: distinguishable legacy projects; only the explicitly mapped one restores', async () => {
+    const stackDir = await tempDir('stack-proj-');
+    const otherDir = await tempDir('other-proj-');
+    const stackKey = encodeClaudeProjectKey(path.resolve(stackDir));
+    const otherKey = encodeClaudeProjectKey(path.resolve(otherDir));
+    const stackHome = await seedWithObjects([
+      {
+        project: gitProject('github.com/acme/atlas'),
+        rel: 'a.md',
+        body: 'atlas1',
+      },
+      {
+        project: gitProject('github.com/acme/atlas'),
+        rel: 'b.md',
+        body: 'atlas2',
+      },
+      {
+        project: { kind: 'local', vendorKey: stackKey },
+        rel: 's1.md',
+        body: 's1',
+      },
+      {
+        project: { kind: 'local', vendorKey: stackKey },
+        rel: 's2.md',
+        body: 's2',
+      },
+      {
+        project: { kind: 'local', vendorKey: otherKey },
+        rel: 'o1.md',
+        body: 'o1',
+      },
+      {
+        project: { kind: 'local', vendorKey: otherKey },
+        rel: 'o2.md',
+        body: 'o2',
+      },
+      {
+        project: { kind: 'local', vendorKey: 'C--legacy-nexus' },
+        rel: 'n1.md',
+        body: 'n1',
+      },
+      {
+        project: { kind: 'local', vendorKey: 'C--legacy-nexus' },
+        rel: 'n2.md',
+        body: 'n2',
+      },
+      {
+        project: { kind: 'local', vendorKey: 'C--legacy-nexus' },
+        rel: 'n3.md',
+        body: 'n3',
+      },
+      {
+        project: { kind: 'local', vendorKey: 'C--legacy-nexus' },
+        rel: 'n4.md',
+        body: 'n4',
+      },
+    ]);
+
+    const rows = await listProjects({ stackHome });
+    const locals = rows.filter((r) => r.identity.kind === 'local');
+    // The two 2-file projects are distinguishable by reference, not file count.
+    const twoFile = locals.filter((r) => r.files === 2);
+    expect(twoFile).toHaveLength(2);
+    expect(new Set(twoFile.map((r) => r.recoveryReference?.value)).size).toBe(
+      2,
+    );
+    // No legacy project is available (no binding, no git).
+    for (const row of locals) expect(row.availability).toBe('unavailable');
+
+    // Recognize the Stack-like project by its reference and map it explicitly.
+    const stackRow = locals.find((r) =>
+      r.recoveryReference?.value.includes(stackKey),
+    );
+    expect(stackRow).toBeDefined();
+    const mapped = await mapProject({
+      stackHome,
+      selector: stackRow?.projectId as string,
+      dir: stackDir,
+      gitOrigin: noGit,
+    });
+    expect(mapped.status).toBe('mapped');
+
+    const claudeHome = await tempDir('claude-');
+    const registry = await readLocalRegistry(stackHome);
+    const plan = await runMemoryRestore({
+      stackHome,
+      claudeHome,
+      apply: true,
+      registry,
+      projects: [], // no git candidates; atlas stays unavailable here
+    });
+    const byRel = Object.fromEntries(
+      plan.items.map((i) => [i.logicalId.split('/').pop(), i.status]),
+    );
+    // Only the mapped Stack-like project restores.
+    expect(byRel['s1.md']).toBe('restored');
+    expect(byRel['s2.md']).toBe('restored');
+    expect(byRel['o1.md']).toBe('project-not-found');
+    expect(byRel['n1.md']).toBe('project-not-found');
+
+    // No filesystem path became portable identity.
+    const snapshot = JSON.stringify(await readPortableSnapshot(stackHome));
+    expect(snapshot).not.toContain(stackKey);
+    expect(snapshot).not.toContain('bindings');
   });
 });

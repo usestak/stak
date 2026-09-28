@@ -38,6 +38,10 @@ export const renderProjectList = (rows: ProjectListRow[]): string => {
         ? 'available on this machine'
         : 'not available on this machine';
     lines.push(`${shortProjectId(row.projectId)}  ${identityLabel(row)}`);
+    // Local, informational provenance so a human can tell legacy projects apart.
+    // It is not identity and does not imply the historical path still exists.
+    if (row.recoveryReference)
+      lines.push(`    recovered from: ${row.recoveryReference.value}`);
     lines.push(
       `    ${row.files} file${row.files === 1 ? '' : 's'} · ${availability}${
         row.conflict ? ' · identity conflict' : ''

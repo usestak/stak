@@ -466,3 +466,29 @@ foundation described above. Concrete choices, recorded for future phases:
   the ambiguous project (`identity-conflict`) instead of guessing. Reconciliation UX (letting
   the user declare the two IDs the same project) is deferred to a later phase. This is
   existing behavior, now covered by tests; no runtime change was needed.
+
+### 15B.2 note — legacy project identification (2026-09-28)
+
+Real Phase 15B dogfood (recovering the real Protected generation on a fresh machine)
+confirmed the runtime is correct — 9 logical Project IDs lazily created, the Git-backed
+project auto-resolved, 8 legacy projects safely retained as unresolved, no unsafe writes —
+but exposed a manual-recovery UX gap: `stack project` rendered every legacy project as
+only `local project`, so a human could not tell which Project ID corresponded to a known
+historical project (e.g. Stack vs Nexus) and therefore could not safely choose an argument
+for `stack project map`. File counts are not identity and must not be used to guess.
+
+Fix: `stack project` (and `--json`) now show a **recovery reference** for legacy projects —
+the historical `local:<vendorKey>` correlated **locally** from the recovered private Memory
+manifest at list time. It is informational provenance only:
+
+- It is **not** identity authority. A live directory at that historical path still does not
+  auto-resolve the project; path reuse remains unsafe; `legacy-compat` remains a historical
+  association; an explicit `stack project map` (or an independent strong Git identity) is
+  still required to authorize a restore. Displaying the reference has **zero** effect on
+  restore resolution (regression-tested).
+- It is **private and local**. It is computed at display time and never persisted: it does
+  not enter the portable registry snapshot, the Memory bundle, the public Stack bundle/publish
+  payload, or any Cloud/server-readable field. The `legacy-compat` digest strategy and
+  Protected-mode privacy are unchanged.
+
+`historical recovery reference ≠ restore authority.` No Phase 15 architecture change.
