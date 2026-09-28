@@ -535,3 +535,43 @@ deferred to later lifecycle/deletion design. No Phase 15 architecture change.
 A non-blocking dogfood note was also recorded: the first `memory recover --passkey`
 attempt hit an expired recovery session and an immediate retry succeeded (see
 `memory-cloud-deployment.md`); passkey/session behavior was not changed here.
+
+### 15B.4 note — Git identity continuity for restored native Memory (2026-09-28)
+
+Real Phase 15B dogfood surfaced an identity-continuity bug (caught by `memory backup
+--dry-run` **before** any Cloud mutation; generation 3 stayed latest and intact). After
+recovering a Git-backed project and restoring it natively, the native files sit under a
+vendor key derived from the recovery machine's absolute checkout path. The checkout still
+carried the correct Git remote, and `memory scan` (run from inside the checkout) resolved
+it to `github.com/<owner>/<repo>` correctly — but a later `stack memory backup` run from a
+**different working directory** did not: auto-memory Git resolution depended on the current
+working directory (candidate = cwd + siblings). With no candidate match, discovery fell
+back to `local:<vendor-key>`, so `syncRegistryForBackup` (a legitimate registry writer)
+minted a **second** logical project for the same files and carried the recovered Git-keyed
+items forward as "unavailable" — inflating the preview from 9/27 to 34/10.
+
+Root cause: two production paths used different project-resolution inputs. Fix: auto-memory
+Git resolution is now **working-directory-independent** — `discoverClaudeMemory` resolves a
+native project's strong Git identity from the project's **own checkout**, reconstructed
+from the vendor key (`reconstructProjectDir`, a filesystem-validated inverse of
+`encodeClaudeProjectKey` that handles hyphenated leaf names) and probed with an injected
+`gitRemoteOf`. Because `scan`, `backup`, and `backup --dry-run` all discover through this
+one path, they now agree. When a native item resolves to a strong Git identity that the
+registry already holds, it maps to the existing Project ID; a new local Project ID is
+minted only when no strong identity can be established (legacy/mapped projects and
+path-reuse cases are unchanged). No automatic Project-ID merge was added; genuine
+strong-identity conflicts still surface as conflicts.
+
+Registry writer boundaries (verified in code): **read-only** — `stack project`,
+`stack project --json`, `memory scan`, and `memory backup --dry-run` (they only read
+`projects-local.json`, `project-registry.json`, and the manifest; regression-tested
+byte-for-byte). **Mutating** — `recover` (reconcile/merge the portable registry),
+`stack project map` (machine binding), and a real `memory backup` (commit updated
+manifest + registry snapshot). Double-counting is additionally prevented by the existing
+`logicalId` overlay dedup (native wins), so even the carry-forward path cannot re-add a
+project the native scan already covers.
+
+Environment note (not a code change): during diagnostics `git -C <repo>` reported dubious
+ownership because the fenced dogfood HOME lacked the user's normal Git `safe.directory`
+context. This is separate from the identity bug; no Git global configuration or
+`safe.directory` change was made in this patch.

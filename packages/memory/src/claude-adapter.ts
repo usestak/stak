@@ -16,6 +16,7 @@ import {
   encodeClaudeProjectKey,
   normalizeVendorKey,
   projectIdentityKey,
+  reconstructProjectDir,
 } from './project-identity.js';
 
 export type ClaudeProjectInput = { dir: string; gitRemote?: string };
@@ -29,6 +30,15 @@ export type ClaudeMemoryDiscoveryOptions = {
    * platform; injectable so matching semantics are deterministic in tests.
    */
   platform?: NodeJS.Platform;
+  /**
+   * Resolve a directory's canonical Git remote (Phase 15B.4). When provided, an
+   * auto-memory project that is not matched by a passed candidate is resolved from
+   * its OWN checkout directory (reconstructed from the vendor key), so Git identity
+   * is recovered independent of the current working directory — keeping `scan` and
+   * `backup` consistent. `isDirectory` validates the reconstructed path.
+   */
+  gitRemoteOf?: (dir: string) => Promise<string | undefined>;
+  isDirectory?: (candidate: string) => Promise<boolean>;
 };
 
 export type MemoryDetection = { installed: boolean; reason?: string };
@@ -187,9 +197,24 @@ export const discoverClaudeMemory = async (
     const memoryRoot = path.join(projectsRoot, vendorKey, 'memory');
     const files = await walkMemoryFiles(memoryRoot);
     if (files.length === 0) continue;
-    const identity =
-      gitByVendorKey.get(normalizeVendorKey(vendorKey, platform)) ??
-      localIdentity(vendorKey);
+    // Prefer a candidate match; otherwise resolve strong Git identity from the
+    // project's OWN checkout (reconstructed from the vendor key) so a native project
+    // with a strong Git identity is never mis-minted as a new local project just
+    // because it is not the current working directory (Phase 15B.4).
+    let identity =
+      gitByVendorKey.get(normalizeVendorKey(vendorKey, platform)) ?? null;
+    if (!identity && options.gitRemoteOf && options.isDirectory) {
+      const dir = await reconstructProjectDir({
+        vendorKey,
+        isDirectory: options.isDirectory,
+        platform,
+      });
+      if (dir) {
+        const git = canonicalGitIdentity(await options.gitRemoteOf(dir));
+        if (git) identity = git;
+      }
+    }
+    identity = identity ?? localIdentity(vendorKey);
     for (const { rel, abs } of files)
       items.push(
         await fileItem({

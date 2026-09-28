@@ -8,6 +8,8 @@ import type { ManifestItem, MemoryManifest } from '@stack/memory';
 import {
   encodeClaudeProjectKey,
   hashBytes,
+  memoryStorePaths,
+  planMemoryBackupComposition,
   readLocalRegistry,
   readPortableSnapshot,
   runMemoryRestore,
@@ -421,5 +423,50 @@ describe('legacy project identification (15B.2)', () => {
     const snapshot = JSON.stringify(await readPortableSnapshot(stackHome));
     expect(snapshot).not.toContain(stackKey);
     expect(snapshot).not.toContain('bindings');
+  });
+});
+
+describe('read-only command purity (15B.4)', () => {
+  it('listProjects and backup-composition preview never mutate registry/store files', async () => {
+    const stackHome = await seedWithObjects([
+      { project: gitProject('github.com/acme/atlas'), rel: 'a.md', body: 'A' },
+      {
+        project: { kind: 'local', vendorKey: 'C--legacy-nexus' },
+        rel: 'n.md',
+        body: 'N',
+      },
+    ]);
+    const paths = memoryStorePaths(stackHome);
+    const snapshotState = async () => ({
+      local: await readFile(paths.localProjectRegistry),
+      registry: await readFile(paths.projectRegistrySnapshot),
+      manifest: await readFile(paths.currentManifest),
+    });
+    const before = await snapshotState();
+
+    // Read-only operations, repeated (mirrors `stack project`, `--json`, and the
+    // three `memory backup --dry-run` variants which all route through these).
+    for (let i = 0; i < 3; i += 1) {
+      await listProjects({
+        stackHome,
+        projects: [
+          {
+            dir: '/somewhere/atlas',
+            gitRemote: 'https://github.com/acme/atlas.git',
+          },
+        ],
+      });
+      await planMemoryBackupComposition({
+        stackHome,
+        nativeItems: [],
+        registry: await readLocalRegistry(stackHome),
+        projects: [],
+      });
+    }
+
+    const after = await snapshotState();
+    expect(after.local.equals(before.local)).toBe(true);
+    expect(after.registry.equals(before.registry)).toBe(true);
+    expect(after.manifest.equals(before.manifest)).toBe(true);
   });
 });

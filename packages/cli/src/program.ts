@@ -1,4 +1,4 @@
-import { readdir, writeFile } from 'node:fs/promises';
+import { readdir, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -269,11 +269,23 @@ const listChildDirs = async (dir: string): Promise<string[]> => {
 
 const claudeHome = path.join(os.homedir(), '.claude');
 
+const isDirectoryAt = async (candidate: string): Promise<boolean> => {
+  try {
+    return (await stat(candidate)).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
 const memoryAdapter = async () =>
   createClaudeMemoryAdapter({
     stackHome,
     claudeHome,
     platform: process.platform,
+    // Resolve strong Git identity from each project's own checkout so scan and
+    // backup agree regardless of the current working directory (Phase 15B.4).
+    gitRemoteOf: gitOriginOf,
+    isDirectory: isDirectoryAt,
     projects: await resolveMemoryProjects({
       cwd: process.cwd(),
       platform: process.platform,

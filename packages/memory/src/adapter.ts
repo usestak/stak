@@ -53,6 +53,8 @@ export type ClaudeMemoryAdapterOptions = {
   projects?: ClaudeProjectInput[];
   now?: () => Date;
   platform?: NodeJS.Platform;
+  gitRemoteOf?: (dir: string) => Promise<string | undefined>;
+  isDirectory?: (candidate: string) => Promise<boolean>;
 };
 
 export const createClaudeMemoryAdapter = (
@@ -63,6 +65,8 @@ export const createClaudeMemoryAdapter = (
     ...(options.projects ? { projects: options.projects } : {}),
     ...(options.now ? { now: options.now } : {}),
     ...(options.platform ? { platform: options.platform } : {}),
+    ...(options.gitRemoteOf ? { gitRemoteOf: options.gitRemoteOf } : {}),
+    ...(options.isDirectory ? { isDirectory: options.isDirectory } : {}),
   };
   return {
     provider: 'claude',
