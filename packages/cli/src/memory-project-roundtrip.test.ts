@@ -21,6 +21,7 @@ import {
   protectedCloudBackup,
   readLocalRegistry,
   readPortableSnapshot,
+  registryConflicts,
   standardCloudBackup,
   syncRegistryForBackup,
   writeMemoryManifest,
@@ -319,6 +320,67 @@ describe('Phase 15B project-identity acceptance (Machine F → map → new backu
     await cloudRecover({ stackHome: machineG, backend, mmk });
     const regGAfter = await readLocalRegistry(machineG);
     expect(regGAfter.bindings.some((b) => b.projectId === someId)).toBe(true);
+  });
+
+  it('two machines that independently migrate the same pre-registry bundle surface a conflict, not a silent merge', async () => {
+    const cloud = makeCloud();
+    const backend = cloud.backendForToken(await cloud.signIn(USER));
+    const mmk = generateMmk();
+
+    // OLD pre-registry bundle: one legacy local project, no portable snapshot.
+    const bodies = new Map<string, string>();
+    const nexus = localItemFor('C--Users-OLD-Desktop-nexus', 'n.md', 'NEXUS');
+    bodies.set(nexus.logicalId, 'NEXUS');
+    const machineA0 = await writeStore([nexus], bodies);
+    expect(await readPortableSnapshot(machineA0)).toBeNull();
+    await protectedCloudBackup({ stackHome: machineA0, backend, mmk });
+
+    // Machine A and Machine B independently recover it → different opaque IDs.
+    const machineA = await tempDir('stack-A2-');
+    const machineB = await tempDir('stack-B2-');
+    await cloudRecover({ stackHome: machineA, backend, mmk });
+    await cloudRecover({ stackHome: machineB, backend, mmk });
+    const idA = (await readLocalRegistry(machineA)).projects[0]?.projectId;
+    const idB = (await readLocalRegistry(machineB)).projects[0]?.projectId;
+    expect(idA).toBeDefined();
+    expect(idB).toBeDefined();
+    expect(idA).not.toBe(idB); // acceptable first-window divergence
+
+    // B explicitly binds its migrated project locally.
+    const bDir = await tempDir('nexus-B-');
+    let regB = await readLocalRegistry(machineB);
+    regB = setBinding(regB, {
+      projectId: idB as string,
+      dir: bDir,
+      boundAt: '2026-09-28T00:00:00.000Z',
+      provenance: 'user-map',
+    });
+    await writeLocalRegistry(machineB, regB);
+
+    // A now makes a registry-bearing backup; B recovers it → registries meet.
+    await syncRegistryForBackup({ stackHome: machineA });
+    await protectedCloudBackup({ stackHome: machineA, backend, mmk });
+    await cloudRecover({ stackHome: machineB, backend, mmk });
+
+    const regBMerged = await readLocalRegistry(machineB);
+    // Deterministic conflict, both records preserved, no silent last-write-wins.
+    expect(registryConflicts(regBMerged).length).toBeGreaterThan(0);
+    expect(regBMerged.projects.map((r) => r.projectId).sort()).toEqual(
+      [idA as string, idB as string].sort(),
+    );
+    // The machine-local binding is untouched by the recovered state.
+    expect(regBMerged.bindings.some((b) => b.projectId === idB)).toBe(true);
+
+    // Restore withholds the ambiguous project (no silent contamination), memory kept.
+    const claudeB = await tempDir('claude-B2-');
+    const restoreB = await runMemoryRestore({
+      stackHome: machineB,
+      claudeHome: claudeB,
+      apply: true,
+      registry: regBMerged,
+      projects: [],
+    });
+    expect(restoreB.items[0]?.status).toBe('identity-conflict');
   });
 
   it('Standard: the registry survives a round-trip with Standard (server-readable) semantics', async () => {

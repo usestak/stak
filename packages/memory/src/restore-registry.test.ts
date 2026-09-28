@@ -177,6 +177,43 @@ describe('registry-driven restore resolution', () => {
     ).toBe('widget');
   });
 
+  it('a resolved legacy project is still NOT authorized by a live directory at its historical path', async () => {
+    // The legacy project IS known to the registry (resolvable via its compat claim),
+    // but observing a directory at the historical path must not promote that claim
+    // into restore authority — only an explicit binding may.
+    const historicalDir = await tempDir('historical-');
+    const vendorKey = encodeClaudeProjectKey(path.resolve(historicalDir));
+    const stackHome = await seed([
+      { project: { kind: 'local', vendorKey }, rel: 'h.md', body: 'legacy' },
+    ]);
+    const { syncRegistryForBackup } =
+      await import('./project/registry-store.js');
+    let counter = 0;
+    const { registry } = await syncRegistryForBackup({
+      stackHome,
+      mint: () => `prj_${(counter++).toString(36).padStart(26, '0')}`,
+    });
+    const { resolveProjectForIdentity } = await import('./project/registry.js');
+    // Sanity: the registry resolves the legacy identity (single, no conflict)…
+    expect(
+      resolveProjectForIdentity(registry, { kind: 'local', vendorKey }).status,
+    ).toBe('resolved');
+
+    const claudeHome = await tempDir('stack-ch-');
+    const plan = await runMemoryRestore({
+      stackHome,
+      claudeHome,
+      apply: true,
+      registry, // no binding present
+      projects: [{ dir: historicalDir }], // a live dir at the historical path
+    });
+    // …yet restore is withheld: the path is not authority.
+    expect(plan.items[0]?.status).toBe('project-not-found');
+    await expect(
+      readFile(autoMemoryPath(claudeHome, historicalDir, 'h.md'), 'utf8'),
+    ).rejects.toThrow();
+  });
+
   it('restores resolvable projects and retains unresolved ones; second restore is idempotent', async () => {
     const legacyDir = await tempDir('legacy-');
     const vendorKey = encodeClaudeProjectKey(path.resolve(legacyDir));

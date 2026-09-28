@@ -438,3 +438,31 @@ foundation described above. Concrete choices, recorded for future phases:
   cross-machine convergence, Git transfer/rename reconciliation, opt-in
   `.stack/project.json` marker, multiple-checkout primary selection, multi-provider
   manifests, and hard-delete / crypto-shred.
+
+### 15B.1 closure notes (2026-09-28)
+
+- **Public/private boundary is tested at the real serialization layer.** A regression
+  (`packages/cli/src/public-publish-boundary.test.ts`) populates a Stack home with a full
+  private project registry (Project IDs, private Git claims, legacy-compat keys, a machine
+  binding, unresolved-project metadata, and Memory), then runs the actual
+  `preparePublish` path — `resolvePublishSource → loadLocalStack → buildPublicStackBundle`
+  — against a real git-backed authoring stack and inspects both the produced bundle and the
+  exact payload `applyPublish` would transmit. None of the private tokens appear. No network
+  publish occurs (the client only answers `me`/`getPublicStack`).
+- **Legacy-compat is a historical association, not path authority.** A `legacy-compat`
+  claim only associates a logical-project record with a historical backup reference. A live
+  directory sitting at the old path never promotes that claim into restore authority — an
+  explicit `stack project map` (or an independent strong Git identity) is still required.
+  Two records sharing one compatibility reference are a standing conflict and cannot resolve
+  (and therefore cannot restore) silently.
+- **Pre-registry first-upgrade convergence window.** A historical bundle with no portable
+  registry has no stable Project ID. If two machines independently recover it before either
+  makes a registry-bearing backup, each mints a _different_ opaque Project ID for the same
+  legacy reference. This divergence is expected and safe for the first-upgrade window. When
+  those registries later meet (one machine recovers the other's registry-bearing backup),
+  the merge **surfaces a deterministic conflict** rather than merging: both records are
+  preserved, no Memory is reassigned between Project IDs, no filesystem path becomes
+  authority, machine-local bindings are untouched, Memory is retained, and restore withholds
+  the ambiguous project (`identity-conflict`) instead of guessing. Reconciliation UX (letting
+  the user declare the two IDs the same project) is deferred to a later phase. This is
+  existing behavior, now covered by tests; no runtime change was needed.
