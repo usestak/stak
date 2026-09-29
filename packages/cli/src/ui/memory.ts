@@ -146,7 +146,7 @@ export const renderMemoryRecover = (outcome: CloudRecoverOutcome): string => {
       '  stack memory recover --recovery-file <path>',
     ]);
   return block([
-    'Memory recovered.',
+    `Memory recovered from backup #${outcome.generation}.`,
     '',
     `${plainFiles(outcome.objects)} available`,
     `Privacy: ${outcome.privacyMode === 'protected' ? 'Protected' : 'Standard'}`,
@@ -208,8 +208,8 @@ export const renderMemoryCloudStatus = (
   if (cloud.historicalRecovery) {
     lines.push(
       '',
-      `Local source      Generation ${cloud.localRecoveredGeneration}`,
-      `Cloud latest      Generation ${cloud.latestGeneration}`,
+      `Local source      Backup #${cloud.localRecoveredGeneration}`,
+      `Cloud latest      Backup #${cloud.latestGeneration}`,
       `Privacy           ${cloud.privacyMode === 'protected' ? 'Protected' : 'Standard'}`,
     );
   } else {
@@ -229,8 +229,8 @@ export const renderMemoryCloudStatus = (
     lines.push(
       '',
       'Historical recovery',
-      `Local Memory was recovered from generation ${cloud.localRecoveredGeneration}.`,
-      `Generation ${cloud.latestGeneration} remains the latest Cloud backup.`,
+      `Local Memory was recovered from backup #${cloud.localRecoveredGeneration}.`,
+      `Backup #${cloud.latestGeneration} remains your latest Cloud backup.`,
     );
   return block(lines);
 };
@@ -360,8 +360,8 @@ export const renderMemoryBackupPreview = (
   const s = preview.supersession;
   if (s.supersedes)
     lines.push(
-      `Local source      Generation ${s.localRecoveredGeneration}`,
-      `Cloud latest      Generation ${s.cloudLatestGeneration}`,
+      `Local source      Backup #${s.localRecoveredGeneration}`,
+      `Cloud latest      Backup #${s.cloudLatestGeneration}`,
       '',
     );
   lines.push(
@@ -380,17 +380,14 @@ export const renderMemoryBackupPreview = (
     files(preview.finalFiles),
   );
   if (s.nextGeneration !== null)
-    lines.push(
-      `Generation        ${s.nextGeneration}`,
-      `Parent            ${s.parentGeneration === null ? 'none' : s.parentGeneration}`,
-    );
+    lines.push(`Next backup       #${s.nextGeneration}`);
   lines.push(`Privacy: ${privacyLabel(preview.privacy)}`);
   if (s.supersedes)
     lines.push(
       '',
-      `This backup would create generation ${s.nextGeneration} from your current local`,
-      `Memory and supersede generation ${s.cloudLatestGeneration} as latest.`,
-      `Generation ${s.cloudLatestGeneration} remains immutable and recoverable.`,
+      `This will create backup #${s.nextGeneration} from your current local Memory.`,
+      `It will be added after your current latest backup (#${s.cloudLatestGeneration}).`,
+      `Backup #${s.cloudLatestGeneration} will remain available in your backup history.`,
     );
   if (options.verbose) {
     lines.push('', 'Carried forward:');
@@ -402,15 +399,14 @@ export const renderMemoryBackupPreview = (
   return block(lines);
 };
 
-/** Confirmation prompt shown before a real backup that would supersede a newer generation. */
+/** Confirmation prompt shown before a real backup that would supersede a newer backup. */
 export const historicalBaseBackupWarning = (
   s: BackupSupersessionView,
 ): string =>
-  `You recovered Memory from generation ${s.localRecoveredGeneration}.\n` +
-  `Cloud latest is generation ${s.cloudLatestGeneration}.\n\n` +
-  `This backup will create generation ${s.nextGeneration} from your current local Memory ` +
-  `and supersede generation ${s.cloudLatestGeneration} as latest.\n` +
-  `Generation ${s.cloudLatestGeneration} will remain immutable and recoverable.`;
+  `Your local Memory was recovered from backup #${s.localRecoveredGeneration}.\n` +
+  `Your latest Cloud backup is #${s.cloudLatestGeneration}.\n\n` +
+  `This will create backup #${s.nextGeneration} from your current local Memory.\n` +
+  `Backup #${s.cloudLatestGeneration} will remain available in your backup history.`;
 
 const bytesLabel = (bytes: number): string => {
   if (bytes < 1024) return `${bytes} B`;
@@ -435,8 +431,8 @@ export const renderMemoryGenerations = (
   if (!options.authenticated)
     return 'Not signed in.\nRun `stack login` first.\n';
   if (rows.length === 0)
-    return 'No Memory generations yet.\nRun `stack memory backup` first.\n';
-  const lines = ['Memory generations', ''];
+    return 'No Memory backups yet.\nRun `stack memory backup` first.\n';
+  const lines = ['Memory backup history', ''];
   for (const row of [...rows].sort((a, b) => b.generation - a.generation)) {
     const when = new Date(row.createdAt);
     const date = Number.isNaN(when.getTime())
@@ -444,14 +440,14 @@ export const renderMemoryGenerations = (
       : when.toISOString().slice(0, 10);
     const privacy = row.privacyMode === 'protected' ? 'Protected' : 'Standard';
     lines.push(
-      `${String(row.generation).padStart(3)}   ${date}   ${privacy.padEnd(9)} ${bytesLabel(
+      `  #${String(row.generation).padEnd(3)} ${date}   ${privacy.padEnd(9)} ${bytesLabel(
         row.payloadBytes,
       ).padStart(8)}${row.latest ? '   latest' : ''}`,
     );
   }
   lines.push(
     '',
-    'Recover a specific one with `stack memory recover --generation <n>`.',
+    'Recover a previous backup with `stack memory recover --backup <n>`.',
   );
   return `${lines.join('\n').trimEnd()}\n`;
 };

@@ -868,3 +868,27 @@ logical identities, no source-machine bindings, all 27 Memory files preserved.
 
 **Phase status.** Phase 15B runtime acceptance: **COMPLETE.** (Phase 15C is neither started
 nor scoped here.)
+
+### 15B.7 note — user-facing backup terminology (2026-09-29)
+
+Product language change only; no semantic change. Stack presents immutable Memory
+**generations** to users as **backups**. This document, the database schema, the domain
+types, and JSON field names retained for programmatic compatibility keep the internal
+"generation" vocabulary (`generation`, `parentGeneration`, `latestGeneration`,
+`parent_generation`, `latest_generation`) — the model is unchanged.
+
+- CLI: `stack memory history` (was `stack memory generations`) and
+  `stack memory recover --backup <n>` (was `--generation <n>`) are the user-facing forms;
+  the previous names remain as **hidden** compatibility aliases with identical behavior.
+  Supplying both `--backup` and `--generation` with different values fails clearly.
+- Human output uses "backup"/"Backup #N"/"backup history" and never "generation"
+  (history list, recover message, status historical relationship, backup dry-run preview,
+  and the supersession confirmation). Errors say e.g. "Backup #99 was not found."
+- JSON contract decision: `--json` is treated as a user-facing contract, so it now emits
+  backup-named fields as the primary shape (`backups[].backup`, `nextBackup`,
+  `localSourceBackup`/`cloudLatestBackup`, `localRecoveredBackup`, and `backup` on a
+  recover result) **while retaining** the generation-named fields for compatibility (no
+  breaking change). Internal domain models and the DB are untouched.
+- No change to immutability, historical selection, default-latest recovery,
+  Standard/Protected/passkey behavior, provenance, linear parent semantics, project
+  identity, native+retained composition, or public/private boundaries.

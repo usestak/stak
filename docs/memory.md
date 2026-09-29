@@ -125,7 +125,7 @@ designed in the architecture docs but not implemented in this release.
   never modifies, reformats, deletes, or invokes Claude. A failed backup leaves
   the previous backup valid and commits nothing. `--dry-run` previews the backup
   composition (native + carried-forward counts, final total, privacy mode) without
-  writing anything, creating a Cloud generation, or touching the registry.
+  writing anything, creating a Cloud backup, or touching the registry.
 - `stack memory status` — shows the last backup.
 - `stack memory restore [--dry-run]` — resolves, previews, and applies. It only
   writes to **absent** targets; an existing target with different content is a
@@ -188,40 +188,45 @@ public):
   sets up a recovery method (recovery file today; passkey via the browser), enrolls
   this device so future backups need no prompt, and safely migrates existing
   Standard backups to Protected (verify-before-delete).
-- `stack memory generations [--json]` — list your recoverable Memory backup
-  generations (newest first) with generation number, date, privacy mode, and size.
-- `stack memory recover [--generation <n>] [--recovery-file <path>]` — rebuild the
+- `stack memory history [--json]` — list your recoverable **backups** (newest first)
+  with backup number, date, privacy mode, and size.
+- `stack memory recover [--backup <n>] [--recovery-file <path>]` — rebuild the
   private Memory **store** from Cloud on a new machine. It never writes native agent
   files — run `stack memory restore` afterward for that.
 - `stack memory status` — shows local and Cloud state (privacy mode, recovery
   methods, whether this device is enrolled, and whether local Memory came from an
-  earlier generation than the Cloud latest).
+  earlier backup than the Cloud latest).
 
 `recover` (Cloud → Stack's private store) is deliberately separate from `restore`
 (private store → native agent files); `restore` keeps all Phase 14A conflict
 protection.
 
-### Immutable generations & historical recovery
+### Backup history & recovering a previous backup
 
-Every Cloud backup is an **immutable, numbered generation**. `stack memory recover`
-recovers the **latest** by default. You can inspect the history with
-`stack memory generations` and recover a specific earlier one with
-`stack memory recover --generation <n>` — useful when the latest generation contains
-unwanted state but an earlier generation is known-good.
+Every Cloud backup is **immutable and numbered**. `stack memory recover` recovers the
+**latest** backup by default. You can inspect the history with `stack memory history`
+and recover a specific earlier one with `stack memory recover --backup <n>` — useful
+when the latest backup contains unwanted state but an earlier backup is known-good.
 
 - Historical recovery changes only your **local** private Memory store. It does
-  **not** change the Cloud latest, retire newer generations, or upload anything.
+  **not** change the latest Cloud backup, retire newer backups, or upload anything.
   You still run `stack memory restore` to apply it to native agent Memory.
-- After a historical recovery, `stack memory status` shows the relationship (e.g.
-  "Local source Generation 3 / Cloud latest Generation 4") instead of "up to date".
-- If you then `stack memory backup`, Stack creates a **new** generation from your
-  current local Memory. Cloud history is linear, so the new generation **parents from
-  the current Cloud latest** (e.g. generation 5 with parent 4) and becomes the new
-  latest — superseding it. The older generation stays immutable and recoverable.
-  Because this supersedes newer Cloud content, Stack **asks for confirmation** first
-  (`--dry-run` previews it; pass `--yes` in non-interactive use).
+- After recovering a previous backup, `stack memory status` shows the relationship
+  (e.g. "Local source Backup #3 / Cloud latest Backup #4") instead of "up to date".
+- If you then `stack memory backup`, Stack creates a **new** backup from your current
+  local Memory. Cloud history is linear, so the new backup is added after your current
+  latest backup (e.g. backup #5 after #4) and becomes the new latest — superseding it.
+  The older backup stays available in your backup history. Because this supersedes a
+  newer backup, Stack **asks for confirmation** first (`--dry-run` previews it; pass
+  `--yes` in non-interactive use).
 - Machine bindings and recovery provenance are machine-local — they never cross
   machines or enter a backup.
+
+> **Terminology.** Stack presents its immutable Memory backups to users as
+> **backups**; internally (and in the architecture docs, schema, and JSON field names
+> retained for compatibility) they are still called _generations_. The internal model
+> is unchanged. `stack memory generations` and `recover --generation <n>` remain as
+> hidden compatibility aliases for `stack memory history` and `recover --backup <n>`.
 
 ### Recovery methods (Protected)
 

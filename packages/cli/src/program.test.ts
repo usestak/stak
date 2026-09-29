@@ -1416,57 +1416,64 @@ describe('Stack CLI', () => {
     });
   });
 
-  it('memory generations lists recoverable generations newest-first', async () => {
-    const result = await runProgram(['memory', 'generations'], {
-      memoryGenerations: async () => ({
-        status: 'ok',
-        generations: [
-          {
-            generation: 4,
-            createdAt: '2026-09-28T16:45:57.000Z',
-            privacyMode: 'protected',
-            state: 'committed',
-            payloadBytes: 76442,
-            latest: true,
-          },
-          {
-            generation: 3,
-            createdAt: '2026-09-26T13:58:45.000Z',
-            privacyMode: 'protected',
-            state: 'committed',
-            payloadBytes: 73126,
-            latest: false,
-          },
-        ],
-      }),
+  const twoGenerations = {
+    status: 'ok' as const,
+    generations: [
+      {
+        generation: 4,
+        createdAt: '2026-09-28T16:45:57.000Z',
+        privacyMode: 'protected' as const,
+        state: 'committed',
+        payloadBytes: 76442,
+        latest: true,
+      },
+      {
+        generation: 3,
+        createdAt: '2026-09-26T13:58:45.000Z',
+        privacyMode: 'protected' as const,
+        state: 'committed',
+        payloadBytes: 73126,
+        latest: false,
+      },
+    ],
+  };
+
+  it('memory history lists backups in backup terminology (newest first)', async () => {
+    const result = await runProgram(['memory', 'history'], {
+      memoryGenerations: async () => twoGenerations,
     });
-    expect(result.output).toContain('Memory generations');
-    expect(result.output).toContain('4');
+    expect(result.output).toContain('Memory backup history');
+    expect(result.output).toContain('#4');
     expect(result.output).toContain('latest');
-    expect(result.output).toContain('--generation');
+    expect(result.output).toContain('--backup');
+    expect(result.output).not.toContain('generation');
   });
 
-  it('memory generations --json emits the generation metadata', async () => {
-    const result = await runProgram(['memory', 'generations', '--json'], {
+  it('memory generations still works as a hidden compatibility alias', async () => {
+    const result = await runProgram(['memory', 'generations'], {
+      memoryGenerations: async () => twoGenerations,
+    });
+    expect(result.output).toContain('Memory backup history');
+    expect(result.output).toContain('#4');
+  });
+
+  it('normal help advertises history and hides the generations alias', async () => {
+    const help = await runProgram(['memory', '--help']);
+    expect(help.output).toContain('history');
+    expect(help.output).not.toContain('generations');
+  });
+
+  it('memory history --json emits backups (with a compatibility generations alias)', async () => {
+    const result = await runProgram(['memory', 'history', '--json'], {
       memoryGenerations: async () => ({
         status: 'ok',
-        generations: [
-          {
-            generation: 4,
-            createdAt: '2026-09-28T16:45:57.000Z',
-            privacyMode: 'protected',
-            state: 'committed',
-            payloadBytes: 76442,
-            latest: true,
-          },
-        ],
+        generations: twoGenerations.generations.slice(0, 1),
       }),
     });
     const parsed = JSON.parse(result.output);
-    expect(parsed.generations[0]).toMatchObject({
-      generation: 4,
-      latest: true,
-    });
+    expect(parsed.backups[0]).toMatchObject({ backup: 4, latest: true });
+    // Compatibility: the generation-named field/array are retained.
+    expect(parsed.generations[0]).toMatchObject({ generation: 4 });
   });
 
   it('memory status shows a historical-recovery relationship, not “up to date”', async () => {
@@ -1488,10 +1495,11 @@ describe('Stack CLI', () => {
         historicalRecovery: true,
       }),
     });
-    expect(result.output).toContain('Local source      Generation 3');
-    expect(result.output).toContain('Cloud latest      Generation 4');
+    expect(result.output).toContain('Local source      Backup #3');
+    expect(result.output).toContain('Cloud latest      Backup #4');
     expect(result.output).toContain('Historical recovery');
     expect(result.output).not.toContain('up to date');
+    expect(result.output).not.toContain('Generation');
   });
 
   it('memory backup from historical local state requires confirmation before superseding', async () => {
@@ -1522,7 +1530,9 @@ describe('Stack CLI', () => {
         throw new Error('must not back up without confirmation');
       },
     });
-    expect(declined.output).toContain('supersede generation 4');
+    expect(declined.output).toContain('backup #5');
+    expect(declined.output).toContain('#4');
+    expect(declined.output.toLowerCase()).not.toContain('generation');
     expect(declined.output).toContain('Cancelled.');
 
     // Confirmed → proceeds.
@@ -1544,5 +1554,60 @@ describe('Stack CLI', () => {
       },
     });
     expect(backedUp).toBe(true);
+  });
+
+  it('recover --backup N selects exactly N and reports it as backup #N', async () => {
+    let requested: number | undefined;
+    const result = await runProgram(['memory', 'recover', '--backup', '3'], {
+      memoryCloudRecover: async (opts) => {
+        requested = opts.generation;
+        return {
+          status: 'recovered',
+          privacyMode: 'protected',
+          objects: 27,
+          generation: 3,
+        };
+      },
+    });
+    expect(requested).toBe(3);
+    expect(result.output).toContain('backup #3');
+  });
+
+  it('recover --generation N still works as a compatibility alias', async () => {
+    let requested: number | undefined;
+    await runProgram(['memory', 'recover', '--generation', '3'], {
+      memoryCloudRecover: async (opts) => {
+        requested = opts.generation;
+        return {
+          status: 'recovered',
+          privacyMode: 'protected',
+          objects: 27,
+          generation: 3,
+        };
+      },
+    });
+    expect(requested).toBe(3);
+  });
+
+  it('recover fails clearly when --backup and --generation disagree', async () => {
+    let called = false;
+    const result = await runProgram(
+      ['memory', 'recover', '--backup', '3', '--generation', '4'],
+      {
+        memoryCloudRecover: async () => {
+          called = true;
+          return { status: 'no-backup' };
+        },
+      },
+    );
+    expect(called).toBe(false);
+    expect(result.output).toContain('only one of --backup or --generation');
+  });
+
+  it('a nonexistent backup reports “Backup #N was not found.”', async () => {
+    const result = await runProgram(['memory', 'recover', '--backup', '99'], {
+      memoryCloudRecover: async () => ({ status: 'no-backup' }),
+    });
+    expect(result.output).toContain('Backup #99 was not found.');
   });
 });

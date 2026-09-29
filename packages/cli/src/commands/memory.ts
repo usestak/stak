@@ -1,4 +1,4 @@
-import type { Command } from 'commander';
+import { Option, type Command } from 'commander';
 
 import type {
   DiscoveredMemoryItem,
@@ -134,6 +134,12 @@ export const registerMemoryCommand = (
             finalProjects: preview.finalProjects,
             privacy: preview.privacy,
             supersedes: preview.supersession.supersedes,
+            // Public/backup-facing fields; generation-named fields retained for
+            // programmatic compatibility.
+            localSourceBackup: preview.supersession.localRecoveredGeneration,
+            cloudLatestBackup: preview.supersession.cloudLatestGeneration,
+            parentBackup: preview.supersession.parentGeneration,
+            nextBackup: preview.supersession.nextGeneration,
             localRecoveredGeneration:
               preview.supersession.localRecoveredGeneration,
             cloudLatestGeneration: preview.supersession.cloudLatestGeneration,
@@ -167,9 +173,7 @@ export const registerMemoryCommand = (
           );
         const ok =
           options.yes === true ||
-          (await dependencies.confirm(
-            'Create the new generation and supersede?',
-          ));
+          (await dependencies.confirm('Create the new backup and supersede?'));
         if (!ok) {
           if (!options.json) dependencies.writeOut('Cancelled.\n');
           return;
@@ -185,28 +189,47 @@ export const registerMemoryCommand = (
       dependencies.writeOut(renderMemoryCloudBackup(outcome));
     });
 
+  // `stack memory history` (was `generations`). Users see immutable Cloud generations
+  // as "backups"; the internal generation model is unchanged.
+  const historyAction = async (options: Flags) => {
+    const outcome = await dependencies.memoryGenerations();
+    const rows = (outcome.status === 'ok' ? outcome.generations : []).map(
+      (g) => ({
+        // Public/backup-facing field is `backup`; `generation` retained for
+        // programmatic compatibility (see the JSON contract note in docs).
+        backup: g.generation,
+        generation: g.generation,
+        createdAt: g.createdAt,
+        privacyMode: g.privacyMode,
+        state: g.state,
+        payloadBytes: g.payloadBytes,
+        latest: g.latest,
+      }),
+    );
+    if (options.json) {
+      emitJson(dependencies, { backups: rows, generations: rows });
+      return;
+    }
+    dependencies.writeOut(
+      renderMemoryGenerations(
+        outcome.status === 'ok' ? outcome.generations : [],
+        { authenticated: outcome.status === 'ok' },
+      ),
+    );
+  };
+
   memory
-    .command('generations')
-    .description('List recoverable Memory backup generations (newest first)')
+    .command('history')
+    .description('Show your Memory backup history (newest first)')
     .option('--json', 'emit structured JSON only')
-    .action(async (options: Flags) => {
-      const outcome = await dependencies.memoryGenerations();
-      if (options.json) {
-        emitJson(
-          dependencies,
-          outcome.status === 'ok'
-            ? { generations: outcome.generations }
-            : { authenticated: false, generations: [] },
-        );
-        return;
-      }
-      dependencies.writeOut(
-        renderMemoryGenerations(
-          outcome.status === 'ok' ? outcome.generations : [],
-          { authenticated: outcome.status === 'ok' },
-        ),
-      );
-    });
+    .action(historyAction);
+
+  // Hidden backward-compatibility alias for the previous public command name.
+  memory
+    .command('generations', { hidden: true })
+    .description('Alias for `stack memory history`')
+    .option('--json', 'emit structured JSON only')
+    .action(historyAction);
 
   memory
     .command('protect')
@@ -278,10 +301,9 @@ export const registerMemoryCommand = (
   memory
     .command('recover')
     .description('Recover the private memory store from Stack Cloud')
-    .option(
-      '--generation <n>',
-      'recover a specific generation (default: latest)',
-    )
+    .option('--backup <n>', 'recover a specific backup (default: latest)')
+    // Hidden backward-compatibility alias for the previous option name.
+    .addOption(new Option('--generation <n>', 'alias for --backup').hideHelp())
     .option(
       '--passkey',
       'unlock Protected memory with a passkey in the browser',
@@ -293,19 +315,42 @@ export const registerMemoryCommand = (
     .option('--json', 'emit structured JSON only')
     .action(
       async (options: {
+        backup?: string;
         generation?: string;
         passkey?: boolean;
         recoveryFile?: string;
         json?: boolean;
       }) => {
+        // Resolve --backup / --generation (alias). Reject a genuine conflict.
+        if (
+          options.backup !== undefined &&
+          options.generation !== undefined &&
+          options.backup !== options.generation
+        ) {
+          dependencies.writeOut(
+            'Specify only one of --backup or --generation.\n',
+          );
+          return;
+        }
+        const selector = options.backup ?? options.generation;
+        const generation =
+          selector !== undefined ? Number.parseInt(selector, 10) : undefined;
+        const notFoundMessage =
+          generation !== undefined
+            ? `Backup #${generation} was not found.\n`
+            : 'No Cloud backup found for this account.\n';
+
         if (options.passkey) {
           const result = await dependencies.memoryRecoverPasskey({
-            ...(options.generation !== undefined
-              ? { generation: Number.parseInt(options.generation, 10) }
-              : {}),
+            ...(generation !== undefined ? { generation } : {}),
           });
           if (options.json) {
-            emitJson(dependencies, result);
+            emitJson(
+              dependencies,
+              result.status === 'recovered'
+                ? { ...result, backup: result.generation }
+                : result,
+            );
             return;
           }
           if (result.status === 'not-authenticated') {
@@ -313,7 +358,7 @@ export const registerMemoryCommand = (
             return;
           }
           if (result.status === 'no-backup') {
-            dependencies.writeOut('No Cloud backup found for this account.\n');
+            dependencies.writeOut(notFoundMessage);
             return;
           }
           dependencies.writeOut(
@@ -327,15 +372,22 @@ export const registerMemoryCommand = (
           return;
         }
         const outcome = await dependencies.memoryCloudRecover({
-          ...(options.generation !== undefined
-            ? { generation: Number.parseInt(options.generation, 10) }
-            : {}),
+          ...(generation !== undefined ? { generation } : {}),
           ...(options.recoveryFile
             ? { recoveryFile: options.recoveryFile }
             : {}),
         });
         if (options.json) {
-          emitJson(dependencies, outcome);
+          emitJson(
+            dependencies,
+            outcome.status === 'recovered'
+              ? { ...outcome, backup: outcome.generation }
+              : outcome,
+          );
+          return;
+        }
+        if (outcome.status === 'no-backup') {
+          dependencies.writeOut(notFoundMessage);
           return;
         }
         dependencies.writeOut(renderMemoryRecover(outcome));
@@ -355,7 +407,12 @@ export const registerMemoryCommand = (
       if (options.json) {
         emitJson(dependencies, {
           local: local ?? { provider: 'claude', files: 0, projects: 0 },
-          cloud,
+          cloud: {
+            ...cloud,
+            // Public/backup-facing aliases; generation-named fields retained.
+            localRecoveredBackup: cloud.localRecoveredGeneration,
+            cloudLatestBackup: cloud.latestGeneration,
+          },
         });
         return;
       }
