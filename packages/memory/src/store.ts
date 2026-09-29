@@ -34,6 +34,9 @@ export const memoryStorePaths = (stackHome: string) => {
     ),
     // Machine-local project registry (bindings + paths). NEVER bundled/uploaded.
     localProjectRegistry: path.join(root, 'projects-local.json'),
+    // Machine-local recovery provenance (which generation local state came from).
+    // NEVER bundled/uploaded/public; non-secret metadata only. (Phase 15B.6)
+    recoveryState: path.join(root, 'recovery-state.json'),
   };
 };
 

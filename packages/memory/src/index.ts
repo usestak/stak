@@ -4,6 +4,7 @@ export * from './project/project-id.js';
 export * from './project/registry.js';
 export * from './project/registry-store.js';
 export * from './store.js';
+export * from './local-recovery-state.js';
 export * from './claude-adapter.js';
 export * from './backup.js';
 export * from './restore.js';

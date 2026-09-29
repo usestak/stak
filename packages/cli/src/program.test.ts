@@ -293,6 +293,7 @@ const runProgram = async (
     memoryCloudProtect: async () => ({ status: 'not-authenticated' }),
     memoryProtectPasskey: async () => ({ status: 'not-authenticated' }),
     memoryRecoverPasskey: async () => ({ status: 'not-authenticated' }),
+    memoryGenerations: async () => ({ status: 'not-authenticated' }),
     memoryCloudStatus: async () => ({
       authenticated: false,
       privacyMode: null,
@@ -300,6 +301,8 @@ const runProgram = async (
       lastCloudBackupAt: null,
       recoveryMethodTypes: [],
       deviceEnrolled: false,
+      localRecoveredGeneration: null,
+      historicalRecovery: false,
     }),
     projectList: async () => [],
     projectMap: async () => ({ status: 'project-not-found' }),
@@ -314,6 +317,13 @@ const runProgram = async (
       finalFiles: 0,
       finalProjects: 0,
       privacy: null,
+      supersession: {
+        localRecoveredGeneration: null,
+        cloudLatestGeneration: null,
+        parentGeneration: null,
+        nextGeneration: null,
+        supersedes: false,
+      },
     }),
     confirm: async () => true,
     writeOut: (value) => {
@@ -1215,6 +1225,8 @@ describe('Stack CLI', () => {
         lastCloudBackupAt: '2026-09-25T12:00:00.000Z',
         recoveryMethodTypes: ['passkey'],
         deviceEnrolled: true,
+        localRecoveredGeneration: 4,
+        historicalRecovery: false,
       }),
     });
     expect(present.output).toContain('3 projects backed up');
@@ -1346,6 +1358,13 @@ describe('Stack CLI', () => {
       finalFiles: 27,
       finalProjects: 9,
       privacy: 'protected' as const,
+      supersession: {
+        localRecoveredGeneration: null,
+        cloudLatestGeneration: null,
+        parentGeneration: null,
+        nextGeneration: null,
+        supersedes: false,
+      },
     };
     const result = await runProgram(['memory', 'backup', '--dry-run'], {
       memoryBackupPreview: async () => preview,
@@ -1376,6 +1395,13 @@ describe('Stack CLI', () => {
           finalFiles: 27,
           finalProjects: 9,
           privacy: 'protected',
+          supersession: {
+            localRecoveredGeneration: null,
+            cloudLatestGeneration: null,
+            parentGeneration: null,
+            nextGeneration: null,
+            supersedes: false,
+          },
         }),
       },
     );
@@ -1388,5 +1414,135 @@ describe('Stack CLI', () => {
       privacy: 'protected',
       dryRun: true,
     });
+  });
+
+  it('memory generations lists recoverable generations newest-first', async () => {
+    const result = await runProgram(['memory', 'generations'], {
+      memoryGenerations: async () => ({
+        status: 'ok',
+        generations: [
+          {
+            generation: 4,
+            createdAt: '2026-09-28T16:45:57.000Z',
+            privacyMode: 'protected',
+            state: 'committed',
+            payloadBytes: 76442,
+            latest: true,
+          },
+          {
+            generation: 3,
+            createdAt: '2026-09-26T13:58:45.000Z',
+            privacyMode: 'protected',
+            state: 'committed',
+            payloadBytes: 73126,
+            latest: false,
+          },
+        ],
+      }),
+    });
+    expect(result.output).toContain('Memory generations');
+    expect(result.output).toContain('4');
+    expect(result.output).toContain('latest');
+    expect(result.output).toContain('--generation');
+  });
+
+  it('memory generations --json emits the generation metadata', async () => {
+    const result = await runProgram(['memory', 'generations', '--json'], {
+      memoryGenerations: async () => ({
+        status: 'ok',
+        generations: [
+          {
+            generation: 4,
+            createdAt: '2026-09-28T16:45:57.000Z',
+            privacyMode: 'protected',
+            state: 'committed',
+            payloadBytes: 76442,
+            latest: true,
+          },
+        ],
+      }),
+    });
+    const parsed = JSON.parse(result.output);
+    expect(parsed.generations[0]).toMatchObject({
+      generation: 4,
+      latest: true,
+    });
+  });
+
+  it('memory status shows a historical-recovery relationship, not “up to date”', async () => {
+    const result = await runProgram(['memory', 'status'], {
+      memoryStatus: async () => ({
+        provider: 'claude',
+        projects: 9,
+        files: 27,
+        lastBackupAt: '2026-09-26T12:00:00.000Z',
+      }),
+      memoryCloudStatus: async () => ({
+        authenticated: true,
+        privacyMode: 'protected',
+        latestGeneration: 4,
+        lastCloudBackupAt: '2026-09-28T12:00:00.000Z',
+        recoveryMethodTypes: ['passkey'],
+        deviceEnrolled: true,
+        localRecoveredGeneration: 3,
+        historicalRecovery: true,
+      }),
+    });
+    expect(result.output).toContain('Local source      Generation 3');
+    expect(result.output).toContain('Cloud latest      Generation 4');
+    expect(result.output).toContain('Historical recovery');
+    expect(result.output).not.toContain('up to date');
+  });
+
+  it('memory backup from historical local state requires confirmation before superseding', async () => {
+    const supersedingPreview = {
+      provider: 'claude' as const,
+      native: [],
+      carriedForward: [],
+      nativeFiles: 9,
+      nativeProjects: 2,
+      retainedFiles: 18,
+      retainedProjects: 7,
+      finalFiles: 27,
+      finalProjects: 9,
+      privacy: 'protected' as const,
+      supersession: {
+        localRecoveredGeneration: 3,
+        cloudLatestGeneration: 4,
+        parentGeneration: 4,
+        nextGeneration: 5,
+        supersedes: true,
+      },
+    };
+    // Declined → cancelled, no backup performed.
+    const declined = await runProgram(['memory', 'backup'], {
+      memoryBackupPreview: async () => supersedingPreview,
+      confirm: async () => false,
+      memoryCloudBackup: async () => {
+        throw new Error('must not back up without confirmation');
+      },
+    });
+    expect(declined.output).toContain('supersede generation 4');
+    expect(declined.output).toContain('Cancelled.');
+
+    // Confirmed → proceeds.
+    let backedUp = false;
+    await runProgram(['memory', 'backup'], {
+      memoryBackupPreview: async () => supersedingPreview,
+      confirm: async () => true,
+      memoryCloudBackup: async () => {
+        backedUp = true;
+        return {
+          local: {
+            provider: 'claude',
+            files: 27,
+            projects: 9,
+            createdAt: '2026-09-29T00:00:00.000Z',
+          },
+          cloud: { status: 'protected', generation: 5 },
+        };
+      },
+    });
+    expect(backedUp).toBe(true);
   });
 });

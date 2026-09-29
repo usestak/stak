@@ -11,11 +11,14 @@ import type {
   CloudRecoverOutcome,
   MemoryBackupOutcome,
   MemoryCloudStatus,
+  MemoryGenerationsOutcome,
 } from '../memory/cloud-ops.js';
 import {
+  historicalBaseBackupWarning,
   renderMemoryBackupPreview,
   renderMemoryCloudBackup,
   renderMemoryCloudStatus,
+  renderMemoryGenerations,
   renderMemoryProtect,
   renderMemoryRecover,
   renderMemoryRestore,
@@ -43,6 +46,7 @@ export type MemoryCommandDependencies = {
     generation?: number;
     recoveryFile?: string;
   }): Promise<CloudRecoverOutcome>;
+  memoryGenerations(): Promise<MemoryGenerationsOutcome>;
   memoryCloudProtect(options: {
     recoveryFile?: string;
   }): Promise<MemoryProtectCommandResult>;
@@ -51,16 +55,24 @@ export type MemoryCommandDependencies = {
     | { status: 'insecure-local-key' }
     | { status: 'protected'; migrated: number }
   >;
-  memoryRecoverPasskey(): Promise<
+  memoryRecoverPasskey(options: {
+    generation?: number;
+  }): Promise<
     | { status: 'not-authenticated' }
     | { status: 'no-backup' }
     | { status: 'recovered'; objects: number; generation: number }
   >;
   memoryCloudStatus(): Promise<MemoryCloudStatus>;
+  confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
 
-type Flags = { json?: boolean; verbose?: boolean; dryRun?: boolean };
+type Flags = {
+  json?: boolean;
+  verbose?: boolean;
+  dryRun?: boolean;
+  yes?: boolean;
+};
 
 const emitJson = (deps: MemoryCommandDependencies, value: unknown) =>
   deps.writeOut(`${JSON.stringify(value, null, 2)}\n`);
@@ -103,6 +115,10 @@ export const registerMemoryCommand = (
       'preview the backup composition without changing anything',
     )
     .option('--verbose', 'show per-item detail (with --dry-run)')
+    .option(
+      '-y, --yes',
+      'confirm superseding a newer Cloud generation (non-interactive)',
+    )
     .option('--json', 'emit structured JSON only')
     .action(async (options: Flags) => {
       if (options.dryRun) {
@@ -117,6 +133,12 @@ export const registerMemoryCommand = (
             finalFiles: preview.finalFiles,
             finalProjects: preview.finalProjects,
             privacy: preview.privacy,
+            supersedes: preview.supersession.supersedes,
+            localRecoveredGeneration:
+              preview.supersession.localRecoveredGeneration,
+            cloudLatestGeneration: preview.supersession.cloudLatestGeneration,
+            parentGeneration: preview.supersession.parentGeneration,
+            nextGeneration: preview.supersession.nextGeneration,
             dryRun: true,
           });
           return;
@@ -128,6 +150,31 @@ export const registerMemoryCommand = (
         );
         return;
       }
+      // Backing up after a historical recovery would supersede a newer Cloud
+      // generation — require explicit confirmation (fail closed).
+      const preview = await dependencies.memoryBackupPreview();
+      if (preview.supersession.supersedes) {
+        if (options.json && options.yes !== true) {
+          emitJson(dependencies, {
+            status: 'supersession-unconfirmed',
+            ...preview.supersession,
+          });
+          return;
+        }
+        if (!options.json)
+          dependencies.writeOut(
+            `${historicalBaseBackupWarning(preview.supersession)}\n\n`,
+          );
+        const ok =
+          options.yes === true ||
+          (await dependencies.confirm(
+            'Create the new generation and supersede?',
+          ));
+        if (!ok) {
+          if (!options.json) dependencies.writeOut('Cancelled.\n');
+          return;
+        }
+      }
       if (!options.json)
         dependencies.writeOut('Backing up Claude memory...\n\n');
       const outcome = await dependencies.memoryCloudBackup();
@@ -136,6 +183,29 @@ export const registerMemoryCommand = (
         return;
       }
       dependencies.writeOut(renderMemoryCloudBackup(outcome));
+    });
+
+  memory
+    .command('generations')
+    .description('List recoverable Memory backup generations (newest first)')
+    .option('--json', 'emit structured JSON only')
+    .action(async (options: Flags) => {
+      const outcome = await dependencies.memoryGenerations();
+      if (options.json) {
+        emitJson(
+          dependencies,
+          outcome.status === 'ok'
+            ? { generations: outcome.generations }
+            : { authenticated: false, generations: [] },
+        );
+        return;
+      }
+      dependencies.writeOut(
+        renderMemoryGenerations(
+          outcome.status === 'ok' ? outcome.generations : [],
+          { authenticated: outcome.status === 'ok' },
+        ),
+      );
     });
 
   memory
@@ -229,7 +299,11 @@ export const registerMemoryCommand = (
         json?: boolean;
       }) => {
         if (options.passkey) {
-          const result = await dependencies.memoryRecoverPasskey();
+          const result = await dependencies.memoryRecoverPasskey({
+            ...(options.generation !== undefined
+              ? { generation: Number.parseInt(options.generation, 10) }
+              : {}),
+          });
           if (options.json) {
             emitJson(dependencies, result);
             return;

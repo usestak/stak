@@ -27,6 +27,9 @@ import {
   protectedCloudBackup,
   standardCloudBackup,
   unwrapWithRecoveryKey,
+  isHistoricalRecovery,
+  readLocalRecoveryState,
+  writeLocalRecoveryState,
   type BackupResult,
   type BridgeEnvelope,
   type LocalMemoryKeyStore,
@@ -91,6 +94,28 @@ const isStoredWrapper = (value: unknown): value is StoredWrapper =>
   typeof (value as { mmkId?: unknown }).mmkId === 'string' &&
   typeof (value as { wrapper?: unknown }).wrapper === 'object';
 
+/**
+ * Record which Cloud generation the local private store now reflects (Phase 15B.6).
+ * Machine-local, non-secret provenance so `status` can flag a historical recovery and
+ * a later backup can warn before superseding a newer Cloud generation.
+ */
+const recordRecoveryProvenance = async (
+  deps: MemoryCloudDeps,
+  recovered: {
+    generation: number;
+    privacyMode: 'standard' | 'protected';
+    cloudLatest: number | null;
+  },
+): Promise<void> => {
+  await writeLocalRecoveryState(deps.stackHome, {
+    schemaVersion: 1,
+    recoveredGeneration: recovered.generation,
+    cloudLatestAtRecovery: recovered.cloudLatest,
+    recoveredAt: (deps.now ?? (() => new Date()))().toISOString(),
+    privacyMode: recovered.privacyMode,
+  });
+};
+
 /** backup: local first, then Cloud (never fails the local commit). */
 export const runMemoryCloudBackup = async (
   deps: MemoryCloudDeps,
@@ -109,6 +134,13 @@ export const runMemoryCloudBackup = async (
         mmk,
         ...(deps.now ? { now: deps.now } : {}),
       });
+      // Local state now equals the new latest generation — clear any historical
+      // provenance so status returns to normal.
+      await recordRecoveryProvenance(deps, {
+        generation: result.generation,
+        privacyMode: 'protected',
+        cloudLatest: result.generation,
+      });
       return {
         local,
         cloud: { status: 'protected', generation: result.generation },
@@ -118,6 +150,11 @@ export const runMemoryCloudBackup = async (
       stackHome: deps.stackHome,
       backend: deps.backend,
       ...(deps.now ? { now: deps.now } : {}),
+    });
+    await recordRecoveryProvenance(deps, {
+      generation: result.generation,
+      privacyMode: 'standard',
+      cloudLatest: result.generation,
     });
     return {
       local,
@@ -151,6 +188,8 @@ export const runMemoryCloudRecover = async (
       : await deps.backend.getLatest();
   if (!meta) return { status: 'no-backup' };
 
+  const cloudLatest = (await deps.backend.getLatest())?.generation ?? null;
+
   if (meta.privacyMode === 'standard') {
     const result = await cloudRecover({
       stackHome: deps.stackHome,
@@ -158,6 +197,11 @@ export const runMemoryCloudRecover = async (
       ...(options.generation !== undefined
         ? { generation: options.generation }
         : {}),
+    });
+    await recordRecoveryProvenance(deps, {
+      generation: result.generation,
+      privacyMode: 'standard',
+      cloudLatest,
     });
     return {
       status: 'recovered',
@@ -187,6 +231,11 @@ export const runMemoryCloudRecover = async (
   // Recovery already succeeded; enrolling this device is best-effort and must not
   // persist insecure key material (enrollDeviceSafe fails closed internally).
   if (unlockedViaRecoveryKey) await enrollDeviceSafe(deps.localKeyStore, mmk);
+  await recordRecoveryProvenance(deps, {
+    generation: result.generation,
+    privacyMode: 'protected',
+    cloudLatest,
+  });
   return {
     status: 'recovered',
     privacyMode: 'protected',
@@ -267,12 +316,18 @@ export type MemoryCloudStatus = {
   lastCloudBackupAt: string | null;
   recoveryMethodTypes: string[];
   deviceEnrolled: boolean;
+  /** Machine-local: which generation the local store was recovered from (Phase 15B.6). */
+  localRecoveredGeneration: number | null;
+  /** True when local state came from an OLDER generation than the Cloud latest. */
+  historicalRecovery: boolean;
 };
 
 export const readMemoryCloudStatus = async (
   deps: MemoryCloudDeps,
 ): Promise<MemoryCloudStatus> => {
   const deviceEnrolled = await deps.localKeyStore.hasKey();
+  const provenance = await readLocalRecoveryState(deps.stackHome);
+  const localRecoveredGeneration = provenance?.recoveredGeneration ?? null;
   if (!deps.backend)
     return {
       authenticated: false,
@@ -281,17 +336,105 @@ export const readMemoryCloudStatus = async (
       lastCloudBackupAt: null,
       recoveryMethodTypes: [],
       deviceEnrolled,
+      localRecoveredGeneration,
+      historicalRecovery: false,
     };
   const profile = await deps.backend.getProfile();
   const latest = await deps.backend.getLatest();
   const methods = await deps.backend.listRecoveryMethods();
+  const latestGeneration = profile?.latestGeneration ?? null;
   return {
     authenticated: true,
     privacyMode: profile?.privacyMode ?? null,
-    latestGeneration: profile?.latestGeneration ?? null,
+    latestGeneration,
     lastCloudBackupAt: latest?.createdAt ?? null,
     recoveryMethodTypes: [...new Set(methods.map((method) => method.type))],
     deviceEnrolled,
+    localRecoveredGeneration,
+    historicalRecovery: isHistoricalRecovery(provenance, latestGeneration),
+  };
+};
+
+/* -------------------------------------------------------------------------- */
+/* Generation history + historical-base backup context (Phase 15B.6)          */
+/* -------------------------------------------------------------------------- */
+
+export type MemoryGenerationSummary = {
+  generation: number;
+  createdAt: string;
+  privacyMode: 'standard' | 'protected';
+  state: string;
+  payloadBytes: number;
+  latest: boolean;
+};
+
+export type MemoryGenerationsOutcome =
+  | { status: 'not-authenticated' }
+  | { status: 'ok'; generations: MemoryGenerationSummary[] };
+
+/**
+ * List the user's recoverable (committed) Memory generations, newest first. Exposes
+ * only non-secret metadata — never backup UUIDs, payload locators, wrapped DEKs,
+ * hashes, or contents.
+ */
+export const runMemoryGenerations = async (
+  deps: MemoryCloudDeps,
+): Promise<MemoryGenerationsOutcome> => {
+  if (!deps.backend) return { status: 'not-authenticated' };
+  const generations = await deps.backend.listGenerations();
+  const latest = generations.reduce<number | null>(
+    (max, g) => (max === null || g.generation > max ? g.generation : max),
+    null,
+  );
+  return {
+    status: 'ok',
+    generations: generations.map((g) => ({
+      generation: g.generation,
+      createdAt: g.createdAt,
+      privacyMode: g.privacyMode,
+      state: g.state,
+      payloadBytes: g.payloadBytes,
+      latest: g.generation === latest,
+    })),
+  };
+};
+
+export type BackupSupersession = {
+  localRecoveredGeneration: number | null;
+  cloudLatestGeneration: number | null;
+  parentGeneration: number | null;
+  nextGeneration: number | null;
+  supersedes: boolean;
+};
+
+/**
+ * Read-only context for a backup: the local store's recovery provenance and the Cloud
+ * latest. A new backup always parents from the Cloud latest (linear history); when the
+ * local store came from an OLDER generation, the backup would supersede a newer Cloud
+ * generation and must be explicitly confirmed.
+ */
+export const readBackupSupersession = async (
+  deps: MemoryCloudDeps,
+): Promise<BackupSupersession> => {
+  const provenance = await readLocalRecoveryState(deps.stackHome);
+  const localRecoveredGeneration = provenance?.recoveredGeneration ?? null;
+  if (!deps.backend)
+    return {
+      localRecoveredGeneration,
+      cloudLatestGeneration: null,
+      parentGeneration: null,
+      nextGeneration: null,
+      supersedes: false,
+    };
+  const cloudLatestGeneration =
+    (await deps.backend.getLatest())?.generation ?? null;
+  return {
+    localRecoveredGeneration,
+    cloudLatestGeneration,
+    parentGeneration: cloudLatestGeneration,
+    nextGeneration:
+      cloudLatestGeneration === null ? 0 : cloudLatestGeneration + 1,
+    supersedes: isHistoricalRecovery(provenance, cloudLatestGeneration),
   };
 };
 
@@ -434,11 +577,20 @@ export type PasskeyRecoverResult =
  */
 export const runPasskeyRecover = async (
   deps: PasskeyBridgeDeps,
+  options: { generation?: number } = {},
 ): Promise<PasskeyRecoverResult> => {
   if (!deps.backend) return { status: 'not-authenticated' };
   const now = deps.now ?? (() => new Date());
   const sleep = deps.sleep ?? defaultSleep;
-  if (!(await deps.backend.getLatest())) return { status: 'no-backup' };
+  // The CLI authoritatively selects the generation and fetches/decrypts its payload;
+  // the browser only unwraps the (generation-independent) MMK, so there is no
+  // browser/server generation TOCTOU. Confirm the requested generation exists first.
+  const cloudLatest = (await deps.backend.getLatest())?.generation ?? null;
+  const selected =
+    options.generation !== undefined
+      ? await deps.backend.getGeneration(options.generation)
+      : await deps.backend.getLatest();
+  if (!selected) return { status: 'no-backup' };
   const { session, initiatorPrivateKey } = await createRecoverySession({
     userId: 'stack-memory',
     ttlMs: deps.ttlMs ?? 5 * 60_000,
@@ -473,9 +625,19 @@ export const runPasskeyRecover = async (
     stackHome: deps.stackHome,
     backend: deps.backend,
     mmk,
+    ...(options.generation !== undefined
+      ? { generation: options.generation }
+      : {}),
   });
   // Recovery already succeeded; enroll best-effort (never persists insecure state).
   await enrollDeviceSafe(deps.localKeyStore, mmk);
+  await writeLocalRecoveryState(deps.stackHome, {
+    schemaVersion: 1,
+    recoveredGeneration: result.generation,
+    cloudLatestAtRecovery: cloudLatest,
+    recoveredAt: now().toISOString(),
+    privacyMode: 'protected',
+  });
   return {
     status: 'recovered',
     objects: result.objects,

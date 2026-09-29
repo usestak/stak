@@ -58,16 +58,19 @@ import { resolveMemoryProjects } from './memory/resolve.js';
 import { resolveCloudBaseUrl } from './cloud/config.js';
 import { stackCloudRemoteMemoryBackend } from './memory/cloud-backend.js';
 import {
+  readBackupSupersession,
   readMemoryCloudStatus,
   runMemoryCloudBackup,
   runMemoryCloudProtect,
   runMemoryCloudRecover,
+  runMemoryGenerations,
   runPasskeyProtect,
   runPasskeyRecover,
   type CloudRecoverOutcome,
   type MemoryBackupOutcome,
   type MemoryCloudDeps,
   type MemoryCloudStatus,
+  type MemoryGenerationsOutcome,
   type PasskeyBridgeDeps,
   type PasskeyProtectResult,
   type PasskeyRecoverResult,
@@ -226,11 +229,14 @@ export type ProgramDependencies = {
     generation?: number;
     recoveryFile?: string;
   }): Promise<CloudRecoverOutcome>;
+  memoryGenerations(): Promise<MemoryGenerationsOutcome>;
   memoryCloudProtect(options: {
     recoveryFile?: string;
   }): Promise<MemoryProtectCommandResult>;
   memoryProtectPasskey(): Promise<PasskeyProtectResult>;
-  memoryRecoverPasskey(): Promise<PasskeyRecoverResult>;
+  memoryRecoverPasskey(options: {
+    generation?: number;
+  }): Promise<PasskeyRecoverResult>;
   memoryCloudStatus(): Promise<MemoryCloudStatus>;
   projectList(): Promise<ProjectListRow[]>;
   projectMap(options: {
@@ -469,7 +475,8 @@ const defaultDependencies: ProgramDependencies = {
   memoryRestore: async ({ apply }) =>
     (await memoryAdapter()).restore({ apply }),
   memoryBackupPreview: async () => {
-    // Non-mutating: preview composition locally, read Cloud privacy without writing.
+    // Non-mutating: preview composition + supersession locally, read Cloud privacy
+    // without writing anything.
     const composition = await (await memoryAdapter()).previewBackup();
     const cloud = await buildMemoryCloudDeps();
     let privacy: 'standard' | 'protected' | null = null;
@@ -477,12 +484,15 @@ const defaultDependencies: ProgramDependencies = {
       const profile = await cloud.backend.getProfile();
       privacy = profile?.privacyMode ?? 'standard';
     }
-    return { ...composition, privacy };
+    const supersession = await readBackupSupersession(cloud);
+    return { ...composition, privacy, supersession };
   },
   memoryCloudBackup: async () =>
     runMemoryCloudBackup(await buildMemoryCloudDeps()),
   memoryCloudRecover: async (options) =>
     runMemoryCloudRecover(await buildMemoryCloudDeps(), options),
+  memoryGenerations: async () =>
+    runMemoryGenerations(await buildMemoryCloudDeps()),
   memoryCloudStatus: async () =>
     readMemoryCloudStatus(await buildMemoryCloudDeps()),
   memoryCloudProtect: async (options) => {
@@ -504,7 +514,8 @@ const defaultDependencies: ProgramDependencies = {
     return { migrated: result.migrated, recoveryFilePath };
   },
   memoryProtectPasskey: async () => runPasskeyProtect(await buildPasskeyDeps()),
-  memoryRecoverPasskey: async () => runPasskeyRecover(await buildPasskeyDeps()),
+  memoryRecoverPasskey: async (options) =>
+    runPasskeyRecover(await buildPasskeyDeps(), options),
   projectList: async () =>
     listProjects({
       stackHome,

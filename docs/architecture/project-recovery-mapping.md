@@ -756,3 +756,46 @@ Possible future UX (concepts only, not frozen): `stack memory generations` and/o
 syntax or behavior is implemented or committed in this closure. The contamination is still
 remediated by **superseding it with a new clean backup** (a fresh generation 5 from
 post‑15B.4 code), never by mutating an immutable generation.
+
+### 15B.6 — historical generation recovery + safe supersession (2026-09-29)
+
+Phase 15B.5 established that Cloud Memory generations are immutable and that recovery
+faithfully reproduces the latest one. The live dogfood also exposed a gap: when the
+latest generation contains unwanted state (e.g. the contaminated generation 4) but an
+earlier generation is known-good (generation 3), `stack memory recover` had no way to
+select the earlier one. 15B.6 adds that recovery primitive (no Phase 15C scope).
+
+- **`stack memory generations`** lists committed (recoverable) generations newest-first
+  with generation number, date, privacy mode, state, and payload size — and nothing
+  secret (no backup ids, payload locators, wrapped DEKs, hashes, or contents). JSON
+  variant is deterministic.
+- **`stack memory recover --generation <n>`** selects exactly generation _n_, never
+  falling back to latest; it fetches that generation's own metadata + payload, verifies
+  the hash, uses that generation's own privacy/crypto, decrypts if Protected, restores
+  the bundle, and reconciles its registry. A nonexistent (or retired/uncommitted)
+  generation fails clearly with no partial local state. Default recovery still selects
+  the latest. Passkey recovery binds the generation **CLI-side** (the browser only moves
+  the generation-independent MMK), so there is no browser/server generation TOCTOU.
+- **Recovery is read-only against Cloud.** Historical recovery never changes
+  `latest_generation`, retires newer generations, creates a generation, or uploads
+  anything — only the local private store changes.
+- **Machine-local recovery provenance** (`memory/recovery-state.json`, non-secret,
+  never bundled/public/cross-machine) records which generation the local store came from
+  and the Cloud latest observed at recovery. `stack memory status` uses it to show a
+  historical-recovery relationship ("Local source Generation N / Cloud latest M")
+  instead of falsely claiming "up to date".
+- **Safe supersession.** Cloud history is linear: a backup always parents from the
+  **current Cloud latest** (never from the recovered generation), so backing up after a
+  historical recovery creates e.g. generation 5 with parent 4 and supersedes 4 as
+  latest, while 4 stays immutable and recoverable. Because this supersedes newer Cloud
+  content, a real backup **requires explicit confirmation** (interactive prompt, or
+  `--yes`); `backup --dry-run` surfaces the situation (local source, cloud latest, next
+  generation, parent) without mutating. After a successful superseding backup, local
+  provenance resets to the new latest and status returns to normal; if the Cloud backup
+  fails, provenance is left intact so the historical origin is still visible.
+- Standard and Protected follow identical generation-selection/provenance semantics
+  (only the encryption layer differs). The e31ff5c `upsert: false` immutability
+  hardening is preserved; historical recovery relies on immutable generation objects.
+
+Deferred: richer generation management (pruning, labelling, branching) is out of scope;
+this phase adds only inspect + recover-a-specific-generation + safe supersession.
