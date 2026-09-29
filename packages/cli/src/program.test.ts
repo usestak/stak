@@ -1463,7 +1463,7 @@ describe('Stack CLI', () => {
     expect(help.output).not.toContain('generations');
   });
 
-  it('memory history --json emits backups (with a compatibility generations alias)', async () => {
+  it('memory history --json uses backup terminology only (no generation fields)', async () => {
     const result = await runProgram(['memory', 'history', '--json'], {
       memoryGenerations: async () => ({
         status: 'ok',
@@ -1472,8 +1472,121 @@ describe('Stack CLI', () => {
     });
     const parsed = JSON.parse(result.output);
     expect(parsed.backups[0]).toMatchObject({ backup: 4, latest: true });
-    // Compatibility: the generation-named field/array are retained.
-    expect(parsed.generations[0]).toMatchObject({ generation: 4 });
+    // Public JSON exposes no generation terminology.
+    expect(parsed.generations).toBeUndefined();
+    expect(parsed.backups[0].generation).toBeUndefined();
+    expect(result.output).not.toContain('generation');
+  });
+
+  it('hidden `memory generations --json` returns the modern backup JSON', async () => {
+    const result = await runProgram(['memory', 'generations', '--json'], {
+      memoryGenerations: async () => ({
+        status: 'ok',
+        generations: twoGenerations.generations.slice(0, 1),
+      }),
+    });
+    const parsed = JSON.parse(result.output);
+    expect(parsed.backups[0]).toMatchObject({ backup: 4 });
+    expect(parsed.generations).toBeUndefined();
+  });
+
+  it('recover --json uses `backup`, not `generation`', async () => {
+    const result = await runProgram(
+      ['memory', 'recover', '--backup', '3', '--json'],
+      {
+        memoryCloudRecover: async () => ({
+          status: 'recovered',
+          privacyMode: 'protected',
+          objects: 27,
+          generation: 3,
+        }),
+      },
+    );
+    const parsed = JSON.parse(result.output);
+    expect(parsed.backup).toBe(3);
+    expect(parsed.generation).toBeUndefined();
+  });
+
+  it('hidden recover --generation --json returns the modern backup JSON', async () => {
+    const result = await runProgram(
+      ['memory', 'recover', '--generation', '3', '--json'],
+      {
+        memoryCloudRecover: async () => ({
+          status: 'recovered',
+          privacyMode: 'protected',
+          objects: 27,
+          generation: 3,
+        }),
+      },
+    );
+    const parsed = JSON.parse(result.output);
+    expect(parsed.backup).toBe(3);
+    expect(parsed.generation).toBeUndefined();
+  });
+
+  it('status --json exposes backup-named fields only', async () => {
+    const result = await runProgram(['memory', 'status', '--json'], {
+      memoryStatus: async () => ({
+        provider: 'claude',
+        projects: 9,
+        files: 27,
+        lastBackupAt: '2026-09-26T12:00:00.000Z',
+      }),
+      memoryCloudStatus: async () => ({
+        authenticated: true,
+        privacyMode: 'protected',
+        latestGeneration: 4,
+        lastCloudBackupAt: '2026-09-28T12:00:00.000Z',
+        recoveryMethodTypes: ['passkey'],
+        deviceEnrolled: true,
+        localRecoveredGeneration: 3,
+        historicalRecovery: true,
+      }),
+    });
+    const parsed = JSON.parse(result.output);
+    expect(parsed.cloud.localRecoveredBackup).toBe(3);
+    expect(parsed.cloud.cloudLatestBackup).toBe(4);
+    expect(parsed.cloud.latestGeneration).toBeUndefined();
+    expect(parsed.cloud.localRecoveredGeneration).toBeUndefined();
+  });
+
+  it('backup --dry-run --json exposes backup-named supersession fields only', async () => {
+    const result = await runProgram(
+      ['memory', 'backup', '--dry-run', '--json'],
+      {
+        memoryBackupPreview: async () => ({
+          provider: 'claude',
+          native: [],
+          carriedForward: [],
+          nativeFiles: 9,
+          nativeProjects: 2,
+          retainedFiles: 18,
+          retainedProjects: 7,
+          finalFiles: 27,
+          finalProjects: 9,
+          privacy: 'protected',
+          supersession: {
+            localRecoveredGeneration: 3,
+            cloudLatestGeneration: 4,
+            parentGeneration: 4,
+            nextGeneration: 5,
+            supersedes: true,
+          },
+        }),
+      },
+    );
+    const parsed = JSON.parse(result.output);
+    expect(parsed).toMatchObject({
+      nextBackup: 5,
+      parentBackup: 4,
+      localSourceBackup: 3,
+      cloudLatestBackup: 4,
+      supersedes: true,
+    });
+    expect(parsed.nextGeneration).toBeUndefined();
+    expect(parsed.parentGeneration).toBeUndefined();
+    expect(parsed.cloudLatestGeneration).toBeUndefined();
+    expect(parsed.localRecoveredGeneration).toBeUndefined();
   });
 
   it('memory status shows a historical-recovery relationship, not “up to date”', async () => {

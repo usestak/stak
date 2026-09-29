@@ -223,10 +223,14 @@ when the latest backup contains unwanted state but an earlier backup is known-go
   machines or enter a backup.
 
 > **Terminology.** Stack presents its immutable Memory backups to users as
-> **backups**; internally (and in the architecture docs, schema, and JSON field names
-> retained for compatibility) they are still called _generations_. The internal model
-> is unchanged. `stack memory generations` and `recover --generation <n>` remain as
-> hidden compatibility aliases for `stack memory history` and `recover --backup <n>`.
+> **backups**. The **public CLI — including `--json` output — uses backup terminology
+> only** (`backups[].backup`, `--backup <n>`, `Backup #N`). Internally (the domain
+> types, the database columns, the Cloud RPC, and the architecture docs) they are still
+> called _generations_; that model is unchanged and translated to backups at the CLI
+> boundary. `stack memory generations` and `recover --generation <n>` remain as
+> **hidden** aliases that accept the old invocation syntax but return the same modern
+> backup JSON. These aliases are a pre-release convenience and are not promised as a
+> permanent compatibility contract.
 
 ### Recovery methods (Protected)
 

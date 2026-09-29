@@ -884,11 +884,15 @@ types, and JSON field names retained for programmatic compatibility keep the int
 - Human output uses "backup"/"Backup #N"/"backup history" and never "generation"
   (history list, recover message, status historical relationship, backup dry-run preview,
   and the supersession confirmation). Errors say e.g. "Backup #99 was not found."
-- JSON contract decision: `--json` is treated as a user-facing contract, so it now emits
-  backup-named fields as the primary shape (`backups[].backup`, `nextBackup`,
-  `localSourceBackup`/`cloudLatestBackup`, `localRecoveredBackup`, and `backup` on a
-  recover result) **while retaining** the generation-named fields for compatibility (no
-  breaking change). Internal domain models and the DB are untouched.
+- JSON contract decision: pre-release at 0.1.0, `--json` uses **backup terminology only**
+  — `backups[].backup`, `nextBackup`, `parentBackup`, `localSourceBackup`/`cloudLatestBackup`,
+  `localRecoveredBackup`, and `backup` on a recover result. It does **not** duplicate
+  generation-named fields (no long-term compatibility debt). Internal generation-named
+  values are translated to backup terms at the CLI presentation boundary; internal domain
+  models, the Cloud RPC, and the DB are untouched. The hidden aliases
+  (`memory generations`, `recover --generation <n>`) accept the old invocation syntax but
+  return the same modern backup JSON; they are a pre-release convenience, not a promised
+  permanent contract.
 - No change to immutability, historical selection, default-latest recovery,
   Standard/Protected/passkey behavior, provenance, linear parent semantics, project
   identity, native+retained composition, or public/private boundaries.

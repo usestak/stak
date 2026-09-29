@@ -134,17 +134,12 @@ export const registerMemoryCommand = (
             finalProjects: preview.finalProjects,
             privacy: preview.privacy,
             supersedes: preview.supersession.supersedes,
-            // Public/backup-facing fields; generation-named fields retained for
-            // programmatic compatibility.
+            // Public CLI JSON uses backup terminology only; internal generation-named
+            // values are translated at this presentation boundary.
             localSourceBackup: preview.supersession.localRecoveredGeneration,
             cloudLatestBackup: preview.supersession.cloudLatestGeneration,
             parentBackup: preview.supersession.parentGeneration,
             nextBackup: preview.supersession.nextGeneration,
-            localRecoveredGeneration:
-              preview.supersession.localRecoveredGeneration,
-            cloudLatestGeneration: preview.supersession.cloudLatestGeneration,
-            parentGeneration: preview.supersession.parentGeneration,
-            nextGeneration: preview.supersession.nextGeneration,
             dryRun: true,
           });
           return;
@@ -157,13 +152,17 @@ export const registerMemoryCommand = (
         return;
       }
       // Backing up after a historical recovery would supersede a newer Cloud
-      // generation — require explicit confirmation (fail closed).
+      // backup — require explicit confirmation (fail closed).
       const preview = await dependencies.memoryBackupPreview();
       if (preview.supersession.supersedes) {
         if (options.json && options.yes !== true) {
           emitJson(dependencies, {
             status: 'supersession-unconfirmed',
-            ...preview.supersession,
+            supersedes: true,
+            localSourceBackup: preview.supersession.localRecoveredGeneration,
+            cloudLatestBackup: preview.supersession.cloudLatestGeneration,
+            parentBackup: preview.supersession.parentGeneration,
+            nextBackup: preview.supersession.nextGeneration,
           });
           return;
         }
@@ -195,10 +194,9 @@ export const registerMemoryCommand = (
     const outcome = await dependencies.memoryGenerations();
     const rows = (outcome.status === 'ok' ? outcome.generations : []).map(
       (g) => ({
-        // Public/backup-facing field is `backup`; `generation` retained for
-        // programmatic compatibility (see the JSON contract note in docs).
+        // Public CLI JSON uses backup terminology only; the internal generation
+        // number is translated to `backup` at this presentation boundary.
         backup: g.generation,
-        generation: g.generation,
         createdAt: g.createdAt,
         privacyMode: g.privacyMode,
         state: g.state,
@@ -207,7 +205,7 @@ export const registerMemoryCommand = (
       }),
     );
     if (options.json) {
-      emitJson(dependencies, { backups: rows, generations: rows });
+      emitJson(dependencies, { backups: rows });
       return;
     }
     dependencies.writeOut(
@@ -348,7 +346,11 @@ export const registerMemoryCommand = (
             emitJson(
               dependencies,
               result.status === 'recovered'
-                ? { ...result, backup: result.generation }
+                ? {
+                    status: result.status,
+                    objects: result.objects,
+                    backup: result.generation,
+                  }
                 : result,
             );
             return;
@@ -381,7 +383,12 @@ export const registerMemoryCommand = (
           emitJson(
             dependencies,
             outcome.status === 'recovered'
-              ? { ...outcome, backup: outcome.generation }
+              ? {
+                  status: outcome.status,
+                  privacyMode: outcome.privacyMode,
+                  objects: outcome.objects,
+                  backup: outcome.generation,
+                }
               : outcome,
           );
           return;
@@ -405,11 +412,17 @@ export const registerMemoryCommand = (
         dependencies.memoryCloudStatus(),
       ]);
       if (options.json) {
+        // Public CLI JSON uses backup terminology only; internal generation-named
+        // fields are translated at this presentation boundary.
         emitJson(dependencies, {
           local: local ?? { provider: 'claude', files: 0, projects: 0 },
           cloud: {
-            ...cloud,
-            // Public/backup-facing aliases; generation-named fields retained.
+            authenticated: cloud.authenticated,
+            privacyMode: cloud.privacyMode,
+            lastCloudBackupAt: cloud.lastCloudBackupAt,
+            recoveryMethodTypes: cloud.recoveryMethodTypes,
+            deviceEnrolled: cloud.deviceEnrolled,
+            historicalRecovery: cloud.historicalRecovery,
             localRecoveredBackup: cloud.localRecoveredGeneration,
             cloudLatestBackup: cloud.latestGeneration,
           },
