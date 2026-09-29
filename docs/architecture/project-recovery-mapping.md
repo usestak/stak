@@ -799,3 +799,72 @@ select the earlier one. 15B.6 adds that recovery primitive (no Phase 15C scope).
 
 Deferred: richer generation management (pruning, labelling, branching) is out of scope;
 this phase adds only inspect + recover-a-specific-generation + safe supersession.
+
+### 15B.6 real dogfood acceptance (2026-09-29)
+
+The full historical-recovery + safe-supersession chain was accepted against live Stack
+Cloud on fresh fenced machines (no private Memory contents or secrets recorded here).
+
+**Live generation history (immutable).** Gen 3 (Protected, committed, 2026-09-26, 73,126
+B — last known-good pre-Phase-15 backup) → Gen 4 (Protected, committed, parent 3,
+2026-09-28, 76,442 B — the known pre-15B.4 contaminated portable registry, retained as
+immutable evidence) → Gen 5 (Protected, committed, parent 4, 2026-09-29, 76,114 B —
+created from the clean historical recovery on Machine H; current latest, separate object).
+Gen 3 and Gen 4 object timestamps/sizes were unchanged after Gen 5 was created.
+
+**Machine H — explicit rollback + clean migration + supersession.** Fresh HOME/STACK_HOME
+
+- empty Atlas checkout (remote `github.com/reymiahthesun-bit/atlas-access-flow`), Cloud
+  latest = Gen 4. `stack memory recover --generation 3 --passkey` recovered exactly Gen 3
+  (27 files, Protected; local source = Gen 3, Cloud latest = Gen 4; historical provenance
+  persisted). Under the fixed Phase-15 runtime the pre-registry migration produced a clean
+  **9-project** model: Atlas resolved **once** to its Git identity with a single stable
+  Project ID (7 files); the other 8 historical local projects held the remaining 20 files;
+  **no duplicate local Atlas** appeared. Stack's historical local project was explicitly
+  mapped (machine-local) to `C:\Users\NT\Desktop\stack`; restore preview → 9 restorable / 18
+  retained from 7 unavailable; a real restore completed; a second preview → 0 ready / 9
+  identical / 18 retained. After deliberately closing the PowerShell process and reattaching
+  a fresh shell to the same filesystem, authentication, historical provenance, the same 9
+  Project IDs, Atlas-as-one-Git-project, and the explicit local binding all **persisted on
+  disk** (restore still 0 ready / 9 identical / 18 retained).
+
+**Historical supersession.** `stack memory backup --dry-run` reported native 9 files / 2
+available, carried-forward 18 / 7 unavailable, final 27 / 9, with the historical
+relationship (local source Gen 3, Cloud latest Gen 4, next generation 5, parent 4) and the
+explicit warning that the backup would create Gen 5 and supersede Gen 4 while keeping Gen 4
+immutable/recoverable. The real interactive backup run **without `--yes`** showed the
+safety prompt, was explicitly confirmed, and committed **Gen 5 (parent 4, Protected,
+committed)**. Afterward `stack memory status` returned to normal (Cloud up to date); Gen 3
+and Gen 4 remained present, recoverable, and byte-unchanged; Gen 5 used a separate new
+object.
+
+**Machine I — ordinary fresh recovery.** Another fully fresh fenced machine (no Machine H
+local state) authenticated, listed generations (5 latest; 4/3/2/1 historical), and ran the
+**ordinary** `stack memory recover --passkey` (no `--generation`) → recovered latest Gen 5
+(27 files, Protected, Cloud up to date). Project inspection showed exactly **9** logical
+projects with the **same portable Project IDs produced/preserved on Machine H**: Atlas —
+same Project ID, Git identity, 7 files, auto-available; Stack — same Project ID, historical
+local identity, 2 files, **not** available and **no Machine H path binding crossed**; the
+other 7 historical projects likewise unavailable. Restore preview → 7 ready / 20 retained
+from 8 unavailable; real restore → 7 restored / 20 retained; second dry-run → 0 ready / 7
+already up to date / 20 retained. A native provider scan then saw 1 project with Memory / 7
+files, all under `github.com/reymiahthesun-bit/atlas-access-flow`.
+
+**Proven (real dogfood).** (1) exact historical generation recovery; (2) default latest
+recovery intact; (3) Protected passkey recovery for both paths; (4) historical provenance
+persists across process restart; (5) pre-registry migration yields a clean 9-project model;
+(6) fixed Git identity prevents duplicate Atlas; (7) Project IDs survive backup/recovery
+across machines; (8) machine-local bindings do **not** cross machines; (9) unavailable
+Memory stays retained; (10) native restore idempotent; (11) backup composition preserved
+all 27 files; (12) historical-base backup required explicit confirmation; (13) Gen 5
+parented from Cloud latest Gen 4; (14) Gen 3 and Gen 4 remained immutable; (15) ordinary
+fresh-machine recovery selected clean Gen 5; (16) recovered native Memory was visible to
+the Claude provider scanner.
+
+**Incident/recovery chain.** gen 3 good → gen 4 contaminated (immutable) → fresh Machine H
+explicit rollback to gen 3 → clean migration under the fixed runtime → gen 5 safe
+supersession parented from gen 4 → fresh Machine I ordinary latest recovery → same portable
+logical identities, no source-machine bindings, all 27 Memory files preserved.
+
+**Phase status.** Phase 15B runtime acceptance: **COMPLETE.** (Phase 15C is neither started
+nor scoped here.)
