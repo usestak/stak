@@ -623,8 +623,9 @@ showed 9 projects / 27 files. F2's `memory/manifests/project-registry.json` (and
 `"bindings": []`.
 
 **Central question.** How did `prj_ezj7hk…` — first seen during Machine F work — appear
-in the registry reconstructed by a completely fresh F2 while Cloud reported
-`latest_generation = 3`?
+in the registry reconstructed by a completely fresh F2 — when the latest generation was
+believed to be 3 (a read-only Cloud inspection later showed it was **4**; see the
+chronology closure below)?
 
 **Answer (proven from source + reproduced synthetically).** The recovered **committed
 Cloud generation's own payload** carries a portable registry snapshot (`registryB64`)
@@ -659,21 +660,22 @@ Git-Atlas record with no manifest items + the local-Atlas duplicate + 8 legacy) 
 manifest references 9 distinct identities across 27 files. This exact shape is reproduced
 synthetically in `recovery-provenance.test.ts`.
 
-**Root cause.** The committed generation was created by a **pre-15B.4** real
-`stack memory backup` whose store already held the contaminated `project-registry.json`
+**Root cause.** **Generation 4** was created by a **pre-15B.4** real `stack memory backup`
+(Machine F, 2026-09-28) whose store already held the contaminated `project-registry.json`
 (the cwd-dependent Git-resolution bug fixed in 15B.4, which minted the duplicate
 local-Atlas project). That backup embedded the contaminated registry into an immutable
 generation **before** the 15B.4 fix landed. 15B.4 prevents _new_ contamination but,
 correctly, cannot alter an already-committed immutable generation. So every subsequent
-recovery — contaminated F and fresh F2 alike — faithfully reproduces it.
+recovery of the latest generation — contaminated F and fresh F2 alike — faithfully
+reproduces it.
 
 **Corrections to earlier narrative.** (a) The 15B.4 report's retracted "a real backup
-wrote the bogus ID" is now resolved for the _Cloud_ artifact: a real backup **did** embed
-the contamination into a committed generation (the exact machine/timestamp remains
-unproven without live Cloud access, which is out of scope). (b) The assumption that the
-recovered generation "predates portable project-registry backup" is **false**: the
-generation F2 recovered carries `registryB64` and was therefore produced by Phase-15B+
-code. The `registryB64`/`registrySha256` bundle fields were introduced in `a65c5d0`.
+wrote the bogus ID" is now **fully resolved**: a real Machine F `stack memory backup`
+embedded the contamination into **generation 4** on 2026-09-28 (chronology closure below).
+(b) F2 recovered the **latest** generation, which is **generation 4** — not generation 3.
+Generation 3 predates Phase 15, does **not** carry a portable registry, and remains intact
+and immutable. Generation 4 carries `registryB64` and was produced by Phase-15B code (the
+`registryB64`/`registrySha256` bundle fields were introduced in `a65c5d0`).
 
 **No new runtime defect in recovery.** Recovery reads only the committed payload; there is
 no browser/dev-server/cross-STACK_HOME/account leakage; IDs are random; committed
@@ -688,8 +690,69 @@ generation created by post-15B.4 code), never by mutating the existing generatio
 preserved as evidence and will be discarded; a fresh machine will create the clean
 generation. No automatic merge/repair of the contaminated IDs was added.
 
-**Remaining uncertainty (not provable from source/tests alone).** The exact machine,
-timestamp, and command invocation that committed the contaminated generation cannot be
-determined without live Cloud access to the account's generation history (explicitly out
-of scope). The provenance _mechanism_ above is proven; the specific historical event is
-inferred.
+**Resolved (2026-09-29).** A read-only Cloud inspection has since established the full
+generation chronology and removed the earlier uncertainty — see the chronology closure
+immediately below.
+
+### 15B.5 closure — live generation chronology (2026-09-29)
+
+A read-only inspection of the account's Cloud database and storage (no payload
+decryption, no recover/backup, F2 untouched) resolved the final uncertainty. **Five**
+generations exist — the earlier assumption that "no generation 4 exists" was **false**:
+
+| Gen | created_at (UTC)    | mode      | state     | bytes | parent |
+| --- | ------------------- | --------- | --------- | ----- | ------ |
+| 0   | 2026-09-26 11:30:00 | standard  | retired   | 1738  | —      |
+| 1   | 2026-09-26 11:49:04 | protected | committed | 1766  | —      |
+| 2   | 2026-09-26 12:41:14 | protected | committed | 1838  | —      |
+| 3   | 2026-09-26 13:58:45 | protected | committed | 73126 | 2      |
+| 4   | 2026-09-28 16:45:57 | protected | committed | 76442 | 3      |
+
+Cross-referenced with the git chronology (`66942c1` 14B.5 on 2026-09-26; `a65c5d0` 15B on
+2026-09-27; `153a6cc`/`8b7d96e` the 15B.4 fix on 2026-09-28 ~20:46/22:34 local):
+
+- **Generation 3 conclusion.** Created 2026-09-26 by the real Protected **Phase‑14B**
+  backup. It **predates** Phase 15 and therefore carries **no** portable project registry.
+  Its storage object's created/updated timestamps are identical (2026-09-26 13:58:45) with
+  no later update, and its size (73126) is unchanged — i.e. **not overwritten in place**.
+  It remains the last known‑good historical generation.
+- **Generation 4 conclusion.** Created 2026-09-28 16:45:57 UTC (~17:45 local), parent 3,
+  Protected, committed, 76442 bytes, in its **own** storage object (separate key/version).
+  It carries the Phase‑15B portable registry with the **10** contaminated records
+  (duplicate local‑Atlas + Git‑Atlas + 8 legacy), a manifest of 9 identities / 27 files,
+  and no portable machine bindings. It was created **before** the 15B.4 Git‑identity fix,
+  which is why it embeds the cwd‑dependent duplicate‑Atlas contamination.
+- **F2 recovery conclusion.** `stack memory recover --passkey` selects the **latest**
+  generation, so fresh F2 recovered **generation 4** (not generation 3) and faithfully
+  decoded its `registryB64` — which is exactly why the earlier Machine‑F random Project IDs
+  reappeared on a completely fresh machine.
+- **Machine F correlation.** The contaminated Machine F `project-registry.json` /
+  `projects-local.json` last‑write time (2026-09-28 ~17:45:52 local) immediately precedes
+  generation 4's object creation (~17:45:56) and DB commit (~17:45:57), matching the
+  production transaction order (local backup/registry commit → encrypted object upload →
+  Cloud generation commit). The user had been asked to run a real `stack memory backup`;
+  the shell was then lost before its console output was captured, which is why the backup
+  was mistakenly assumed not to have happened. The live database disproves that: **the
+  backup completed and created generation 4.** (The terminal output itself was lost and is
+  not reconstructed here.)
+- **Immutability conclusion.** The live evidence supports generation isolation:
+  generation 3's object was not later updated, and generation 4 uses a separate,
+  newly‑created object. The e31ff5c hardening (Supabase upload `upsert: false`) is
+  **retained** as defense‑in‑depth enforcing the immutable‑generation contract — kept even
+  though in‑place overwrite was not the incident cause.
+
+**Assumptions explicitly corrected.** The following earlier statements are wrong and are
+corrected by this closure: that generation 3 carried the Phase‑15 portable registry; that
+generation 3 was rewritten in place; that no generation 4 existed; that F2 recovered
+generation 3; and that the exact committing event was unknowable. F2 recovered
+**generation 4**, which a **pre‑15B.4 real Machine F backup** committed on 2026-09-28.
+
+**Product requirement recorded (not implemented here).** F2 recovered the latest
+generation automatically. Because generation 4 is logically contaminated while generation
+3 is the last known‑good historical generation, users need a safe way to **inspect and
+explicitly recover a previous immutable Memory generation** when the latest is unwanted.
+Possible future UX (concepts only, not frozen): `stack memory generations` and/or
+`stack memory recover --generation <n>`. This is recorded for the next design step; no CLI
+syntax or behavior is implemented or committed in this closure. The contamination is still
+remediated by **superseding it with a new clean backup** (a fresh generation 5 from
+post‑15B.4 code), never by mutating an immutable generation.
