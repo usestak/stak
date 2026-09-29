@@ -609,3 +609,87 @@ an earlier resolution), so the two sources legitimately differ. The precise writ
 that produced the extra record is not recoverable from the available evidence; the 15B.4
 fix is prevention (cwd-independent, ambiguity-safe resolution), not repair. Machine F will
 be discarded and recreated as F2 from generation 3.
+
+### 15B.5 — recovery registry provenance (2026-09-29)
+
+**Live F2 finding (facts).** The contaminated Machine F was deleted. A completely fresh
+Machine F2 (fresh HOME, fresh STACK_HOME, fresh Atlas checkout seeded only with the Git
+remote) authenticated and ran `stack memory recover --passkey`. With **no** native
+restore, project map, or real backup, `stack project` showed **ten** logical projects
+whose IDs (including the bogus `prj_ezj7hk…` local-Atlas duplicate and the Git-Atlas
+`prj_xbb9zv…`) exactly matched the earlier contaminated Machine F, while `memory status`
+showed 9 projects / 27 files. F2's `memory/manifests/project-registry.json` (and
+`projects-local.json`) contained all ten records; `projects-local.json` had
+`"bindings": []`.
+
+**Central question.** How did `prj_ezj7hk…` — first seen during Machine F work — appear
+in the registry reconstructed by a completely fresh F2 while Cloud reported
+`latest_generation = 3`?
+
+**Answer (proven from source + reproduced synthetically).** The recovered **committed
+Cloud generation's own payload** carries a portable registry snapshot (`registryB64`)
+holding those exact records, and recovery decodes it faithfully. Evidence:
+
+1. `stack memory recover --passkey` downloads only the committed generation's encrypted
+   payload (`cloudRecover` → `backend.getPayload(meta.backupId)`), decrypts it locally,
+   `restoreBundleToStore`s it, then `reconcileRegistryAfterRecover`. The browser bridge
+   only produces/unwraps the MMK and seals it to the CLI; it never handles the
+   bundle/registry and persists no `localStorage`/`sessionStorage`/IndexedDB/cookie state
+   (audited). The registry never leaves the encrypted bundle.
+2. `restoreBundleToStore` writes `project-registry.json` **only** from the bundle's
+   `registryB64`; otherwise it writes nothing. `reconcileRegistryAfterRecover` consults
+   **only** the recovered snapshot and the fresh local registry — no cwd, Git, Cloud,
+   browser, account store, or other STACK_HOME. Into an empty fresh registry, a merge
+   copies the snapshot's Project IDs **exactly**.
+3. Project IDs are random (`mintProjectId` = 128-bit CSPRNG; never derived from
+   path/Git/content/account/compat digest). So a genuinely registry-less bundle would
+   lazy-mint **different** IDs on each fresh machine (test: two fresh recoveries diverge).
+   F2 matching F exactly ⟹ the IDs were **copied from the bundle**, not re-derived.
+4. Committed generation payloads are immutable: object keys are unique per random
+   `backupId` (`mem/<userId>/<backupId>`), the domain backend rejects a duplicate
+   `backupId`, and a later generation never alters an earlier generation's bytes (tests).
+   `verifyPayload` checks downloaded bytes against the committed (immutable) SHA, so a
+   silently-replaced object would fail recovery — F2's recovery succeeded, so the bytes
+   are the committed bytes.
+
+Therefore F2's ten records, the two Atlas records, and the 10-registry / 9-manifest split
+were **baked into the committed generation's payload** and reproduced verbatim. The
+10-vs-9 split is itself carried in the bundle: the snapshot holds 10 records (a stale
+Git-Atlas record with no manifest items + the local-Atlas duplicate + 8 legacy) while the
+manifest references 9 distinct identities across 27 files. This exact shape is reproduced
+synthetically in `recovery-provenance.test.ts`.
+
+**Root cause.** The committed generation was created by a **pre-15B.4** real
+`stack memory backup` whose store already held the contaminated `project-registry.json`
+(the cwd-dependent Git-resolution bug fixed in 15B.4, which minted the duplicate
+local-Atlas project). That backup embedded the contaminated registry into an immutable
+generation **before** the 15B.4 fix landed. 15B.4 prevents _new_ contamination but,
+correctly, cannot alter an already-committed immutable generation. So every subsequent
+recovery — contaminated F and fresh F2 alike — faithfully reproduces it.
+
+**Corrections to earlier narrative.** (a) The 15B.4 report's retracted "a real backup
+wrote the bogus ID" is now resolved for the _Cloud_ artifact: a real backup **did** embed
+the contamination into a committed generation (the exact machine/timestamp remains
+unproven without live Cloud access, which is out of scope). (b) The assumption that the
+recovered generation "predates portable project-registry backup" is **false**: the
+generation F2 recovered carries `registryB64` and was therefore produced by Phase-15B+
+code. The `registryB64`/`registrySha256` bundle fields were introduced in `a65c5d0`.
+
+**No new runtime defect in recovery.** Recovery reads only the committed payload; there is
+no browser/dev-server/cross-STACK_HOME/account leakage; IDs are random; committed
+generations are immutable. One **defense-in-depth hardening** was applied: the Supabase
+backend now uploads generation payloads with `upsert: false` (was `true`), so a committed
+object can never be overwritten even on an accidental same-`backupId` re-upload — aligning
+it with the domain backend, which already rejects a duplicate `backupId`.
+
+**Remediation (not in this phase).** The contamination lives in an immutable committed
+generation and must be **superseded by a new clean backup** (a fresh, correctly-resolved
+generation created by post-15B.4 code), never by mutating the existing generation. F2 is
+preserved as evidence and will be discarded; a fresh machine will create the clean
+generation. No automatic merge/repair of the contaminated IDs was added.
+
+**Remaining uncertainty (not provable from source/tests alone).** The exact machine,
+timestamp, and command invocation that committed the contaminated generation cannot be
+determined without live Cloud access to the account's generation history (explicitly out
+of scope). The provenance _mechanism_ above is proven; the specific historical event is
+inferred.

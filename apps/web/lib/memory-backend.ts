@@ -190,11 +190,17 @@ export const supabaseRemoteMemoryBackend = (
     },
 
     createGeneration: async (input: CreateGenerationInput) => {
+      // Each generation's payload object key is unique (per random backupId), and a
+      // committed generation's object must never be overwritten. Upload WITHOUT
+      // upsert (fail closed) so a committed generation's bytes are immutable — an
+      // accidental re-upload of the same backupId errors instead of silently
+      // replacing a committed payload. Matches the domain backend, which rejects a
+      // duplicate backupId. (Phase 15B.5 immutability hardening.)
       const locator = locatorFor(userId, input.backupId);
       const { error: uploadError } = await storage().upload(
         locator,
         Buffer.from(input.payload),
-        { contentType: 'application/octet-stream', upsert: true },
+        { contentType: 'application/octet-stream', upsert: false },
       );
       if (uploadError)
         throw new Error(`Memory payload upload failed: ${uploadError.message}`);
