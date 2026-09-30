@@ -56,11 +56,17 @@ export const planMemoryBackup = (
 /* -------------------------------------------------------------------------- */
 
 /**
- * The composed shape of the NEXT backup: the current native scan PLUS previously
- * backed-up Memory whose project is unresolved/unavailable on THIS machine, carried
- * forward unchanged. This exists so a new generation never silently drops Memory just
- * because its project is not checked out here. Absence from the native scan is NOT
- * treated as deletion for unresolved projects.
+ * The composed shape of the NEXT backup (Phase 15C.1, preservation-first): the current
+ * private Memory manifest is the BASELINE; the native scan is an OVERLAY. Every previous
+ * item not observed in the native scan is retained UNCHANGED — regardless of whether its
+ * project is available, mapped, Git-resolved, active, or archived — so a new backup never
+ * silently drops Memory. Native absence is NEVER treated as deletion (see the invariant
+ * in `docs/memory.md`).
+ *
+ * `carriedForward` holds the retained baseline items (those not present natively).
+ * `retainedAvailableFiles` / `retainedUnavailableFiles` split them by whether the project
+ * resolves on this machine — for the preview only; both are always preserved. Native
+ * items win by logical id when the same id also appears in the baseline.
  */
 export type BackupComposition = {
   provider: 'claude';
@@ -68,20 +74,30 @@ export type BackupComposition = {
   carriedForward: ManifestItem[];
   nativeFiles: number;
   nativeProjects: number;
+  /** Distinct projects available (resolvable) on this machine — NOT "projects with native Memory". */
+  availableProjects: number;
   retainedFiles: number;
   retainedProjects: number;
+  /** Retained items whose project IS available here but was not observed natively. */
+  retainedAvailableFiles: number;
+  /** Distinct available projects among the available retained items. */
+  retainedAvailableProjects: number;
+  /** Retained items whose project is unavailable/unresolved on this machine. */
+  retainedUnavailableFiles: number;
+  /** Distinct unavailable projects among the unavailable retained items. */
+  retainedUnavailableProjects: number;
   finalFiles: number;
   finalProjects: number;
 };
 
 /**
- * Plan the next backup's composition WITHOUT writing anything. Carry-forward is
- * selected by the SAME authority restore uses: a previous item is retained only when
- * its project resolves as `project-not-found` or `identity-conflict` on this machine
- * (i.e. no available/bound destination). Items whose project IS available are covered
- * by the fresh native scan (current native versions win), matching the existing model;
- * this patch adds no new deletion semantics for available projects. Read-only: it never
- * mints Project IDs, writes the store, or touches the registry.
+ * Plan the next backup's composition WITHOUT writing anything. Preservation-first: the
+ * private manifest is the baseline and the native scan overlays it by logical Memory
+ * identity. A previous item is retained whenever it is not observed in the native scan —
+ * availability and lifecycle do NOT gate retention; they only categorize it in the
+ * preview. The restore plan is consulted solely to tell "available here" apart from
+ * "unavailable here" for the preview wording. Read-only: it never mints Project IDs,
+ * writes the store, or touches the registry.
  */
 export const planMemoryBackupComposition = async (options: {
   stackHome: string;
@@ -93,15 +109,29 @@ export const planMemoryBackupComposition = async (options: {
   const nativeIds = new Set(options.nativeItems.map((item) => item.logicalId));
   const previous = await readMemoryManifest(options.stackHome);
   let carriedForward: ManifestItem[] = [];
+  let unresolvedIds = new Set<string>();
+  // Distinct projects available on this machine: any project with native Memory, plus
+  // any baseline project that resolves to a destination here (available but not yet
+  // restored natively). This is intentionally NOT "projects with native Memory".
+  const availableProjectKeys = new Set<string>();
+  const addProjectKeys = (
+    items: Array<Pick<ManifestItem, 'scope' | 'project'>>,
+  ): void => {
+    for (const item of items)
+      if (item.scope === 'project' && item.project)
+        availableProjectKeys.add(projectIdentityKey(item.project));
+  };
+  addProjectKeys(options.nativeItems);
   if (previous) {
-    // Classify the PREVIOUS (still-current) manifest against this machine.
+    // Classify the PREVIOUS (still-current) manifest against this machine — only to
+    // categorize retained Memory for the preview, NOT to gate retention.
     const plan = await planMemoryRestore({
       stackHome: options.stackHome,
       ...(options.claudeHome ? { claudeHome: options.claudeHome } : {}),
       ...(options.projects ? { projects: options.projects } : {}),
       ...(options.registry ? { registry: options.registry } : {}),
     });
-    const unresolved = new Set(
+    unresolvedIds = new Set(
       plan.items
         .filter(
           (item) =>
@@ -110,11 +140,20 @@ export const planMemoryBackupComposition = async (options: {
         )
         .map((item) => item.logicalId),
     );
+    addProjectKeys(
+      plan.items.filter((item) => !unresolvedIds.has(item.logicalId)),
+    );
+    // Preservation-first: retain EVERY previous item not present natively.
     carriedForward = previous.items.filter(
-      (item) =>
-        unresolved.has(item.logicalId) && !nativeIds.has(item.logicalId),
+      (item) => !nativeIds.has(item.logicalId),
     );
   }
+  const retainedUnavailable = carriedForward.filter((item) =>
+    unresolvedIds.has(item.logicalId),
+  );
+  const retainedAvailable = carriedForward.filter(
+    (item) => !unresolvedIds.has(item.logicalId),
+  );
   const finalItems = [...options.nativeItems, ...carriedForward];
   return {
     provider: 'claude',
@@ -122,8 +161,13 @@ export const planMemoryBackupComposition = async (options: {
     carriedForward,
     nativeFiles: options.nativeItems.length,
     nativeProjects: distinctProjects(options.nativeItems),
+    availableProjects: availableProjectKeys.size,
     retainedFiles: carriedForward.length,
     retainedProjects: distinctProjects(carriedForward),
+    retainedAvailableFiles: retainedAvailable.length,
+    retainedAvailableProjects: distinctProjects(retainedAvailable),
+    retainedUnavailableFiles: retainedUnavailable.length,
+    retainedUnavailableProjects: distinctProjects(retainedUnavailable),
     finalFiles: finalItems.length,
     finalProjects: distinctProjects(finalItems),
   };
@@ -136,11 +180,12 @@ export const planMemoryBackupComposition = async (options: {
  * remains valid (content-addressed objects are idempotent, so partial writes are
  * harmless orphans).
  *
- * `carryForward` items (Phase 15B.3) are previous manifest items whose project is
- * unavailable on this machine; they are retained UNCHANGED (their bytes are already
- * in the content-addressed store). Their objects are re-verified as present and
- * committing FAILS CLOSED if any is missing, so a backup never silently drops
- * unresolved Memory.
+ * `carryForward` items (Phase 15C.1, preservation-first) are previous manifest items
+ * NOT observed in this native scan — retained UNCHANGED regardless of availability or
+ * lifecycle (their bytes are already in the content-addressed store). Native items win
+ * by logical id (`seen`). Each retained object is re-verified as present and committing
+ * FAILS CLOSED if any is missing, so a backup never silently drops Memory that was
+ * merely absent from the native scan (absence is not deletion).
  */
 export const runMemoryBackup = async (options: {
   stackHome: string;

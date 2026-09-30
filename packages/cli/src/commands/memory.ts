@@ -126,10 +126,13 @@ export const registerMemoryCommand = (
         if (options.json) {
           emitJson(dependencies, {
             provider: preview.provider,
+            availableProjects: preview.availableProjects,
             nativeFiles: preview.nativeFiles,
             nativeProjects: preview.nativeProjects,
             retainedFiles: preview.retainedFiles,
             retainedProjects: preview.retainedProjects,
+            retainedAvailableFiles: preview.retainedAvailableFiles,
+            retainedUnavailableFiles: preview.retainedUnavailableFiles,
             finalFiles: preview.finalFiles,
             finalProjects: preview.finalProjects,
             privacy: preview.privacy,

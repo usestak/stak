@@ -171,28 +171,40 @@ Default output stays beginner-friendly (no hashes, object paths, vendor keys, or
 absolute paths). Use `--verbose` for diagnostics and `--json` for stable
 structured output.
 
-### Backup continuity for unavailable projects
+### Backups are preservation-first
 
-A backup **preserves previously recovered Memory that belongs to projects which are
-not available on this machine.** After recovering on a fresh machine, only the
-projects you can resolve here (a Git-backed project, or one you `stack project map`)
-appear in your native agent Memory; the rest stay safely in Stack's private store.
-The next `stack memory backup` **carries those unresolved files forward unchanged**
-into the new backup — it does not drop them just because they aren't checked out
-here. So a machine that natively holds 9 files but recovered 27 still backs up 27.
+**Stack backups are preservation-first: a missing native Memory file is never treated
+as a deletion.** Your current Stack private Memory store is the **baseline** for the
+next backup, and the current native agent Memory scan is an **overlay** on top of it:
 
-- **Unavailable is not deleted.** Absence from the native scan (or a project that
-  isn't checked out here) is never treated as a deletion signal for unresolved
-  projects; preservation is preferred over silent loss.
-- Carried-forward Memory stays **private inside Stack** — it is not restored into
-  Claude, no directories are created, no machine bindings are made, and old paths do
-  not become authoritative. Mappings you make remain machine-local.
-- For projects that **are** available here, your current native Memory is the source
-  (a changed file's current version wins), matching the existing model.
-- Use `stack memory backup --dry-run` to see the composition (native vs
-  carried-forward vs final) before creating a new backup.
-- There is **no archive or delete** yet: intentionally removing one old project's
-  Memory is deferred to later lifecycle/deletion design.
+- Every previous Memory item **not observed** in the native scan is **retained
+  unchanged**. This holds regardless of whether its project is available, unavailable,
+  Git-resolved, explicitly mapped, **active, or archived** — availability and lifecycle
+  never authorize deletion.
+- Where the native scan **does** observe an item (matched by its logical Memory
+  identity, after project-identity resolution), the **native version wins**: a changed
+  file contributes its new content, an identical file is reused, and a genuinely new
+  native file is **added**.
+- So a machine that recovered 27 files but currently scans 0 native files still backs
+  up **27** — including an available project (e.g. a Git-backed one) whose recovered
+  Memory has not yet been restored into native storage. It is not reduced to only the
+  files present natively.
+
+Carried-forward Memory stays **private inside Stack** — it is not restored into Claude,
+no directories are created, no machine bindings are made, and old paths do not become
+authoritative. Mappings you make remain machine-local. Content is content-addressed, so
+retained items reuse their existing objects and hashes.
+
+Use `stack memory backup --dry-run` to see the composition before creating a backup: it
+distinguishes **projects available on this machine**, **native memory files found**, and
+the **previous memory files preserved** (split into those from available projects not
+currently present natively, and those from projects not available here).
+
+**Absence is not deletion (intentional V0 tradeoff).** Because native absence is never a
+deletion signal, this can retain stale Memory until an explicit removal mechanism exists.
+There is **no archive-as-delete and no `stack memory forget`/delete** yet: intentionally
+removing a project's Memory needs a separate explicit design later. Silent loss is worse
+than conservative retention, so preservation wins.
 
 ## Cloud backup & recovery
 

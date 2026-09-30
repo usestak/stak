@@ -314,8 +314,13 @@ const runProgram = async (
       carriedForward: [],
       nativeFiles: 0,
       nativeProjects: 0,
+      availableProjects: 0,
       retainedFiles: 0,
       retainedProjects: 0,
+      retainedAvailableFiles: 0,
+      retainedAvailableProjects: 0,
+      retainedUnavailableFiles: 0,
+      retainedUnavailableProjects: 0,
       finalFiles: 0,
       finalProjects: 0,
       privacy: null,
@@ -1355,8 +1360,13 @@ describe('Stack CLI', () => {
       carriedForward: [],
       nativeFiles: 9,
       nativeProjects: 2,
+      availableProjects: 2,
       retainedFiles: 18,
       retainedProjects: 7,
+      retainedAvailableFiles: 0,
+      retainedAvailableProjects: 0,
+      retainedUnavailableFiles: 18,
+      retainedUnavailableProjects: 7,
       finalFiles: 27,
       finalProjects: 9,
       privacy: 'protected' as const,
@@ -1377,7 +1387,8 @@ describe('Stack CLI', () => {
     });
     expect(result.output).toContain('Memory backup preview');
     expect(result.output).toContain('27 memory files');
-    expect(result.output).toContain('18 memory files carried forward');
+    expect(result.output).toContain('18 previous memory files preserved');
+    expect(result.output).toContain('7 projects not available on this machine');
     expect(result.output).toContain('No changes were made.');
     expect(result.output).toContain('Privacy: Protected');
   });
@@ -1392,8 +1403,13 @@ describe('Stack CLI', () => {
           carriedForward: [],
           nativeFiles: 9,
           nativeProjects: 2,
+          availableProjects: 2,
           retainedFiles: 18,
           retainedProjects: 7,
+          retainedAvailableFiles: 0,
+          retainedAvailableProjects: 0,
+          retainedUnavailableFiles: 18,
+          retainedUnavailableProjects: 7,
           finalFiles: 27,
           finalProjects: 9,
           privacy: 'protected',
@@ -1409,8 +1425,11 @@ describe('Stack CLI', () => {
     );
     const parsed = JSON.parse(result.output);
     expect(parsed).toMatchObject({
+      availableProjects: 2,
       nativeFiles: 9,
       retainedFiles: 18,
+      retainedAvailableFiles: 0,
+      retainedUnavailableFiles: 18,
       finalFiles: 27,
       finalProjects: 9,
       privacy: 'protected',
@@ -1562,8 +1581,13 @@ describe('Stack CLI', () => {
           carriedForward: [],
           nativeFiles: 9,
           nativeProjects: 2,
+          availableProjects: 2,
           retainedFiles: 18,
           retainedProjects: 7,
+          retainedAvailableFiles: 0,
+          retainedAvailableProjects: 0,
+          retainedUnavailableFiles: 18,
+          retainedUnavailableProjects: 7,
           finalFiles: 27,
           finalProjects: 9,
           privacy: 'protected',
@@ -1624,8 +1648,13 @@ describe('Stack CLI', () => {
       carriedForward: [],
       nativeFiles: 9,
       nativeProjects: 2,
+      availableProjects: 2,
       retainedFiles: 18,
       retainedProjects: 7,
+      retainedAvailableFiles: 0,
+      retainedAvailableProjects: 0,
+      retainedUnavailableFiles: 18,
+      retainedUnavailableProjects: 7,
       finalFiles: 27,
       finalProjects: 9,
       privacy: 'protected' as const,

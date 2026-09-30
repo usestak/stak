@@ -952,3 +952,51 @@ available never implies active.
   or relocation suggester (15A discussed one; it was never built). Safe explicit
   `stack project map` remains the V0 relocation mechanism; no folder-name heuristics were
   added. Availability is computed from a real binding or a strong-Git candidate match only.
+
+### 15C.1 note — preservation-first backup composition (2026-09-30)
+
+Real Phase 15C dogfood surfaced a backup-composition safety bug. Abstractly (no private
+Memory contents): a fresh machine recovered a backup of N files across several projects,
+including a project that was **available** here (resolved by strong Git identity) but
+whose recovered Memory had **not yet been restored** into native agent storage. The
+native scan therefore observed **zero** files for that project. The previous composition
+rule carried forward only items whose project was **unavailable/unresolved**
+(`project-not-found` / `identity-conflict`), on the assumption that an available project
+would be re-observed natively. With no native observation, that available project's items
+appeared in neither the native scan nor the carry-forward, so the next backup would have
+**dropped** them. No real backup was performed.
+
+**Root cause / old rule.** `planMemoryBackupComposition`
+(`packages/memory/src/backup.ts`) selected carry-forward = previous items whose restore
+status is `project-not-found` or `identity-conflict` and that are absent natively.
+Availability gated retention, and "available + zero native" meant omission.
+
+**Core invariant (fix).** Backup is **non-destructive by default**. The current private
+Memory manifest is the **baseline**; the native scan is an **overlay** keyed by logical
+Memory identity (after the existing project-identity resolution):
+
+1. a previous item observed natively → the native version wins (new content → new hash);
+2. a previous item **not** observed natively → **retained unchanged**;
+3. retention applies regardless of availability, mapping, Git-resolution, or lifecycle
+   (`active`/`archived`);
+4. native absence is **never** interpreted as deletion.
+
+`carriedForward` now holds every previous item not present natively; the restore plan is
+consulted only to categorize retained items (available vs unavailable) for the preview.
+`runMemoryBackup` composes the full baseline+overlay and commits the manifest **before**
+any Cloud upload, so a Cloud failure never leaves a pruned local manifest. Composition is
+mode-independent (Standard and Protected compose identically; encryption is applied to the
+finished bundle). Older immutable backups are untouched (`upsert: false` intact); this
+changes only the composition of the NEXT backup.
+
+**No implicit delete.** Intentional Memory removal is out of scope — no auto-pruning, no
+`memory forget`. Absence ≠ deletion for V0; this may retain stale Memory until an explicit
+removal mechanism is designed. That tradeoff is deliberate: silent loss is worse than
+conservative retention.
+
+**Preview UX.** The dry-run preview no longer conflates "projects available on this
+machine" with "projects with native Memory". It reports available projects, native files
+found, and previous files preserved (split into available-but-not-native and unavailable),
+then the final preserved total. Dry-run JSON exposes `availableProjects`, `nativeFiles`,
+`retainedFiles`, `retainedAvailableFiles`, `retainedUnavailableFiles`, and `finalFiles`
+under backup terminology (no internal generation terms).

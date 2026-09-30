@@ -364,15 +364,30 @@ export const renderMemoryBackupPreview = (
       `Cloud latest      Backup #${s.cloudLatestGeneration}`,
       '',
     );
+  // Availability and "native Memory observed" are DISTINCT (Phase 15C.1): a project can
+  // be available here yet have no native Memory (e.g. recovered but not yet restored).
   lines.push(
-    `${projects(preview.nativeProjects)} available on this machine`,
-    `${files(preview.nativeFiles)} to capture`,
+    `${projects(preview.availableProjects)} available on this machine`,
+    `${preview.nativeFiles} native memory file${
+      preview.nativeFiles === 1 ? '' : 's'
+    } found`,
   );
-  if (preview.retainedFiles > 0)
+  if (preview.retainedFiles > 0) {
     lines.push(
-      `${projects(preview.retainedProjects)} not available on this machine`,
-      `${files(preview.retainedFiles)} carried forward unchanged`,
+      '',
+      `${preview.retainedFiles} previous memory file${
+        preview.retainedFiles === 1 ? '' : 's'
+      } preserved`,
     );
+    if (preview.retainedAvailableFiles > 0)
+      lines.push(
+        `  ${plainFiles(preview.retainedAvailableFiles)} from ${projects(preview.retainedAvailableProjects)} available but not currently present in native memory`,
+      );
+    if (preview.retainedUnavailableFiles > 0)
+      lines.push(
+        `  ${plainFiles(preview.retainedUnavailableFiles)} from ${projects(preview.retainedUnavailableProjects)} not available on this machine`,
+      );
+  }
   lines.push(
     '',
     'Next backup',
