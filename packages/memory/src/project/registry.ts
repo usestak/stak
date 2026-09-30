@@ -211,8 +211,14 @@ export type MergeResult = {
  *  - the SAME strong identity attached to a DIFFERENT Project ID is a CONFLICT — both
  *    records are preserved and the conflict reported; claims are NOT merged across
  *    ids (no last-writer-wins identity merge that could contaminate projects);
+ *  - PORTABLE lifecycle comes from the recovered snapshot and is AUTHORITATIVE: for a
+ *    Project ID also present locally, the recovered lifecycle replaces the local one
+ *    (an explicit Memory recovery makes the selected backup the source of truth for
+ *    portable project state, Phase 15C). A recovered pre-lifecycle record carries no
+ *    lifecycle field and therefore reads back as `active` (see `lifecycleOf`);
  *  - machine-local bindings are NEVER added, replaced, or injected by recovered
- *    state (a recovered snapshot carries no paths and cannot create a binding).
+ *    state (a recovered snapshot carries no paths and cannot create a binding), and
+ *    are kept exactly as-is regardless of any lifecycle change.
  * Bindings whose Project ID is unknown after merge are retained as-is (harmless).
  */
 export const mergePortableSnapshot = (
@@ -253,13 +259,18 @@ export const mergePortableSnapshot = (
           conflicts.push({ claimKey: key, projectIds: [...ids].sort() });
       }
       // Preserve both: add the incoming record as its own id if not present, but do
-      // NOT merge its claims into the conflicting existing record.
+      // NOT merge its claims into the conflicting existing record. The same-id record
+      // still adopts the recovered (authoritative) lifecycle.
       if (!byId) projects.push({ ...incoming, claims: [...incoming.claims] });
+      else byId.lifecycle = incoming.lifecycle;
       continue;
     }
 
-    if (byId) byId.claims = dedupeClaims([...byId.claims, ...incoming.claims]);
-    else projects.push({ ...incoming, claims: [...incoming.claims] });
+    if (byId) {
+      byId.claims = dedupeClaims([...byId.claims, ...incoming.claims]);
+      // Recovered lifecycle is authoritative for portable state; bindings stay local.
+      byId.lifecycle = incoming.lifecycle;
+    } else projects.push({ ...incoming, claims: [...incoming.claims] });
   }
 
   // Deduplicate reported conflicts.

@@ -192,6 +192,58 @@ describe('project lifecycle portability (15C)', () => {
     );
   });
 
+  it('recovered backup is authoritative: historical recovery overrides local lifecycle and keeps the local binding', async () => {
+    const backend = makeBackend();
+    const machineA = await writeStore([
+      { project: local('C--nexus'), rel: 'n.md', body: 'N' },
+    ]);
+    await backup(machineA, backend); // #0: active
+    const nexusId = resolveId(
+      await readLocalRegistry(machineA),
+      local('C--nexus'),
+    );
+    await setProjectLifecycle({
+      stackHome: machineA,
+      selector: nexusId,
+      lifecycle: 'archived',
+    });
+    await backup(machineA, backend); // #1: archived
+
+    // Machine C recovers the latest (#1) → archived, establishing local state,
+    // then maps a machine-local binding.
+    const machineC = await temp('stack-C-');
+    await cloudRecover({ stackHome: machineC, backend });
+    expect(lifecycleOf(byId(await readLocalRegistry(machineC), nexusId))).toBe(
+      'archived',
+    );
+    const nexusDir = await temp('nexus-C-');
+    const { mapProject } = await import('./project-ops.js');
+    await mapProject({
+      stackHome: machineC,
+      selector: nexusId,
+      dir: nexusDir,
+      gitOrigin: async () => undefined,
+    });
+    const boundBefore = (await readLocalRegistry(machineC)).bindings;
+    expect(boundBefore).toHaveLength(1);
+
+    // Deliberately recover the OLDER backup #0 (active) onto the SAME machine, whose
+    // local working state currently says archived.
+    await cloudRecover({ stackHome: machineC, backend, generation: 0 });
+    const afterOld = await readLocalRegistry(machineC);
+    // Portable lifecycle follows the selected backup (#0 = active), NOT local state.
+    expect(lifecycleOf(byId(afterOld, nexusId))).toBe('active');
+    // The machine-local binding is untouched across the recovery.
+    expect(afterOld.bindings).toEqual(boundBefore);
+
+    // Recovering the newer backup (#1) again flips lifecycle back to archived,
+    // proving the selected backup — not local state — decides each time.
+    await cloudRecover({ stackHome: machineC, backend, generation: 1 });
+    const afterNew = await readLocalRegistry(machineC);
+    expect(lifecycleOf(byId(afterNew, nexusId))).toBe('archived');
+    expect(afterNew.bindings).toEqual(boundBefore);
+  });
+
   it('#29 a pre-lifecycle backup recovers projects as active', async () => {
     const backend = makeBackend();
     const machineA = await writeStore([

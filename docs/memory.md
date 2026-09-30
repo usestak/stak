@@ -138,8 +138,14 @@ and is purely organizational:
 - Like other registry changes, a lifecycle change is **local until your next
   `stack memory backup`**, which snapshots it into the portable registry; a later
   recovery on a fresh machine then reproduces the same lifecycle (with **no** local
-  bindings crossing). Recovering an older backup reproduces the lifecycle that backup
-  held. Backups made before this feature recover as **active**.
+  bindings crossing). Backups made before this feature recover as **active**.
+- An explicit **recovery makes the selected backup authoritative** for lifecycle.
+  Recovering backup #N restores the lifecycle that backup #N held — even for a project
+  you already have locally, and even if your current local state differs. So if you
+  archive a project locally but have **not** backed it up, deliberately recovering an
+  older backup can replace that unbacked change with the older backup's lifecycle. Your
+  machine-local **directory bindings stay local and are untouched** by this; only the
+  portable lifecycle follows the selected backup.
 
 _Not yet available:_ deleting a project's memory (hard delete), an optional in-repo
 project marker, and repository-transfer reconciliation are designed in the

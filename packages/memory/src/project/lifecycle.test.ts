@@ -118,7 +118,7 @@ describe('project lifecycle model (15C)', () => {
     expect(only(merged.registry.projects).projectId).toBe(id);
   });
 
-  it('merge: keeps the local lifecycle for a project already known locally', () => {
+  it('merge: recovered lifecycle is authoritative over local (archived local, active backup → active)', () => {
     counter = 0;
     const source = resolveOrMintProject(
       emptyRegistry(),
@@ -129,6 +129,66 @@ describe('project lifecycle model (15C)', () => {
     const local: LocalRegistry = setLifecycle(source, id, 'archived');
     const incoming = toPortableSnapshot(setLifecycle(source, id, 'active'));
     const merged = mergePortableSnapshot(local, incoming);
+    // Explicit recovery: the selected backup wins for portable lifecycle.
+    expect(lifecycleOf(only(merged.registry.projects))).toBe('active');
+    expect(only(merged.registry.projects).projectId).toBe(id);
+  });
+
+  it('merge: recovered lifecycle is authoritative over local (active local, archived backup → archived)', () => {
+    counter = 0;
+    const source = resolveOrMintProject(
+      emptyRegistry(),
+      git('github.com/a/b'),
+      mint,
+    ).registry;
+    const id = only(source.projects).projectId;
+    const local: LocalRegistry = setLifecycle(source, id, 'active');
+    const incoming = toPortableSnapshot(setLifecycle(source, id, 'archived'));
+    const merged = mergePortableSnapshot(local, incoming);
     expect(lifecycleOf(only(merged.registry.projects))).toBe('archived');
+  });
+
+  it('merge: a recovered pre-lifecycle record forces a locally-archived project back to active', () => {
+    counter = 0;
+    const source = resolveOrMintProject(
+      emptyRegistry(),
+      git('github.com/a/b'),
+      mint,
+    ).registry;
+    const id = only(source.projects).projectId;
+    const local: LocalRegistry = setLifecycle(source, id, 'archived');
+    // Incoming snapshot with the lifecycle field stripped (pre-15C shape).
+    const incoming = {
+      snapshotVersion: 1 as const,
+      projects: [{ projectId: id, claims: only(source.projects).claims }],
+    };
+    const merged = mergePortableSnapshot(local, incoming);
+    expect(only(merged.registry.projects).lifecycle).toBeUndefined();
+    expect(lifecycleOf(only(merged.registry.projects))).toBe('active');
+  });
+
+  it('merge: a recovered lifecycle change never disturbs a machine-local binding', () => {
+    counter = 0;
+    const source = resolveOrMintProject(
+      emptyRegistry(),
+      git('github.com/a/b'),
+      mint,
+    ).registry;
+    const id = only(source.projects).projectId;
+    const binding = {
+      projectId: id,
+      dir: '/local/work/b',
+      boundAt: '2026-09-30T00:00:00.000Z',
+      provenance: 'user-map' as const,
+    };
+    const local: LocalRegistry = {
+      ...setLifecycle(source, id, 'active'),
+      bindings: [binding],
+    };
+    const incoming = toPortableSnapshot(setLifecycle(source, id, 'archived'));
+    const merged = mergePortableSnapshot(local, incoming);
+    expect(lifecycleOf(only(merged.registry.projects))).toBe('archived');
+    // The local binding is untouched by the portable lifecycle change.
+    expect(merged.registry.bindings).toEqual([binding]);
   });
 });

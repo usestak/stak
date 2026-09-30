@@ -927,8 +927,22 @@ available never implies active.
   next backup; a successful backup makes it portable; a fresh machine reproduces the
   lifecycle with no bindings crossing. Historical recovery reproduces the lifecycle stored
   in _that_ backup, not the latest. Archiving does not drop any Memory (15B.3 carry-forward
-  intact). Merge keeps a project's local lifecycle when it already exists locally, and
-  adopts the snapshot's lifecycle on a fresh machine.
+  intact).
+- **Recovered lifecycle is authoritative (15C fix).** An explicit Memory recovery makes the
+  selected backup the source of truth for _portable_ project state. When a recovered
+  snapshot carries a Project ID that also exists locally, the recovered `lifecycle` replaces
+  the local one — recovery never lets stale local lifecycle win over the selected backup.
+  So `local archived` + `backup active` → `active`, and `local active` + `backup archived`
+  → `archived`; recovering backup #N applies #N's lifecycle regardless of the current
+  working state, and a recovered pre-lifecycle record reads back as `active`. This is a
+  consequence of explicit recovery semantics: if a user archives locally but has not backed
+  up, deliberately recovering an older backup may replace that unbacked lifecycle change
+  with the one in the selected backup. _Machine-local_ state — directory bindings, resolved
+  path, binding provenance, availability — remains local and is never disturbed by a
+  recovered lifecycle change. Identity safeguards are unchanged: Project IDs are preserved,
+  strong-identity conflicts still fail closed, and claims are never merged across Project
+  IDs. `mergePortableSnapshot` is the single recovery merge that applies this; backup-time
+  `syncRegistryForBackup` is unaffected.
 - **Boundaries preserved.** No standalone Cloud project-registry table or sync service;
   authoritative state stays local and travels via Memory backups. Local paths never enter
   the portable lifecycle state. Public `stack publish` still excludes the registry,
