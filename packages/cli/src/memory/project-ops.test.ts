@@ -19,7 +19,11 @@ import {
 } from '@stack/memory';
 
 import { renderProjectList } from '../commands/project.js';
-import { listProjects, mapProject } from './project-ops.js';
+import {
+  listProjects,
+  mapProject,
+  setProjectLifecycle,
+} from './project-ops.js';
 
 const roots: string[] = [];
 const tempDir = async (prefix: string) => {
@@ -468,5 +472,186 @@ describe('read-only command purity (15B.4)', () => {
     expect(after.local.equals(before.local)).toBe(true);
     expect(after.registry.equals(before.registry)).toBe(true);
     expect(after.manifest.equals(before.manifest)).toBe(true);
+  });
+});
+
+describe('project lifecycle (15C)', () => {
+  const idOf = async (stackHome: string) =>
+    (await readLocalRegistry(stackHome)).projects[0]?.projectId as string;
+
+  it('projects are active by default; archive/unarchive flip lifecycle (idempotent)', async () => {
+    const stackHome = await seedRegistry([localItem('C--x-y', 'n.md')]);
+    const id = await idOf(stackHome);
+    expect((await listProjects({ stackHome }))[0]?.lifecycle).toBe('active');
+
+    const a = await setProjectLifecycle({
+      stackHome,
+      selector: id,
+      lifecycle: 'archived',
+    });
+    expect(a).toMatchObject({
+      status: 'ok',
+      lifecycle: 'archived',
+      changed: true,
+    });
+    expect((await listProjects({ stackHome }))[0]?.lifecycle).toBe('archived');
+
+    // Idempotent archive.
+    expect(
+      await setProjectLifecycle({
+        stackHome,
+        selector: id,
+        lifecycle: 'archived',
+      }),
+    ).toMatchObject({ status: 'ok', changed: false });
+
+    const u = await setProjectLifecycle({
+      stackHome,
+      selector: id,
+      lifecycle: 'active',
+    });
+    expect(u).toMatchObject({
+      status: 'ok',
+      lifecycle: 'active',
+      changed: true,
+    });
+    expect(
+      await setProjectLifecycle({
+        stackHome,
+        selector: id,
+        lifecycle: 'active',
+      }),
+    ).toMatchObject({ status: 'ok', changed: false });
+  });
+
+  it('an ambiguous selector fails closed; an unknown selector is not-found', async () => {
+    const stackHome = await seedRegistry([
+      localItem('C--a', 'a.md'),
+      localItem('C--b', 'b.md'),
+    ]);
+    // Every minted id shares the prj_ prefix, so a bare prefix is ambiguous.
+    expect(
+      (
+        await setProjectLifecycle({
+          stackHome,
+          selector: 'prj_',
+          lifecycle: 'archived',
+        })
+      ).status,
+    ).toBe('ambiguous-selector');
+    expect(
+      (
+        await setProjectLifecycle({
+          stackHome,
+          selector: 'prj_zzzzzzzzzzzzzzzzzzzzzzzzzz',
+          lifecycle: 'archived',
+        })
+      ).status,
+    ).toBe('project-not-found');
+  });
+
+  it('archive preserves the Project ID and Memory references', async () => {
+    const stackHome = await seedRegistry([
+      localItem('C--x-y', 'n1.md'),
+      localItem('C--x-y', 'n2.md'),
+    ]);
+    const id = await idOf(stackHome);
+    await setProjectLifecycle({
+      stackHome,
+      selector: id,
+      lifecycle: 'archived',
+    });
+    const row = (await listProjects({ stackHome }))[0];
+    expect(row?.projectId).toBe(id);
+    expect(row?.files).toBe(2); // Memory references preserved
+  });
+
+  it('lifecycle is independent of availability (all four combinations)', async () => {
+    // Atlas has a Git candidate → available; the local project has none → unavailable.
+    const stackHome = await seedRegistry([
+      gitItem('github.com/acme/atlas', 'a.md'),
+      localItem('C--nexus', 'n.md'),
+    ]);
+    const candidates = [
+      { dir: '/x/atlas', gitRemote: 'https://github.com/acme/atlas.git' },
+    ];
+    const registry = await readLocalRegistry(stackHome);
+    const { resolveProjectForIdentity } = await import('@stack/memory');
+    const nexusId =
+      resolveProjectForIdentity(registry, {
+        kind: 'local',
+        vendorKey: 'C--nexus',
+      }).status === 'resolved'
+        ? (
+            resolveProjectForIdentity(registry, {
+              kind: 'local',
+              vendorKey: 'C--nexus',
+            }) as { status: 'resolved'; projectId: string }
+          ).projectId
+        : '';
+
+    // active + available (atlas) and active + unavailable (nexus).
+    let rows = await listProjects({ stackHome, projects: candidates });
+    const atlas = () =>
+      rows.find((r) => r.identity.kind === 'git') as (typeof rows)[number];
+    const nexus = () =>
+      rows.find((r) => r.identity.kind === 'local') as (typeof rows)[number];
+    expect(atlas()).toMatchObject({
+      lifecycle: 'active',
+      availability: 'present',
+    });
+    expect(nexus()).toMatchObject({
+      lifecycle: 'active',
+      availability: 'unavailable',
+    });
+
+    // Archive nexus → archived + unavailable (availability unchanged).
+    await setProjectLifecycle({
+      stackHome,
+      selector: nexusId,
+      lifecycle: 'archived',
+    });
+    rows = await listProjects({ stackHome, projects: candidates });
+    expect(nexus()).toMatchObject({
+      lifecycle: 'archived',
+      availability: 'unavailable',
+    });
+    // Atlas stays active + available regardless.
+    expect(atlas()).toMatchObject({
+      lifecycle: 'active',
+      availability: 'present',
+    });
+  });
+
+  it('mapping an archived project makes it available but does NOT change lifecycle', async () => {
+    const dir = await tempDir('nexus-here-');
+    const vendorKey = encodeClaudeProjectKey(path.resolve(dir));
+    const stackHome = await seedWithObjects([
+      { project: { kind: 'local', vendorKey }, rel: 'n.md', body: 'N' },
+    ]);
+    const id = await idOf(stackHome);
+    await setProjectLifecycle({
+      stackHome,
+      selector: id,
+      lifecycle: 'archived',
+    });
+
+    // archived + unavailable → map → archived + available.
+    expect((await listProjects({ stackHome }))[0]).toMatchObject({
+      lifecycle: 'archived',
+      availability: 'unavailable',
+    });
+    const mapped = await mapProject({
+      stackHome,
+      selector: id,
+      dir,
+      gitOrigin: noGit,
+    });
+    expect(mapped.status).toBe('mapped');
+    const row = (await listProjects({ stackHome }))[0];
+    expect(row).toMatchObject({
+      lifecycle: 'archived',
+      availability: 'present',
+    });
   });
 });

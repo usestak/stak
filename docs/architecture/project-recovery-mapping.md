@@ -896,3 +896,45 @@ types, and JSON field names retained for programmatic compatibility keep the int
 - No change to immutability, historical selection, default-latest recovery,
   Standard/Protected/passkey behavior, provenance, linear parent semantics, project
   identity, native+retained composition, or public/private boundaries.
+
+### 15C note — project lifecycle (2026-09-30)
+
+Phase 15C implements project lifecycle (`active` | `archived`) as portable private
+registry metadata, independent of machine availability. All four combinations are
+valid; a missing directory never implies archived, and an archived project becoming
+available never implies active.
+
+- **Data model.** `PortableProjectRecord` gains an optional `lifecycle` field. It is
+  **optional** so pre-15C records decode safely; `lifecycleOf(record)` treats a missing
+  value as `active`. Newly minted records are `active`; `toPortableSnapshot` always
+  serializes an explicit lifecycle so a new backup records it. No old immutable backup is
+  rewritten.
+- **Commands.** `stack project archive <project>` (interactive confirmation, or `--yes`)
+  and `stack project unarchive <project>` (non-destructive; proceeds without a prompt).
+  Selectors reuse the existing exact-ID / unique-prefix rules and fail closed when
+  ambiguous. Archive/unarchive are idempotent. `stack project` groups ACTIVE / ARCHIVED
+  and shows availability independently per project; project JSON exposes `lifecycle`
+  (never an inferred boolean).
+- **Archive semantics.** Metadata only — it preserves the Project ID, claims, Memory,
+  backup history, recoverability, and any local binding; it never deletes, retires
+  backups, removes Memory from future backups, or infers directory absence. Hard delete
+  remains out of scope (no `deleted`/`retired` states).
+- **Independence.** `project map` and strong-Git resolution change availability only, never
+  lifecycle (e.g. `archived + unavailable` → map → `archived + available`). A missing
+  directory keeps an active project `active + unavailable`.
+- **Backup/recovery.** Lifecycle rides in the portable registry snapshot inside the Memory
+  bundle (mode-following; Protected encrypts it). A lifecycle change is local until the
+  next backup; a successful backup makes it portable; a fresh machine reproduces the
+  lifecycle with no bindings crossing. Historical recovery reproduces the lifecycle stored
+  in _that_ backup, not the latest. Archiving does not drop any Memory (15B.3 carry-forward
+  intact). Merge keeps a project's local lifecycle when it already exists locally, and
+  adopts the snapshot's lifecycle on a fresh machine.
+- **Boundaries preserved.** No standalone Cloud project-registry table or sync service;
+  authoritative state stays local and travels via Memory backups. Local paths never enter
+  the portable lifecycle state. Public `stack publish` still excludes the registry,
+  lifecycle, Memory, bindings, and recovery state. All 15B.4 mapping-safety rules
+  (path-reuse, folder-name, ambiguity fail-closed, bindings-never-portable) are unchanged.
+- **Candidate/relocation audit.** The runtime has no heuristic "candidate" project state
+  or relocation suggester (15A discussed one; it was never built). Safe explicit
+  `stack project map` remains the V0 relocation mechanism; no folder-name heuristics were
+  added. Availability is computed from a real binding or a strong-Git candidate match only.

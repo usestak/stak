@@ -306,6 +306,8 @@ const runProgram = async (
     }),
     projectList: async () => [],
     projectMap: async () => ({ status: 'project-not-found' }),
+    projectArchive: async () => ({ status: 'project-not-found' }),
+    projectUnarchive: async () => ({ status: 'project-not-found' }),
     memoryBackupPreview: async () => ({
       provider: 'claude',
       native: [],
@@ -1722,5 +1724,90 @@ describe('Stack CLI', () => {
       memoryCloudRecover: async () => ({ status: 'no-backup' }),
     });
     expect(result.output).toContain('Backup #99 was not found.');
+  });
+
+  const lifecycleRows = [
+    {
+      projectId: 'prj_aaaaaaaaaaaaaaaaaaaaaaaaaa',
+      identity: { kind: 'git' as const, canonical: 'github.com/acme/atlas' },
+      lifecycle: 'active' as const,
+      binding: null,
+      files: 7,
+      availability: 'present' as const,
+      conflict: false,
+      recoveryReference: null,
+    },
+    {
+      projectId: 'prj_bbbbbbbbbbbbbbbbbbbbbbbbbb',
+      identity: { kind: 'local' as const },
+      lifecycle: 'archived' as const,
+      binding: null,
+      files: 4,
+      availability: 'unavailable' as const,
+      conflict: false,
+      recoveryReference: null,
+    },
+  ];
+
+  it('project list groups ACTIVE and ARCHIVED and shows lifecycle in JSON', async () => {
+    const human = await runProgram(['project'], {
+      projectList: async () => lifecycleRows,
+    });
+    expect(human.output).toContain('ACTIVE');
+    expect(human.output).toContain('ARCHIVED');
+
+    const json = await runProgram(['project', '--json'], {
+      projectList: async () => lifecycleRows,
+    });
+    const parsed = JSON.parse(json.output);
+    expect(parsed.projects[0].lifecycle).toBe('active');
+    expect(parsed.projects[1].lifecycle).toBe('archived');
+  });
+
+  it('project archive confirms, then reports the change and the backup hint', async () => {
+    let archived = false;
+    const declined = await runProgram(['project', 'archive', 'prj_x'], {
+      confirm: async () => false,
+      projectArchive: async () => {
+        archived = true;
+        return {
+          status: 'ok',
+          projectId: 'prj_x',
+          lifecycle: 'archived',
+          changed: true,
+        };
+      },
+    });
+    expect(declined.output).toContain('Cancelled.');
+    expect(archived).toBe(false);
+
+    const ok = await runProgram(['project', 'archive', 'prj_x', '--yes'], {
+      projectArchive: async () => ({
+        status: 'ok',
+        projectId: 'prj_aaaaaaaaaaaaaaaaaaaaaaaaaa',
+        lifecycle: 'archived',
+        changed: true,
+      }),
+    });
+    expect(ok.output).toContain('Archived');
+    expect(ok.output).toContain('stack memory backup');
+  });
+
+  it('project unarchive reactivates without a prompt', async () => {
+    let confirmed = false;
+    const result = await runProgram(['project', 'unarchive', 'prj_x'], {
+      confirm: async () => {
+        confirmed = true;
+        return true;
+      },
+      projectUnarchive: async () => ({
+        status: 'ok',
+        projectId: 'prj_aaaaaaaaaaaaaaaaaaaaaaaaaa',
+        lifecycle: 'active',
+        changed: true,
+      }),
+    });
+    expect(confirmed).toBe(false); // unarchive is non-destructive; no prompt
+    expect(result.output).toContain('is active');
   });
 });

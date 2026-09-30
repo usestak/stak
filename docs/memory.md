@@ -73,18 +73,28 @@ Each project Stack knows about has a stable, opaque **Project ID**
 renamed, moved, or cloned, and that never encodes a path, username, machine, or
 folder name. A logical project can carry identity claims (its canonical Git
 remote, and a compatibility reference for older path-derived identities), a
-machine-local binding to a directory on _this_ machine, and (in the future) a
-lifecycle state.
+machine-local binding to a directory on _this_ machine, and a **lifecycle** state
+(`active` or `archived`).
 
-- **`stack project`** lists the logical projects Stack knows, each with its
-  identity, whether it is available on this machine, how many memory files it has,
-  and any mapping. It never shows memory contents.
+- **`stack project`** lists the logical projects Stack knows, grouped by lifecycle
+  (ACTIVE / ARCHIVED), each with its identity, whether it is available on this
+  machine, how many memory files it has, and any mapping. It never shows memory
+  contents.
 - **`stack project map <project> <directory>`** authorizes a directory on this
   machine as the restore destination for a recovered project. This is a
   **machine-local binding only** — it does not turn the directory's path into a
   shared/portable identity, and it never silently merges two projects. If the
   directory is a different Git repository than the project, the map is refused
-  (repository transfers are not reconciled automatically yet).
+  (repository transfers are not reconciled automatically yet). Mapping never changes
+  a project's lifecycle.
+- **`stack project archive <project>`** / **`stack project unarchive <project>`**
+  set a project's lifecycle. See "Archiving a project" below.
+
+**Active vs archived.** Lifecycle is your organizational stance on a project and is
+**independent of availability**. All four combinations are valid: active+available,
+active+unavailable, archived+available, archived+unavailable. A missing directory
+does **not** archive a project, and an archived project becoming available does
+**not** reactivate it — the two are separate.
 
 **Why a project can stay "not available on this machine."** After recovering on a
 fresh machine, a project without a portable Git identity has no automatic
@@ -113,9 +123,27 @@ never sees your Project IDs, Git identities, or claims; in **Standard** mode it 
 server-readable exactly like the rest of a Standard backup. Filesystem paths and
 bindings stay on your machine in either mode.
 
-_Not yet available:_ archiving/retiring projects, deleting a project's memory, an
-optional in-repo project marker, and repository-transfer reconciliation are
-designed in the architecture docs but not implemented in this release.
+**Archiving a project.** `stack project archive <project>` marks a project archived;
+`stack project unarchive <project>` returns it to active. Archive is **reversible**
+and is purely organizational:
+
+- It **preserves everything** — the Project ID, identity claims, Memory, backup
+  history, recoverability, and any local binding. It is **not** a delete (there is no
+  `stack project delete`; hard deletion is out of scope).
+- Archived projects still appear in `stack project` (grouped under ARCHIVED) and
+  their Memory is still backed up and still carried forward when unavailable — the
+  same preservation rules apply regardless of lifecycle.
+- Availability is independent: mapping or Git-resolving an archived project makes it
+  available **without** unarchiving it.
+- Like other registry changes, a lifecycle change is **local until your next
+  `stack memory backup`**, which snapshots it into the portable registry; a later
+  recovery on a fresh machine then reproduces the same lifecycle (with **no** local
+  bindings crossing). Recovering an older backup reproduces the lifecycle that backup
+  held. Backups made before this feature recover as **active**.
+
+_Not yet available:_ deleting a project's memory (hard delete), an optional in-repo
+project marker, and repository-transfer reconciliation are designed in the
+architecture docs but not implemented in this release.
 
 ## Backup and restore
 

@@ -5,12 +5,14 @@ import { shortProjectId } from '@stack/memory';
 import type {
   MapProjectResult,
   ProjectListRow,
+  SetLifecycleResult,
 } from '../memory/project-ops.js';
 
 /**
- * `stack project` — the smallest read-only view of logical projects, plus the
- * explicit `stack project map` binding operation (Phase 15B). No archive/retire,
- * no delete, no merge: those are later phases.
+ * `stack project` — a read-only view of logical projects, the explicit
+ * `stack project map` binding operation (Phase 15B), and lifecycle management
+ * (`archive`/`unarchive`, Phase 15C). No delete: hard deletion is out of scope.
+ * Lifecycle (active | archived) is independent of machine availability.
  */
 export type ProjectCommandDependencies = {
   projectList(): Promise<ProjectListRow[]>;
@@ -18,6 +20,8 @@ export type ProjectCommandDependencies = {
     project: string;
     dir: string;
   }): Promise<MapProjectResult>;
+  projectArchive(options: { project: string }): Promise<SetLifecycleResult>;
+  projectUnarchive(options: { project: string }): Promise<SetLifecycleResult>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -25,34 +29,73 @@ export type ProjectCommandDependencies = {
 const identityLabel = (row: ProjectListRow): string =>
   row.identity.kind === 'git' ? row.identity.canonical : 'local project';
 
+const renderRow = (row: ProjectListRow): string[] => {
+  const availability =
+    row.availability === 'present'
+      ? 'available on this machine'
+      : 'not available on this machine';
+  const lines = [`${shortProjectId(row.projectId)}  ${identityLabel(row)}`];
+  // Local, informational provenance so a human can tell legacy projects apart.
+  // It is not identity and does not imply the historical path still exists.
+  if (row.recoveryReference)
+    lines.push(`    recovered from: ${row.recoveryReference.value}`);
+  lines.push(
+    `    ${row.files} file${row.files === 1 ? '' : 's'} · ${availability}${
+      row.conflict ? ' · identity conflict' : ''
+    }`,
+  );
+  if (row.binding) lines.push(`    mapped to ${row.binding}`);
+  else if (row.availability !== 'present')
+    lines.push('    map with `stack project map <project> <directory>`');
+  lines.push('');
+  return lines;
+};
+
 export const renderProjectList = (rows: ProjectListRow[]): string => {
   if (rows.length === 0)
     return (
       'No projects known to Stack yet.\n' +
       'Run `stack memory backup` or `stack memory recover` first.\n'
     );
+  // Grouped by lifecycle; availability is shown independently per project.
+  const active = rows.filter((r) => r.lifecycle === 'active');
+  const archived = rows.filter((r) => r.lifecycle === 'archived');
   const lines = ['Logical projects', ''];
-  for (const row of rows) {
-    const availability =
-      row.availability === 'present'
-        ? 'available on this machine'
-        : 'not available on this machine';
-    lines.push(`${shortProjectId(row.projectId)}  ${identityLabel(row)}`);
-    // Local, informational provenance so a human can tell legacy projects apart.
-    // It is not identity and does not imply the historical path still exists.
-    if (row.recoveryReference)
-      lines.push(`    recovered from: ${row.recoveryReference.value}`);
-    lines.push(
-      `    ${row.files} file${row.files === 1 ? '' : 's'} · ${availability}${
-        row.conflict ? ' · identity conflict' : ''
-      }`,
-    );
-    if (row.binding) lines.push(`    mapped to ${row.binding}`);
-    else if (row.availability !== 'present')
-      lines.push('    map with `stack project map <project> <directory>`');
-    lines.push('');
+  lines.push('ACTIVE', '');
+  if (active.length === 0) lines.push('(none)', '');
+  for (const row of active) lines.push(...renderRow(row));
+  if (archived.length > 0) {
+    lines.push('ARCHIVED', '');
+    for (const row of archived) lines.push(...renderRow(row));
   }
   return `${lines.join('\n').trimEnd()}\n`;
+};
+
+const renderLifecycleResult = (
+  result: SetLifecycleResult,
+  target: 'archived' | 'active',
+): string => {
+  switch (result.status) {
+    case 'project-not-found':
+      return 'No matching project. Run `stack project` to see known projects.\n';
+    case 'ambiguous-selector':
+      return `That selector matches ${result.matches.length} projects. Use a full Project ID.\n`;
+    case 'ok': {
+      const id = shortProjectId(result.projectId);
+      const state = target === 'archived' ? 'archived' : 'active';
+      const head = result.changed
+        ? target === 'archived'
+          ? `Archived ${id}.`
+          : `${id} is active.`
+        : `${id} is already ${state}.`;
+      return (
+        `${head}\n` +
+        (result.changed
+          ? 'Run `stack memory backup` to include this lifecycle change in your next Cloud backup.\n'
+          : '')
+      );
+    }
+  }
 };
 
 const renderMapResult = (result: MapProjectResult): string => {
@@ -137,4 +180,54 @@ export const registerProjectCommand = (
         dependencies.writeOut(renderMapResult(result));
       },
     );
+
+  project
+    .command('archive <project>')
+    .description(
+      'Archive a project without deleting its identity or Memory (reversible)',
+    )
+    .option('--json', 'emit structured JSON only')
+    .option('-y, --yes', 'skip the confirmation prompt')
+    .action(
+      async (
+        projectSelector: string,
+        options: { json?: boolean; yes?: boolean },
+      ) => {
+        if (!options.json && options.yes !== true) {
+          dependencies.writeOut(
+            `Archive ${projectSelector}?\n` +
+              'Its Project ID and Memory will be preserved. Archiving does not delete project data.\n',
+          );
+          const ok = await dependencies.confirm('Archive?');
+          if (!ok) {
+            dependencies.writeOut('Cancelled.\n');
+            return;
+          }
+        }
+        const result = await dependencies.projectArchive({
+          project: projectSelector,
+        });
+        if (options.json) {
+          dependencies.writeOut(`${JSON.stringify(result, null, 2)}\n`);
+          return;
+        }
+        dependencies.writeOut(renderLifecycleResult(result, 'archived'));
+      },
+    );
+
+  // Unarchive is non-destructive (re-activates); it proceeds without a prompt.
+  project
+    .command('unarchive <project>')
+    .description('Return an archived project to active')
+    .option('--json', 'emit structured JSON only')
+    .action(async (projectSelector: string, options: { json?: boolean }) => {
+      const result = await dependencies.projectUnarchive({
+        project: projectSelector,
+      });
+      if (options.json) {
+        dependencies.writeOut(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      dependencies.writeOut(renderLifecycleResult(result, 'active'));
+    });
 };

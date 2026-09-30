@@ -123,8 +123,10 @@ import { registerProjectCommand } from './commands/project.js';
 import {
   listProjects,
   mapProject,
+  setProjectLifecycle,
   type MapProjectResult,
   type ProjectListRow,
+  type SetLifecycleResult,
 } from './memory/project-ops.js';
 import { fileCredentialStore } from './cloud/credentials.js';
 import {
@@ -243,6 +245,8 @@ export type ProgramDependencies = {
     project: string;
     dir: string;
   }): Promise<MapProjectResult>;
+  projectArchive(options: { project: string }): Promise<SetLifecycleResult>;
+  projectUnarchive(options: { project: string }): Promise<SetLifecycleResult>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -528,6 +532,14 @@ const defaultDependencies: ProgramDependencies = {
     }),
   projectMap: async ({ project, dir }) =>
     mapProject({ stackHome, selector: project, dir, gitOrigin: gitOriginOf }),
+  projectArchive: async ({ project }) =>
+    setProjectLifecycle({
+      stackHome,
+      selector: project,
+      lifecycle: 'archived',
+    }),
+  projectUnarchive: async ({ project }) =>
+    setProjectLifecycle({ stackHome, selector: project, lifecycle: 'active' }),
   confirm: async (message) => {
     if (!process.stdin.isTTY) return false;
     const prompt = createInterface({

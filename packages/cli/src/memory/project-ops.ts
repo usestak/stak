@@ -16,16 +16,19 @@ import {
   canonicalGitIdentity,
   bindingFor,
   gitClaimOf,
+  lifecycleOf,
   projectIdentityKey,
   readLocalRegistry,
   recordFor,
   resolveProjectForIdentity,
   registryConflicts,
   setBinding,
+  setLifecycle,
   writeLocalRegistry,
   readMemoryManifest,
   type LocalRegistry,
   type PortableProjectRecord,
+  type ProjectLifecycle,
 } from '@stack/memory';
 
 export type ProjectIdentityView =
@@ -44,6 +47,8 @@ export type RecoveryReference = { kind: 'legacy-local'; value: string };
 export type ProjectListRow = {
   projectId: string;
   identity: ProjectIdentityView;
+  // Lifecycle (active | archived) is INDEPENDENT of availability (Phase 15C).
+  lifecycle: 'active' | 'archived';
   binding: string | null;
   files: number;
   availability: 'present' | 'unavailable';
@@ -121,6 +126,7 @@ export const listProjects = async (deps: {
       return {
         projectId: record.projectId,
         identity: view,
+        lifecycle: lifecycleOf(record),
         binding: binding ? binding.dir : null,
         files: counts.get(record.projectId) ?? 0,
         availability: (binding || gitAutoMatch ? 'present' : 'unavailable') as
@@ -234,4 +240,50 @@ export const mapProject = async (deps: {
   });
   await writeLocalRegistry(deps.stackHome, updated);
   return { status: 'mapped', projectId: record.projectId, dir };
+};
+
+/* -------------------------------------------------------------------------- */
+/* lifecycle (archive / unarchive) — Phase 15C                                 */
+/* -------------------------------------------------------------------------- */
+
+export type SetLifecycleResult =
+  | {
+      status: 'ok';
+      projectId: string;
+      lifecycle: ProjectLifecycle;
+      changed: boolean;
+    }
+  | { status: 'project-not-found' }
+  | { status: 'ambiguous-selector'; matches: string[] };
+
+/**
+ * Set a project's lifecycle (machine-local write). Idempotent: setting the value it
+ * already has is a safe no-op (`changed: false`). Never mints, never deletes, never
+ * touches Memory, bindings, or identity claims. The lifecycle change becomes portable
+ * only after the next `stack memory backup`.
+ */
+export const setProjectLifecycle = async (deps: {
+  stackHome: string;
+  selector: string;
+  lifecycle: ProjectLifecycle;
+}): Promise<SetLifecycleResult> => {
+  const registry = await readLocalRegistry(deps.stackHome);
+  const resolved = resolveSelector(registry, deps.selector);
+  if ('error' in resolved)
+    return resolved.error === 'project-not-found'
+      ? { status: 'project-not-found' }
+      : { status: 'ambiguous-selector', matches: resolved.matches };
+  const record = resolved.record;
+  const changed = lifecycleOf(record) !== deps.lifecycle;
+  if (changed)
+    await writeLocalRegistry(
+      deps.stackHome,
+      setLifecycle(registry, record.projectId, deps.lifecycle),
+    );
+  return {
+    status: 'ok',
+    projectId: record.projectId,
+    lifecycle: deps.lifecycle,
+    changed,
+  };
 };

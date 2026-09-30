@@ -42,11 +42,27 @@ export const projectClaimSchema = z.discriminatedUnion('type', [
 ]);
 export type ProjectClaim = z.infer<typeof projectClaimSchema>;
 
+/**
+ * Project lifecycle (Phase 15C): the user's organizational stance on a logical project,
+ * independent of machine availability. `active` | `archived`. Legacy/pre-15C records omit
+ * it and are treated as `active` (see `lifecycleOf`). Archive is reversible and never
+ * deletes anything.
+ */
+export const projectLifecycleSchema = z.enum(['active', 'archived']);
+export type ProjectLifecycle = z.infer<typeof projectLifecycleSchema>;
+
 export const portableProjectRecordSchema = z.object({
   projectId: z.string().regex(PROJECT_ID_PATTERN),
   claims: z.array(projectClaimSchema).min(1),
+  // Optional so pre-15C records decode safely; absence means `active`.
+  lifecycle: projectLifecycleSchema.optional(),
 });
 export type PortableProjectRecord = z.infer<typeof portableProjectRecordSchema>;
+
+/** A record's effective lifecycle; a missing value (legacy record) is `active`. */
+export const lifecycleOf = (
+  record: Pick<PortableProjectRecord, 'lifecycle'>,
+): ProjectLifecycle => record.lifecycle ?? 'active';
 
 /** The portable snapshot embedded in a Memory bundle. NO bindings, NO paths. */
 export const PROJECT_REGISTRY_SNAPSHOT_VERSION = 1 as const;
@@ -168,7 +184,10 @@ export const resolveOrMintProject = (
   return {
     registry: {
       ...registry,
-      projects: [...registry.projects, { projectId, claims: [claim] }],
+      projects: [
+        ...registry.projects,
+        { projectId, claims: [claim], lifecycle: 'active' },
+      ],
     },
     projectId,
     minted: true,
@@ -269,8 +288,22 @@ export const toPortableSnapshot = (
       claims: [...record.claims].sort((a, b) =>
         claimKey(a) < claimKey(b) ? -1 : 1,
       ),
+      // Always serialize an explicit lifecycle so a new backup records it.
+      lifecycle: lifecycleOf(record),
     }))
     .sort((a, b) => (a.projectId < b.projectId ? -1 : 1)),
+});
+
+/** Set a project's lifecycle (no-op-safe); returns a new registry. */
+export const setLifecycle = (
+  registry: LocalRegistry,
+  projectId: string,
+  lifecycle: ProjectLifecycle,
+): LocalRegistry => ({
+  ...registry,
+  projects: registry.projects.map((record) =>
+    record.projectId === projectId ? { ...record, lifecycle } : record,
+  ),
 });
 
 /* -------------------------------------------------------------------------- */
