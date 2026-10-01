@@ -1000,3 +1000,64 @@ found, and previous files preserved (split into available-but-not-native and una
 then the final preserved total. Dry-run JSON exposes `availableProjects`, `nativeFiles`,
 `retainedFiles`, `retainedAvailableFiles`, `retainedUnavailableFiles`, and `finalFiles`
 under backup terminology (no internal generation terms).
+
+### 15C.1 real dogfood acceptance (2026-10-01)
+
+Real Machine J was kept in the 15C.1 bug-reproduction shape: 9 logical projects, 27 private
+Memory files, Atlas (active, Git-backed, available, 7 files), Nexus (same stable Project ID,
+archived, unavailable, 4 files), the remaining historical projects unavailable, and a native
+Claude Memory scan of **0 files**. Before the fix the preview had proposed 8 projects / 20
+files (dropping Atlas's 7 recovered files); after 15C.1, `memory backup --dry-run` reported 1
+project available, 0 native files, 27 previous files preserved (7 retained from an available
+project not present natively, 20 from 8 unavailable projects), final 9 projects / 27 files,
+next backup #6, parent #5, Protected — proving **native absence ≠ deletion**.
+
+**Real backup #6.** A real Machine J backup was then created: 27 Memory files saved locally,
+9 projects backed up, Protected. Cloud history shows Backup #6 as latest, parent #5, Protected,
+committed (internally generation 6, parent_generation 5). No historical backup was mutated.
+Backup #6 carried Nexus lifecycle = `archived`.
+
+**Fresh Machine K.** A completely fresh machine (fresh HOME, fresh STACK_HOME, empty Atlas
+checkout at `github.com/reymiahthesun-bit/atlas-access-flow`, no Machine J local state)
+authenticated and ran ordinary latest recovery (`memory recover --passkey`, no specific
+backup requested). It recovered Backup #6: 27 Memory files, Protected, Cloud up to date, 9
+logical projects.
+
+**Portable identity.** On Machine K, Atlas kept its prior Project ID, lifecycle `active`,
+strong Git identity, 7 files, automatically available. Nexus kept its prior Project ID,
+lifecycle `archived`, 4 files, unavailable, with **no Machine J path binding crossed**. The
+other historical projects likewise retained identity and Memory without crossing
+source-machine bindings — portable identity crosses machines while bindings stay
+machine-local.
+
+**Memory continuity.** Machine K's restore preview showed 9 projects / 27 Memory files (7
+Atlas ready, 20 retained from 8 unavailable projects). A preservation-first backup built from
+27 private / 0 native files recovered as 27 private files on a new machine.
+
+**Four-dimension independence.** On Machine K, Nexus began `archived + unavailable`. A safe
+synthetic local directory was explicitly mapped (`stack project map <Nexus> <dir>`): same
+Project ID, lifecycle still `archived`, availability now available, local binding present —
+mapping did **not** unarchive. Then `stack project unarchive <Nexus>`: same Project ID,
+lifecycle `active`, availability still available, binding preserved — unarchive changed
+lifecycle only. This confirms identity, lifecycle, availability, and machine binding remain
+four separate dimensions.
+
+**Proven (real Phase 15 acceptance).** (1) stable portable Project IDs; (2) strong Git
+project identity; (3) safe explicit local mapping; (4) machine-local bindings do not cross
+machines; (5) unresolved-project Memory stays preserved; (6) Protected Memory recovery works
+across machines; (7) historical backup recovery works; (8) bad immutable backups can be
+bypassed without rewriting history; (9) clean backups safely supersede bad ones; (10)
+user-facing backup history works; (11) active/archived lifecycle is portable; (12) archive
+preserves identity and Memory; (13) unavailable does not imply archived; (14) available does
+not imply active; (15) mapping changes availability, not lifecycle; (16) unarchive changes
+lifecycle, not identity; (17) lifecycle recovery is authoritative from the selected backup;
+(18) native Memory absence is not deletion; (19) backup composition is preservation-first;
+(20) 27 private + 0 native files still produce a 27-file backup; (21) fresh recovery of that
+backup preserves all 27 files; (22) public/private isolation remains intact.
+
+**Phase status.** **Phase 15: COMPLETE.** Subphases: 15A (portable project identity
+architecture), 15B (portable project identity runtime and recovery), 15B.5 (recovery registry
+provenance + generation immutability hardening), 15B.6 (historical Memory recovery + safe
+supersession), 15B.7 (user-facing backup terminology), 15C (project lifecycle management),
+15C.1 (preservation-first Memory backup composition). The next phase is intentionally not
+scoped here.
