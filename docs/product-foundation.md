@@ -1,8 +1,8 @@
-# Stack Product Foundation v0.1
+# STAK Product Foundation v0.1
 
 ## 1. Product Summary
 
-**Stack is the control plane for portable AI agent environments.**
+**STAK is the control plane for portable AI agent environments.**
 
 It helps developers discover, preserve, compose, restore, share, and safely synchronize the skills that make up their AI agent setup across machines and supported agents.
 
@@ -116,9 +116,9 @@ Installing a skill is becoming easier.
 
 The harder problem is managing the complete environment created by many skills over time.
 
-Stack therefore operates above the skill distribution layer.
+STAK therefore operates above the skill distribution layer.
 
-Stack is not primarily:
+STAK is not primarily:
 
 * a skill marketplace
 * another skills directory
@@ -126,19 +126,19 @@ Stack is not primarily:
 * a package repository
 * a simple backup utility
 
-Stack manages the **state of the user's agent environment**.
+STAK manages the **state of the user's agent environment**.
 
 The central distinction is:
 
 > A skill manager understands what can be installed.
 
-> Stack understands what your environment is supposed to look like.
+> STAK understands what your environment is supposed to look like.
 
 ---
 
 ## 4. Core Product Model
 
-Stack uses four main concepts.
+STAK uses four main concepts.
 
 ### 4.1 Skill
 
@@ -231,7 +231,7 @@ try-emil-frontend
 
 It represents the setup the user normally wants available.
 
-It does not mean every Skill Stack has ever discovered.
+It does not mean every Skill STAK has ever discovered.
 
 ---
 
@@ -263,7 +263,7 @@ The conceptual hierarchy is:
 ```text
 Skill
   ↓
-Stack
+STAK
   ↓
 Environment
   ↓
@@ -276,14 +276,14 @@ Machine
 
 ### 5.1 Discover Before Configure
 
-Stack should begin by understanding what the developer already has.
+STAK should begin by understanding what the developer already has.
 
 The first experience should not require manually creating a manifest.
 
 The user should be able to run:
 
 ```bash
-stack scan
+stak scan
 ```
 
 and see their current agent environment reconstructed.
@@ -294,7 +294,7 @@ and see their current agent environment reconstructed.
 
 Using someone else's Stack must never silently overwrite incompatible Skills or unmanaged local files.
 
-Stack should always:
+STAK should always:
 
 1. resolve
 2. preview
@@ -308,7 +308,7 @@ Destructive or conflicting operations require explicit approval.
 
 ### 5.3 Desired State Over Installation History
 
-Stack should not merely remember:
+STAK should not merely remember:
 
 > You once installed these Skills.
 
@@ -320,7 +320,7 @@ It should understand:
 
 ### 5.4 Reproducibility Matters
 
-Where possible, Stack should preserve:
+Where possible, STAK should preserve:
 
 * source
 * version
@@ -334,7 +334,7 @@ Restoring an Environment should reproduce the intended setup rather than blindly
 
 ### 5.5 Local Work Belongs to the User
 
-If Stack encounters a Skill or file it does not manage, it should not modify or delete it without permission.
+If STAK encounters a Skill or file it does not manage, it should not modify or delete it without permission.
 
 Unmanaged local content is protected by default.
 
@@ -344,7 +344,7 @@ Unmanaged local content is protected by default.
 
 Multiple Stacks should be able to share Skills.
 
-If two Stacks require the same compatible Skill, Stack should deduplicate it.
+If two Stacks require the same compatible Skill, STAK should deduplicate it.
 
 Example:
 
@@ -364,7 +364,7 @@ The resulting Environment contains one resolved Skill.
 
 The local CLI, Stack specification, and essential restoration format should remain open and portable.
 
-A developer should not lose access to their Environment if the hosted Stack service becomes unavailable.
+A developer should not lose access to their Environment if the hosted STAK service becomes unavailable.
 
 ---
 
@@ -418,10 +418,10 @@ Team functionality is part of the long-term direction, not the initial V0 scope.
 The user runs:
 
 ```bash
-npx stack scan
+stak scan
 ```
 
-Stack checks supported Skill locations.
+STAK checks supported Skill locations.
 
 Example:
 
@@ -499,7 +499,7 @@ Sign in to:
 The user runs:
 
 ```bash
-stack push
+stak push
 ```
 
 Example result:
@@ -522,7 +522,7 @@ The second major product moment is:
 
 ### Step 5: Restore Preview
 
-Stack shows how the Environment would behave elsewhere.
+STAK shows how the Environment would behave elsewhere.
 
 Example:
 
@@ -547,10 +547,10 @@ The third major product moment is:
 
 ## 8. Command Semantics
 
-### `stack scan`
+### `stak scan`
 
 ```bash
-stack scan
+stak scan
 ```
 
 Discovers Skills and supported agent configurations on the current machine.
@@ -559,43 +559,43 @@ Does not mutate the machine.
 
 ---
 
-### `stack init`
+### `stak init`
 
 ```bash
-stack init
+stak init
 ```
 
 Creates the default Environment, normally `main`, from discovered Skills.
 
 ---
 
-### `stack status`
+### `stak status`
 
 ```bash
-stack status
+stak status
 ```
 
 Shows whether the active Machine matches the desired Environment.
 
 ---
 
-### `stack diff`
+### `stak diff`
 
 ```bash
-stack diff
+stak diff
 ```
 
 Shows exactly what differs between desired and actual state.
 
 ---
 
-### `stack push`
+### `stak push`
 
 ```bash
-stack push
+stak push
 ```
 
-Saves local Environment state to Stack Cloud.
+Saves local Environment state to STAK Cloud.
 
 Direction:
 
@@ -605,10 +605,10 @@ Machine → Cloud
 
 ---
 
-### `stack pull`
+### `stak pull`
 
 ```bash
-stack pull
+stak pull
 ```
 
 Restores or applies saved Environment state to the current Machine.
@@ -621,10 +621,10 @@ Cloud → Machine
 
 ---
 
-### `stack use`
+### `stak use`
 
 ```bash
-stack use @someone/frontend
+stak use @someone/frontend
 ```
 
 Adds a Stack to the currently active Environment.
@@ -649,10 +649,10 @@ The imported Stack remains part of the Environment until removed.
 
 ---
 
-### `stack remove`
+### `stak remove`
 
 ```bash
-stack remove @someone/frontend
+stak remove @someone/frontend
 ```
 
 Removes that Stack from the active Environment.
@@ -661,10 +661,10 @@ Skills still required elsewhere remain available.
 
 ---
 
-### `stack try`
+### `stak try`
 
 ```bash
-stack try @someone/frontend
+stak try @someone/frontend
 ```
 
 Creates a temporary isolated Environment containing that Stack and its requirements.
@@ -675,10 +675,10 @@ This is for real testing, not just previewing.
 
 ---
 
-### `stack run`
+### `stak run`
 
 ```bash
-stack run codex
+stak run codex
 ```
 
 Launches an agent with access to the active Environment.
@@ -690,7 +690,7 @@ The agent adapter is responsible for exposing the correct Skills.
 ### Direct Try
 
 ```bash
-stack try @someone/frontend -- codex
+stak try @someone/frontend -- codex
 ```
 
 Conceptually:
@@ -715,20 +715,20 @@ main remains unchanged
 
 ---
 
-### `stack switch`
+### `stak switch`
 
 ```bash
-stack switch main
+stak switch main
 ```
 
 Changes the active Environment.
 
 ---
 
-### `stack publish`
+### `stak publish`
 
 ```bash
-stack publish
+stak publish
 ```
 
 Creates a reusable, shareable Stack from selected parts of an Environment.
@@ -827,13 +827,13 @@ requires v2.4
 requires v2.4
 ```
 
-Stack installs or exposes one resolved copy.
+STAK installs or exposes one resolved copy.
 
 ---
 
 ### 11.2 Compatible Requirements
 
-If both requirements can be satisfied by the same version, Stack resolves them automatically.
+If both requirements can be satisfied by the same version, STAK resolves them automatically.
 
 ---
 
@@ -849,7 +849,7 @@ requires v2.4
 requires v3.1
 ```
 
-Stack must not silently choose.
+STAK must not silently choose.
 
 It should present options such as:
 
@@ -882,13 +882,13 @@ frontend-design v5
 
 The original Stack remains unchanged.
 
-Stack should make clear that the resulting Environment differs from the author's original resolution.
+STAK should make clear that the resulting Environment differs from the author's original resolution.
 
 ---
 
 ### 11.5 Unmanaged Files
 
-Stack does not modify files it does not own without explicit approval.
+STAK does not modify files it does not own without explicit approval.
 
 ---
 
@@ -931,37 +931,37 @@ If application fails:
 Rollback
 ```
 
-Stack should avoid leaving partially modified Environments.
+STAK should avoid leaving partially modified Environments.
 
 ---
 
 ## 13. Skill Ownership
 
-Stack should know why each managed Skill exists.
+STAK should know why each managed Skill exists.
 
 Example:
 
 ```text
 playwright
 
-Managed by Stack
+Managed by STAK
 
 Required by:
 @temi/frontend
 @acme/engineering
 ```
 
-If a Stack is removed, Stack can determine whether the Skill is still required elsewhere.
+If a Stack is removed, STAK can determine whether the Skill is still required elsewhere.
 
 ---
 
 ## 14. Skill Storage Models
 
-Stack supports two restoration strategies.
+STAK supports two restoration strategies.
 
 ### 14.1 Reference
 
-Used when Stack can reliably fetch the Skill again.
+Used when STAK can reliably fetch the Skill again.
 
 Stored information may include:
 
@@ -982,7 +982,7 @@ Used when a Skill is:
 * unavailable remotely
 * otherwise not safely reproducible
 
-Stack stores a private immutable snapshot.
+STAK stores a private immutable snapshot.
 
 Private snapshots must never become public without explicit user action.
 
@@ -1019,15 +1019,15 @@ This avoids accidentally exposing:
 
 ## 16. Isolated Testing
 
-`stack try` creates a temporary Environment.
+`stak try` creates a temporary Environment.
 
 Example:
 
 ```bash
-stack try @emil/frontend -- codex
+stak try @emil/frontend -- codex
 ```
 
-Stack creates something conceptually like:
+STAK creates something conceptually like:
 
 ```text
 Environment: try-emil-frontend
@@ -1052,22 +1052,22 @@ The purpose is to test whether the Stack itself behaves as intended.
 
 ---
 
-## 17. Agent Access During `stack try`
+## 17. Agent Access During `stak try`
 
 The target agent must actually be able to use the isolated Skills.
 
-Therefore Stack needs an agent launch layer.
+Therefore STAK needs an agent launch layer.
 
 Example:
 
 ```bash
-stack run codex
+stak run codex
 ```
 
 or:
 
 ```bash
-stack try @someone/frontend -- codex
+stak try @someone/frontend -- codex
 ```
 
 The agent adapter exposes the Environment to that agent.
@@ -1109,7 +1109,7 @@ Discard
 Future versions may allow:
 
 ```bash
-stack keep try-emil-frontend --name design-test
+stak keep try-emil-frontend --name design-test
 ```
 
 This is not required for early V0.
@@ -1124,7 +1124,7 @@ V0 isolation means:
 
 It does not mean full VM, container, or OS process isolation.
 
-Stack can materialize isolated Skills into a Stack-controlled runtime/workspace and launch the selected agent against it.
+STAK can materialize isolated Skills into a STAK-controlled runtime/workspace and launch the selected agent against it.
 
 Agent-specific details remain inside adapters.
 
@@ -1134,7 +1134,7 @@ The Stack specification does not expose vendor filesystem mechanics.
 
 ## 20. Open Source and Hosted Product Boundary
 
-Stack should be both an open-source developer tool and a hosted product.
+STAK should be both an open-source developer tool and a hosted product.
 
 ### Open Source
 
@@ -1174,7 +1174,7 @@ The hosted product creates the long-term business.
 
 ## 21. V0 Scope
 
-Stack V0 focuses on **Agent Skills**.
+STAK V0 focuses on **Agent Skills**.
 
 V0 should support:
 
@@ -1189,7 +1189,7 @@ V0 should support:
 9. diff and drift detection
 10. creating and using Stacks
 11. basic conflict handling
-12. isolated `stack try`
+12. isolated `stak try`
 13. public/private Stack concepts
 14. reference and snapshot restoration
 15. cloud push/pull after the local product works
@@ -1198,7 +1198,7 @@ V0 should support:
 
 ## 22. Explicit V0 Non-Goals
 
-Stack V0 will not manage:
+STAK V0 will not manage:
 
 * API keys
 * environment secrets
@@ -1220,7 +1220,7 @@ Stack V0 will not manage:
 
 The initial boundary is:
 
-> Stack manages Agent Skills and the information required to reproducibly expose those Skills to supported agents.
+> STAK manages Agent Skills and the information required to reproducibly expose those Skills to supported agents.
 
 ---
 
@@ -1250,7 +1250,7 @@ and:
 Current Machine
 ```
 
-Stack should surface:
+STAK should surface:
 
 ```text
 Satisfied
@@ -1265,7 +1265,7 @@ Conflicting
 
 ## 25. Environment Health
 
-Stack may summarize state descriptively.
+STAK may summarize state descriptively.
 
 Example:
 
@@ -1283,16 +1283,16 @@ Avoid arbitrary gamified scoring.
 
 ## 26. Provenance
 
-Stack should determine, where possible:
+STAK should determine, where possible:
 
 ```text
 Where did this Skill come from?
 What revision was used?
 Has it changed?
-Can Stack reproduce it?
+Can STAK reproduce it?
 ```
 
-If provenance is unknown, Stack should say so.
+If provenance is unknown, STAK should say so.
 
 It should never guess.
 
@@ -1302,12 +1302,12 @@ It should never guess.
 
 ### Recognition
 
-> Stack found everything I installed.
+> STAK found everything I installed.
 
 Triggered by:
 
 ```bash
-stack scan
+stak scan
 ```
 
 ### Security
@@ -1317,14 +1317,14 @@ stack scan
 Triggered by local preservation and eventually:
 
 ```bash
-stack push
+stak push
 ```
 
 ### Portability
 
 > I can reproduce or share this setup anywhere.
 
-Triggered by restore, `stack use`, and public Stacks.
+Triggered by restore, `stak use`, and public Stacks.
 
 ### Safe Exploration
 
@@ -1333,7 +1333,7 @@ Triggered by restore, `stack use`, and public Stacks.
 Triggered by:
 
 ```bash
-stack try
+stak try
 ```
 
 ---
@@ -1350,17 +1350,17 @@ Supporting:
 
 Technical:
 
-> **Stack is the control plane for AI agent environments.**
+> **STAK is the control plane for AI agent environments.**
 
 Developer explanation:
 
-> Stack gives your AI agent setup a portable, versioned, reproducible home.
+> STAK gives your AI agent setup a portable, versioned, reproducible home.
 
 ---
 
-## 29. What Stack Is Not
+## 29. What STAK Is Not
 
-Stack is not:
+STAK is not:
 
 * another AI Skill marketplace
 * another GitHub
@@ -1370,13 +1370,13 @@ Stack is not:
 * a prompt marketplace
 * a replacement for existing Skill distribution systems
 
-Stack should integrate with the ecosystem rather than own every layer.
+STAK should integrate with the ecosystem rather than own every layer.
 
 ---
 
 ## 30. Long-Term Direction
 
-If the Skill-focused product succeeds, Stack may later expand to broader agent environment primitives such as:
+If the Skill-focused product succeeds, STAK may later expand to broader agent environment primitives such as:
 
 ```text
 Skills
@@ -1407,13 +1407,13 @@ If not, reconsider the core product.
 
 Do developers want to use environments created by other developers?
 
-If yes, Stack gains organic distribution.
+If yes, STAK gains organic distribution.
 
 ### C. Standardization
 
 Do teams want developers to operate with shared agent environments?
 
-If yes, Stack has a strong commercial path.
+If yes, STAK has a strong commercial path.
 
 ---
 
@@ -1447,7 +1447,7 @@ From this point forward, the following concepts are considered frozen for V0:
 
 ```text
 Skill
-Stack
+STAK
 Environment
 Machine
 ```
@@ -1487,13 +1487,13 @@ Implementation work should now focus on:
 4. content storage and restore
 5. Codex adapter
 6. resolver and composition
-7. isolated `stack try`
+7. isolated `stak try`
 8. Cursor and Claude adapters
 9. cloud portability
 10. public Stack flow
 
 Future ideas should be evaluated against:
 
-> Does this strengthen Stack's core job of making AI agent environments portable, reproducible, composable, and safe?
+> Does this strengthen STAK's core job of making AI agent environments portable, reproducible, composable, and safe?
 
 If not, it stays outside V0.

@@ -1,4 +1,4 @@
-# Release checklist (V0.1)
+# Release checklist (0.1.0)
 
 Publishing and deployment are manual human actions. This checklist separates what
 is automatically verified from what requires an owner decision.
@@ -11,39 +11,60 @@ is automatically verified from what requires an owner decision.
 - [x] `pnpm test` (no live Supabase / network required)
 - [x] `pnpm build` (workspace builds + CLI bundle + `next build`)
 - [x] Cross-platform CI matrix: ubuntu / windows / macOS on Node 22
-- [x] Packed CLI installs and runs from an isolated directory
+- [x] Packed CLI installs and runs the `stak` command from an isolated directory
 - [x] Controlled demonstrations (Phase 7–10) run green
 - [x] `pnpm audit --prod`: no known vulnerabilities
 - [x] No secrets committed (tracked-file scan)
 - [x] Version is `0.1.0`; `stak --version` reports `0.1.0`
 - [x] `CHANGELOG.md`, README, and docs present
 
-## Human action required (release blockers)
+## Resolved (identity & metadata)
 
-- [ ] **Public npm package name** — `stack` is taken. Verified-available
-      candidates at audit time: `@getstack/cli`, `@skillstack/cli`,
-      `@agentstack/cli`, `stackcli`, `agent-stack`. Choose one, then make
-      `packages/cli` non-private, set `"name"`, and update install docs.
-- [ ] **LICENSE** — no license file exists. Choose one (e.g. MIT or Apache-2.0)
-      or intentionally keep it proprietary; add a root `LICENSE` and set the
-      package `license` field.
-- [ ] **Security contact** — fill in `SECURITY.md` with a real reporting channel.
-- [ ] **GitHub remote** — no remote is configured; create the repository and push.
-- [ ] **Production Supabase project** — create it and apply
-      `supabase/migrations/0001_*` then `0002_*` in order.
-- [ ] **GitHub OAuth app** — configure the provider + callback URLs in Supabase
+- [x] **Product identity** — STAK; CLI command `stak`.
+- [x] **Public npm package name** — `@usestak/cli` (the npm scope `@usestak` is
+      secured; `packages/cli` is non-private with `publishConfig.access: public`).
+- [x] **LICENSE** — MIT added at the repository root; package `license` set.
+- [x] **GitHub repository** — `usestak/stak`; the `origin` remote is configured
+      locally (not yet pushed).
+- [x] **Security reporting channel** — `SECURITY.md` points to GitHub Private
+      Vulnerability Reporting (enabling it in repo settings is still open, below).
+- [x] **Migrations present** — `supabase/migrations/0001`, `0002`, `0003`.
+- [x] **Env vars** — `STAK_*` preferred with `STACK_*` legacy aliases.
+- [x] **Local state** — new installs default to `~/.stak`; a legacy `~/.stack` is
+      adopted in place.
+- [x] **Release artifacts ignored** — `.release/` is in `.gitignore`.
+
+> External/manual facts (cannot be verified from this repository): the `@usestak`
+> npm organization has 2FA/publish protection enabled, and the `usestak/stak`
+> GitHub namespace is secured.
+
+## Human action required before release (still open)
+
+- [ ] Enable **GitHub Private Vulnerability Reporting** in `usestak/stak` settings.
+- [ ] Purchase/configure the **`usestak.app`** domain (and any subdomains).
+- [ ] Stand up a **production Supabase** project and apply
+      `supabase/migrations/0001` → `0002` → `0003` in order.
+- [ ] **Production web deployment** of `apps/web` with production env vars.
+- [ ] Set server secrets (`SUPABASE_SERVICE_ROLE_KEY`, `STAK_TICKET_SECRET`) in the
+      hosting environment — see [env-vars.md](env-vars.md).
+- [ ] Configure the **production GitHub OAuth app** + callback URLs in Supabase
       (see [cloud-setup.md](cloud-setup.md)).
-- [ ] **Production `STACK_APP_URL` / domain** and web hosting deployment.
-- [ ] Set server secrets (`SUPABASE_SERVICE_ROLE_KEY`, `STACK_TICKET_SECRET`) in
-      the hosting environment — see [env-vars.md](env-vars.md).
+- [ ] Validate **production WebAuthn** RP ID / allowed origins on the real domain
+      (localhost success does not prove production).
+- [ ] Decide the **production API endpoint** (baked default vs documented
+      `STAK_API_URL`); no production URL is hardcoded yet.
+- [ ] Provision a **production security email** (`security@usestak.app`) — do not
+      advertise it until the mailbox exists.
+- [ ] Final **fresh-machine acceptance** against production (login → push/pull →
+      memory backup/recover, Standard and Protected).
 
-## Release steps (manual, after blockers cleared)
+## Release steps (manual, after the open items are cleared)
 
 1. Final `pnpm install --frozen-lockfile && pnpm typecheck && pnpm lint && pnpm test && pnpm build` from a clean checkout.
-2. `cd packages/cli && npm pack`; inspect the tarball; install-smoke it.
-3. Tag `v0.1.0`.
-4. `npm publish` the CLI under the chosen name.
+2. `cd packages/cli && npm pack`; inspect the tarball; install-smoke the `stak` binary.
+3. Push `main` to `origin` and tag `v0.1.0`.
+4. `npm publish` `@usestak/cli` (public access).
 5. Apply Supabase migrations to production.
 6. Deploy `apps/web` with production env vars.
-7. Verify `stak login` → `push`/`pull` and a public publish/use against
-   production.
+7. Verify `stak login` → `push`/`pull` and a public publish/use against production.
+8. Create the GitHub release for `v0.1.0`.

@@ -10,6 +10,9 @@ coverage/
 Thumbs.db
 .worktrees/
 
+# Local release artifacts (e.g. `npm pack` tarballs); never commit these.
+.release/
+
 
 # Supabase CLI generated temp state
 supabase/.temp

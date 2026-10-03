@@ -1,5 +1,12 @@
 # Stack V0 Technical Build Specification
 
+> **Rename note (pre-0.1.0):** the product was renamed **Stack → STAK** (CLI
+> `stack` → `stak`, public package `@usestak/cli`, repo `usestak/stak`). This is a
+> frozen design-time build specification and retains the original "Stack" name as
+> written; the shipped product, CLI, and current user docs use STAK. The reusable
+> domain object remains a "stack" (`stack.yaml`, `stak use <stack>`). Persisted
+> identifiers and internal `@stack/*` package names are unchanged.
+
 **Status:** Approved for development
 **Version:** 0.1
 **Product Foundation:** Frozen

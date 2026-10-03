@@ -10,8 +10,8 @@
 ## Install (V0.1 from source)
 
 ```bash
-git clone <this-repo>
-cd stack
+git clone https://github.com/usestak/stak.git
+cd stak
 corepack enable          # provides the pinned pnpm
 pnpm install --frozen-lockfile
 pnpm build
