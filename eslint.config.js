@@ -34,7 +34,7 @@ export default tseslint.config(
           patterns: [
             {
               group: [
-                '@stack/cli',
+                '@usestak/cli',
                 '@stack/web',
                 'react',
                 'react/**',

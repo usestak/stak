@@ -1,9 +1,9 @@
 {
-  "name": "stack-monorepo",
+  "name": "stak-monorepo",
   "version": "0.1.0",
   "private": true,
-  "description": "The control plane for portable AI agent environments.",
-  "license": "UNLICENSED",
+  "description": "STAK — the control plane for portable AI agent environments.",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=22"

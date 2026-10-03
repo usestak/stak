@@ -2,12 +2,17 @@
 
 ## Reporting a vulnerability
 
-> TODO (release blocker): a security contact has not yet been decided. Before the
-> public release, replace this section with a real reporting channel (a dedicated
-> email such as `security@<domain>` or a GitHub private security advisory link).
+Report suspected vulnerabilities through **GitHub Private Vulnerability
+Reporting** on the `usestak/stak` repository (Security → Report a vulnerability).
+**Do not** open a public GitHub issue for security reports.
 
-Until then, report suspected vulnerabilities privately to the repository owner
-through a private channel — **do not** open a public issue for security reports.
+> A dedicated `security@usestak.app` address is **not active yet** and must not be
+> used until the production domain is configured; use GitHub private reporting
+> until then.
+>
+> Manual pre-release requirement: enable Private Vulnerability Reporting in the
+> `usestak/stak` repository settings (Settings → Security → Private vulnerability
+> reporting). This cannot be verified from the local repository.
 
 When reporting, please include:
 

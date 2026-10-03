@@ -1,9 +1,23 @@
 {
-  "name": "@stack/cli",
+  "name": "@usestak/cli",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
-  "description": "The control plane for portable AI agent environments.",
+  "description": "STAK — the control plane for portable AI agent environments.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/usestak/stak.git"
+  },
+  "bugs": {
+    "url": "https://github.com/usestak/stak/issues"
+  },
+  "homepage": "https://github.com/usestak/stak#readme",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "stack": "./dist/bin.js"
   },
