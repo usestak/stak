@@ -44,19 +44,20 @@ pnpm --filter @stack/web dev
 
 ## 5. Point the CLI at the API
 
-Set `STACK_API_URL` to the web app's origin (development defaults to
+Set `STAK_API_URL` to the web app's origin (development defaults to
 `http://localhost:3000` when unset). Production builds fail clearly if a cloud
-command is run without a configured endpoint.
+command is run without a configured endpoint. The legacy `STACK_API_URL` is still
+accepted; set only one (see [env-vars.md](env-vars.md)).
 
 ```bash
-export STACK_API_URL=http://localhost:3000
+export STAK_API_URL=http://localhost:3000
 stak login
 stak push
 ```
 
 ## Notes and future hardening
 
-- The CLI token is stored at `$STACK_HOME/auth.json` with owner-only permissions
+- The CLI token is stored at `$STAK_HOME/auth.json` with owner-only permissions
   where supported. Windows at-rest credential protection (DPAPI / OS keychain)
   is a deferred hardening item; the credential-storage abstraction lets it be
   swapped without changing CLI behavior.

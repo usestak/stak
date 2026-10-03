@@ -77,12 +77,12 @@ Cloud in V0.1.
 
 ## Cloud
 
-Require `STACK_API_URL`; mutations require `stak login`.
+Require `STAK_API_URL`; mutations require `stak login`.
 
 ### `stak login [--api-url <url>] [--label <label>] [--no-browser]`
 
 Browser device-authorization flow; stores an opaque token under
-`$STACK_HOME/auth.json`.
+`$STAK_HOME/auth.json`.
 
 ### `stak logout`
 

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -24,7 +25,8 @@ export class StackStateError extends Error {
       | 'environment-exists'
       | 'environment-not-found'
       | 'incomplete-scan'
-      | 'invalid-state',
+      | 'invalid-state'
+      | 'ambiguous-home',
     message: string,
     options?: ErrorOptions,
   ) {
@@ -38,14 +40,94 @@ export type ResolveStackHomeOptions = {
   homeDir?: string;
 };
 
+/**
+ * Relative markers that identify a directory as a STAK state home (Phase R3). Each is a
+ * product-owned path that an unrelated or empty directory never contains, and each can
+ * exist INDEPENDENTLY — a machine with only `auth.json` (logged in, nothing else) or
+ * only a Memory store is still a recognizable home. Mere directory existence is NOT a
+ * marker. Kept in sync with `statePaths` (core), `memoryStorePaths` (@stack/memory), and
+ * the Cloud credential file (`auth.json`).
+ */
+const STATE_MARKERS: readonly string[] = [
+  'machine.json', // core machine identity
+  'auth.json', // Cloud credential
+  path.join('environments', 'main', 'environment.yaml'), // desired-state manifest
+  path.join('environments', 'main', 'stack.lock.json'), // resolved lockfile
+  path.join('memory', 'manifests', 'current.json'), // Memory manifest
+  path.join('memory', 'objects'), // Memory content store
+  path.join('memory', 'projects-local.json'), // machine-local project registry
+  path.join('memory', 'recovery-state.json'), // recovery provenance
+];
+
+/**
+ * Whether `home` holds recognizable STAK state (any one marker). Read-only; never
+ * creates anything. Used to adopt a legacy `~/.stack` in place without moving data.
+ */
+export const hasRecognizableStakState = (home: string): boolean => {
+  const root = path.resolve(home);
+  return STATE_MARKERS.some((marker) => existsSync(path.join(root, marker)));
+};
+
+/** Canonical form for comparing two home paths (Windows is case-insensitive). */
+const canonicalHome = (candidate: string): string => {
+  const resolved = path.resolve(candidate);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+};
+
+/**
+ * The explicit home from environment variables, or undefined when neither is set.
+ * `STAK_HOME` is preferred; `STACK_HOME` is the supported legacy alias. If BOTH are set
+ * and point at DIFFERENT locations we FAIL CLOSED rather than guess, merge, or copy.
+ */
+const explicitHome = (env: NodeJS.ProcessEnv): string | undefined => {
+  const preferred = env.STAK_HOME;
+  const legacy = env.STACK_HOME;
+  if (preferred !== undefined && legacy !== undefined) {
+    if (canonicalHome(preferred) !== canonicalHome(legacy))
+      throw new StackStateError(
+        'ambiguous-home',
+        'STAK found different locations for STAK_HOME and legacy STACK_HOME. ' +
+          'Unset one, or point both at the same state directory. No changes were made.',
+      );
+    return preferred;
+  }
+  return preferred ?? legacy;
+};
+
+/**
+ * Resolve the STAK state home (Phase R3). Precedence:
+ *  1. explicit `STAK_HOME` / `STACK_HOME` (conflict → fail closed);
+ *  2. otherwise discover implicitly: prefer `~/.stak`, but adopt a legacy `~/.stack`
+ *     IN PLACE when it (and only it) holds recognizable state. If BOTH `~/.stak` and
+ *     `~/.stack` hold recognizable state, fail closed (never guess, move, or merge).
+ * New installs default to `~/.stak`. Read-only: never creates a directory (lazy/atomic
+ * creation stays at the mutation boundary).
+ */
 export const resolveStackHome = (
   options: ResolveStackHomeOptions = {},
-): string =>
-  path.resolve(
-    options.env?.STACK_HOME ??
-      process.env.STACK_HOME ??
-      path.join(options.homeDir ?? os.homedir(), '.stack'),
-  );
+): string => {
+  const env = options.env ?? process.env;
+  const explicit = explicitHome(env);
+  if (explicit !== undefined) return path.resolve(explicit);
+
+  const homeDir = options.homeDir ?? os.homedir();
+  const preferredHome = path.join(homeDir, '.stak');
+  const legacyHome = path.join(homeDir, '.stack');
+  const preferredHasState = hasRecognizableStakState(preferredHome);
+  const legacyHasState = hasRecognizableStakState(legacyHome);
+
+  if (preferredHasState && legacyHasState)
+    throw new StackStateError(
+      'ambiguous-home',
+      `STAK found state in both ${preferredHome} and legacy ${legacyHome}. ` +
+        'No state was moved or merged. Set STAK_HOME explicitly to the state ' +
+        'directory you intend to use.',
+    );
+  // Adopt a legacy ~/.stack in place only when it is the sole home with state.
+  if (legacyHasState && !preferredHasState) return path.resolve(legacyHome);
+  // New install, or state already under ~/.stak → the preferred home.
+  return path.resolve(preferredHome);
+};
 
 type BaseStatePaths = {
   machine: string;

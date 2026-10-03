@@ -18,7 +18,7 @@ STAK
 Memory is treated as potentially secret-bearing. No public manifest, public
 version, public snapshot preparation, or `stak publish` traversal ever touches
 Memory storage, which lives in its own private namespace under
-`$STACK_HOME/memory/` (content-addressed objects + an atomically committed
+`$STAK_HOME/memory/` (content-addressed objects + an atomically committed
 manifest), separate from the Skill store.
 
 ## What STAK Memory V0 preserves (Claude)
@@ -305,7 +305,7 @@ is unrecoverable — STAK has no backdoor.**
   not defended against STAK shipping malicious client code (documented, accepted
   for V0).
 - **Local device key:** an enrolled device stores your Memory Master Key in an
-  owner-only (0600) envelope under `$STACK_HOME/memory/keys/`. This keeps STAK
+  owner-only (0600) envelope under `$STAK_HOME/memory/keys/`. This keeps STAK
   Cloud blind, but does **not** defend against full compromise of your local OS
   account; OS-native secure storage is future hardening.
 - **Deletion:** retiring old Standard backups after migration is a soft-delete;

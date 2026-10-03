@@ -88,6 +88,6 @@ stak use @you/frontend
 stak try @you/frontend -- codex
 ```
 
-Cloud commands need `STACK_API_URL` (and login for mutations). Local commands
+Cloud commands need `STAK_API_URL` (and login for mutations). Local commands
 work fully offline. See [cloud-setup.md](cloud-setup.md) and
 [commands.md](commands.md).

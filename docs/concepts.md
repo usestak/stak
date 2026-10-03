@@ -18,7 +18,7 @@ content produces a new hash.
 
 ## Store
 
-The immutable, content-addressed cache at `$STACK_HOME/store/sha256/<hash>/`.
+The immutable, content-addressed cache at `$STAK_HOME/store/sha256/<hash>/`.
 Store objects are written once and verified on read. Restoration always
 materializes exact bytes from the Store.
 
@@ -50,7 +50,7 @@ composed of direct Skills plus ordered Stack layers, resolved into a lockfile.
 ## Machine
 
 A computer running STAK, identified by a random UUID in
-`$STACK_HOME/machine.json`. Machine-specific state — placements, agent bindings,
+`$STAK_HOME/machine.json`. Machine-specific state — placements, agent bindings,
 local snapshot IDs, sync metadata — is never portable and never uploaded.
 
 ## Binding

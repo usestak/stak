@@ -36,7 +36,7 @@ and the safe next step. Below are common situations.
   component (usually `workspace`) could not be deleted, often because another
   process on Windows briefly held a file. `main` and your normal Codex bindings
   are unchanged. The runtime is retained safely under
-  `$STACK_HOME/runtime/<sessionId>/` with a valid ownership marker
+  `$STAK_HOME/runtime/<sessionId>/` with a valid ownership marker
   (`status: cleanup-failed`), and STAK retries cleanup conservatively on a later
   `stak try`. You can also remove that directory yourself. STAK never
   auto-deletes an unmarked runtime directory.
@@ -54,7 +54,7 @@ and the safe next step. Below are common situations.
 
 ## Cloud
 
-- **`STAK Cloud is not configured`** — set `STACK_API_URL`. Local commands do
+- **`STAK Cloud is not configured`** — set `STAK_API_URL`. Local commands do
   not need it.
 - **`Not signed in` / session expired** — run `stak login` again.
 - **Push conflict (remote newer / unsynced remote)** — pull the newer Environment
