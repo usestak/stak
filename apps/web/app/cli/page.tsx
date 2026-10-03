@@ -28,7 +28,7 @@ export default async function CliPage({
         <h1>Device authorization</h1>
         <p className="muted">
           No code provided. Start from your terminal with{' '}
-          <code>stack login</code>.
+          <code>stak login</code>.
         </p>
       </Shell>
     );
@@ -42,7 +42,7 @@ export default async function CliPage({
     const next = `/cli?code=${encodeURIComponent(code)}`;
     return (
       <Shell>
-        <h1>Authorize the Stack CLI</h1>
+        <h1>Authorize the STAK CLI</h1>
         <p className="muted">Verification code</p>
         <p className="codechip">{code}</p>
         <p style={{ marginTop: '1.5rem' }}>
@@ -59,7 +59,7 @@ export default async function CliPage({
 
   return (
     <Shell>
-      <h1>Authorize the Stack CLI</h1>
+      <h1>Authorize the STAK CLI</h1>
       <p className="muted">
         Confirm this matches the code shown in your terminal:
       </p>

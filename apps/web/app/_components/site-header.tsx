@@ -11,7 +11,7 @@ export function SiteHeader({ user }: { user?: WebUser | null }) {
     <header className="site-header">
       <div className="site-header-inner">
         <a href={user ? '/dashboard' : '/'} className="wordmark">
-          Stack
+          STAK
         </a>
         {user ? (
           <nav className="site-nav">

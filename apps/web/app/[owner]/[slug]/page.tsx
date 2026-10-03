@@ -49,11 +49,11 @@ export default async function StackPage({
 
           <h2>Install</h2>
           <pre>
-            <code>{`stack use ${ref}\nstack try ${ref} -- codex`}</code>
+            <code>{`stak use ${ref}\nstak try ${ref} -- codex`}</code>
           </pre>
           <p className="muted">
             Supported agents: Codex, Cursor, Claude. Isolated{' '}
-            <code>stack try</code> is Codex-only in V0.1.
+            <code>stak try</code> is Codex-only in V0.1.
           </p>
 
           <h2>Skills</h2>
@@ -94,7 +94,7 @@ export default async function StackPage({
             style={{ fontSize: '0.82rem', marginTop: '1rem' }}
           >
             Source references are provided by the author. Repository
-            accessibility is not verified by Stack.
+            accessibility is not verified by STAK.
           </p>
         </main>
       </div>

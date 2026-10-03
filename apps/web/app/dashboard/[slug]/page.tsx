@@ -70,7 +70,7 @@ export default async function DashboardStackPage({
               <h2>Skills</h2>
               {detail.skills.length === 0 ? (
                 <p className="muted">
-                  This Stack has no Skills yet. Run <code>stack push</code> from
+                  This Stack has no Skills yet. Run <code>stak push</code> from
                   your terminal.
                 </p>
               ) : (

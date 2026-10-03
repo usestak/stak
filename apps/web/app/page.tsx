@@ -13,9 +13,9 @@ export default async function HomePage() {
       <SiteHeader />
       <div className="page">
         <main>
-          <h1>Stack Cloud</h1>
+          <h1>STAK Cloud</h1>
           <p className="lead">
-            Keep your AI agent Skills reproducible across machines. Your Stack
+            Keep your AI agent Skills reproducible across machines. Your STAK
             lives locally and syncs privately to the Cloud.
           </p>
 
@@ -27,7 +27,7 @@ export default async function HomePage() {
 
           <h2>From your terminal</h2>
           <pre>
-            <code>{`stack login\nstack push`}</code>
+            <code>{`stak login\nstak push`}</code>
           </pre>
 
           <p className="muted">

@@ -27,7 +27,7 @@ export default async function SettingsPage() {
           <h2>CLI</h2>
           <p className="muted">
             Sign in and out of the CLI from your terminal with{' '}
-            <code>stack login</code> and <code>stack logout</code>.
+            <code>stak login</code> and <code>stak logout</code>.
           </p>
 
           <h2>Session</h2>

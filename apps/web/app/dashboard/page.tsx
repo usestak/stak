@@ -55,7 +55,7 @@ export default async function DashboardPage() {
               <p>No Stacks in Cloud yet.</p>
               <p className="muted">Push your first Stack from your terminal:</p>
               <pre>
-                <code>stack push</code>
+                <code>stak push</code>
               </pre>
             </div>
           ) : (

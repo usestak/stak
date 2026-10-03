@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import './globals.css';
 
 export const metadata = {
-  title: 'Stack Cloud',
+  title: 'STAK Cloud',
   description: 'Portable AI agent environments.',
 };
 

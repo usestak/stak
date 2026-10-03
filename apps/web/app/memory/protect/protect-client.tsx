@@ -66,7 +66,7 @@ export function ProtectClient({
       setStatus({ kind: 'working', message: 'Creating your passkey…' });
       const { credentialId } = await createPasskeyCredential({
         rpId,
-        rpName: 'Stack Memory',
+        rpName: 'STAK Memory',
         userName,
       });
 
@@ -76,7 +76,7 @@ export function ProtectClient({
           kind: 'unsupported',
           message:
             'Your passkey works, but this browser or authenticator does not provide the ' +
-            'encryption capability Stack Memory requires. Use a recovery file instead.',
+            'encryption capability STAK Memory requires. Use a recovery file instead.',
         });
         return;
       }

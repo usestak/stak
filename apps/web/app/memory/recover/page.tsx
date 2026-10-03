@@ -26,9 +26,9 @@ export default async function MemoryRecoverPage({
   if (!session)
     return (
       <Shell>
-        <h1>Unlock your Stack Memory</h1>
+        <h1>Unlock your STAK Memory</h1>
         <p className="muted">
-          Start from your terminal with <code>stack memory recover</code>.
+          Start from your terminal with <code>stak memory recover</code>.
         </p>
       </Shell>
     );
@@ -38,7 +38,7 @@ export default async function MemoryRecoverPage({
     const next = `/memory/recover?session=${encodeURIComponent(session)}`;
     return (
       <Shell>
-        <h1>Unlock your Stack Memory</h1>
+        <h1>Unlock your STAK Memory</h1>
         <p style={{ marginTop: '1.5rem' }}>
           <a
             className="btn"
@@ -56,7 +56,7 @@ export default async function MemoryRecoverPage({
 
   return (
     <Shell>
-      <h1>Unlock your Stack Memory</h1>
+      <h1>Unlock your STAK Memory</h1>
       <p className="muted">
         Use your passkey to unlock Protected Memory for the CLI.
       </p>

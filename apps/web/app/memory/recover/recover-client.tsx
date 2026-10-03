@@ -84,7 +84,7 @@ export function RecoverClient({
             kind: 'unsupported',
             message:
               'Your passkey works, but this browser or authenticator does not provide the ' +
-              'encryption capability Stack Memory requires. Use a recovery file instead.',
+              'encryption capability STAK Memory requires. Use a recovery file instead.',
           });
           return;
         }
