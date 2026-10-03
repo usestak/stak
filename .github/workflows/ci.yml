@@ -70,8 +70,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/rc" && cd "$RUNNER_TEMP/rc"
           echo '{"name":"rc","private":true}' > package.json
           npm install "$RUNNER_TEMP/$tgz" --no-save
-          ./node_modules/.bin/stack --version
-          ./node_modules/.bin/stack scan --help
+          ./node_modules/.bin/stak --version
+          ./node_modules/.bin/stak scan --help
 
   demos:
     name: controlled demonstrations

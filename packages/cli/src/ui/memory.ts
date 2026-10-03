@@ -94,7 +94,7 @@ export const renderMemoryCloudBackup = (
     return block([
       ...head,
       'Cloud backup skipped.',
-      'Run `stack login` to protect this backup from machine loss.',
+      'Run `stak login` to protect this backup from machine loss.',
     ]);
   if (cloud.status === 'protected-locked')
     return block([
@@ -103,7 +103,7 @@ export const renderMemoryCloudBackup = (
       'cannot unlock your protected Memory.',
       '',
       'Run:',
-      '  stack memory recover',
+      '  stak memory recover',
     ]);
   if (cloud.status === 'failed')
     return block([
@@ -116,25 +116,25 @@ export const renderMemoryCloudBackup = (
   if (cloud.status === 'protected')
     return block([
       ...head,
-      `${projects(local.projects)} backed up to Stack Cloud.`,
+      `${projects(local.projects)} backed up to STAK Cloud.`,
       '',
       'Privacy: Protected',
     ]);
   return block([
     ...head,
-    `${projects(local.projects)} backed up to Stack Cloud.`,
+    `${projects(local.projects)} backed up to STAK Cloud.`,
     '',
     'Privacy: Standard',
     '',
     'For client-side encryption:',
-    '  stack memory protect',
+    '  stak memory protect',
   ]);
 };
 
 /** Cloud → local private store recovery (does not touch native agent files). */
 export const renderMemoryRecover = (outcome: CloudRecoverOutcome): string => {
   if (outcome.status === 'not-authenticated')
-    return block(['Not signed in.', 'Run `stack login` first.']);
+    return block(['Not signed in.', 'Run `stak login` first.']);
   if (outcome.status === 'no-backup')
     return block(['No Cloud backup found for this account.']);
   if (outcome.status === 'needs-recovery-method')
@@ -143,7 +143,7 @@ export const renderMemoryRecover = (outcome: CloudRecoverOutcome): string => {
       '',
       'This device can’t unlock it yet.',
       'Recover with a passkey in your browser, or use a recovery file:',
-      '  stack memory recover --recovery-file <path>',
+      '  stak memory recover --recovery-file <path>',
     ]);
   return block([
     `Memory recovered from backup #${outcome.generation}.`,
@@ -151,7 +151,7 @@ export const renderMemoryRecover = (outcome: CloudRecoverOutcome): string => {
     `${plainFiles(outcome.objects)} available`,
     `Privacy: ${outcome.privacyMode === 'protected' ? 'Protected' : 'Standard'}`,
     '',
-    'Run `stack memory restore`.',
+    'Run `stak memory restore`.',
   ]);
 };
 
@@ -244,7 +244,7 @@ export const renderMemoryStatus = (
       'Claude',
       '',
       'No backup yet.',
-      'Run `stack memory backup` to protect your memory.',
+      'Run `stak memory backup` to protect your memory.',
     ]);
   const lines = [
     'Claude',
@@ -305,7 +305,7 @@ export const renderMemoryRestore = (
       );
     lines.push('', 'Existing agent memory will not be overwritten.', '');
     if (notFound.length > 0 || identityConflicts.length > 0)
-      lines.push('Run `stack project` to review them.');
+      lines.push('Run `stak project` to review them.');
     if (options.verbose)
       for (const item of plan.items)
         lines.push(`${item.status}  ${item.logicalId}`);
@@ -327,7 +327,7 @@ export const renderMemoryRestore = (
       `${plainFiles(identityConflicts.length)} from ${projects(conflictedProjects)} need explicit mapping (identity conflict).`,
     );
   if (notFound.length > 0 || identityConflicts.length > 0)
-    lines.push('Run `stack project` to review them.');
+    lines.push('Run `stak project` to review them.');
   return block(lines);
 };
 
@@ -444,9 +444,9 @@ export const renderMemoryGenerations = (
   options: { authenticated: boolean } = { authenticated: true },
 ): string => {
   if (!options.authenticated)
-    return 'Not signed in.\nRun `stack login` first.\n';
+    return 'Not signed in.\nRun `stak login` first.\n';
   if (rows.length === 0)
-    return 'No Memory backups yet.\nRun `stack memory backup` first.\n';
+    return 'No Memory backups yet.\nRun `stak memory backup` first.\n';
   const lines = ['Memory backup history', ''];
   for (const row of [...rows].sort((a, b) => b.generation - a.generation)) {
     const when = new Date(row.createdAt);
@@ -462,7 +462,7 @@ export const renderMemoryGenerations = (
   }
   lines.push(
     '',
-    'Recover a previous backup with `stack memory recover --backup <n>`.',
+    'Recover a previous backup with `stak memory recover --backup <n>`.',
   );
   return `${lines.join('\n').trimEnd()}\n`;
 };

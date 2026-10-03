@@ -1,7 +1,7 @@
 /**
  * CLI operations for the logical-project registry (Phase 15B):
- *   - `listProjects`  → read-only view for `stack project`
- *   - `mapProject`    → explicit machine-local binding for `stack project map`
+ *   - `listProjects`  → read-only view for `stak project`
+ *   - `mapProject`    → explicit machine-local binding for `stak project map`
  *
  * Pure and injectable (no direct git/process access) so the behavior is testable
  * without the filesystem network. `mapProject` writes ONLY a machine-local binding;
@@ -260,7 +260,7 @@ export type SetLifecycleResult =
  * Set a project's lifecycle (machine-local write). Idempotent: setting the value it
  * already has is a safe no-op (`changed: false`). Never mints, never deletes, never
  * touches Memory, bindings, or identity claims. The lifecycle change becomes portable
- * only after the next `stack memory backup`.
+ * only after the next `stak memory backup`.
  */
 export const setProjectLifecycle = async (deps: {
   stackHome: string;

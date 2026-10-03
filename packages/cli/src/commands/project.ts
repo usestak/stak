@@ -9,8 +9,8 @@ import type {
 } from '../memory/project-ops.js';
 
 /**
- * `stack project` — a read-only view of logical projects, the explicit
- * `stack project map` binding operation (Phase 15B), and lifecycle management
+ * `stak project` — a read-only view of logical projects, the explicit
+ * `stak project map` binding operation (Phase 15B), and lifecycle management
  * (`archive`/`unarchive`, Phase 15C). No delete: hard deletion is out of scope.
  * Lifecycle (active | archived) is independent of machine availability.
  */
@@ -46,7 +46,7 @@ const renderRow = (row: ProjectListRow): string[] => {
   );
   if (row.binding) lines.push(`    mapped to ${row.binding}`);
   else if (row.availability !== 'present')
-    lines.push('    map with `stack project map <project> <directory>`');
+    lines.push('    map with `stak project map <project> <directory>`');
   lines.push('');
   return lines;
 };
@@ -54,8 +54,8 @@ const renderRow = (row: ProjectListRow): string[] => {
 export const renderProjectList = (rows: ProjectListRow[]): string => {
   if (rows.length === 0)
     return (
-      'No projects known to Stack yet.\n' +
-      'Run `stack memory backup` or `stack memory recover` first.\n'
+      'No projects known to STAK yet.\n' +
+      'Run `stak memory backup` or `stak memory recover` first.\n'
     );
   // Grouped by lifecycle; availability is shown independently per project.
   const active = rows.filter((r) => r.lifecycle === 'active');
@@ -77,7 +77,7 @@ const renderLifecycleResult = (
 ): string => {
   switch (result.status) {
     case 'project-not-found':
-      return 'No matching project. Run `stack project` to see known projects.\n';
+      return 'No matching project. Run `stak project` to see known projects.\n';
     case 'ambiguous-selector':
       return `That selector matches ${result.matches.length} projects. Use a full Project ID.\n`;
     case 'ok': {
@@ -91,7 +91,7 @@ const renderLifecycleResult = (
       return (
         `${head}\n` +
         (result.changed
-          ? 'Run `stack memory backup` to include this lifecycle change in your next Cloud backup.\n'
+          ? 'Run `stak memory backup` to include this lifecycle change in your next Cloud backup.\n'
           : '')
       );
     }
@@ -106,7 +106,7 @@ const renderMapResult = (result: MapProjectResult): string => {
         'This is a local binding only; the path is not shared as project identity.\n'
       );
     case 'project-not-found':
-      return 'No matching project. Run `stack project` to see known projects.\n';
+      return 'No matching project. Run `stak project` to see known projects.\n';
     case 'ambiguous-selector':
       return `That selector matches ${result.matches.length} projects. Use a full Project ID.\n`;
     case 'not-a-directory':
@@ -134,7 +134,7 @@ export const registerProjectCommand = (
 
   project
     .command('list', { isDefault: true })
-    .description('List logical projects Stack knows about (read-only)')
+    .description('List logical projects STAK knows about (read-only)')
     .option('--json', 'emit structured JSON only')
     .action(async (options: { json?: boolean }) => {
       const rows = await dependencies.projectList();

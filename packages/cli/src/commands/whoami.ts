@@ -13,7 +13,7 @@ export const registerWhoamiCommand = (
 ): void => {
   program
     .command('whoami')
-    .description('Show the signed-in Stack Cloud account')
+    .description('Show the signed-in STAK Cloud account')
     .option('--json', 'emit structured JSON only')
     .action(async (options: { json?: boolean }) => {
       const me = await dependencies.cloudWhoami();

@@ -134,7 +134,7 @@ export const createCloudClient = (
   )
     throw new StackCloudError(
       'insecure-cloud-url',
-      'Stack Cloud requires HTTPS outside local development.',
+      'STAK Cloud requires HTTPS outside local development.',
     );
   const timeoutMs = options.timeoutMs ?? 30_000;
   const fetchImpl =
@@ -179,7 +179,7 @@ export const createCloudClient = (
         signal: controller.signal,
       });
     } catch (error) {
-      throw new CloudUnavailableError('Could not reach Stack Cloud.', {
+      throw new CloudUnavailableError('Could not reach STAK Cloud.', {
         cause: error,
       });
     } finally {
@@ -227,7 +227,7 @@ export const createCloudClient = (
     if (!payload.contentType.includes('application/json'))
       throw new StackCloudError(
         'invalid-response',
-        'Stack Cloud returned a non-JSON response.',
+        'STAK Cloud returned a non-JSON response.',
       );
     return schema.parse(JSON.parse(payload.text));
   };

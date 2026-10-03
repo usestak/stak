@@ -210,14 +210,14 @@ export const renderPullResult = (
       row('References restored', result.referencesRestored).trimEnd(),
       row('Environment digest', shortDigest(result.digest)).trimEnd(),
       '',
-      'Local desired state restored. Run stack run <agent> to project it into agent directories.',
+      'Local desired state restored. Run stak run <agent> to project it into agent directories.',
       '',
     ].join('\n');
   return block([
     `${skills(result.desiredSkills)} downloaded.`,
     'main is ready.',
     '',
-    'Run `stack run codex` to set up Codex.',
+    'Run `stak run codex` to set up Codex.',
   ]);
 };
 
@@ -238,7 +238,7 @@ export const renderPublishPreview = (plan: PublishPlan): string => {
     ...plan.sourceRemotes.map((remote) => `  ${remote}`),
     '',
     'These source references will be public.',
-    'Repository accessibility is not verified by Stack.',
+    'Repository accessibility is not verified by STAK.',
     '',
   ];
   lines.push(
@@ -276,10 +276,10 @@ export const renderPublishResult = (
     row('Skills', plan.skillCount).trimEnd(),
     '',
     'Use:',
-    `stack use @${result.owner}/${result.slug}`,
+    `stak use @${result.owner}/${result.slug}`,
     '',
     'Try:',
-    `stack try @${result.owner}/${result.slug} -- codex`,
+    `stak try @${result.owner}/${result.slug} -- codex`,
     '',
     result.url,
     '',

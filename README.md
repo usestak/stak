@@ -1,27 +1,32 @@
-# Stack
+# STAK
 
 **The control plane for portable AI agent environments.**
 
-Stack discovers the Agent Skills you have accumulated across Codex, Cursor, and
+STAK discovers the Agent Skills you have accumulated across Codex, Cursor, and
 Claude Code, captures them as a portable **Environment**, restores them on any
-machine, safely composes additional **Stacks**, and lets you try someone else's
-Stack without disturbing your existing setup.
+machine, safely composes additional **stacks**, backs up your private agent
+**Memory**, and lets you try someone else's stack without disturbing your
+existing setup.
 
-> Status: V0.1 release candidate. See [docs/release-checklist.md](docs/release-checklist.md)
+> Your STAK should survive your laptop. Your skills, your memory, your setup —
+> any agent, any machine.
+
+> Status: 0.1.0 release candidate. See [docs/release-checklist.md](docs/release-checklist.md)
 > for the remaining human release steps.
 
-## Why Stack
+## Why STAK
 
 Agent Skills accumulate in vendor directories (`~/.agents/skills`,
 `~/.cursor/skills`, `~/.claude/skills`, `~/.codex/skills`). They drift between
-machines, get lost on a laptop swap, and are hard to share safely. Stack keeps a
+machines, get lost on a laptop swap, and are hard to share safely. STAK keeps a
 single canonical, content-addressed record of your desired setup and projects it
 into each agent's directory — without ever overwriting content it does not own.
 
 ## Concepts in one breath
 
 - **Skill** — an existing Agent Skill directory (a `SKILL.md` plus its files).
-- **Stack** — a reusable, named collection of Skill requirements.
+- **stack** — a reusable, named collection of Skill requirements (defined by a
+  `stack.yaml`). The product is STAK; the thing you compose is a stack.
 - **Environment** — your desired local setup. V0.1 has one: `main`.
 - **Machine** — a computer with its own bindings and placements; Machine state
   is never uploaded.
@@ -30,46 +35,46 @@ See [docs/concepts.md](docs/concepts.md) for the full model.
 
 ## Install
 
-Stack is distributed as a single self-contained CLI. During the V0.1 release
-candidate the public npm package name is still being finalized (the name `stack`
-on npm belongs to an unrelated project), so install from source:
+STAK is distributed as a single self-contained CLI. During the 0.1.0 release
+candidate the public package `@usestak/cli` is **not yet published to npm**, so
+install from source:
 
 ```bash
-git clone <this-repo>
-cd stack
+git clone https://github.com/usestak/stak.git
+cd stak
 corepack enable
 pnpm install --frozen-lockfile
 pnpm build
 node packages/cli/dist/bin.js --help
 ```
 
-The published package will install the `stack` binary via
-`npm install -g <package-name>` once the public name is chosen. `npx stack` is
-**not** this project. See [docs/getting-started.md](docs/getting-started.md).
+Once 0.1.0 is published, the package will install the `stak` command via
+`npm install -g @usestak/cli`. (`npx stack` is an unrelated project.) See
+[docs/getting-started.md](docs/getting-started.md).
 
 ## First five minutes
 
 ```bash
-stack scan      # discover Skills across your agents (read-only)
-stack init      # capture the desired Environment: main
-stack status    # see how this machine compares to main
+stak scan      # discover Skills across your agents (read-only)
+stak init      # capture the desired Environment: main
+stak status    # see how this machine compares to main
 ```
 
 Then compose and project:
 
 ```bash
-stack use ./frontend-stack     # add a local Stack to main
-stack run codex                # reconcile main into Codex's Skill directory
-stack try ./other-stack -- codex   # try a Stack in an isolated Codex session
+stak use ./frontend-stack       # add a local stack to main
+stak run codex                  # reconcile main into Codex's Skill directory
+stak try ./other-stack -- codex # try a stack in an isolated Codex session
 ```
 
 And carry it across machines or share it:
 
 ```bash
-stack login
-stack push                     # back up main to Stack Cloud (private)
-stack pull                     # restore main on another machine
-stack publish ./frontend-stack # publish a reusable public @owner/name Stack
+stak login
+stak push                       # back up main to STAK Cloud (private)
+stak pull                       # restore main on another machine
+stak publish ./frontend-stack   # publish a reusable public @owner/name stack
 ```
 
 Full reference: [docs/commands.md](docs/commands.md).
@@ -81,7 +86,7 @@ Full reference: [docs/commands.md](docs/commands.md).
 - Trials run in an isolated scratch workspace with a temporary HOME.
 - Git references restore the exact revision and hash (`shell:false`, no shell
   interpolation).
-- Private snapshots stay private; public Stacks are reference-only.
+- Private snapshots stay private; public stacks are reference-only.
 
 See [docs/security.md](docs/security.md).
 
@@ -97,5 +102,4 @@ See [docs/security.md](docs/security.md).
 
 ## License
 
-No license file has been added yet; see [docs/release-checklist.md](docs/release-checklist.md).
-This is a release blocker requiring an owner decision.
+MIT — see [LICENSE](LICENSE).

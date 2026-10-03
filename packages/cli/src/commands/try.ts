@@ -47,7 +47,7 @@ export const registerTryCommand = (
         options: { dryRun?: boolean; json?: boolean; verbose?: boolean },
       ) => {
         if (agent !== 'codex')
-          throw new Error('Use: stack try <stack> -- codex');
+          throw new Error('Use: stak try <stack> -- codex');
         const verbose = options.verbose === true;
         const detection = await dependencies.detectCodex();
         if (!detection.installed) throw new AgentNotInstalledError();

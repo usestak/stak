@@ -356,7 +356,7 @@ const runProgram = async (
   return { exit, output };
 };
 
-describe('Stack CLI', () => {
+describe('STAK CLI', () => {
   it('prints root help with cloud commands but without deferred commands', async () => {
     const result = await runProgram(['--help']);
 
@@ -381,6 +381,17 @@ describe('Stack CLI', () => {
     for (const command of ['switch', 'restore']) {
       expect(result.output).not.toContain(`  ${command}`);
     }
+  });
+
+  it('presents the STAK brand: the executable is `stak` (R2)', async () => {
+    expect(createProgram().name()).toBe('stak');
+    const help = await runProgram(['--help']);
+    expect(help.output).toContain('Usage: stak');
+    // The reusable domain object stays a "stack": the `use` command still takes a
+    // `<stack>` argument (`stak use <stack>`).
+    expect(help.output).toMatch(/use .*<stack>/);
+    const version = await runProgram(['--version']);
+    expect(version.output.trim()).toBe('0.1.0');
   });
 
   it('supports canonical try dry-run syntax with parseable secret-free JSON', async () => {
@@ -562,9 +573,7 @@ describe('Stack CLI', () => {
     await expect(
       runProgram(['run', 'codex'], {
         loadRunEnvironment: async () => {
-          throw new Error(
-            'main does not exist. Run stack scan and stack init.',
-          );
+          throw new Error('main does not exist. Run stak scan and stak init.');
         },
       }),
     ).rejects.toThrow('main does not exist');
@@ -805,7 +814,7 @@ describe('Stack CLI', () => {
     });
     expect(project).toBe(false);
     expect(received).toBe(emptyResult);
-    expect(result.output).toContain('Initialized Stack.');
+    expect(result.output).toContain('Initialized STAK.');
     expect(result.output).toContain('No skills found yet.');
     expect(result.output).not.toContain('Preservation');
   });
@@ -829,7 +838,7 @@ describe('Stack CLI', () => {
         files: { manifest: '', lock: '', baseline: '', machine: '' },
       }),
     });
-    expect(result.output).toContain('Initialized Stack.');
+    expect(result.output).toContain('Initialized STAK.');
     expect(result.output).toContain('Found 31 skills.');
     expect(result.output).toContain('Saved them to main.');
     expect(result.output).not.toContain('integrity checks');
@@ -910,7 +919,7 @@ describe('Stack CLI', () => {
     });
     expect(result.output).toContain('29 skills ready');
     expect(result.output).toContain('2 skills missing');
-    expect(result.output).toContain('Run `stack diff` to see what changed.');
+    expect(result.output).toContain('Run `stak diff` to see what changed.');
   });
 
   it('prints the package version', async () => {
@@ -1072,7 +1081,7 @@ describe('Stack CLI', () => {
     expect(result.output).toContain('Pulling main...');
     expect(result.output).toContain('31 skills downloaded.');
     expect(result.output).toContain('main is ready.');
-    expect(result.output).toContain('Run `stack run codex` to set up Codex.');
+    expect(result.output).toContain('Run `stak run codex` to set up Codex.');
   });
 
   it('emits parseable pull dry-run JSON', async () => {
@@ -1187,7 +1196,7 @@ describe('Stack CLI', () => {
     });
     expect(result.output).toContain('Backing up Claude memory...');
     expect(result.output).toContain('12 memory files saved locally.');
-    expect(result.output).toContain('3 projects backed up to Stack Cloud.');
+    expect(result.output).toContain('3 projects backed up to STAK Cloud.');
     expect(result.output).toContain('Privacy: Standard');
   });
 
@@ -1195,7 +1204,7 @@ describe('Stack CLI', () => {
     const result = await runProgram(['memory', 'backup']); // default stub: skipped
     expect(result.output).toContain('saved locally.');
     expect(result.output).toContain('Cloud backup skipped.');
-    expect(result.output).toContain('stack login');
+    expect(result.output).toContain('stak login');
   });
 
   it('fails the Cloud backup closed for a Protected account with no local key', async () => {
@@ -1819,7 +1828,7 @@ describe('Stack CLI', () => {
       }),
     });
     expect(ok.output).toContain('Archived');
-    expect(ok.output).toContain('stack memory backup');
+    expect(ok.output).toContain('stak memory backup');
   });
 
   it('project unarchive reactivates without a prompt', async () => {

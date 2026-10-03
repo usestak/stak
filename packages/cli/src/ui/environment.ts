@@ -46,13 +46,13 @@ export const renderInitResult = (
   if (options.verbose) return renderInitVerbose(result);
   if (result.importedSkills === 0)
     return block([
-      'Initialized Stack.',
+      'Initialized STAK.',
       '',
       'No skills found yet.',
-      'Add Skills to your agents, then run `stack init` again.',
+      'Add Skills to your agents, then run `stak init` again.',
     ]);
   return block([
-    'Initialized Stack.',
+    'Initialized STAK.',
     '',
     `Found ${skills(result.importedSkills)}.`,
     'Saved them to main.',
@@ -157,7 +157,7 @@ export const renderStatus = (
         `${agentLabel(agent.agent).padEnd(9)}${agent.ready ? 'ready' : 'not set up'}`,
       );
   }
-  if (problems > 0) lines.push('', 'Run `stack diff` to see what changed.');
+  if (problems > 0) lines.push('', 'Run `stak diff` to see what changed.');
   return block(lines);
 };
 

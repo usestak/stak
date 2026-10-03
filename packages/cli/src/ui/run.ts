@@ -57,7 +57,7 @@ export const bindingCountLines = (summary: BindingSummary): string[] =>
     summary.removed > 0 && `${skills(summary.removed)} removed`,
   ].filter((line): line is string => Boolean(line));
 
-/** Human dry-run preview for `stack run <agent> --dry-run`. */
+/** Human dry-run preview for `stak run <agent> --dry-run`. */
 export const renderRunDryRun = (plan: BindingPlan): string => {
   const agent = agentLabel(plan.agent);
   const summary = summarizeBinding(plan);

@@ -34,7 +34,7 @@ export type MemoryProtectCommandResult =
 const INSECURE_LOCAL_KEY_MESSAGE =
   'Could not secure local Memory key storage on this device.\n' +
   'Protected Memory was not enabled.\n' +
-  'Check the permissions on your Stack home directory and try again.\n';
+  'Check the permissions on your STAK home directory and try again.\n';
 
 export type MemoryCommandDependencies = {
   memoryScan(): Promise<DiscoveredMemoryItem[]>;
@@ -108,7 +108,7 @@ export const registerMemoryCommand = (
   memory
     .command('backup')
     .description(
-      'Back up private memory locally and, when signed in, to Stack Cloud',
+      'Back up private memory locally and, when signed in, to STAK Cloud',
     )
     .option(
       '--dry-run',
@@ -191,7 +191,7 @@ export const registerMemoryCommand = (
       dependencies.writeOut(renderMemoryCloudBackup(outcome));
     });
 
-  // `stack memory history` (was `generations`). Users see immutable Cloud generations
+  // `stak memory history` (was `generations`). Users see immutable Cloud generations
   // as "backups"; the internal generation model is unchanged.
   const historyAction = async (options: Flags) => {
     const outcome = await dependencies.memoryGenerations();
@@ -228,7 +228,7 @@ export const registerMemoryCommand = (
   // Hidden backward-compatibility alias for the previous public command name.
   memory
     .command('generations', { hidden: true })
-    .description('Alias for `stack memory history`')
+    .description('Alias for `stak memory history`')
     .option('--json', 'emit structured JSON only')
     .action(historyAction);
 
@@ -256,7 +256,7 @@ export const registerMemoryCommand = (
             return;
           }
           if (result.status === 'not-authenticated') {
-            dependencies.writeOut('Not signed in.\nRun `stack login` first.\n');
+            dependencies.writeOut('Not signed in.\nRun `stak login` first.\n');
             return;
           }
           if (result.status === 'insecure-local-key') {
@@ -289,7 +289,7 @@ export const registerMemoryCommand = (
           dependencies.writeOut(
             result.status === 'insecure-local-key'
               ? INSECURE_LOCAL_KEY_MESSAGE
-              : 'Not signed in.\nRun `stack login` first.\n',
+              : 'Not signed in.\nRun `stak login` first.\n',
           );
           return;
         }
@@ -301,7 +301,7 @@ export const registerMemoryCommand = (
 
   memory
     .command('recover')
-    .description('Recover the private memory store from Stack Cloud')
+    .description('Recover the private memory store from STAK Cloud')
     .option('--backup <n>', 'recover a specific backup (default: latest)')
     // Hidden backward-compatibility alias for the previous option name.
     .addOption(new Option('--generation <n>', 'alias for --backup').hideHelp())
@@ -359,7 +359,7 @@ export const registerMemoryCommand = (
             return;
           }
           if (result.status === 'not-authenticated') {
-            dependencies.writeOut('Not signed in.\nRun `stack login` first.\n');
+            dependencies.writeOut('Not signed in.\nRun `stak login` first.\n');
             return;
           }
           if (result.status === 'no-backup') {
@@ -437,7 +437,7 @@ export const registerMemoryCommand = (
 
   memory
     .command('restore')
-    .description('Restore native agent memory from Stack’s private store')
+    .description('Restore native agent memory from STAK’s private store')
     .option('--dry-run', 'preview without changing agent memory')
     .option('--json', 'emit structured JSON only')
     .option('--verbose', 'show per-item detail')

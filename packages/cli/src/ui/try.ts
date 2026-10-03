@@ -55,7 +55,7 @@ export const renderTryExit = (
     'Runtime retained safely:',
     retained,
     '',
-    'Stack will retry cleanup on a future trial.',
+    'STAK will retry cleanup on a future trial.',
     '',
     'main was not changed.',
     'Normal Codex bindings were not changed.',

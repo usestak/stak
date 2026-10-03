@@ -15,7 +15,7 @@ is automatically verified from what requires an owner decision.
 - [x] Controlled demonstrations (Phase 7–10) run green
 - [x] `pnpm audit --prod`: no known vulnerabilities
 - [x] No secrets committed (tracked-file scan)
-- [x] Version is `0.1.0`; `stack --version` reports `0.1.0`
+- [x] Version is `0.1.0`; `stak --version` reports `0.1.0`
 - [x] `CHANGELOG.md`, README, and docs present
 
 ## Human action required (release blockers)
@@ -45,5 +45,5 @@ is automatically verified from what requires an owner decision.
 4. `npm publish` the CLI under the chosen name.
 5. Apply Supabase migrations to production.
 6. Deploy `apps/web` with production env vars.
-7. Verify `stack login` → `push`/`pull` and a public publish/use against
+7. Verify `stak login` → `push`/`pull` and a public publish/use against
    production.

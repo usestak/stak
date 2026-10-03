@@ -16,8 +16,8 @@ export const registerLoginCommand = (
 ): void => {
   program
     .command('login')
-    .description('Sign in to Stack Cloud through your browser')
-    .option('--api-url <url>', 'Stack Cloud API base URL')
+    .description('Sign in to STAK Cloud through your browser')
+    .option('--api-url <url>', 'STAK Cloud API base URL')
     .option('--label <label>', 'label for this CLI token')
     .option('--no-browser', 'do not attempt to open a browser automatically')
     .action(

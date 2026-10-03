@@ -560,7 +560,7 @@ export const createProgram = (
   dependencies: ProgramDependencies = defaultDependencies,
 ): Command => {
   const program = new Command()
-    .name('stack')
+    .name('stak')
     .description('The control plane for portable AI agent environments.')
     .version(packageMetadata.version);
   registerScanCommand(program, dependencies);

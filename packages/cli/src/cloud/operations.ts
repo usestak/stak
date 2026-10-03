@@ -123,7 +123,7 @@ export const performLogin = async (
     ...(options.label ? { label: options.label } : {}),
   });
   deps.writeOut(
-    `Opening Stack in your browser...\n\nIf it does not open, visit ${start.verificationUri} and enter code ${start.userCode}.\n\nWaiting for approval...\n`,
+    `Opening STAK in your browser...\n\nIf it does not open, visit ${start.verificationUri} and enter code ${start.userCode}.\n\nWaiting for approval...\n`,
   );
   if (options.openBrowser !== false)
     await (deps.openBrowser ?? defaultOpenBrowser)(

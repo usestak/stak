@@ -1,5 +1,5 @@
 /**
- * CLI operations for remote Stack Memory (Phase 14B). Encodes the product rules:
+ * CLI operations for remote STAK Memory (Phase 14B). Encodes the product rules:
  *  - `backup` ALWAYS makes the safe local Phase 14A backup first, then a Cloud
  *    backup when authenticated (Standard by default, Protected when the account is
  *    Protected AND this device holds the MMK). If the account is Protected but the

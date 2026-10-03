@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Stack uses typed errors. Messages state what failed, what did and did not change,
+STAK uses typed errors. Messages state what failed, what did and did not change,
 and the safe next step. Below are common situations.
 
 ## Skills and scanning
@@ -10,35 +10,35 @@ and the safe next step. Below are common situations.
 - **Unknown provenance** — a Skill with no clean Git source is preserved as a
   private snapshot. It works locally but cannot be published (see below).
 - **Claude synced Skills not counted** — Skills under `~/.claude/skills/synced/`
-  are Claude account Skills downloaded from claude.ai. Stack intentionally
-  excludes them from `stack scan`/`status`/`init`, so they are neither counted
+  are Claude account Skills downloaded from claude.ai. STAK intentionally
+  excludes them from `stak scan`/`status`/`init`, so they are neither counted
   nor reported as untracked, and are never backed up or published. This is
-  expected — Stack does not own or disable Claude syncing. Claude's
+  expected — STAK does not own or disable Claude syncing. Claude's
   `~/.claude/skills/.trash/` (disabled synced Skills) is ignored for the same
-  reason. If you want a synced Skill managed by Stack, keep your own copy as a
+  reason. If you want a synced Skill managed by STAK, keep your own copy as a
   personal Skill directly under the Skill root (not inside `synced/`).
 
 ## Composition and agents
 
-- **`stack run` says an agent is missing** — the CLI verifies the agent binary
+- **`stak run` says an agent is missing** — the CLI verifies the agent binary
   (`codex` / `agent`|`cursor-agent` / `claude`) before any mutation. Install the
   agent or check your PATH.
-- **Unmanaged binding conflict** — a target Skill directory exists that Stack did
-  not create and whose content differs. Stack will not overwrite it. Remove or
+- **Unmanaged binding conflict** — a target Skill directory exists that STAK did
+  not create and whose content differs. STAK will not overwrite it. Remove or
   reconcile it manually, then re-run.
 - **Cursor visibility conflict** — the same Skill name exists with differing
-  content across Cursor-visible roots. Stack blocks rather than guess; resolve
+  content across Cursor-visible roots. STAK blocks rather than guess; resolve
   the divergence.
 - **Store corruption / hash mismatch** — a Store object failed verification.
-  Stack refuses to use it and never silently "repairs". The affected content must
+  STAK refuses to use it and never silently "repairs". The affected content must
   be reacquired; unrelated commands remain usable.
-- **"Trial ended, but temporary cleanup was incomplete"** — a `stack try` runtime
+- **"Trial ended, but temporary cleanup was incomplete"** — a `stak try` runtime
   component (usually `workspace`) could not be deleted, often because another
   process on Windows briefly held a file. `main` and your normal Codex bindings
   are unchanged. The runtime is retained safely under
   `$STACK_HOME/runtime/<sessionId>/` with a valid ownership marker
-  (`status: cleanup-failed`), and Stack retries cleanup conservatively on a later
-  `stack try`. You can also remove that directory yourself. Stack never
+  (`status: cleanup-failed`), and STAK retries cleanup conservatively on a later
+  `stak try`. You can also remove that directory yourself. STAK never
   auto-deletes an unmarked runtime directory.
 
 ## Publishing
@@ -54,17 +54,17 @@ and the safe next step. Below are common situations.
 
 ## Cloud
 
-- **`Stack Cloud is not configured`** — set `STACK_API_URL`. Local commands do
+- **`STAK Cloud is not configured`** — set `STACK_API_URL`. Local commands do
   not need it.
-- **`Not signed in` / session expired** — run `stack login` again.
+- **`Not signed in` / session expired** — run `stak login` again.
 - **Push conflict (remote newer / unsynced remote)** — pull the newer Environment
-  before pushing; Stack never overwrites automatically.
+  before pushing; STAK never overwrites automatically.
 - **Pull conflict (local changes / unsynced local)** — you have local changes
-  that were never pushed; Stack will not replace them automatically.
+  that were never pushed; STAK will not replace them automatically.
 - **Private Git restore failure** — the exact revision could not be reacquired
   (missing revision, permission denied, hash mismatch). `main` is left unchanged.
   Ensure your existing Git credentials (SSH agent / credential manager) grant
-  access; Stack never collects or stores Git credentials.
+  access; STAK never collects or stores Git credentials.
 - **Network errors** — the cloud client surfaces typed errors
   (`CloudUnavailable`, `401`, `409`, timeouts) and never retries non-idempotent
   operations blindly.
@@ -78,5 +78,5 @@ and the safe next step. Below are common situations.
   `corepack enable`. If a dependency's native build is blocked, it is governed by
   `allowBuilds` in `pnpm-workspace.yaml`.
 - **Windows symlink limitations** — recreating nested Skill symlinks may require
-  Developer Mode or elevation; Stack reports a clear error rather than producing
+  Developer Mode or elevation; STAK reports a clear error rather than producing
   incorrect content.

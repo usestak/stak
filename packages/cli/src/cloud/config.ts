@@ -3,7 +3,7 @@ import { CloudNotConfiguredError } from '@stack/cloud-client';
 const DEV_FALLBACK = 'http://localhost:3000';
 
 /**
- * Resolve the Stack Cloud API base URL for cloud commands. Local commands never
+ * Resolve the STAK Cloud API base URL for cloud commands. Local commands never
  * call this, so they keep working without any cloud configuration. In production
  * an unset endpoint fails clearly; in development it falls back to localhost.
  */

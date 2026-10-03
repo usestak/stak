@@ -1,5 +1,12 @@
 # Stack Project Recovery Mapping (Phase 15A architecture)
 
+> **Rename note (pre-0.1.0):** the product was renamed from **Stack** to **STAK**
+> (CLI `stack` → `stak`, public package `@stack/cli` → `@usestak/cli`). Historical
+> acceptance records and dogfood narratives below retain the original "Stack" name
+> where it describes what the tool was called at the time; persisted identifiers
+> (`stack-*-v1` constants, `stack.yaml`, `.stackkey`, `STACK_HOME`, internal
+> `@stack/*` packages) are unchanged by the rename.
+
 - **Status:** Proposed — architecture/specification only. No production behavior
   changes in this phase. Version 0.1.0 unchanged.
 - **Date:** 2026-09-27

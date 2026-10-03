@@ -1,6 +1,6 @@
-# Stack Cloud setup (Phase 8)
+# STAK Cloud setup (Phase 8)
 
-Stack Cloud is the optional transport that backs `stack push` / `stack pull`.
+STAK Cloud is the optional transport that backs `stak push` / `stak pull`.
 Local commands (`scan`, `init`, `status`, `diff`, `use`, `remove`, `run`, `try`)
 never require it.
 
@@ -50,8 +50,8 @@ command is run without a configured endpoint.
 
 ```bash
 export STACK_API_URL=http://localhost:3000
-stack login
-stack push
+stak login
+stak push
 ```
 
 ## Notes and future hardening

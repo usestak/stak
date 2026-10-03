@@ -6,8 +6,8 @@ No real values appear here. Actual values are configured per deployment.
 
 | Name            | Purpose                                                                       | Required            | Secret | Default                                             |
 | --------------- | ----------------------------------------------------------------------------- | ------------------- | ------ | --------------------------------------------------- |
-| `STACK_HOME`    | Root of Stack's canonical local state                                         | No                  | No     | `~/.stack`                                          |
-| `STACK_API_URL` | Stack Cloud API base URL                                                      | Cloud commands only | No     | localhost in dev; unset fails clearly in production |
+| `STACK_HOME`    | Root of STAK's canonical local state                                          | No                  | No     | `~/.stack`                                          |
+| `STACK_API_URL` | STAK Cloud API base URL                                                       | Cloud commands only | No     | localhost in dev; unset fails clearly in production |
 | `STACK_ENV`     | Set to `production` to disable the localhost dev fallback for `STACK_API_URL` | No                  | No     | unset (dev)                                         |
 | `NODE_ENV`      | Also treated as production for the dev fallback rule                          | No                  | No     | unset                                               |
 

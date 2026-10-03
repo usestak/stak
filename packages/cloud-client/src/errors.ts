@@ -12,28 +12,28 @@ export class StackCloudError extends Error {
 }
 
 export class NotAuthenticatedError extends StackCloudError {
-  constructor(message = 'Not signed in. Run stack login first.') {
+  constructor(message = 'Not signed in. Run stak login first.') {
     super('not-authenticated', message);
     this.name = 'NotAuthenticatedError';
   }
 }
 export class AuthenticationExpiredError extends StackCloudError {
   constructor(
-    message = 'Your Stack session has expired. Run stack login again.',
+    message = 'Your STAK session has expired. Run stak login again.',
   ) {
     super('authentication-expired', message);
     this.name = 'AuthenticationExpiredError';
   }
 }
 export class CloudUnavailableError extends StackCloudError {
-  constructor(message = 'Stack Cloud is unavailable.', options?: ErrorOptions) {
+  constructor(message = 'STAK Cloud is unavailable.', options?: ErrorOptions) {
     super('cloud-unavailable', message, options);
     this.name = 'CloudUnavailableError';
   }
 }
 export class CloudUnauthorizedError extends StackCloudError {
   constructor(
-    message = 'You are not authorized for this Stack Cloud resource.',
+    message = 'You are not authorized for this STAK Cloud resource.',
   ) {
     super('cloud-unauthorized', message);
     this.name = 'CloudUnauthorizedError';
@@ -41,7 +41,7 @@ export class CloudUnauthorizedError extends StackCloudError {
 }
 export class CloudNotConfiguredError extends StackCloudError {
   constructor(
-    message = 'Stack Cloud is not configured. Set STACK_API_URL to a Stack Cloud endpoint.',
+    message = 'STAK Cloud is not configured. Set STACK_API_URL to a STAK Cloud endpoint.',
   ) {
     super('cloud-not-configured', message);
     this.name = 'CloudNotConfiguredError';

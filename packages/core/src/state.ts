@@ -238,7 +238,7 @@ export const loadMainEnvironment = async ({
     if (isNotFound(error))
       throw new StackStateError(
         'environment-not-found',
-        'main does not exist. Run stack init first.',
+        'main does not exist. Run stak init first.',
         { cause: error },
       );
     if (error instanceof StackStateError) throw error;

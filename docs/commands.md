@@ -9,43 +9,43 @@ else. It never contains tokens, secrets, or signed URLs.
 
 ## Local (work fully offline)
 
-### `stack scan [--project] [--json]`
+### `stak scan [--project] [--json]`
 
 Read-only discovery of Skills across agent roots. Never mutates anything.
 
-### `stack init`
+### `stak init`
 
 Capture the current global Skills as the desired Environment `main`.
 
-### `stack status [--json]` / `stack diff [--json]`
+### `stak status [--json]` / `stak diff [--json]`
 
 Compare this machine to `main`: satisfied, modified, missing, uncertain,
 untracked, drift.
 
-### `stack use <stack> [--dry-run] [--json] [--yes]`
+### `stak use <stack> [--dry-run] [--json] [--yes]`
 
 Add a Stack layer to `main`. `<stack>` may be a local path or a public
 `@owner/name`. Desired-state only — no agent directories are changed. Remote use
 reacquires exact references, verifies hashes, and persists the imported version
 locally so subsequent `status`/`diff`/`remove` work offline.
 
-### `stack remove <name|id> [--yes]`
+### `stak remove <name|id> [--yes]`
 
 Remove a Stack layer from `main`. Skills still required by other layers are
 preserved.
 
-### `stack run <codex|cursor|claude> [--dry-run] [--json] [--yes]`
+### `stak run <codex|cursor|claude> [--dry-run] [--json] [--yes]`
 
 Reconcile `main` into an agent's Skill directory, then launch that agent's CLI
 with the Skills projected. Verifies the agent is installed first; protects
-unmanaged content; removes only healthy Stack-owned bindings. `stack run codex`
+unmanaged content; removes only healthy STAK-owned bindings. `stak run codex`
 launches the **Codex CLI** (`codex` on your `PATH`), not the ChatGPT desktop app.
 The launcher is shim-safe: on Windows an npm `.cmd`/`.bat` shim is executed
 without a shell and with argument-array semantics preserved (see
 [security](./security.md#windows-npm-shims)). `--dry-run` reconciles and previews
 without launching; add `--json` for structured output.
 
-### `stack try <stack> -- codex [--dry-run] [--json]`
+### `stak try <stack> -- codex [--dry-run] [--json]`
 
 Run a Stack in an isolated scratch Codex session (temporary HOME/`CODEX_HOME`).
 `<stack>` may be local or public. `main` and normal bindings are untouched.
@@ -56,20 +56,20 @@ Isolated `try` is Codex-only in V0.1.
 Private durable agent context — separate from shareable Skills and never
 publishable. See [memory](./memory.md).
 
-### `stack memory scan [--json] [--verbose]`
+### `stak memory scan [--json] [--verbose]`
 
 Read-only discovery of portable Claude memory on this machine. Changes nothing.
 
-### `stack memory backup [--json]`
+### `stak memory backup [--json]`
 
-Copy allowlisted memory into Stack's private store (read-only capture; native
+Copy allowlisted memory into STAK's private store (read-only capture; native
 Claude files are never modified). Commits the manifest last.
 
-### `stack memory status [--json] [--verbose]`
+### `stak memory status [--json] [--verbose]`
 
 Show the last memory backup.
 
-### `stack memory restore [--dry-run] [--json] [--verbose]`
+### `stak memory restore [--dry-run] [--json] [--verbose]`
 
 Restore private memory. Only writes absent targets; a differing existing target
 is reported as a conflict and left untouched (never merged). Not uploaded to
@@ -77,39 +77,39 @@ Cloud in V0.1.
 
 ## Cloud
 
-Require `STACK_API_URL`; mutations require `stack login`.
+Require `STACK_API_URL`; mutations require `stak login`.
 
-### `stack login [--api-url <url>] [--label <label>] [--no-browser]`
+### `stak login [--api-url <url>] [--label <label>] [--no-browser]`
 
 Browser device-authorization flow; stores an opaque token under
 `$STACK_HOME/auth.json`.
 
-### `stack logout`
+### `stak logout`
 
 Revoke the server token where reachable and remove the local credential.
 
-### `stack whoami [--json]`
+### `stak whoami [--json]`
 
 Show the signed-in account. Never prints the token.
 
-### `stack push [--dry-run] [--json] [--yes]`
+### `stak push [--dry-run] [--json] [--yes]`
 
 Back up the private portable `main` Environment. Optimistic conflict protection;
 no-op when unchanged. Does not change agent bindings.
 
-### `stack pull [--dry-run] [--json] [--yes]`
+### `stak pull [--dry-run] [--json] [--yes]`
 
 Reconstruct `main` on this machine (reference reacquisition + private snapshot
 download, all verified, then an atomic commit). Does not change agent bindings.
 
-### `stack publish <stack> [--slug <slug>] [--dry-run] [--json] [--yes]`
+### `stak publish <stack> [--slug <slug>] [--dry-run] [--json] [--yes]`
 
 Publish a reference-only public Stack as `@owner/name` from a local source or an
 active local layer.
 
 ## Current V0.1 restrictions
 
-- One persistent Environment: `main` only. `stack switch` is deferred.
+- One persistent Environment: `main` only. `stak switch` is deferred.
 - Isolated `try` supports Codex only.
 - Public Stacks are reference-only (snapshot-backed Skills cannot be published).
 - No automatic Stack updates; an already-active public Stack is not silently

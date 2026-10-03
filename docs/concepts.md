@@ -1,13 +1,13 @@
 # Concepts
 
-Stack has a small, deliberate vocabulary. Using these terms precisely is part of
+STAK has a small, deliberate vocabulary. Using these terms precisely is part of
 the product.
 
 ## Skill
 
 An existing Agent Skill directory — a `SKILL.md` file with `name` and
 `description` front matter, plus any supporting files (`scripts/`,
-`references/`). Stack never invents a new Skill format; it records metadata
+`references/`). STAK never invents a new Skill format; it records metadata
 around the directories that already exist.
 
 ## Content hash
@@ -44,19 +44,19 @@ composed of direct Skills plus ordered Stack layers, resolved into a lockfile.
 `main` is the source of truth for what you want; it is agent-neutral.
 
 > Multiple named persistent Environments remain part of the long-term product
-> model, but V0.1 exposes only `main`. `stack switch` is deferred until named
+> model, but V0.1 exposes only `main`. `stak switch` is deferred until named
 > Environment lifecycle exists.
 
 ## Machine
 
-A computer running Stack, identified by a random UUID in
+A computer running STAK, identified by a random UUID in
 `$STACK_HOME/machine.json`. Machine-specific state — placements, agent bindings,
 local snapshot IDs, sync metadata — is never portable and never uploaded.
 
 ## Binding
 
 A physical projection of a desired Skill into an agent's Skill directory,
-recorded in a machine-level registry. `stack run <agent>` reconciles bindings;
+recorded in a machine-level registry. `stak run <agent>` reconciles bindings;
 Codex and Cursor share `~/.agents/skills`, while Claude uses `~/.claude/skills`.
 
 ## Cloud Environment vs public Stack

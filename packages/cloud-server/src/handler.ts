@@ -373,7 +373,7 @@ export const handleCloudRequest = async (
         );
     }
 
-    return errorResponse(404, 'not-found', 'Unknown Stack Cloud route.');
+    return errorResponse(404, 'not-found', 'Unknown STAK Cloud route.');
   } catch (error) {
     if (error instanceof CloudServiceError)
       return errorResponse(error.httpStatus, error.code, error.message);

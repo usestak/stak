@@ -13,7 +13,7 @@ export const registerLogoutCommand = (
 ): void => {
   program
     .command('logout')
-    .description('Sign out of Stack Cloud and remove the local credential')
+    .description('Sign out of STAK Cloud and remove the local credential')
     .action(async () => {
       const result = await dependencies.cloudLogout();
       if (!result.wasSignedIn) {

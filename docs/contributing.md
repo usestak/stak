@@ -30,12 +30,12 @@ All five must pass before a change is complete.
 - `@stack/scanner` — read-only Skill discovery and provenance.
 - `@stack/core` — Environment/Stack/resolver/composition, cloud bundle, push/pull,
   publish, remote source, Git reference restoration.
-- `@stack/adapters` — Codex/Cursor/Claude binding engine and `stack try` runtime.
+- `@stack/adapters` — Codex/Cursor/Claude binding engine and `stak try` runtime.
 - `@stack/cloud-client` — typed HTTP client and cloud error types.
 - `@stack/cloud-server` — framework-agnostic auth/environment/snapshot/public
   services, in-memory repository, and the `/api/v1` router.
-- `@stack/cli` — the `stack` command (bundled into a self-contained binary).
-- `apps/web` — the Next.js Stack Cloud app (API routes + sign-in + public pages).
+- `@usestak/cli` — the `stak` command (bundled into a self-contained binary).
+- `apps/web` — the Next.js STAK Cloud app (API routes + sign-in + public pages).
 
 Domain/infrastructure packages must not import CLI, web, React, Next.js, or
 Supabase concerns (enforced by ESLint).
