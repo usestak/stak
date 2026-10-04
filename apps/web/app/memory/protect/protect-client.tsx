@@ -3,6 +3,7 @@
 import { useState } from 'react';
 
 import {
+  bridgeFailure,
   createPasskeyCredential,
   credentialIdToB64url,
   detectCapabilities,
@@ -10,6 +11,7 @@ import {
   randomMmk,
   sealMmkForCli,
   wrapMmkWithPrf,
+  type BridgeFailureReason,
   type BridgeSessionPublic,
 } from '@/lib/recovery-webcrypto';
 
@@ -37,11 +39,23 @@ export function ProtectClient({
 }) {
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
 
+  // Tell the waiting CLI the ceremony ended so it stops polling immediately instead of
+  // waiting out the session timeout. Best-effort; consumes the one-time session so a
+  // failed setup is never read as success.
+  const signalFailure = async (reason: BridgeFailureReason) => {
+    try {
+      await submitEnvelopeAction(sessionId, bridgeFailure(reason));
+    } catch {
+      // ignore: the CLI still ends via its bounded timeout.
+    }
+  };
+
   const run = async () => {
     setStatus({ kind: 'working', message: 'Checking passkey support…' });
     try {
       const caps = await detectCapabilities();
       if (!caps.passkeySupported) {
+        await signalFailure('unsupported');
         setStatus({
           kind: 'unsupported',
           message:
@@ -72,6 +86,7 @@ export function ProtectClient({
 
       const prf = await getPrfOutput({ rpId, credentialId }).catch(() => null);
       if (!prf) {
+        await signalFailure('unsupported');
         setStatus({
           kind: 'unsupported',
           message:
@@ -118,12 +133,14 @@ export function ProtectClient({
       }
       setStatus({ kind: 'done' });
     } catch (error) {
+      const cancelled =
+        error instanceof Error && error.name === 'NotAllowedError';
+      await signalFailure(cancelled ? 'cancelled' : 'provider-error');
       setStatus({
         kind: 'error',
-        message:
-          error instanceof Error && error.name === 'NotAllowedError'
-            ? 'Passkey prompt was cancelled.'
-            : 'Something went wrong. You can try again.',
+        message: cancelled
+          ? 'Passkey setup cancelled. You can try again when you’re ready.'
+          : 'Couldn’t complete passkey setup. You can try again.',
       });
     }
   };

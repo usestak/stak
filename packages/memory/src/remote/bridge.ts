@@ -22,6 +22,39 @@ export const BRIDGE_VERSION = 'stack-mem-bridge-v1' as const;
 
 export type BridgeDirection = 'recovery' | 'enrollment';
 
+/**
+ * A terminal, NON-cryptographic failure signal the browser may relay through the SAME
+ * opaque one-time envelope channel when the passkey ceremony cannot complete (Phase R6).
+ * It is NOT a `BridgeEnvelope` and carries no key material; it only lets the waiting CLI
+ * stop polling immediately and surface a clear next action instead of waiting out the
+ * session timeout. The crypto bridge format (`BRIDGE_VERSION`) is unchanged.
+ */
+export type BridgeFailureReason =
+  'cancelled' | 'provider-error' | 'unsupported' | 'error';
+export type BridgeFailure = { outcome: 'error'; reason: BridgeFailureReason };
+
+export const bridgeFailure = (reason: BridgeFailureReason): BridgeFailure => ({
+  outcome: 'error',
+  reason,
+});
+
+/** Classify a relayed envelope: a `BridgeFailureReason` if it is a failure signal, else null. */
+export const asBridgeFailure = (value: unknown): BridgeFailureReason | null => {
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    (value as { outcome?: unknown }).outcome === 'error'
+  ) {
+    const reason = (value as { reason?: unknown }).reason;
+    return reason === 'cancelled' ||
+      reason === 'provider-error' ||
+      reason === 'unsupported'
+      ? reason
+      : 'error';
+  }
+  return null;
+};
+
 const subtle = (): SubtleCrypto => globalThis.crypto.subtle;
 
 const b64 = (bytes: ArrayBuffer | Uint8Array): string =>

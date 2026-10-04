@@ -17,6 +17,7 @@
 import {
   CIPHER_VERSION,
   addRecoveryFileWrapper,
+  asBridgeFailure,
   cloudRecover,
   createRecoverySession,
   LocalKeyStoreError,
@@ -32,12 +33,21 @@ import {
   writeLocalRecoveryState,
   type BackupResult,
   type BridgeEnvelope,
+  type BridgeFailureReason,
   type LocalMemoryKeyStore,
   type MmkKeyring,
   type MmkWrapper,
   type RecoveryKeyArtifacts,
   type RemoteMemoryBackend,
 } from '@stack/memory';
+
+/**
+ * How a passkey ceremony can end short of success (Phase R6). `timed-out` and
+ * `session-expired` come from the CLI's bounded poll; the others are relayed by the
+ * browser through the one-time envelope channel. None ever yields an MMK.
+ */
+export type PasskeyFailureReason =
+  BridgeFailureReason | 'timed-out' | 'session-expired';
 
 export type MemoryCloudDeps = {
   stackHome: string;
@@ -466,9 +476,20 @@ const errorCode = (error: unknown): string =>
     : '';
 
 /**
+ * The bounded result of waiting for the browser (Phase R6): either the relayed opaque
+ * envelope (which may be a success envelope OR a browser failure signal), or a terminal
+ * reason that ended the wait without any browser response. The wait is ALWAYS bounded —
+ * it never loops past the session deadline — so the CLI can never appear to hang.
+ */
+type PollOutcome =
+  | { ok: true; envelope: unknown }
+  | { ok: false; reason: 'timed-out' | 'session-expired' };
+
+/**
  * Poll the one-time relay for the browser's opaque envelope. The relay reports
- * `no-envelope` until the browser submits, `session-expired` on timeout, and marks
- * the session consumed on the first successful read.
+ * `no-envelope` until the browser submits (success envelope or failure signal),
+ * `session-expired` once the session's lifetime passes, and marks the session consumed
+ * on the first successful read. Bounded by `timeoutMs` (the session lifetime).
  */
 const pollForEnvelope = async (
   backend: RemoteMemoryBackend,
@@ -479,7 +500,7 @@ const pollForEnvelope = async (
     timeoutMs: number;
     pollMs: number;
   },
-): Promise<unknown> => {
+): Promise<PollOutcome> => {
   const deadline = options.now().getTime() + options.timeoutMs;
   for (;;) {
     try {
@@ -487,21 +508,17 @@ const pollForEnvelope = async (
         sessionId,
         options.now,
       );
-      return envelope;
+      return { ok: true, envelope };
     } catch (error) {
       const code = errorCode(error);
       if (code.endsWith('no-envelope')) {
         if (options.now().getTime() > deadline)
-          throw new Error('Timed out waiting for the browser to finish.', {
-            cause: error,
-          });
+          return { ok: false, reason: 'timed-out' };
         await options.sleep(options.pollMs);
         continue;
       }
       if (code.endsWith('session-expired'))
-        throw new Error('The recovery session expired before it completed.', {
-          cause: error,
-        });
+        return { ok: false, reason: 'session-expired' };
       throw error;
     }
   }
@@ -510,6 +527,7 @@ const pollForEnvelope = async (
 export type PasskeyProtectResult =
   | { status: 'not-authenticated' }
   | { status: 'insecure-local-key' }
+  | { status: 'passkey-failed'; reason: PasskeyFailureReason }
   | { status: 'protected'; migrated: number };
 
 /**
@@ -542,16 +560,21 @@ export const runPasskeyProtect = async (
   await deps.openBrowser(
     `${deps.webBaseUrl}/memory/protect?session=${encodeURIComponent(session.sessionId)}`,
   );
-  const envelope = await pollForEnvelope(deps.backend, session.sessionId, {
+  const poll = await pollForEnvelope(deps.backend, session.sessionId, {
     sleep,
     now,
     timeoutMs: deps.timeoutMs ?? 5 * 60_000,
     pollMs: deps.pollMs ?? 1500,
   });
+  // Terminal, MMK-free failures: a bounded timeout/expiry, or a browser failure signal.
+  // Return before any key material is derived — no wrapper, no enrollment, no migration.
+  if (!poll.ok) return { status: 'passkey-failed', reason: poll.reason };
+  const failure = asBridgeFailure(poll.envelope);
+  if (failure) return { status: 'passkey-failed', reason: failure };
   const mmk = await openMmkFromEnvelope({
     session,
     initiatorPrivateKey,
-    envelope: envelope as BridgeEnvelope,
+    envelope: poll.envelope as BridgeEnvelope,
     now,
   });
   // Fail closed: do not finalize Protected if this device's key store can't be secured.
@@ -568,6 +591,7 @@ export const runPasskeyProtect = async (
 export type PasskeyRecoverResult =
   | { status: 'not-authenticated' }
   | { status: 'no-backup' }
+  | { status: 'passkey-failed'; reason: PasskeyFailureReason }
   | { status: 'recovered'; objects: number; generation: number };
 
 /**
@@ -609,16 +633,22 @@ export const runPasskeyRecover = async (
   await deps.openBrowser(
     `${deps.webBaseUrl}/memory/recover?session=${encodeURIComponent(session.sessionId)}`,
   );
-  const envelope = await pollForEnvelope(deps.backend, session.sessionId, {
+  const poll = await pollForEnvelope(deps.backend, session.sessionId, {
     sleep,
     now,
     timeoutMs: deps.timeoutMs ?? 5 * 60_000,
     pollMs: deps.pollMs ?? 1500,
   });
+  // Terminal, MMK-free failures: a bounded timeout/expiry, or a browser failure signal.
+  // Return before any unwrap/recover/enroll so no MMK is produced and nothing is marked
+  // recovered. The user can retry the passkey or use their recovery file.
+  if (!poll.ok) return { status: 'passkey-failed', reason: poll.reason };
+  const failure = asBridgeFailure(poll.envelope);
+  if (failure) return { status: 'passkey-failed', reason: failure };
   const mmk = await openMmkFromEnvelope({
     session,
     initiatorPrivateKey,
-    envelope: envelope as BridgeEnvelope,
+    envelope: poll.envelope as BridgeEnvelope,
     now,
   });
   const result = await cloudRecover({

@@ -16,6 +16,22 @@
  * returned to the DOM, logged, or sent anywhere except as ciphertext.
  */
 
+/**
+ * A terminal, non-cryptographic failure signal (Phase R6). When the passkey ceremony
+ * cannot complete, the browser relays this through the SAME opaque one-time envelope so
+ * the waiting CLI stops immediately instead of waiting out the session timeout. It
+ * carries no key material and does not touch the crypto bridge format. Mirrors
+ * `bridgeFailure`/`asBridgeFailure` in @stack/memory.
+ */
+export type BridgeFailureReason =
+  'cancelled' | 'provider-error' | 'unsupported' | 'error';
+export const bridgeFailure = (
+  reason: BridgeFailureReason,
+): { outcome: 'error'; reason: BridgeFailureReason } => ({
+  outcome: 'error',
+  reason,
+});
+
 // Must match @stack/memory: kdf.ts labels, bridge.ts version/AAD, mmk.ts AAD.
 const PASSKEY_KDF_INFO = 'stack-memory-passkey-v1';
 const BRIDGE_KDF_INFO = 'stack-memory-bridge-v1';

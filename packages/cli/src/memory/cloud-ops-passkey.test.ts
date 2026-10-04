@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   InMemoryRemoteMemoryStore,
   addPasskeyWrapper,
+  bridgeFailure,
   fileLocalMemoryKeyStore,
   generateMmk,
   hashBytes,
@@ -20,6 +21,7 @@ import {
   unwrapWithPasskey,
   writeMemoryManifest,
   writeMemoryObject,
+  type BridgeFailureReason,
   type ManifestItem,
   type MemoryManifest,
   type RecoverySession,
@@ -201,5 +203,196 @@ describe('passkey bridge flows (CLI ↔ relay ↔ simulated browser)', () => {
       openBrowser: () => undefined,
     });
     expect(result.status).toBe('not-authenticated');
+  });
+});
+
+/** A controllable clock whose `sleep` advances time, so polling loops are deterministic. */
+const makeClock = () => {
+  let ms = 0;
+  let sleeps = 0;
+  return {
+    now: () => new Date(ms),
+    sleep: (delta: number) => {
+      sleeps += 1;
+      ms += delta;
+      return Promise.resolve();
+    },
+    get sleepCount() {
+      return sleeps;
+    },
+  };
+};
+
+/** A browser that relays a terminal failure signal through the one-time envelope. */
+const failingBrowser =
+  (backend: RemoteMemoryBackend, reason: BridgeFailureReason) =>
+  async (url: string) => {
+    await backend.submitRecoveryEnvelope(
+      sessionIdFrom(url),
+      bridgeFailure(reason),
+    );
+  };
+
+describe('passkey bridge failures are bounded (R6)', () => {
+  const baseDeps = async () => {
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const device = secureKeys(await temp('stack-pk-fail-'));
+    const stackHome = await temp('stack-pk-fh-');
+    return { store, backend, device, stackHome };
+  };
+
+  it('#3/#8 recover: user cancellation ends promptly as passkey-failed (no long poll)', async () => {
+    const { backend, device, stackHome } = await baseDeps();
+    const src = await writeStore();
+    await standardCloudBackup({ stackHome: src.stackHome, backend });
+    const clock = makeClock();
+    const result = await runPasskeyRecover({
+      stackHome,
+      backend,
+      localKeyStore: device,
+      webBaseUrl: 'http://localhost:3000',
+      openBrowser: failingBrowser(backend, 'cancelled'),
+      sleep: clock.sleep,
+      now: clock.now,
+    });
+    expect(result).toEqual({ status: 'passkey-failed', reason: 'cancelled' });
+    expect(clock.sleepCount).toBe(0); // terminated immediately, did not keep polling
+    expect(await device.hasKey()).toBe(false); // #10 no MMK enrolled
+  });
+
+  it('#4 recover: provider error → passkey-failed(provider-error)', async () => {
+    const { backend, device, stackHome } = await baseDeps();
+    const src = await writeStore();
+    await standardCloudBackup({ stackHome: src.stackHome, backend });
+    const result = await runPasskeyRecover({
+      stackHome,
+      backend,
+      localKeyStore: device,
+      webBaseUrl: 'http://localhost:3000',
+      openBrowser: failingBrowser(backend, 'provider-error'),
+      sleep: immediateSleep,
+    });
+    expect(result).toEqual({
+      status: 'passkey-failed',
+      reason: 'provider-error',
+    });
+  });
+
+  it('#5 recover: PRF unsupported → passkey-failed(unsupported)', async () => {
+    const { backend, device, stackHome } = await baseDeps();
+    const src = await writeStore();
+    await standardCloudBackup({ stackHome: src.stackHome, backend });
+    const result = await runPasskeyRecover({
+      stackHome,
+      backend,
+      localKeyStore: device,
+      webBaseUrl: 'http://localhost:3000',
+      openBrowser: failingBrowser(backend, 'unsupported'),
+      sleep: immediateSleep,
+    });
+    expect(result).toEqual({ status: 'passkey-failed', reason: 'unsupported' });
+  });
+
+  it('#6 recover: browser never responds → bounded timeout (does not hang)', async () => {
+    const { backend, device, stackHome } = await baseDeps();
+    const src = await writeStore();
+    await standardCloudBackup({ stackHome: src.stackHome, backend });
+    const clock = makeClock();
+    const result = await runPasskeyRecover({
+      stackHome,
+      backend,
+      localKeyStore: device,
+      webBaseUrl: 'http://localhost:3000',
+      openBrowser: () => undefined, // browser opens but never submits
+      sleep: clock.sleep,
+      now: clock.now,
+      timeoutMs: 100,
+      pollMs: 1500,
+    });
+    expect(result).toEqual({ status: 'passkey-failed', reason: 'timed-out' });
+  });
+
+  it('#7 recover: session expiry → passkey-failed(session-expired)', async () => {
+    const { backend, device, stackHome } = await baseDeps();
+    const src = await writeStore();
+    await standardCloudBackup({ stackHome: src.stackHome, backend });
+    const clock = makeClock();
+    const result = await runPasskeyRecover({
+      stackHome,
+      backend,
+      localKeyStore: device,
+      webBaseUrl: 'http://localhost:3000',
+      openBrowser: () => undefined,
+      sleep: clock.sleep,
+      now: clock.now,
+      ttlMs: 50, // session lifetime shorter than the poll budget
+      timeoutMs: 10 * 60_000,
+      pollMs: 1500,
+    });
+    expect(result).toEqual({
+      status: 'passkey-failed',
+      reason: 'session-expired',
+    });
+  });
+
+  it('#10/#11 recover failure never produces an MMK, success, or recovery-state', async () => {
+    const { backend, device, stackHome } = await baseDeps();
+    const src = await writeStore();
+    await standardCloudBackup({ stackHome: src.stackHome, backend });
+    const result = await runPasskeyRecover({
+      stackHome,
+      backend,
+      localKeyStore: device,
+      webBaseUrl: 'http://localhost:3000',
+      openBrowser: failingBrowser(backend, 'provider-error'),
+      sleep: immediateSleep,
+    });
+    expect(result.status).not.toBe('recovered');
+    expect(await device.hasKey()).toBe(false);
+    // No local store / recovery-state was written by a failed recovery.
+    await expect(
+      readFile(memoryStorePaths(stackHome).recoveryState),
+    ).rejects.toBeTruthy();
+  });
+
+  it('#9/#15 protect failure creates no wrapper and never auto-selects Standard', async () => {
+    const { backend, device, stackHome } = await baseDeps();
+    const src = await writeStore();
+    await standardCloudBackup({ stackHome: src.stackHome, backend });
+    const before = (await backend.getProfile())?.privacyMode;
+    const result = await runPasskeyProtect({
+      stackHome: src.stackHome,
+      backend,
+      localKeyStore: device,
+      webBaseUrl: 'http://localhost:3000',
+      openBrowser: failingBrowser(backend, 'cancelled'),
+      sleep: immediateSleep,
+    });
+    void stackHome;
+    expect(result).toEqual({ status: 'passkey-failed', reason: 'cancelled' });
+    expect(await backend.listRecoveryMethods()).toEqual([]); // no passkey wrapper
+    expect(await device.hasKey()).toBe(false); // no device enrollment
+    // Privacy mode is unchanged — failure never silently downgrades to Standard.
+    expect((await backend.getProfile())?.privacyMode).toBe(
+      before ?? 'standard',
+    );
+  });
+
+  it('#14 a failure result carries no PRF/MMK/DEK/recovery-key material', async () => {
+    const { backend, device, stackHome } = await baseDeps();
+    const src = await writeStore();
+    await standardCloudBackup({ stackHome: src.stackHome, backend });
+    const result = await runPasskeyRecover({
+      stackHome,
+      backend,
+      localKeyStore: device,
+      webBaseUrl: 'http://localhost:3000',
+      openBrowser: failingBrowser(backend, 'provider-error'),
+      sleep: immediateSleep,
+    });
+    const serialized = JSON.stringify(result).toLowerCase();
+    for (const secret of ['mmk', 'prf', 'dek', 'recovery-key', 'wrapper'])
+      expect(serialized).not.toContain(secret);
   });
 });

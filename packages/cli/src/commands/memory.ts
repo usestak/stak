@@ -12,6 +12,7 @@ import type {
   MemoryBackupOutcome,
   MemoryCloudStatus,
   MemoryGenerationsOutcome,
+  PasskeyFailureReason,
 } from '../memory/cloud-ops.js';
 import {
   historicalBaseBackupWarning,
@@ -23,6 +24,7 @@ import {
   renderMemoryRecover,
   renderMemoryRestore,
   renderMemoryScan,
+  renderPasskeyFailure,
   type MemoryBackupPreview,
 } from '../ui/memory.js';
 
@@ -53,6 +55,7 @@ export type MemoryCommandDependencies = {
   memoryProtectPasskey(): Promise<
     | { status: 'not-authenticated' }
     | { status: 'insecure-local-key' }
+    | { status: 'passkey-failed'; reason: PasskeyFailureReason }
     | { status: 'protected'; migrated: number }
   >;
   memoryRecoverPasskey(options: {
@@ -60,6 +63,7 @@ export type MemoryCommandDependencies = {
   }): Promise<
     | { status: 'not-authenticated' }
     | { status: 'no-backup' }
+    | { status: 'passkey-failed'; reason: PasskeyFailureReason }
     | { status: 'recovered'; objects: number; generation: number }
   >;
   memoryCloudStatus(): Promise<MemoryCloudStatus>;
@@ -263,6 +267,12 @@ export const registerMemoryCommand = (
             dependencies.writeOut(INSECURE_LOCAL_KEY_MESSAGE);
             return;
           }
+          if (result.status === 'passkey-failed') {
+            dependencies.writeOut(
+              renderPasskeyFailure('protect', result.reason),
+            );
+            return;
+          }
           dependencies.writeOut(
             renderMemoryProtect({
               recoveryMethod: 'passkey',
@@ -364,6 +374,12 @@ export const registerMemoryCommand = (
           }
           if (result.status === 'no-backup') {
             dependencies.writeOut(notFoundMessage);
+            return;
+          }
+          if (result.status === 'passkey-failed') {
+            dependencies.writeOut(
+              renderPasskeyFailure('recover', result.reason),
+            );
             return;
           }
           dependencies.writeOut(

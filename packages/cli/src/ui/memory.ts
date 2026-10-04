@@ -11,6 +11,7 @@ import type {
   CloudRecoverOutcome,
   MemoryBackupOutcome,
   MemoryCloudStatus,
+  PasskeyFailureReason,
 } from '../memory/cloud-ops.js';
 import { block } from './format.js';
 
@@ -153,6 +154,50 @@ export const renderMemoryRecover = (outcome: CloudRecoverOutcome): string => {
     '',
     'Run `stak memory restore`.',
   ]);
+};
+
+/**
+ * A bounded, non-alarming terminal message when a passkey ceremony does not complete
+ * (Phase R6). Never claims Memory is corrupted and never implies a silent Standard
+ * fallback; for recovery it always surfaces the existing recovery-file option.
+ */
+export const renderPasskeyFailure = (
+  mode: 'protect' | 'recover',
+  reason: PasskeyFailureReason,
+): string => {
+  const recoverFallback = [
+    'You can retry the passkey, or use your recovery file:',
+    '  stak memory recover --recovery-file <path>',
+  ];
+  const protectFallback = [
+    'You can retry the passkey, or set up a recovery file instead:',
+    '  stak memory protect --recovery-file <path>',
+  ];
+  const fallback = mode === 'recover' ? recoverFallback : protectFallback;
+  const headline =
+    reason === 'cancelled'
+      ? 'Passkey request cancelled.'
+      : reason === 'unsupported'
+        ? 'This device can’t use a passkey for Protected Memory.'
+        : reason === 'timed-out'
+          ? 'Timed out waiting for the browser passkey.'
+          : reason === 'session-expired'
+            ? 'The browser session expired before it finished.'
+            : 'STAK couldn’t complete the passkey request.';
+  // Unsupported authenticators cannot retry into success — lead with the fallback.
+  const body =
+    reason === 'unsupported' && mode === 'recover'
+      ? [
+          'Use your recovery file:',
+          '  stak memory recover --recovery-file <path>',
+        ]
+      : reason === 'unsupported' && mode === 'protect'
+        ? [
+            'Protect with a recovery file instead:',
+            '  stak memory protect --recovery-file <path>',
+          ]
+        : fallback;
+  return block([headline, '', ...body]);
 };
 
 export const renderMemoryProtect = (result: {
