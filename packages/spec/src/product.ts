@@ -138,6 +138,7 @@ export const setProjectLifecycleRequestSchema = z
     lifecycle: projectLifecycleSchema,
   })
   .strict();
+export const syncProjectsResponseSchema = z.object({ ok: z.literal(true) });
 /** CLI → cloud project registry sync (account-side identity + lifecycle; never paths). */
 export const syncProjectsRequestSchema = z
   .object({
@@ -292,6 +293,7 @@ export type SetProjectLifecycleRequest = z.infer<
   typeof setProjectLifecycleRequestSchema
 >;
 export type SyncProjectsRequest = z.infer<typeof syncProjectsRequestSchema>;
+export type SyncProjectsResponse = z.infer<typeof syncProjectsResponseSchema>;
 export type MemoryMode = z.infer<typeof memoryModeSchema>;
 export type RecoveryMethodState = z.infer<typeof recoveryMethodStateSchema>;
 export type MemoryBackupSummary = z.infer<typeof memoryBackupSummarySchema>;

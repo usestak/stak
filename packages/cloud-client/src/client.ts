@@ -13,6 +13,7 @@ import {
   publicProfileResponseSchema,
   publishPublicStackVersionResponseSchema,
   snapshotDownloadResponseSchema,
+  syncProjectsResponseSchema,
 } from '@stack/spec';
 import type {
   CliAuthStartRequest,
@@ -35,6 +36,8 @@ import type {
   PublicProfileResponse,
   PublishPublicStackVersionRequest,
   PublishPublicStackVersionResponse,
+  SyncProjectsRequest,
+  SyncProjectsResponse,
 } from '@stack/spec';
 
 import {
@@ -76,6 +79,8 @@ export interface CloudClient {
     request: MachineCheckinRequest,
   ): Promise<MachineCheckinResponse>;
   listMachines(): Promise<ListMachinesResponse>;
+  /** Phase P3: sync this account's project registry (lifecycle + name only; never paths). */
+  syncProjects(request: SyncProjectsRequest): Promise<SyncProjectsResponse>;
 }
 
 export interface CloudAuthClient {
@@ -268,6 +273,11 @@ export const createCloudClient = (
       json(
         listMachinesResponseSchema,
         await request('GET', 'machines', { auth: true }),
+      ),
+    syncProjects: async (body) =>
+      json(
+        syncProjectsResponseSchema,
+        await request('POST', 'projects/sync', { auth: true, json: body }),
       ),
     getEnvironment: async (name) => {
       try {

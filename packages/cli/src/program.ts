@@ -713,6 +713,31 @@ const defaultDependencies: ProgramDependencies = {
       },
     });
     await reportCheckin({ client, inputs });
+    // Best-effort P3 project-registry sync: lifecycle + safe identity only, never a path or
+    // machine-local binding. Connectivity failures are non-fatal (like check-in); a 401/403
+    // from the check-in above already surfaced, so this extra call is swallowed.
+    try {
+      const rows = await listProjects({
+        stackHome,
+        projects: await resolveMemoryProjects({
+          cwd: process.cwd(),
+          platform: process.platform,
+          listDirs: listChildDirs,
+          gitOrigin: gitOriginOf,
+        }),
+      });
+      await client.syncProjects({
+        projects: rows.map((row) => ({
+          projectId: row.projectId,
+          lifecycle: row.lifecycle,
+          ...(row.identity.kind === 'git'
+            ? { name: row.identity.canonical }
+            : {}),
+        })),
+      });
+    } catch {
+      // Non-fatal: the project registry refreshes on the next successful check-in.
+    }
   },
 };
 

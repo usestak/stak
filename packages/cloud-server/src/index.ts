@@ -27,3 +27,15 @@ export {
   type CloudResponse,
 } from './handler.js';
 export { createInProcessFetch } from './in-process.js';
+export {
+  createProductMethods,
+  type ProductServiceConfig,
+  type SkillSourceChecker,
+  type SourceLatest,
+  type MemoryProjectCounts,
+} from './product-service.js';
+export {
+  createCachedSourceChecker,
+  type CachedSourceCheckerConfig,
+} from './source-check.js';
+export { deriveMachineState } from './machine-state.js';

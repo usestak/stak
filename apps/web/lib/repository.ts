@@ -6,6 +6,7 @@ import {
   type CloudEnvironmentRecord,
   type CloudEnvironmentVersionRecord,
   type CloudMachineRecord,
+  type CloudProjectRecord,
   type CloudProfile,
   type CloudRepository,
   type CloudSnapshotRecord,
@@ -71,9 +72,18 @@ const mapToken = (row: any): CliTokenRecord => ({
   userId: row.user_id,
   tokenHash: row.token_hash,
   ...(row.label ? { label: row.label } : {}),
+  ...(row.machine_id ? { machineId: row.machine_id } : {}),
   createdAt: row.created_at,
   ...(row.last_used_at ? { lastUsedAt: row.last_used_at } : {}),
   ...(row.revoked_at ? { revokedAt: row.revoked_at } : {}),
+});
+
+const mapProject = (row: any): CloudProjectRecord => ({
+  userId: row.user_id,
+  projectId: row.project_id,
+  lifecycle: row.lifecycle,
+  ...(row.name != null ? { name: row.name } : {}),
+  updatedAt: row.updated_at,
 });
 
 const mapEnvironment = (row: any): CloudEnvironmentRecord => ({
@@ -176,6 +186,7 @@ export const supabaseRepository = (): CloudRepository &
           user_id: record.userId,
           token_hash: record.tokenHash,
           label: record.label ?? null,
+          machine_id: record.machineId ?? null,
           created_at: record.createdAt,
         });
     },
@@ -367,6 +378,7 @@ export const supabaseRepository = (): CloudRepository &
         ...(m.memory_backed_up != null
           ? { memoryBackedUp: m.memory_backed_up as boolean }
           : {}),
+        ...(m.revoked_at != null ? { revokedAt: m.revoked_at } : {}),
         skills: skills
           .filter((s) => s.machine_id === m.machine_id)
           .map((s) => ({
@@ -377,6 +389,78 @@ export const supabaseRepository = (): CloudRepository &
           .filter((p) => p.machine_id === m.machine_id)
           .map((p) => ({ projectId: p.project_id, present: p.present })),
       }));
+    },
+
+    /* ------------------------------- Phase P3 ------------------------------- */
+    listEnvironmentVersions: async (userId, name) => {
+      const environment = await db()
+        .from('environments')
+        .select('environment_id')
+        .eq('user_id', userId)
+        .eq('name', name)
+        .maybeSingle();
+      const environmentId = (environment.data as any)?.environment_id;
+      if (!environmentId) return [];
+      const { data } = await db()
+        .from('environment_versions')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('environment_id', environmentId)
+        .order('version_number', { ascending: false });
+      return ((data as any[] | null) ?? []).map(mapVersion);
+    },
+    revokeMachine: async (userId, machineId, now) => {
+      const { data } = await db()
+        .from('machines')
+        .update({ revoked_at: now })
+        .eq('user_id', userId)
+        .eq('machine_id', machineId)
+        .select('machine_id');
+      if (!data || (data as any[]).length === 0) return null;
+      const revoked = await db()
+        .from('cli_tokens')
+        .update({ revoked_at: now })
+        .eq('user_id', userId)
+        .eq('machine_id', machineId)
+        .is('revoked_at', null)
+        .select('token_id');
+      return {
+        machineId,
+        revokedTokens: ((revoked.data as any[] | null) ?? []).length,
+      };
+    },
+    listProjects: async (userId) => {
+      const { data } = await db()
+        .from('cloud_projects')
+        .select('*')
+        .eq('user_id', userId)
+        .order('project_id', { ascending: true });
+      return ((data as any[] | null) ?? []).map(mapProject);
+    },
+    syncProjects: async (userId, projects, now) => {
+      if (projects.length === 0) return;
+      await db()
+        .from('cloud_projects')
+        .upsert(
+          projects.map((project) => ({
+            user_id: userId,
+            project_id: project.projectId,
+            lifecycle: project.lifecycle,
+            name: project.name ?? null,
+            updated_at: now,
+          })),
+          { onConflict: 'user_id,project_id' },
+        );
+    },
+    setProjectLifecycle: async (userId, projectId, lifecycle, now) => {
+      const { data } = await db()
+        .from('cloud_projects')
+        .update({ lifecycle, updated_at: now })
+        .eq('user_id', userId)
+        .eq('project_id', projectId)
+        .select('*')
+        .maybeSingle();
+      return data ? mapProject(data) : null;
     },
 
     /* ---------------------------- public stacks --------------------------- */
