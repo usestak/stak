@@ -33,8 +33,36 @@ export {
   applyStackUse,
   prepareStackRemove,
   applyStackRemove,
+  resolveSkillSelector,
+  setSkillPaused,
 } from './composition.js';
-export type { StackUseProposal, StackRemoveProposal } from './composition.js';
+export type {
+  StackUseProposal,
+  StackRemoveProposal,
+  SkillSelectorResult,
+  SetSkillPausedResult,
+} from './composition.js';
+export {
+  projectedLocalEnvironment,
+  loadProjectedLocalEnvironment,
+} from './projection.js';
+export {
+  approveSkillSourceVersion,
+  diffSkillTrees,
+  gitLsRemoteHead,
+  resolveSkillSourceLatest,
+} from './skill-source.js';
+export type {
+  ApproveSkillResult,
+  CandidateRevision,
+  IngestCandidate,
+  ResolveRemoteHead,
+  SkillFileChange,
+  SkillFileChangeKind,
+  SkillSourceDiff,
+  SkillTreeDiff,
+  SourceLatestResult,
+} from './skill-source.js';
 export { preserveTrialStack, resolveTrialStack } from './trial.js';
 export type { TrialStackResolution } from './trial.js';
 export {

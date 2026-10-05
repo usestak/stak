@@ -81,6 +81,10 @@ const buildState = (
     skills: {},
   };
   for (const skill of resolved.skills) {
+    // Pause is machine-local desired state carried in the lock. Re-resolving the environment
+    // (use/remove) must preserve it for the SAME stable entryId so a paused Skill is not
+    // silently reactivated; a re-minted entryId (changed identity) starts active.
+    const previousPaused = current.lock.skills[skill.entryId]?.paused;
     lock.skills[skill.entryId] = {
       name: skill.name,
       description: skill.metadata.description,
@@ -93,6 +97,7 @@ const buildState = (
       localContent: { available: true, contentHash: skill.contentHash },
       restoration: skill.restoration,
       origins: skill.origins,
+      ...(previousPaused === true ? { paused: true } : {}),
     };
     const previous = current.baseline.skills[skill.entryId];
     baseline.skills[skill.entryId] =
@@ -107,7 +112,7 @@ const buildState = (
   };
 };
 
-const persistMain = async (
+export const persistMainState = async (
   stackHome: string,
   state: ReturnType<typeof buildState>,
 ) => {
@@ -216,7 +221,7 @@ const sameState = (
   JSON.stringify(left.lock) === JSON.stringify(right.lock) &&
   JSON.stringify(left.baseline) === JSON.stringify(right.baseline);
 
-const withMainMutationLock = async <T>(
+export const withMainMutationLock = async <T>(
   stackHome: string,
   expected: LoadedEnvironmentState,
   operation: () => Promise<T>,
@@ -368,7 +373,7 @@ export const applyStackUse = async (
       ...proposal.current.manifest,
       stacks: [...proposal.current.manifest.stacks, proposal.layer],
     };
-    await persistMain(
+    await persistMainState(
       proposal.stackHome,
       buildState(
         proposal.current,
@@ -465,7 +470,7 @@ export const applyStackRemove = async (
   options: { now?: () => Date } = {},
 ) => {
   await withMainMutationLock(proposal.stackHome, proposal.current, () =>
-    persistMain(
+    persistMainState(
       proposal.stackHome,
       buildState(
         proposal.current,
@@ -476,6 +481,99 @@ export const applyStackRemove = async (
     ),
   );
   return proposal;
+};
+
+/* -------------------------------------------------------------------------- */
+/* Skill pause / resume (P2)                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Resolve a human-friendly Skill selector to a single stable entryId. A selector that is a
+ * stable entryId (`skill_…`) is matched directly; otherwise it is matched by display name.
+ * Two Skills that share a name but have distinct stable ids are NEVER collapsed — a name that
+ * matches more than one is reported ambiguous so the caller can fail safely. Display name is
+ * never identity.
+ */
+export type SkillSelectorResult =
+  | { status: 'ok'; entryId: string }
+  | { status: 'not-found' }
+  | { status: 'ambiguous'; matches: string[] };
+
+export const resolveSkillSelector = (
+  lock: EnvironmentLock,
+  selector: string,
+): SkillSelectorResult => {
+  if (lock.skills[selector]) return { status: 'ok', entryId: selector };
+  const byName = Object.entries(lock.skills)
+    .filter(([, skill]) => skill.name === selector)
+    .map(([entryId]) => entryId)
+    .sort();
+  if (byName.length === 1 && byName[0])
+    return { status: 'ok', entryId: byName[0] };
+  if (byName.length > 1) return { status: 'ambiguous', matches: byName };
+  return { status: 'not-found' };
+};
+
+export type SetSkillPausedResult =
+  | {
+      status: 'ok';
+      entryId: string;
+      name: string;
+      paused: boolean;
+      changed: boolean;
+    }
+  | { status: 'not-found' }
+  | { status: 'ambiguous'; matches: string[] };
+
+/**
+ * Pause or resume a single Skill by selector (P2, contract §6). This flips ONLY the lock's
+ * machine-local `paused` flag for the selected stable entryId; version, provenance, metadata,
+ * origins and history are untouched, and manifest/baseline are preserved. The change is
+ * written through the same optimistic mutation lock + transactional swap as composition, so a
+ * concurrent change fails closed and a write failure leaves the prior state intact. Pause is
+ * NOT remove. The per-machine projection effect happens on the next `run` / `skill update`.
+ */
+export const setSkillPaused = async (options: {
+  stackHome: string;
+  selector: string;
+  paused: boolean;
+}): Promise<SetSkillPausedResult> => {
+  const current = await loadMainEnvironment({ stackHome: options.stackHome });
+  const resolved = resolveSkillSelector(current.lock, options.selector);
+  if (resolved.status !== 'ok') return resolved;
+  const { entryId } = resolved;
+  const locked = current.lock.skills[entryId];
+  if (!locked) return { status: 'not-found' };
+  const wasPaused = locked.paused === true;
+  if (wasPaused === options.paused)
+    return {
+      status: 'ok',
+      entryId,
+      name: locked.name,
+      paused: options.paused,
+      changed: false,
+    };
+  const nextLocked = { ...locked };
+  if (options.paused) nextLocked.paused = true;
+  else delete nextLocked.paused;
+  const lock: EnvironmentLock = {
+    ...current.lock,
+    skills: { ...current.lock.skills, [entryId]: nextLocked },
+  };
+  await withMainMutationLock(options.stackHome, current, () =>
+    persistMainState(options.stackHome, {
+      manifest: environmentManifestSchema.parse(current.manifest),
+      lock: environmentLockSchema.parse(lock),
+      baseline: machineEnvironmentBaselineSchema.parse(current.baseline),
+    }),
+  );
+  return {
+    status: 'ok',
+    entryId,
+    name: locked.name,
+    paused: options.paused,
+    changed: true,
+  };
 };
 
 /* -------------------------------------------------------------------------- */
@@ -631,7 +729,7 @@ export const applyRemoteStackUse = async (
       ...proposal.current.manifest,
       stacks: [...proposal.current.manifest.stacks, proposal.layer],
     };
-    await persistMain(
+    await persistMainState(
       proposal.stackHome,
       buildState(
         proposal.current,

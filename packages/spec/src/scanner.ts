@@ -29,10 +29,26 @@ export const skillLocationSchema = skillRootSchema.extend({
   realPath: z.string().optional(),
   source: skillSourceSchema,
 });
+/**
+ * Declared capabilities (P2, 0.1.0 contract §7). An OPTIONAL, structured block in SKILL.md
+ * frontmatter. Each flag is TRI-STATE: present+true, present+false, or ABSENT (not declared).
+ * Absence of a flag — or of the whole block — means "not declared", never `false`: capability
+ * truth is declared only, never inferred from prose or skill bodies. The object is loose so
+ * future declared keys round-trip; the four flags below are the recognized 0.1.0 surface.
+ */
+export const declaredCapabilitiesSchema = z
+  .object({
+    readFiles: z.boolean().optional(),
+    writeFiles: z.boolean().optional(),
+    runCommands: z.boolean().optional(),
+    network: z.boolean().optional(),
+  })
+  .loose();
 export const skillMetadataSchema = z
   .object({
     name: z.string().trim().min(1),
     description: z.string().trim().min(1),
+    capabilities: declaredCapabilitiesSchema.optional(),
   })
   .loose();
 export const scanDiagnosticSchema = z.object({
@@ -93,6 +109,7 @@ export type SkillScope = z.infer<typeof skillScopeSchema>;
 export type SkillRoot = z.infer<typeof skillRootSchema>;
 export type SkillSource = z.infer<typeof skillSourceSchema>;
 export type SkillLocation = z.infer<typeof skillLocationSchema>;
+export type DeclaredCapabilities = z.infer<typeof declaredCapabilitiesSchema>;
 export type SkillMetadata = z.infer<typeof skillMetadataSchema>;
 export type ScanDiagnostic = z.infer<typeof scanDiagnosticSchema>;
 export type ScannedRoot = z.infer<typeof scannedRootSchema>;

@@ -55,6 +55,12 @@ export const lockedSkillSchema = z.object({
   localContent: localContentRecordSchema,
   restoration: restorationStrategySchema,
   origins: z.array(requirementOriginSchema).optional(),
+  // Pause (P2, 0.1.0 contract §6): machine-local desired state carried in the lock. Absent =
+  // active (back-compat: pre-P2 locks load unchanged). A paused Skill keeps its version,
+  // provenance and history but is excluded from agent projection; `stak skill resume` clears
+  // it. Pause is NOT remove. The per-machine effect is realised on the next projection (run /
+  // skill update), not immediately.
+  paused: z.boolean().optional(),
 });
 
 export const environmentLockSchema = z.object({
