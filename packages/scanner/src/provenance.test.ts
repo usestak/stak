@@ -50,6 +50,38 @@ describe('detectProvenance', () => {
       clean: true,
     });
     expect(source.type === 'git' && source.revision).toMatch(/^[0-9a-f]{40}$/);
+    // The tracked ref (source locator) is captured as a fully-qualified ref on a branch
+    // checkout — distinct from the resolved commit — so source-latest can re-resolve it.
+    expect(source.type === 'git' && source.ref).toMatch(/^refs\/heads\/.+/);
+  }, 15_000);
+
+  it('omits the tracked ref on a detached HEAD (exact-commit-pinned)', async () => {
+    const repository = await mkdtemp(path.join(tmpdir(), 'stack-git-detach-'));
+    directories.push(repository);
+    const skill = path.join(repository, 'skills', 'demo');
+    const { mkdir } = await import('node:fs/promises');
+    await mkdir(skill, { recursive: true });
+    await writeFile(path.join(skill, 'SKILL.md'), 'demo');
+    execFileSync('git', ['init', '-q'], { cwd: repository });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], {
+      cwd: repository,
+    });
+    execFileSync('git', ['config', 'user.name', 'Stack Test'], {
+      cwd: repository,
+    });
+    execFileSync('git', ['add', '.'], { cwd: repository });
+    execFileSync('git', ['commit', '-qm', 'fixture'], { cwd: repository });
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repository,
+      encoding: 'utf8',
+    }).trim();
+    execFileSync('git', ['checkout', '-q', '--detach', head], {
+      cwd: repository,
+    });
+
+    const source = await detectProvenance(skill);
+    expect(source.type).toBe('git');
+    expect(source.type === 'git' && source.ref).toBeUndefined();
   }, 15_000);
 
   it.each([

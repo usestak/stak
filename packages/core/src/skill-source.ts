@@ -23,19 +23,22 @@ import { spawnGit, type GitExecutor } from './git-reference.js';
  * APPROVED/DESIRED (the immutable imported version in the lock) and INSTALLED (what a machine
  * last reported at check-in). This resolver answers only the SOURCE question for one Skill.
  *
- * - `same` / `different` are reported ONLY for a checkable Git-backed source, by comparing the
- *   resolved tracked-ref revision to the approved revision by EXACT IDENTITY (never lexical or
- *   numeric ordering of hashes).
- * - Everything else FAILS CLOSED as `uncheckable`: Local, dirty/modified, ambiguous, and
- *   unreachable sources never yield a false "different"/"update available". The P3 read model
- *   maps `uncheckable` to "Can't check for updates from this source".
+ * - `same` / `different` are reported ONLY for a checkable Git-backed source that records a
+ *   tracked ref (the SOURCE LOCATOR). STAK re-resolves THAT EXACT ref — never the repository
+ *   default branch as a global fallback — and compares the resolved revision to the approved
+ *   revision by EXACT IDENTITY (never lexical/numeric/semver ordering of hashes). Two Skills
+ *   from the same repo on different refs therefore resolve independently.
+ * - Everything else FAILS CLOSED as `uncheckable`: an exact-commit-pinned reference (no tracked
+ *   ref) is `pinned` (intentionally not update-trackable; a moving default branch must not
+ *   invent an update); Local/dirty/ambiguous/unreachable never yield a false "different". The
+ *   P3 read model maps every `uncheckable` to "Can't check for updates from this source".
  */
 export type SourceLatestResult =
   | { status: 'same'; approvedRevision: string; sourceRevision: string }
   | { status: 'different'; approvedRevision: string; sourceRevision: string }
   | {
       status: 'uncheckable';
-      reason: 'local' | 'dirty' | 'ambiguous' | 'unreachable';
+      reason: 'local' | 'dirty' | 'ambiguous' | 'unreachable' | 'pinned';
     };
 
 /** Map a snapshot restoration reason to why its source cannot be checked for updates. */
@@ -55,19 +58,27 @@ const snapshotUncheckable = (
   }
 };
 
-/** Resolve a Git remote's default-branch HEAD to an exact revision, or null if unreachable. */
-export type ResolveRemoteHead = (remote: string) => Promise<string | null>;
+/**
+ * Resolve a specific Git ref on a remote to its exact revision, or null if the ref is missing
+ * or the remote is unreachable. This is the SOURCE LOCATOR resolution; the ref is whatever the
+ * Skill actually tracks (a branch, tag, or other ref), never substituted with the default
+ * branch.
+ */
+export type ResolveRemoteRef = (input: {
+  remote: string;
+  ref: string;
+}) => Promise<string | null>;
 
 /**
- * Default remote-HEAD resolver: `git ls-remote <remote> HEAD`, shell:false, non-interactive,
- * never prompting for credentials. Returns the exact revision the default branch points at, or
- * null on any failure (treated as unreachable — never a false "update available").
+ * Default ref resolver: `git ls-remote <remote> <ref>`, shell:false, non-interactive, never
+ * prompting for credentials. Returns the exact revision the ref points at, or null on any
+ * failure / ref-not-found (treated as unreachable — never a false "update available").
  */
-export const gitLsRemoteHead =
-  (gitExecutor: GitExecutor = spawnGit): ResolveRemoteHead =>
-  async (remote) => {
+export const gitLsRemoteRef =
+  (gitExecutor: GitExecutor = spawnGit): ResolveRemoteRef =>
+  async ({ remote, ref }) => {
     try {
-      const result = await gitExecutor(['ls-remote', remote, 'HEAD'], {
+      const result = await gitExecutor(['ls-remote', remote, ref], {
         cwd: process.cwd(),
         env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
       });
@@ -80,20 +91,28 @@ export const gitLsRemoteHead =
   };
 
 /**
- * Resolve whether a newer source revision exists for one approved Skill. Reference-backed
- * (Git) Skills resolve the tracked ref (the remote default-branch HEAD) and compare by exact
- * revision identity; snapshot-backed Skills (Local, dirty, ambiguous, unreachable) fail closed.
+ * Resolve whether a newer source revision exists for one approved Skill. A reference-backed
+ * Skill that records a tracked ref re-resolves THAT ref and compares by exact revision
+ * identity; a reference with no tracked ref is `pinned` (not trackable); snapshot-backed Skills
+ * (Local, dirty, ambiguous, unreachable) fail closed.
  */
 export const resolveSkillSourceLatest = async (options: {
   locked: Pick<LockedSkill, 'restoration'>;
-  resolveRemoteHead?: ResolveRemoteHead;
+  resolveRemoteRef?: ResolveRemoteRef;
 }): Promise<SourceLatestResult> => {
   const { restoration } = options.locked;
   if (restoration.strategy === 'snapshot')
     return snapshotUncheckable(restoration.reason);
-  const approvedRevision = restoration.reference.revision;
-  const resolveHead = options.resolveRemoteHead ?? gitLsRemoteHead();
-  const sourceRevision = await resolveHead(restoration.reference.remote);
+  const { reference } = restoration;
+  const approvedRevision = reference.revision;
+  // No tracked ref ⇒ exact-commit-pinned: do NOT guess the default branch.
+  if (reference.ref === undefined)
+    return { status: 'uncheckable', reason: 'pinned' };
+  const resolveRef = options.resolveRemoteRef ?? gitLsRemoteRef();
+  const sourceRevision = await resolveRef({
+    remote: reference.remote,
+    ref: reference.ref,
+  });
   if (sourceRevision === null)
     return { status: 'uncheckable', reason: 'unreachable' };
   // Exact-identity comparison only — never lexical/numeric ordering of revisions.

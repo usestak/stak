@@ -30,6 +30,8 @@ export const selectRestorationStrategy = (
       revision: source.revision,
       path: source.path,
       expectedContentHash: options.contentHash,
+      // Preserve the tracked ref (source locator) so source-latest can re-resolve it later.
+      ...(source.ref ? { ref: source.ref } : {}),
     });
     if (parsed.success)
       eligible.set(

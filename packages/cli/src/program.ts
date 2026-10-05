@@ -439,20 +439,10 @@ const defaultDependencies: ProgramDependencies = {
       : applyStackUse(proposal),
   prepareRemove: (identifier) => prepareStackRemove({ stackHome, identifier }),
   applyRemove: (proposal) => applyStackRemove(proposal),
-  loadRunEnvironment: async () => {
-    const state = await loadMainEnvironment({ stackHome });
-    return {
-      name: state.manifest.name,
-      machineId: state.machine.machineId,
-      skills: Object.entries(state.lock.skills).map(([entryId, locked]) => {
-        return {
-          entryId,
-          name: locked.name,
-          contentHash: locked.contentHash,
-        };
-      }),
-    };
-  },
+  // `stak run` projects through the same paused-aware helper as `stak skill update`, so a
+  // paused Skill is excluded from the real agent projection path (contract §6).
+  loadRunEnvironment: async () =>
+    projectedLocalEnvironment(await loadMainEnvironment({ stackHome })),
   detectCodex: () => codex.detect(),
   planCodexBindings: (environment) => codex.planBindings(environment),
   applyCodexBindings: (plan, machineId) => codex.applyBindings(plan, machineId),

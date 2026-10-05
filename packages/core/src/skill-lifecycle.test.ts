@@ -43,14 +43,19 @@ afterEach(async () => {
 });
 
 const hash = (c: string) => `sha256:${c.repeat(64)}`;
-const reference = (revision: string, expectedContentHash: string) =>
+const reference = (
+  revision: string,
+  expectedContentHash: string,
+  options: { ref?: string; remote?: string } = {},
+) =>
   ({
     strategy: 'reference',
     reference: {
-      remote: 'https://github.com/acme/skills.git',
+      remote: options.remote ?? 'https://github.com/acme/skills.git',
       revision,
       path: 'skills/thing',
       expectedContentHash,
+      ...(options.ref ? { ref: options.ref } : {}),
     },
   }) satisfies RestorationStrategy;
 const snapshot = (reason: string) =>
@@ -333,87 +338,138 @@ describe('pause / resume (P2 §5/§6)', () => {
 
 /* ------------------------------ SOURCE-LATEST ------------------------------ */
 
-describe('source-latest (P2 §3/§9)', () => {
+describe('source-latest follows the tracked ref (P2 §3/§9 + review)', () => {
   const locked = (
     restoration: RestorationStrategy,
   ): Pick<LockedSkill, 'restoration'> => ({ restoration });
+  const abc = 'a'.repeat(40);
+  const def = 'd'.repeat(40);
+  const fed = 'f'.repeat(40);
+  // A resolver fed a fixed ref→revision table; it fails if asked for an unknown ref, proving
+  // the resolver only ever consults the tracked ref (never the default branch).
+  const table =
+    (map: Record<string, Record<string, string>>) =>
+    async ({ remote, ref }: { remote: string; ref: string }) =>
+      map[remote]?.[ref] ?? null;
 
-  it('same Git revision → same (identity comparison, not ordering)', async () => {
-    const rev = 'f'.repeat(40);
+  it('A. tracked branch unchanged → no update (default branch moving is ignored)', async () => {
+    const remote = 'https://github.com/example/skill.git';
     const result = await resolveSkillSourceLatest({
-      locked: locked(reference(rev, hash('a'))),
-      resolveRemoteHead: async () => rev,
+      locked: locked(
+        reference(abc, hash('a'), { ref: 'refs/heads/release', remote }),
+      ),
+      // release is unchanged; main (default) moved — must not matter.
+      resolveRemoteRef: table({
+        [remote]: { 'refs/heads/release': abc, 'refs/heads/main': def },
+      }),
     });
     expect(result).toEqual({
       status: 'same',
-      approvedRevision: rev,
-      sourceRevision: rev,
+      approvedRevision: abc,
+      sourceRevision: abc,
     });
   });
 
-  it('different Git revision → different; compared by identity even when approved sorts "higher"', async () => {
-    // approved starts with 'f' (sorts after source 'a') — ordering must NOT be used.
-    const approved = `f${'0'.repeat(39)}`;
-    const source = `a${'0'.repeat(39)}`;
+  it('B. tracked branch changed → update candidate is the ref revision', async () => {
+    const remote = 'https://github.com/example/skill.git';
     const result = await resolveSkillSourceLatest({
-      locked: locked(reference(approved, hash('a'))),
-      resolveRemoteHead: async () => source,
+      locked: locked(
+        reference(abc, hash('a'), { ref: 'refs/heads/release', remote }),
+      ),
+      resolveRemoteRef: table({ [remote]: { 'refs/heads/release': fed } }),
     });
     expect(result).toEqual({
       status: 'different',
-      approvedRevision: approved,
-      sourceRevision: source,
+      approvedRevision: abc,
+      sourceRevision: fed,
     });
   });
 
-  it('Local source → uncheckable(local)', async () => {
-    expect(
-      await resolveSkillSourceLatest({ locked: locked(snapshot('local')) }),
-    ).toEqual({
-      status: 'uncheckable',
-      reason: 'local',
-    });
-  });
-
-  it('dirty/modified source → uncheckable(dirty)', async () => {
-    expect(
-      await resolveSkillSourceLatest({
-        locked: locked(snapshot('modified-source')),
-      }),
-    ).toEqual({
-      status: 'uncheckable',
-      reason: 'dirty',
-    });
-  });
-
-  it('ambiguous source → uncheckable(ambiguous)', async () => {
-    expect(
-      await resolveSkillSourceLatest({
-        locked: locked(snapshot('ambiguous-source')),
-      }),
-    ).toEqual({
-      status: 'uncheckable',
-      reason: 'ambiguous',
-    });
-  });
-
-  it('unreachable Git remote (resolver returns null) → uncheckable(unreachable)', async () => {
+  it('B2. identity comparison, never ordering (approved sorts "after" source)', async () => {
+    const remote = 'https://github.com/example/skill.git';
+    const approved = `f${'0'.repeat(39)}`;
+    const source = `a${'0'.repeat(39)}`;
     const result = await resolveSkillSourceLatest({
-      locked: locked(reference('a'.repeat(40), hash('a'))),
-      resolveRemoteHead: async () => null,
+      locked: locked(
+        reference(approved, hash('a'), { ref: 'refs/heads/main', remote }),
+      ),
+      resolveRemoteRef: table({ [remote]: { 'refs/heads/main': source } }),
+    });
+    expect(result.status).toBe('different');
+  });
+
+  it('C. tracked tag unchanged → no update', async () => {
+    const remote = 'https://github.com/example/skill.git';
+    const result = await resolveSkillSourceLatest({
+      locked: locked(
+        reference(abc, hash('a'), { ref: 'refs/tags/v1', remote }),
+      ),
+      resolveRemoteRef: table({ [remote]: { 'refs/tags/v1': abc } }),
+    });
+    expect(result.status).toBe('same');
+  });
+
+  it('D. exact-commit-pinned (no tracked ref) → uncheckable(pinned); default branch moving is never a false update', async () => {
+    const result = await resolveSkillSourceLatest({
+      locked: locked(reference(abc, hash('a'))), // no ref
+      // Resolver would return a moved default branch, but it must never be consulted.
+      resolveRemoteRef: async () => def,
+    });
+    expect(result).toEqual({ status: 'uncheckable', reason: 'pinned' });
+  });
+
+  it('E. two Skills, same repo, different tracked refs → resolve independently', async () => {
+    const remote = 'https://github.com/example/skill.git';
+    const resolveRemoteRef = table({
+      [remote]: {
+        'refs/heads/release': 'a'.repeat(40),
+        'refs/heads/beta': 'b'.repeat(40),
+      },
+    });
+    const release = await resolveSkillSourceLatest({
+      locked: locked(
+        reference('a'.repeat(40), hash('a'), {
+          ref: 'refs/heads/release',
+          remote,
+        }),
+      ),
+      resolveRemoteRef,
+    });
+    const beta = await resolveSkillSourceLatest({
+      locked: locked(
+        reference('z'.repeat(40), hash('b'), {
+          ref: 'refs/heads/beta',
+          remote,
+        }),
+      ),
+      resolveRemoteRef,
+    });
+    expect(release.status).toBe('same'); // release tip == approved
+    expect(beta).toMatchObject({
+      status: 'different',
+      sourceRevision: 'b'.repeat(40),
+    });
+  });
+
+  it('F. unreachable tracked ref → uncheckable(unreachable); never silently falls back to main', async () => {
+    const result = await resolveSkillSourceLatest({
+      locked: locked(reference(abc, hash('a'), { ref: 'refs/heads/release' })),
+      resolveRemoteRef: async () => null, // ref missing / remote unreachable
     });
     expect(result).toEqual({ status: 'uncheckable', reason: 'unreachable' });
   });
 
-  it('unknown snapshot source → uncheckable(unreachable), never a false update', async () => {
-    expect(
-      await resolveSkillSourceLatest({
-        locked: locked(snapshot('unknown-source')),
-      }),
-    ).toEqual({
-      status: 'uncheckable',
-      reason: 'unreachable',
-    });
+  it('Local / dirty / ambiguous / unknown snapshots all fail closed', async () => {
+    const reasonFor = async (snapshotReason: string): Promise<string> => {
+      const result = await resolveSkillSourceLatest({
+        locked: locked(snapshot(snapshotReason)),
+      });
+      return result.status === 'uncheckable' ? result.reason : result.status;
+    };
+    expect(await reasonFor('local')).toBe('local');
+    expect(await reasonFor('modified-source')).toBe('dirty');
+    expect(await reasonFor('ambiguous-source')).toBe('ambiguous');
+    expect(await reasonFor('unknown-source')).toBe('unreachable');
   });
 });
 

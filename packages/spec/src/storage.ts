@@ -41,6 +41,11 @@ export const referenceRecordSchema = z.object({
       'Git Skill path must be repository-relative',
     ),
   expectedContentHash: contentHashSchema,
+  // SOURCE LOCATOR for update checks (P2): the Git ref this reference tracks (e.g.
+  // `refs/heads/release`), distinct from the exact approved `revision`. Optional/back-compat:
+  // absent = exact-commit-pinned reference, not update-trackable. Reacquisition always uses the
+  // exact `revision`; only source-latest re-resolves this ref.
+  ref: z.string().min(1).optional(),
 });
 
 export const referenceRestorationSchema = z.object({

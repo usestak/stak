@@ -19,6 +19,12 @@ export const skillSourceSchema = z.discriminatedUnion('type', [
     revision: z.string(),
     path: z.string(),
     clean: z.boolean().optional(),
+    // The SOURCE LOCATOR: the mutable Git ref this checkout was tracking (e.g.
+    // `refs/heads/release`, `refs/tags/v1`), distinct from `revision` (the exact approved
+    // commit it resolved to). Optional/back-compat: absent = detached/exact-commit checkout,
+    // which is intentionally not update-trackable. Source-latest re-resolves THIS ref, never
+    // the repository default branch as a global fallback.
+    ref: z.string().min(1).optional(),
   }),
   z.object({ type: z.literal('local') }),
   z.object({ type: z.literal('unknown'), reason: z.string().optional() }),

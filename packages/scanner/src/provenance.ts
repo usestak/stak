@@ -25,6 +25,16 @@ export const detectProvenance = async (
     } catch {
       remote = undefined;
     }
+    // The SOURCE LOCATOR: the fully-qualified ref the checkout is on (e.g.
+    // `refs/heads/release`). On a detached HEAD / exact-commit checkout this fails and we omit
+    // `ref`, which marks the source as exact-commit-pinned (not update-trackable).
+    let ref: string | undefined;
+    try {
+      ref = await git(directory, ['symbolic-ref', '-q', 'HEAD']);
+      if (ref.length === 0) ref = undefined;
+    } catch {
+      ref = undefined;
+    }
     const sourcePath =
       path.relative(repository, directory).split(path.sep).join('/') || '.';
     const clean =
@@ -35,9 +45,14 @@ export const detectProvenance = async (
         '--',
         sourcePath,
       ])) === '';
-    return remote
-      ? { type: 'git', remote, revision, path: sourcePath, clean }
-      : { type: 'git', revision, path: sourcePath, clean };
+    return {
+      type: 'git',
+      revision,
+      path: sourcePath,
+      clean,
+      ...(remote ? { remote } : {}),
+      ...(ref ? { ref } : {}),
+    };
   } catch {
     return { type: 'local' };
   }

@@ -49,14 +49,14 @@ export {
 export {
   approveSkillSourceVersion,
   diffSkillTrees,
-  gitLsRemoteHead,
+  gitLsRemoteRef,
   resolveSkillSourceLatest,
 } from './skill-source.js';
 export type {
   ApproveSkillResult,
   CandidateRevision,
   IngestCandidate,
-  ResolveRemoteHead,
+  ResolveRemoteRef,
   SkillFileChange,
   SkillFileChangeKind,
   SkillSourceDiff,
