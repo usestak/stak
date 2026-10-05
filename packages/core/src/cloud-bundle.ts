@@ -51,6 +51,8 @@ const toPortableLockedSkill = (skill: LockedSkill): PortableLockedSkill => ({
   observedSources: skill.observedSources,
   restoration: toPortableRestoration(skill.restoration, skill.contentHash),
   ...(skill.origins ? { origins: skill.origins } : {}),
+  // Carry desired pause state so it survives push/pull and is visible to the web.
+  ...(skill.paused === true ? { paused: true } : {}),
 });
 
 const toPortableImportedVersion = (

@@ -8,7 +8,11 @@ import { hashSkillDirectory } from '@stack/shared';
 import type { ScanResult } from '@stack/spec';
 
 import { buildCloudEnvironmentBundle } from './cloud-bundle.js';
-import { applyStackUse, prepareStackUse } from './composition.js';
+import {
+  applyStackUse,
+  prepareStackUse,
+  setSkillPaused,
+} from './composition.js';
 import { initializeMainEnvironment } from './initialize.js';
 
 const roots: string[] = [];
@@ -105,6 +109,25 @@ describe('cloud environment bundle', () => {
     const second = await buildCloudEnvironmentBundle({ stackHome });
     expect(second.digest).toBe(first.digest);
     expect(first.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  it('carries desired pause state into the bundle and reflects it in the digest (P3)', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    await seedMain(stackHome, path.join(root, 'src'), ['foo', 'bar']);
+    const before = await buildCloudEnvironmentBundle({ stackHome });
+    const fooEntry = Object.entries(before.resolved.skills).find(
+      ([, skill]) => skill.name === 'foo',
+    );
+    expect(fooEntry).toBeDefined();
+    const fooId = fooEntry?.[0] ?? '';
+    expect(before.resolved.skills[fooId]?.paused).toBeUndefined();
+
+    await setSkillPaused({ stackHome, selector: 'foo', paused: true });
+    const after = await buildCloudEnvironmentBundle({ stackHome });
+    expect(after.resolved.skills[fooId]?.paused).toBe(true);
+    // Pause is part of the desired-state identity, so the digest moves when it changes.
+    expect(after.digest).not.toBe(before.digest);
   });
 
   it('normalizes snapshot restorations to content hashes without local ids', async () => {

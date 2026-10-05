@@ -35,6 +35,11 @@ export const portableLockedSkillSchema = z.object({
   observedSources: z.array(skillSourceSchema),
   restoration: portableRestorationStrategySchema,
   origins: z.array(requirementOriginSchema).optional(),
+  // Desired pause state (P2) rides the pushed Environment so the web can show it (P3) and
+  // account-side pause/resume writes round-trip. Optional/back-compat: absent = active, so
+  // pre-P2 bundles are unchanged and the Environment digest is unaffected unless a Skill is
+  // actually paused.
+  paused: z.boolean().optional(),
 });
 
 export const portableEnvironmentResolutionSchema = z.object({

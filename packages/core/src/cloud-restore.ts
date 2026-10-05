@@ -322,6 +322,8 @@ export const applyCloudRestore = async (
       localContent: { available: true, contentHash: skill.contentHash },
       restoration,
       ...(skill.origins ? { origins: skill.origins } : {}),
+      // Restore desired pause state carried by the bundle (absent = active).
+      ...(skill.paused === true ? { paused: true } : {}),
     };
     lock.skills[entryId] = locked;
     baseline.skills[entryId] = {
