@@ -439,18 +439,30 @@ export const supabaseRepository = (): CloudRepository &
     },
     syncProjects: async (userId, projects, now) => {
       if (projects.length === 0) return;
+      // Discovery only: omit `lifecycle` from the upsert so ON CONFLICT updates name/updated_at
+      // but PRESERVES an existing row's lifecycle; a newly-inserted row takes the column default
+      // ('active'). A stale local machine therefore can never unarchive a web-archived Project.
       await db()
         .from('cloud_projects')
         .upsert(
           projects.map((project) => ({
             user_id: userId,
             project_id: project.projectId,
-            lifecycle: project.lifecycle,
             name: project.name ?? null,
             updated_at: now,
           })),
           { onConflict: 'user_id,project_id' },
         );
+    },
+    bindTokenMachine: async (tokenId, machineId) => {
+      // Bind only when currently unbound (migration-on-first-use); never rebind.
+      const { data } = await db()
+        .from('cli_tokens')
+        .update({ machine_id: machineId })
+        .eq('token_id', tokenId)
+        .is('machine_id', null)
+        .select('token_id');
+      return ((data as unknown[] | null) ?? []).length > 0;
     },
     setProjectLifecycle: async (userId, projectId, lifecycle, now) => {
       const { data } = await db()

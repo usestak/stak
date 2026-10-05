@@ -177,7 +177,7 @@ describe('P3 authorization', () => {
     });
     await env.call('POST', 'projects/sync', {
       token: alice,
-      body: { projects: [{ projectId: 'prj_alice', lifecycle: 'active' }] },
+      body: { projects: [{ projectId: 'prj_alice' }] },
     });
 
     const bob = await env.signIn('bob');
@@ -534,8 +534,8 @@ describe('P3 projects read model + lifecycle', () => {
       token: alice,
       body: {
         projects: [
-          { projectId: 'prj_here', lifecycle: 'active', name: 'Atlas' },
-          { projectId: 'prj_away', lifecycle: 'active' },
+          { projectId: 'prj_here', name: 'Atlas' },
+          { projectId: 'prj_away' },
         ],
       },
     });
@@ -748,7 +748,7 @@ describe('P3 stacks / activity / overview', () => {
     await backend.setPrivacyMode('protected');
     await env.call('POST', 'projects/sync', {
       token: alice,
-      body: { projects: [{ projectId: 'prj_away', lifecycle: 'active' }] },
+      body: { projects: [{ projectId: 'prj_away' }] },
     });
     await env.call('POST', 'machines/checkin', {
       token: alice,
@@ -784,5 +784,201 @@ describe('P3 stacks / activity / overview', () => {
     expect(body.skills.total).toBe(0);
     expect(body.needsAttention).toEqual([]);
     expect(body.viewingMachineId).toBeNull();
+  });
+});
+
+/* ------------------ PROJECT SYNC AUTHORITY / CONFLICT (review §1) ------------------ */
+
+describe('P3 project sync is discovery-only', () => {
+  it('a stale local sync never unarchives a Project the web archived', async () => {
+    const env = setup();
+    const alice = await env.signIn('alice', MACHINE_A);
+    // 1. discovery sync (project appears, defaults active)
+    await env.call('POST', 'projects/sync', {
+      token: alice,
+      body: { projects: [{ projectId: 'prj_demo', name: 'Demo' }] },
+    });
+    // 2. explicit account-side archive from the web
+    await env.call('POST', 'projects/prj_demo/lifecycle', {
+      token: alice,
+      body: { lifecycle: 'archived' },
+    });
+    // 3. the machine re-syncs with stale local metadata (discovery again)
+    await env.call('POST', 'projects/sync', {
+      token: alice,
+      body: { projects: [{ projectId: 'prj_demo', name: 'Demo (renamed)' }] },
+    });
+    const body = (await env.call('GET', 'projects', { token: alice }))
+      .jsonBody as {
+      projects: Array<{ projectId: string; lifecycle: string; name?: string }>;
+    };
+    const demo = body.projects.find((p) => p.projectId === 'prj_demo');
+    expect(demo?.lifecycle).toBe('archived'); // lifecycle preserved
+    expect(demo?.name).toBe('Demo (renamed)'); // safe display metadata still refreshes
+  });
+});
+
+/* --------------------- MACHINE REVOKE: LEGACY + OWNERSHIP (review §2) --------------------- */
+
+describe('P3 machine revoke covers legacy tokens and is scoped', () => {
+  it('a pre-P3 token (no machine binding) binds on check-in, then revokes correctly', async () => {
+    const env = setup();
+    // signIn WITHOUT a machine ⇒ the issued token has no machine binding (legacy shape).
+    const legacy = await env.signIn('alice');
+    // First authenticated check-in migrates the binding to this machine.
+    await env.call('POST', 'machines/checkin', {
+      token: legacy,
+      body: {
+        machineId: MACHINE_A,
+        memoryBackedUp: false,
+        skills: [],
+        projects: [],
+      },
+    });
+    const revoke = await env.call('POST', `machines/${MACHINE_A}/revoke`, {
+      token: legacy,
+    });
+    expect(revoke.status).toBe(200);
+    // The now-bound legacy token is invalidated.
+    expect((await env.call('GET', 'skills', { token: legacy })).status).toBe(
+      401,
+    );
+    // And a revoked credential cannot re-bind itself by sending another check-in.
+    expect(
+      (
+        await env.call('POST', 'machines/checkin', {
+          token: legacy,
+          body: {
+            machineId: MACHINE_A,
+            memoryBackedUp: false,
+            skills: [],
+            projects: [],
+          },
+        })
+      ).status,
+    ).toBe(401);
+  });
+
+  it('revoking machine A does not revoke machine B, and leaves account data intact', async () => {
+    const env = setup();
+    const MACHINE_B = '00000000-0000-4000-8000-0000000000b2';
+    const tokenA = await env.signIn('alice', MACHINE_A);
+    await env.pushBundle(
+      tokenA,
+      buildBundle({ skill_keep00001: gitSkill('keep', h('a')) }),
+    );
+    const tokenB = await env.signIn('alice', MACHINE_B);
+    await env.call('POST', 'machines/checkin', {
+      token: tokenB,
+      body: {
+        machineId: MACHINE_B,
+        memoryBackedUp: false,
+        skills: [],
+        projects: [],
+      },
+    });
+    await env.call('POST', `machines/${MACHINE_A}/revoke`, { token: tokenA });
+    // B still works; A is rejected.
+    expect((await env.call('GET', 'skills', { token: tokenB })).status).toBe(
+      200,
+    );
+    expect((await env.call('GET', 'skills', { token: tokenA })).status).toBe(
+      401,
+    );
+    // Revocation deleted no Skills.
+    const skills = (await env.call('GET', 'skills', { token: tokenB }))
+      .jsonBody as {
+      skills: unknown[];
+    };
+    expect(skills.skills).toHaveLength(1);
+  });
+});
+
+/* ------------------- DELETE CLOUD MEMORY HARDENING (review §3) ------------------- */
+
+describe('P3 delete Cloud Memory removes the recoverable payload', () => {
+  it('removes the payload object and leaves nothing recoverable', async () => {
+    const env = setup();
+    const alice = await env.signIn('alice');
+    const backend = env.memory.memoryBackendFor('alice');
+    await backend.ensureProfile('1');
+    await backend.createGeneration({
+      backupId: 'b-del-1',
+      expectedParent: null,
+      privacyMode: 'standard',
+      payload: new Uint8Array([9, 9, 9]),
+      bundleFormatVersion: '1',
+    });
+    expect((await backend.getPayload('b-del-1')).byteLength).toBe(3); // present before
+
+    const res = await env.call('POST', 'memory/delete', { token: alice });
+    expect(res.jsonBody).toMatchObject({
+      recoverable: false,
+      deletedGenerations: 1,
+    });
+    // The payload object is physically gone, and recover finds nothing.
+    expect(() => backend.getPayload('b-del-1')).toThrow(/not found/i);
+    expect(await backend.getLatest()).toBeNull();
+  });
+
+  it('a storage-removal failure does NOT falsely claim deletion succeeded', async () => {
+    const repository = createInMemoryRepository();
+    let counter = 0;
+    // A backend whose payload removal fails: delete must surface the failure, not 200.
+    const service = createCloudService({
+      repository,
+      blobStore: createInMemoryBlobStore(),
+      appUrl: 'http://localhost:3000',
+      ticketSecret: 'test-secret',
+      now: () => new Date('2026-10-05T00:00:00.000Z'),
+      randomId: () =>
+        `00000000-0000-4000-8000-${(counter++).toString().padStart(12, '0')}`,
+      randomSecret: () => `secret-${counter++}`,
+      memoryBackendFor: () =>
+        ({
+          getProfile: async () => ({ privacyMode: 'standard' }),
+          listGenerations: async () => [
+            {
+              backupId: 'b1',
+              generation: 0,
+              privacyMode: 'standard',
+              createdAt: '2026-10-05T00:00:00.000Z',
+            },
+          ],
+          listRecoveryMethods: async () => [],
+          retireGeneration: async () => {
+            throw new Error('storage remove failed');
+          },
+          revokeRecoveryMethod: async () => undefined,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        }) as any,
+    });
+    const start = await handleCloudRequest(service, {
+      method: 'POST',
+      path: '/api/v1/cli/auth/start',
+      headers: {},
+      jsonBody: {},
+    });
+    const { userCode, deviceSecret } = start.jsonBody as {
+      userCode: string;
+      deviceSecret: string;
+    };
+    await service.approveCliAuth({ userCode, profile: { userId: 'alice' } });
+    const token = (
+      (
+        await handleCloudRequest(service, {
+          method: 'POST',
+          path: '/api/v1/cli/auth/token',
+          headers: {},
+          jsonBody: { deviceSecret },
+        })
+      ).jsonBody as { token: string }
+    ).token;
+    const res = await handleCloudRequest(service, {
+      method: 'POST',
+      path: '/api/v1/memory/delete',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(res.status).not.toBe(200); // no false success on storage failure
   });
 });

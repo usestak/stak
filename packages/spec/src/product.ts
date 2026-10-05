@@ -139,7 +139,13 @@ export const setProjectLifecycleRequestSchema = z
   })
   .strict();
 export const syncProjectsResponseSchema = z.object({ ok: z.literal(true) });
-/** CLI → cloud project registry sync (account-side identity + lifecycle; never paths). */
+/**
+ * CLI → cloud project DISCOVERY sync. This conveys only that a stable Project exists and its
+ * safe display metadata (a name that is never a path). It carries NO lifecycle: discovery must
+ * never masquerade as lifecycle intent, so a stale local machine can never silently unarchive a
+ * Project the account archived from the web. Lifecycle is changed only by the explicit
+ * account-side archive/unarchive write. A newly-discovered Project defaults to `active`.
+ */
 export const syncProjectsRequestSchema = z
   .object({
     projects: z
@@ -147,7 +153,6 @@ export const syncProjectsRequestSchema = z
         z
           .object({
             projectId: z.string().min(1).max(100),
-            lifecycle: projectLifecycleSchema,
             name: z.string().max(200).optional(),
           })
           .strict(),

@@ -230,14 +230,24 @@ export const createInMemoryRepository = (): CloudRepository &
         .filter((p) => p.userId === userId)
         .sort((a, b) => a.projectId.localeCompare(b.projectId)),
     syncProjects: async (userId, incoming, now) => {
-      for (const project of incoming)
-        projects.set(key(userId, project.projectId), {
+      for (const project of incoming) {
+        const k = key(userId, project.projectId);
+        const existing = projects.get(k);
+        // Discovery only: NEVER change an existing row's lifecycle; a new row defaults active.
+        projects.set(k, {
           userId,
           projectId: project.projectId,
-          lifecycle: project.lifecycle,
+          lifecycle: existing?.lifecycle ?? 'active',
           ...(project.name !== undefined ? { name: project.name } : {}),
           updatedAt: now,
         });
+      }
+    },
+    bindTokenMachine: async (tokenId, machineId) => {
+      const existing = tokens.get(tokenId);
+      if (!existing || existing.machineId !== undefined) return false;
+      tokens.set(tokenId, { ...existing, machineId });
+      return true;
     },
     setProjectLifecycle: async (userId, projectId, lifecycle, now) => {
       const existing = projects.get(key(userId, projectId));

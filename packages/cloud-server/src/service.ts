@@ -227,6 +227,12 @@ export const createCloudService = (config: CloudServiceConfig) => {
       user: AuthenticatedUser,
       request: MachineCheckinRequest,
     ): Promise<MachineCheckinResponse> => {
+      // Migration-on-first-authenticated-use: bind this (already authenticated) token to the
+      // machine it is checking in as, if it has no binding yet. This lets a pre-P3 token's
+      // machine be revoked. A revoked token never reaches here (authenticate rejects it), so a
+      // revoked credential cannot re-bind itself. The token is the user's; it is only ever
+      // bound to the machine it reports as — never to an arbitrary token from a body field.
+      await config.repository.bindTokenMachine(user.tokenId, request.machineId);
       await config.repository.recordCheckin({
         userId: user.userId,
         machineId: request.machineId,

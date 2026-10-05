@@ -68,6 +68,7 @@ import {
   installedSkillsFrom,
   nativeMemoryBackedUp,
   projectPresenceFrom,
+  projectSyncPayloadFrom,
   reportCheckin,
 } from './cloud/checkin.js';
 import { resolveMemoryProjects } from './memory/resolve.js';
@@ -726,15 +727,7 @@ const defaultDependencies: ProgramDependencies = {
           gitOrigin: gitOriginOf,
         }),
       });
-      await client.syncProjects({
-        projects: rows.map((row) => ({
-          projectId: row.projectId,
-          lifecycle: row.lifecycle,
-          ...(row.identity.kind === 'git'
-            ? { name: row.identity.canonical }
-            : {}),
-        })),
-      });
+      await client.syncProjects({ projects: projectSyncPayloadFrom(rows) });
     } catch {
       // Non-fatal: the project registry refreshes on the next successful check-in.
     }

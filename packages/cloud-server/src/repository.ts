@@ -222,17 +222,19 @@ export interface CloudRepository {
 
   /** Owner-scoped cloud project registry (lifecycle + safe identity; never paths). */
   listProjects(userId: string): Promise<CloudProjectRecord[]>;
-  /** Upsert the user's project registry from a CLI sync (lifecycle + name only). */
+  /**
+   * DISCOVERY sync: ensure each Project exists with its safe display name. It NEVER changes an
+   * existing row's lifecycle (that is explicit account-side intent); a newly-created row
+   * defaults to `active`. So a stale local machine can never unarchive a web-archived Project.
+   */
   syncProjects(
     userId: string,
-    projects: {
-      projectId: string;
-      lifecycle: 'active' | 'archived';
-      name?: string;
-    }[],
+    projects: { projectId: string; name?: string }[],
     now: string,
   ): Promise<void>;
-  /** Account-side lifecycle change; returns the row, or null when not owned/found. */
+  /** Bind a token to its machine only if unbound (migration-on-first-authenticated-use). */
+  bindTokenMachine(tokenId: string, machineId: string): Promise<boolean>;
+  /** Explicit account-side lifecycle change; returns the row, or null when not owned/found. */
   setProjectLifecycle(
     userId: string,
     projectId: string,

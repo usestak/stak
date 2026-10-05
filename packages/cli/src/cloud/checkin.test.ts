@@ -14,6 +14,7 @@ import {
   installedSkillsFrom,
   nativeMemoryBackedUp,
   projectPresenceFrom,
+  projectSyncPayloadFrom,
   reportCheckin,
   type CheckinInputs,
   type SkillStatusLike,
@@ -256,6 +257,30 @@ describe('projectPresenceFrom (P1 review #1 — real availability)', () => {
       { projectId: 'prj_a', present: true },
       { projectId: 'prj_b', present: false },
     ]);
+  });
+});
+
+describe('projectSyncPayloadFrom (P3 review §5 — no path leaks into the name)', () => {
+  it('names a project only from a strong Git identity, never a local path/vendorKey', () => {
+    const payload = projectSyncPayloadFrom([
+      {
+        projectId: 'prj_git',
+        identity: { kind: 'git', canonical: 'github.com/acme/atlas' },
+      },
+      {
+        // An adversarial local identity whose vendor key is derived from an absolute path.
+        projectId: 'prj_local',
+        identity: { kind: 'local', vendorKey: 'C--Users-dana-secret-work' },
+      },
+    ]);
+    expect(payload).toEqual([
+      { projectId: 'prj_git', name: 'github.com/acme/atlas' },
+      { projectId: 'prj_local' }, // no name — the path-derived vendor key is never sent
+    ]);
+    // Nothing path-like leaked anywhere in the serialized payload.
+    expect(JSON.stringify(payload)).not.toMatch(
+      /C--Users|\/Users\/|[A-Za-z]:\\\\/,
+    );
   });
 });
 

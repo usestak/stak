@@ -246,7 +246,16 @@ export const supabaseRemoteMemoryBackend = (
         .eq('user_id', userId)
         .eq('backup_id', backupId);
       if (error) throw new Error(`Memory retire failed: ${error.message}`);
-      await storage().remove([locatorFor(userId, backupId)]);
+      // The payload object MUST be removed; a silent storage failure would orphan recoverable
+      // ciphertext and let Delete Cloud Memory falsely claim success. Propagate it so the
+      // destructive action reports failure and a retry (idempotent) can clean the object.
+      const { error: removeError } = await storage().remove([
+        locatorFor(userId, backupId),
+      ]);
+      if (removeError)
+        throw new Error(
+          `Memory payload removal failed: ${removeError.message}`,
+        );
     },
 
     addRecoveryMethod: async (input: AddRecoveryMethodInput, now) => {

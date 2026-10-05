@@ -392,7 +392,6 @@ export const createProductMethods = (config: ProductServiceConfig) => {
         user.userId,
         request.projects.map((project) => ({
           projectId: project.projectId,
-          lifecycle: project.lifecycle,
           ...(project.name !== undefined ? { name: project.name } : {}),
         })),
         nowIso(),

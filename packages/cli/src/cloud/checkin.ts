@@ -168,6 +168,29 @@ export const projectPresenceFrom = (rows: ProjectRowLike[]): CheckinProject[] =>
   }));
 
 /**
+ * Discovery-sync payload for the cloud project registry (P3). The safe display `name` is taken
+ * ONLY from a STRONG Git identity (its canonical `host/owner/repo`), which is account metadata,
+ * not a path. A Local project's identity (a vendor key derived from a filesystem location) is
+ * NEVER sent as a name — paths must not leak into the account-side registry. No lifecycle is
+ * sent: discovery never conveys lifecycle intent.
+ */
+export type ProjectSyncRowLike = {
+  projectId: string;
+  // The local variant's `vendorKey` is optional because the `stak project` list view already
+  // strips it (it is path-derived); even if present, it is NEVER forwarded as a name.
+  identity:
+    { kind: 'git'; canonical: string } | { kind: 'local'; vendorKey?: string };
+};
+export const projectSyncPayloadFrom = (
+  rows: ProjectSyncRowLike[],
+): { projectId: string; name?: string }[] =>
+  rows.map((row) =>
+    row.identity.kind === 'git'
+      ? { projectId: row.projectId, name: row.identity.canonical }
+      : { projectId: row.projectId },
+  );
+
+/**
  * Memory backed-up truth (P1 review #3). TRUE only when every current native Memory item is
  * present and byte-identical (by content hash) in the latest backup manifest — so a native
  * file that changed or was added since the last backup yields FALSE. No manifest ⇒ FALSE.
