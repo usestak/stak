@@ -2068,6 +2068,22 @@ describe('stak skill lifecycle (P2)', () => {
     expect(resumed).toBe('alpha');
   });
 
+  it('pause output tells the user the local effect is deferred until reconciliation', async () => {
+    const result = await runProgram(['skill', 'pause', 'alpha'], {
+      skillPause: async () => ({
+        status: 'ok',
+        entryId: 'skill_aaaaaaaa',
+        name: 'alpha',
+        paused: true,
+        changed: true,
+      }),
+    });
+    // Must not imply agents changed now; must point at reconciliation.
+    expect(result.output).toContain('in STAK');
+    expect(result.output).toContain('stak run');
+    expect(result.output.toLowerCase()).toContain('unchanged');
+  });
+
   it('a successful `skill update` reports installed state through check-in', async () => {
     const captured: MachineCheckinRequest[] = [];
     const reportMachineCheckin = vi.fn(

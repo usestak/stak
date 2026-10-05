@@ -23,9 +23,12 @@ import {
 } from './composition.js';
 import { loadProjectedLocalEnvironment } from './projection.js';
 import { loadMainEnvironment } from './state.js';
+import type { GitCommandResult, GitExecutor } from './git-reference.js';
 import {
   approveSkillSourceVersion,
   diffSkillTrees,
+  gitLsRemoteRef,
+  resolvePublicStackSourceLatest,
   resolveSkillSourceLatest,
 } from './skill-source.js';
 
@@ -470,6 +473,117 @@ describe('source-latest follows the tracked ref (P2 §3/§9 + review)', () => {
     expect(await reasonFor('modified-source')).toBe('dirty');
     expect(await reasonFor('ambiguous-source')).toBe('ambiguous');
     expect(await reasonFor('unknown-source')).toBe('unreachable');
+  });
+});
+
+/* ---------------------- ANNOTATED TAGS (peeled refs) ---------------------- */
+
+describe('annotated-tag source-latest (P2 review §1)', () => {
+  const locked = (
+    restoration: RestorationStrategy,
+  ): Pick<LockedSkill, 'restoration'> => ({ restoration });
+  const remote = 'https://github.com/example/skill.git';
+  const COMMIT = 'c'.repeat(40);
+  const TAG_OBJECT = '7'.repeat(40);
+  const OTHER_COMMIT = 'e'.repeat(40);
+  // A fake `git ls-remote` returning fixed stdout, exercising the REAL peeling in gitLsRemoteRef.
+  const executor =
+    (stdout: string, exitCode = 0): GitExecutor =>
+    async (): Promise<GitCommandResult> => ({ exitCode, stdout, stderr: '' });
+  const check = (stdout: string, exitCode = 0) =>
+    resolveSkillSourceLatest({
+      locked: locked(
+        reference(COMMIT, hash('a'), { ref: 'refs/tags/v1', remote }),
+      ),
+      resolveRemoteRef: gitLsRemoteRef(executor(stdout, exitCode)),
+    });
+
+  it('A. lightweight tag unchanged → no update', async () => {
+    expect((await check(`${COMMIT}\trefs/tags/v1\n`)).status).toBe('same');
+  });
+
+  it('B. annotated tag: tag-object differs but peeled commit equals approved → no update', async () => {
+    const result = await check(
+      `${TAG_OBJECT}\trefs/tags/v1\n${COMMIT}\trefs/tags/v1^{}\n`,
+    );
+    expect(result).toEqual({
+      status: 'same',
+      approvedRevision: COMMIT,
+      sourceRevision: COMMIT,
+    });
+  });
+
+  it('C. annotated tag moved/recreated to another commit → update candidate (peeled)', async () => {
+    const result = await check(
+      `${TAG_OBJECT}\trefs/tags/v1\n${OTHER_COMMIT}\trefs/tags/v1^{}\n`,
+    );
+    expect(result).toEqual({
+      status: 'different',
+      approvedRevision: COMMIT,
+      sourceRevision: OTHER_COMMIT,
+    });
+  });
+
+  it('D. malformed/empty tag resolution → fail closed (never falls back to main)', async () => {
+    expect(await check('not a ref line\n')).toEqual({
+      status: 'uncheckable',
+      reason: 'unreachable',
+    });
+    expect(await check('', 2)).toEqual({
+      status: 'uncheckable',
+      reason: 'unreachable',
+    });
+  });
+});
+
+/* ----------------------- PUBLIC-STACK SOURCE-LATEST ----------------------- */
+
+describe('public-stack source-latest (P2 review §2)', () => {
+  const locator = {
+    owner: 'alice',
+    slug: 'frontend',
+    publicStackId: '00000000-0000-4000-8000-0000000000f1',
+  };
+  const approved = { publicVersionId: 'ver-1', versionHash: hash('a') };
+
+  it('same published version → no update (by version identity, not Git)', async () => {
+    const result = await resolvePublicStackSourceLatest({
+      approved,
+      locator,
+      fetchLatest: async () => ({
+        publicVersionId: 'ver-1',
+        versionHash: hash('a'),
+      }),
+    });
+    expect(result).toEqual({
+      status: 'same',
+      approvedRevision: hash('a'),
+      sourceRevision: hash('a'),
+    });
+  });
+
+  it('a newer published version → update candidate (different versionHash)', async () => {
+    const result = await resolvePublicStackSourceLatest({
+      approved,
+      locator,
+      fetchLatest: async () => ({
+        publicVersionId: 'ver-2',
+        versionHash: hash('b'),
+      }),
+    });
+    expect(result).toMatchObject({
+      status: 'different',
+      sourceRevision: hash('b'),
+    });
+  });
+
+  it('unavailable / removed stack → fail closed (uncheckable), not Git logic', async () => {
+    const result = await resolvePublicStackSourceLatest({
+      approved,
+      locator,
+      fetchLatest: async () => null,
+    });
+    expect(result).toEqual({ status: 'uncheckable', reason: 'unreachable' });
   });
 });
 

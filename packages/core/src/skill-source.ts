@@ -70,21 +70,34 @@ export type ResolveRemoteRef = (input: {
 }) => Promise<string | null>;
 
 /**
- * Default ref resolver: `git ls-remote <remote> <ref>`, shell:false, non-interactive, never
- * prompting for credentials. Returns the exact revision the ref points at, or null on any
+ * Default ref resolver: `git ls-remote <remote> <ref> <ref>^{}`, shell:false, non-interactive,
+ * never prompting for credentials. Returns the exact COMMIT the ref points at, or null on any
  * failure / ref-not-found (treated as unreachable — never a false "update available").
+ *
+ * ANNOTATED TAGS: `ls-remote` lists the tag-object SHA for `refs/tags/x` and the peeled commit
+ * for `refs/tags/x^{}`. STAK's approved revision is the peeled commit, so we prefer the `^{}`
+ * line when present and never compare against the tag-object SHA (which would be a false
+ * update). Lightweight tags and branches have no peeled line, so the plain ref SHA is used.
  */
 export const gitLsRemoteRef =
   (gitExecutor: GitExecutor = spawnGit): ResolveRemoteRef =>
   async ({ remote, ref }) => {
     try {
-      const result = await gitExecutor(['ls-remote', remote, ref], {
-        cwd: process.cwd(),
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-      });
+      const result = await gitExecutor(
+        ['ls-remote', remote, ref, `${ref}^{}`],
+        {
+          cwd: process.cwd(),
+          env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        },
+      );
       if (result.exitCode !== 0) return null;
-      const revision = result.stdout.trim().split(/\s+/)[0];
-      return revision && /^[0-9a-f]{7,64}$/i.test(revision) ? revision : null;
+      const byName = new Map<string, string>();
+      for (const line of result.stdout.split('\n')) {
+        const [sha, name] = line.trim().split(/\s+/);
+        if (sha && name && /^[0-9a-f]{7,64}$/i.test(sha)) byName.set(name, sha);
+      }
+      // Prefer the peeled commit (annotated tag) over the tag-object / plain ref SHA.
+      return byName.get(`${ref}^{}`) ?? byName.get(ref) ?? null;
     } catch {
       return null;
     }
@@ -119,6 +132,60 @@ export const resolveSkillSourceLatest = async (options: {
   return sourceRevision === approvedRevision
     ? { status: 'same', approvedRevision, sourceRevision }
     : { status: 'different', approvedRevision, sourceRevision };
+};
+
+/* -------------------------------------------------------------------------- */
+/* Public-stack source-latest (P2, contract §5 — versioned sources)            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A Skill that originates from a public Stack is NOT update-checked with Git ref logic — the
+ * source of truth is the public registry's published VERSIONS. The stable SOURCE LOCATOR is
+ * `@owner/slug` (+ `publicStackId`); the APPROVED version is the immutable `versionHash` (with
+ * `publicVersionId` corroborating). This boundary defines the semantics; the transport that
+ * fetches the latest published version is supplied by P3 (a registry client/service), so P2
+ * proves it with an injected fake and does not fabricate data.
+ */
+export type PublicStackLocator = {
+  owner: string;
+  slug: string;
+  publicStackId: string;
+};
+export type PublicStackVersionId = {
+  publicVersionId: string;
+  versionHash: string;
+};
+/** P3-supplied: the latest published version for a public Stack, or null if unavailable. */
+export type PublicStackLatestResolver = (
+  locator: PublicStackLocator,
+) => Promise<PublicStackVersionId | null>;
+
+/**
+ * Resolve whether a newer published public-Stack version exists, by IMMUTABLE VERSION IDENTITY
+ * (`versionHash`), never Git semantics or ordering. Same published version → `same`; a
+ * different published version → `different` (a newer approved candidate for the Skill rides
+ * that version); an unavailable / removed / ambiguous source fails closed as `uncheckable`
+ * (P3 renders "Can't check for updates from this source").
+ */
+export const resolvePublicStackSourceLatest = async (options: {
+  approved: PublicStackVersionId;
+  locator: PublicStackLocator;
+  fetchLatest: PublicStackLatestResolver;
+}): Promise<SourceLatestResult> => {
+  const latest = await options.fetchLatest(options.locator);
+  if (latest === null) return { status: 'uncheckable', reason: 'unreachable' };
+  // Identity comparison on the immutable version hash — no Git ref logic, no ordering.
+  return latest.versionHash === options.approved.versionHash
+    ? {
+        status: 'same',
+        approvedRevision: options.approved.versionHash,
+        sourceRevision: latest.versionHash,
+      }
+    : {
+        status: 'different',
+        approvedRevision: options.approved.versionHash,
+        sourceRevision: latest.versionHash,
+      };
 };
 
 /* -------------------------------------------------------------------------- */

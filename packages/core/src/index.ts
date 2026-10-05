@@ -50,12 +50,16 @@ export {
   approveSkillSourceVersion,
   diffSkillTrees,
   gitLsRemoteRef,
+  resolvePublicStackSourceLatest,
   resolveSkillSourceLatest,
 } from './skill-source.js';
 export type {
   ApproveSkillResult,
   CandidateRevision,
   IngestCandidate,
+  PublicStackLatestResolver,
+  PublicStackLocator,
+  PublicStackVersionId,
   ResolveRemoteRef,
   SkillFileChange,
   SkillFileChangeKind,

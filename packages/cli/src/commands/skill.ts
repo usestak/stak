@@ -80,10 +80,12 @@ const renderPaused = (
       const verb = target === 'paused' ? 'Paused' : 'Resumed';
       if (!result.changed)
         return `${result.name} is already ${target === 'paused' ? 'paused' : 'active'}.\n`;
+      // Be explicit that this is a DESIRED-state change only: the agent files already on this
+      // machine are not touched until the next reconciliation (run / skill update).
       return (
-        `${verb} ${result.name}.\n` +
-        'This changes desired state only; the per-agent effect is applied on your next ' +
-        '`stak run` or `stak skill update`.\n'
+        `${verb} ${result.name} in STAK.\n` +
+        'Your agent files are unchanged until you reconcile this machine. ' +
+        'Run `stak run` (or `stak skill update`) to apply it here.\n'
       );
     }
   }
