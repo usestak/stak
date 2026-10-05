@@ -126,15 +126,78 @@ export const gatherCheckinInputs = async (
   };
 };
 
-/** Leaf command names whose success materially changes this machine's reported state. */
+/**
+ * Installed-skill identity (P1 review #2). Key by the STABLE entry id (`skill_…`) — never a
+ * display name — so machine-installed state joins to the desired Skill record in P2/P3 and
+ * two skills that share a display name but have distinct ids cannot collapse. The installed
+ * version is the content ACTUALLY on this machine: `desiredHash` when satisfied (current ==
+ * desired), `currentHash` when modified. A skill that is missing/uncertain is not installed
+ * and is omitted.
+ */
+export type SkillStatusLike = {
+  entryId: string;
+  state: 'satisfied' | 'modified' | 'missing' | 'uncertain';
+  desiredHash: string;
+  currentHash?: string | undefined;
+};
+export const installedSkillsFrom = (
+  statuses: SkillStatusLike[],
+): CheckinSkill[] =>
+  statuses.flatMap((s) => {
+    const installedVersion =
+      s.state === 'satisfied'
+        ? s.desiredHash
+        : s.state === 'modified'
+          ? s.currentHash
+          : undefined;
+    return installedVersion ? [{ skillId: s.entryId, installedVersion }] : [];
+  });
+
+/**
+ * Project presence (P1 review #1). TRUE availability from the Phase 15 resolver — a binding
+ * OR a canonical-Git match — not merely "a binding record exists". No path is reported.
+ */
+export type ProjectRowLike = {
+  projectId: string;
+  availability: 'present' | 'unavailable';
+};
+export const projectPresenceFrom = (rows: ProjectRowLike[]): CheckinProject[] =>
+  rows.map((r) => ({
+    projectId: r.projectId,
+    present: r.availability === 'present',
+  }));
+
+/**
+ * Memory backed-up truth (P1 review #3). TRUE only when every current native Memory item is
+ * present and byte-identical (by content hash) in the latest backup manifest — so a native
+ * file that changed or was added since the last backup yields FALSE. No manifest ⇒ FALSE.
+ * Conservative by design: a false negative is safer than a false "Up to date". Reads only
+ * logical ids and content hashes — never Memory content, never a path.
+ */
+export type MemoryItemLike = { logicalId: string; contentHash: string };
+export const nativeMemoryBackedUp = (
+  nativeItems: MemoryItemLike[],
+  manifestItems: MemoryItemLike[] | null,
+): boolean => {
+  if (manifestItems === null) return false;
+  const backed = new Map(
+    manifestItems.map((i) => [i.logicalId, i.contentHash]),
+  );
+  return nativeItems.every((i) => backed.get(i.logicalId) === i.contentHash);
+};
+
+/**
+ * Leaf command names whose success materially changes this machine's reported state
+ * (P1 review #4). Only commands that change installed skills, project presence, or
+ * memory-backed-up are included — not commands that change account-side desired state
+ * (use/push/pull), read-only discovery (scan), lifecycle (archive/unarchive), or sign-out.
+ */
 export const CHECKIN_COMMANDS: ReadonlySet<string> = new Set([
-  'login',
-  'status',
-  'scan',
-  'use',
-  'run',
-  'backup',
-  'recover',
-  'restore',
-  'map',
+  'login', // registers the machine; first check-in
+  'status', // the explicit check-in
+  'run', // projects main into agent dirs → installed skills change
+  'backup', // native Memory now matches the latest backup
+  'recover', // local store/registry reconciled → presence + memory-backed-up
+  'restore', // writes native agent Memory → memory-backed-up
+  'map', // binding added → project presence changes
 ]);

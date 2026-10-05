@@ -11,8 +11,12 @@ import type { MachineCheckinRequest } from '@stack/spec';
 import {
   buildCheckinPayload,
   gatherCheckinInputs,
+  installedSkillsFrom,
+  nativeMemoryBackedUp,
+  projectPresenceFrom,
   reportCheckin,
   type CheckinInputs,
+  type SkillStatusLike,
 } from './checkin.js';
 
 const inputs = (over: Partial<CheckinInputs> = {}): CheckinInputs => ({
@@ -182,5 +186,105 @@ describe('gatherCheckinInputs (P1)', () => {
     expect(got.projects).toEqual([]);
     expect(got.agentsDetected).toEqual([]);
     expect(got.machineId).toBe('00000000-0000-4000-8000-000000000001');
+  });
+});
+
+describe('installedSkillsFrom (P1 review #2 — stable skill identity)', () => {
+  it('keys by stable entryId and uses the on-disk hash (satisfied → desired, modified → current)', () => {
+    const statuses: SkillStatusLike[] = [
+      {
+        entryId: 'skill_aaaaaaaa',
+        state: 'satisfied',
+        desiredHash: 'sha256:d1',
+      },
+      {
+        entryId: 'skill_bbbbbbbb',
+        state: 'modified',
+        desiredHash: 'sha256:d2',
+        currentHash: 'sha256:c2',
+      },
+    ];
+    expect(installedSkillsFrom(statuses)).toEqual([
+      { skillId: 'skill_aaaaaaaa', installedVersion: 'sha256:d1' },
+      { skillId: 'skill_bbbbbbbb', installedVersion: 'sha256:c2' },
+    ]);
+  });
+
+  it('two skills sharing a display name but distinct ids do not collapse', () => {
+    // Same human name "review-pr" at two distinct stable entry ids.
+    const statuses: SkillStatusLike[] = [
+      {
+        entryId: 'skill_dup00001',
+        state: 'satisfied',
+        desiredHash: 'sha256:x',
+      },
+      {
+        entryId: 'skill_dup00002',
+        state: 'satisfied',
+        desiredHash: 'sha256:y',
+      },
+    ];
+    const installed = installedSkillsFrom(statuses);
+    expect(installed).toHaveLength(2);
+    expect(installed.map((s) => s.skillId).sort()).toEqual([
+      'skill_dup00001',
+      'skill_dup00002',
+    ]);
+  });
+
+  it('missing and uncertain skills are not reported as installed', () => {
+    const statuses: SkillStatusLike[] = [
+      { entryId: 'skill_missing0', state: 'missing', desiredHash: 'sha256:m' },
+      {
+        entryId: 'skill_uncertn0',
+        state: 'uncertain',
+        desiredHash: 'sha256:u',
+      },
+    ];
+    expect(installedSkillsFrom(statuses)).toEqual([]);
+  });
+});
+
+describe('projectPresenceFrom (P1 review #1 — real availability)', () => {
+  it('maps availability to presence (never a path)', () => {
+    expect(
+      projectPresenceFrom([
+        { projectId: 'prj_a', availability: 'present' },
+        { projectId: 'prj_b', availability: 'unavailable' },
+      ]),
+    ).toEqual([
+      { projectId: 'prj_a', present: true },
+      { projectId: 'prj_b', present: false },
+    ]);
+  });
+});
+
+describe('nativeMemoryBackedUp (P1 review #3 — truthful backup state)', () => {
+  const native = [
+    { logicalId: 'claude/auto-memory/p/a.md', contentHash: 'sha256:a' },
+    { logicalId: 'claude/auto-memory/p/b.md', contentHash: 'sha256:b' },
+  ];
+
+  it('A. native identical to the latest backup → true', () => {
+    expect(nativeMemoryBackedUp(native, [...native])).toBe(true);
+  });
+
+  it('B. a native file changed since the backup → false', () => {
+    const manifest = [
+      { logicalId: 'claude/auto-memory/p/a.md', contentHash: 'sha256:OLD' },
+      { logicalId: 'claude/auto-memory/p/b.md', contentHash: 'sha256:b' },
+    ];
+    expect(nativeMemoryBackedUp(native, manifest)).toBe(false);
+  });
+
+  it('B2. a new native file not in the backup → false', () => {
+    const manifest = [
+      { logicalId: 'claude/auto-memory/p/a.md', contentHash: 'sha256:a' },
+    ];
+    expect(nativeMemoryBackedUp(native, manifest)).toBe(false);
+  });
+
+  it('C. never backed up (no manifest) → false', () => {
+    expect(nativeMemoryBackedUp(native, null)).toBe(false);
   });
 });

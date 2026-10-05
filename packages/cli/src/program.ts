@@ -44,11 +44,9 @@ import type {
   TrialStackResolution,
 } from '@stack/core';
 import {
-  bindingFor,
   createClaudeMemoryAdapter,
   fileLocalMemoryKeyStore,
   generateRecoveryKey,
-  readLocalRegistry,
   readMemoryManifest,
   readMemoryStatus,
   type BackupResult,
@@ -61,8 +59,10 @@ import { createCloudClient } from '@stack/cloud-client';
 import {
   CHECKIN_COMMANDS,
   gatherCheckinInputs,
+  installedSkillsFrom,
+  nativeMemoryBackedUp,
+  projectPresenceFrom,
   reportCheckin,
-  type CheckinSkill,
 } from './cloud/checkin.js';
 import { resolveMemoryProjects } from './memory/resolve.js';
 import { resolveCloudBaseUrl } from './cloud/config.js';
@@ -582,21 +582,42 @@ const defaultDependencies: ProgramDependencies = {
     const client = createCloudClient({ baseUrl, token: credential.token });
     const inputs = await gatherCheckinInputs({
       machine: () => getOrCreateMachineIdentity({ stackHome }),
-      memoryBackedUp: async () =>
-        (await readMemoryManifest(stackHome)) !== null,
-      installedSkills: async () => {
-        const state = await loadMainEnvironment({ stackHome });
-        return Object.values(state.lock.skills).map((skill): CheckinSkill => ({
-          skillId: skill.name,
-          installedVersion: skill.contentHash,
-        }));
+      // TRUE only when every current native Memory item is byte-identical in the latest
+      // backup manifest (never just "a manifest exists"); conservative false otherwise.
+      memoryBackedUp: async () => {
+        const nativeItems = await (await memoryAdapter()).discover();
+        const manifest = await readMemoryManifest(stackHome);
+        return nativeMemoryBackedUp(
+          nativeItems.map((i) => ({
+            logicalId: i.logicalId,
+            contentHash: i.contentHash,
+          })),
+          manifest ? manifest.items : null,
+        );
       },
+      // Installed skills = what is actually projected into this machine's agent dirs,
+      // keyed by the STABLE entry id. From the desired-vs-current status join; missing or
+      // uncertain skills are not installed.
+      installedSkills: async () => {
+        const scanResult = await scanSkills({
+          roots: resolveScanRoots({ includeProject: false }),
+        });
+        const status = await statusMainEnvironment({ stackHome, scanResult });
+        return installedSkillsFrom(status.skills);
+      },
+      // TRUE availability from the Phase 15 resolver (binding OR canonical-Git match),
+      // reusing the candidate discovery `stak project` uses. Presence only, no paths.
       projectPresence: async () => {
-        const registry = await readLocalRegistry(stackHome);
-        return registry.projects.map((project) => ({
-          projectId: project.projectId,
-          present: bindingFor(registry, project.projectId) !== undefined,
-        }));
+        const rows = await listProjects({
+          stackHome,
+          projects: await resolveMemoryProjects({
+            cwd: process.cwd(),
+            platform: process.platform,
+            listDirs: listChildDirs,
+            gitOrigin: gitOriginOf,
+          }),
+        });
+        return projectPresenceFrom(rows);
       },
       agentsDetected: async () => {
         const detections = await Promise.all(
