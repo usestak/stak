@@ -43,6 +43,11 @@ import { mapProject } from './memory/project-ops.js';
 
 const USER = '00000000-0000-4000-8000-00000000000a';
 
+// A long, unique Memory-body marker for confidentiality checks. Unlike a 2-char body, it has
+// negligible probability of occurring by chance in arbitrary AEAD ciphertext, so an assertion
+// that it is absent from the server payload/metadata is deterministic, not probabilistic.
+const NEXUS_SECRET = 'NEXUS-MEMORY-BODY-DO-NOT-LEAK-7b3f1a2c';
+
 const roots: string[] = [];
 const tempDir = async (prefix: string) => {
   const root = await mkdtemp(path.join(tmpdir(), prefix));
@@ -464,8 +469,12 @@ describe('Phase 15B project-identity acceptance (Machine F → map → new backu
     add(gitItem('github.com/acme/atlas', 'a2.md', 'A2'), 'A2');
     add(localItemFor(stackKey, 's1.md', 'S1'), 'S1');
     add(localItemFor(stackKey, 's2.md', 'S2'), 'S2');
-    for (let i = 1; i <= 4; i += 1)
-      add(localItemFor('C--legacy-nexus', `n${i}.md`, `N${i}`), `N${i}`);
+    // Nexus bodies carry the long unique marker so the Protected confidentiality check below
+    // is deterministic. These are carried forward (unresolved) into the new backup.
+    for (let i = 1; i <= 4; i += 1) {
+      const body = `N${i} ${NEXUS_SECRET}`;
+      add(localItemFor('C--legacy-nexus', `n${i}.md`, body), body);
+    }
     add(localItemFor('C--legacy-other', 'o1.md', 'O1'), 'O1');
     add(localItemFor('C--legacy-other', 'o2.md', 'O2'), 'O2');
     const machineA = await writeStoreItems(items, bodies);
@@ -563,7 +572,17 @@ describe('Phase 15B project-identity acceptance (Machine F → map → new backu
     const payload = await backend.getPayload(newBackup.backupId);
     const payloadText = Buffer.from(payload).toString('utf8');
     expect(payloadText).not.toContain('snapshotVersion');
-    expect(payloadText).not.toContain('N1'); // Nexus memory body
+    // The Nexus Memory body is carried forward into this Protected backup. Its plaintext must
+    // not appear in the opaque AEAD payload — searched at the BYTE level, not by decoding
+    // arbitrary ciphertext as UTF-8 — nor in the server-visible generation metadata, which is
+    // the only server-readable plaintext. The former `not.toContain('N1')` was invalid: a
+    // 2-char body can occur in random ciphertext by chance, so it flaked ~1 run in 6.
+    const protectedMeta = await backend.getGenerationById(newBackup.backupId);
+    expect(protectedMeta?.privacyMode).toBe('protected');
+    expect(
+      Buffer.from(payload).includes(Buffer.from(NEXUS_SECRET, 'utf8')),
+    ).toBe(false);
+    expect(JSON.stringify(protectedMeta ?? {})).not.toContain(NEXUS_SECRET);
     expect(payloadText).not.toContain(stackKey);
 
     // Machine G: fresh recovery receives ALL 10 items (unresolved Memory survived).
