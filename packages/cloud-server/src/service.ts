@@ -42,6 +42,11 @@ import type {
 } from './repository.js';
 import { createPublicStackService } from './public-service.js';
 import { createMemoryMethods } from './memory-service.js';
+import {
+  createProductMethods,
+  type MemoryProjectCounts,
+  type SkillSourceChecker,
+} from './product-service.js';
 
 const USER_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const DEFAULT_SESSION_TTL_MS = 10 * 60 * 1000;
@@ -88,6 +93,10 @@ export type CloudServiceConfig = {
   maxSnapshotBytes?: number;
   /** Per-user remote Memory backend factory. Absent = Memory API returns 501. */
   memoryBackendFor?: (userId: string) => RemoteMemoryBackend;
+  /** P3: injected source-latest checker for the Skills read model (absent ⇒ cannot-check). */
+  checkSkillSource?: SkillSourceChecker;
+  /** P3: injected Standard per-project Memory counts (absent ⇒ unavailable/null). */
+  memoryProjectCounts?: MemoryProjectCounts;
 };
 
 export type CloudService = ReturnType<typeof createCloudService>;
@@ -164,9 +173,25 @@ export const createCloudService = (config: CloudServiceConfig) => {
     now,
   });
 
+  const productMethods = createProductMethods({
+    repository: config.repository,
+    now,
+    newId,
+    ...(config.memoryBackendFor
+      ? { memoryBackendFor: config.memoryBackendFor }
+      : {}),
+    ...(config.checkSkillSource
+      ? { checkSkillSource: config.checkSkillSource }
+      : {}),
+    ...(config.memoryProjectCounts
+      ? { memoryProjectCounts: config.memoryProjectCounts }
+      : {}),
+  });
+
   return {
     ...publicMethods,
     ...memoryMethods,
+    ...productMethods,
     /** Bearer-token authentication. Derives identity server-side; never trusts the client. */
     authenticate: async (
       authorizationHeader: string | undefined,
@@ -317,6 +342,8 @@ export const createCloudService = (config: CloudServiceConfig) => {
         userId: session.userId,
         tokenHash: sha256Hex(plaintext),
         ...(session.label ? { label: session.label } : {}),
+        // Bind the token to its machine (P3) so a machine revoke can target it.
+        ...(session.machineId ? { machineId: session.machineId } : {}),
         createdAt: nowIso(),
       });
       await config.repository.updateAuthSession(session.sessionId, {

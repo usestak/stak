@@ -27,6 +27,8 @@ export type CliTokenRecord = {
   userId: string;
   tokenHash: string;
   label?: string;
+  // Phase P3: the machine this token authenticates, so a machine revoke can target its tokens.
+  machineId?: string;
   createdAt: string;
   lastUsedAt?: string;
   revokedAt?: string;
@@ -72,6 +74,22 @@ export type CloudMachineRecord = {
   agentsDetected?: string[];
   lastCheckinAt?: string;
   memoryBackedUp?: boolean;
+  // Phase P3: when the machine's authorization was revoked. The row is retained as a revoked
+  // record (audit); revocation never deletes Skills/Projects/Memory.
+  revokedAt?: string;
+};
+
+/**
+ * Phase P3: account-side project registry row. Carries only the opaque Project ID, lifecycle
+ * and an optional safe display name — NEVER a path, machine-local binding, or identity claim
+ * that could leak a filesystem location. Synced from the CLI; owner-scoped.
+ */
+export type CloudProjectRecord = {
+  userId: string;
+  projectId: string;
+  lifecycle: 'active' | 'archived';
+  name?: string;
+  updatedAt: string;
 };
 
 /** Phase P1: a machine's installed version of one skill, reported at check-in. */
@@ -182,6 +200,45 @@ export interface CloudRepository {
   recordCheckin(input: RecordCheckinInput): Promise<void>;
   /** Phase P1: all machines for a user with their reported skill versions + presence. */
   listMachineStates(userId: string): Promise<MachineStateRecord[]>;
+
+  /* ----------------------------- Phase P3 ----------------------------- */
+
+  /** All immutable environment versions for one env, newest first (history + activity). */
+  listEnvironmentVersions(
+    userId: string,
+    name: string,
+  ): Promise<CloudEnvironmentVersionRecord[]>;
+
+  /**
+   * Revoke a machine the user owns: mark the machine row revoked and revoke every CLI token
+   * bound to it, atomically. Never deletes Skills/Projects/Memory. Returns the machine id when
+   * it belonged to the user, or null when no such machine exists for them.
+   */
+  revokeMachine(
+    userId: string,
+    machineId: string,
+    now: string,
+  ): Promise<{ machineId: string; revokedTokens: number } | null>;
+
+  /** Owner-scoped cloud project registry (lifecycle + safe identity; never paths). */
+  listProjects(userId: string): Promise<CloudProjectRecord[]>;
+  /** Upsert the user's project registry from a CLI sync (lifecycle + name only). */
+  syncProjects(
+    userId: string,
+    projects: {
+      projectId: string;
+      lifecycle: 'active' | 'archived';
+      name?: string;
+    }[],
+    now: string,
+  ): Promise<void>;
+  /** Account-side lifecycle change; returns the row, or null when not owned/found. */
+  setProjectLifecycle(
+    userId: string,
+    projectId: string,
+    lifecycle: 'active' | 'archived',
+    now: string,
+  ): Promise<CloudProjectRecord | null>;
 }
 
 /** Thrown by {@link CloudRepository.commitEnvironmentVersion} on a stale base. */

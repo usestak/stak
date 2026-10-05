@@ -13,6 +13,7 @@ import {
   type CloudEnvironmentRecord,
   type CloudEnvironmentVersionRecord,
   type CloudMachineRecord,
+  type CloudProjectRecord,
   type MachineSkillVersionRecord,
   type MachineProjectPresenceRecord,
   type CloudProfile,
@@ -44,6 +45,7 @@ export const createInMemoryRepository = (): CloudRepository &
   const machines = new Map<string, CloudMachineRecord>();
   const machineSkills = new Map<string, MachineSkillVersionRecord[]>();
   const machineProjects = new Map<string, MachineProjectPresenceRecord[]>();
+  const projects = new Map<string, CloudProjectRecord>();
   const handlesByUser = new Map<string, PublicHandleRecord>();
   const handleOwners = new Map<string, string>();
   const publicStacks = new Map<string, PublicStackRecord>();
@@ -194,6 +196,60 @@ export const createInMemoryRepository = (): CloudRepository &
             projects: (machineProjects.get(k) ?? []).map((p) => ({ ...p })),
           };
         }),
+
+    /* ------------------------------ Phase P3 ------------------------------ */
+    listEnvironmentVersions: async (userId, name) => {
+      const environment = environments.get(envKey(userId, name));
+      if (!environment) return [];
+      return [...versions.values()]
+        .filter(
+          (v) =>
+            v.userId === userId &&
+            v.environmentId === environment.environmentId,
+        )
+        .sort((a, b) => b.versionNumber - a.versionNumber);
+    },
+    revokeMachine: async (userId, machineId, now) => {
+      const machine = machines.get(key(userId, machineId));
+      if (!machine || machine.userId !== userId) return null;
+      machines.set(key(userId, machineId), { ...machine, revokedAt: now });
+      let revokedTokens = 0;
+      for (const [tokenId, token] of tokens)
+        if (
+          token.userId === userId &&
+          token.machineId === machineId &&
+          !token.revokedAt
+        ) {
+          tokens.set(tokenId, { ...token, revokedAt: now });
+          revokedTokens += 1;
+        }
+      return { machineId, revokedTokens };
+    },
+    listProjects: async (userId) =>
+      [...projects.values()]
+        .filter((p) => p.userId === userId)
+        .sort((a, b) => a.projectId.localeCompare(b.projectId)),
+    syncProjects: async (userId, incoming, now) => {
+      for (const project of incoming)
+        projects.set(key(userId, project.projectId), {
+          userId,
+          projectId: project.projectId,
+          lifecycle: project.lifecycle,
+          ...(project.name !== undefined ? { name: project.name } : {}),
+          updatedAt: now,
+        });
+    },
+    setProjectLifecycle: async (userId, projectId, lifecycle, now) => {
+      const existing = projects.get(key(userId, projectId));
+      if (!existing || existing.userId !== userId) return null;
+      const updated: CloudProjectRecord = {
+        ...existing,
+        lifecycle,
+        updatedAt: now,
+      };
+      projects.set(key(userId, projectId), updated);
+      return updated;
+    },
 
     /* ---------------------------- public stacks --------------------------- */
     getHandleForUser: async (userId) =>

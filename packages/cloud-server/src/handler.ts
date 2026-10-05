@@ -1,4 +1,5 @@
 import {
+  approveSkillVersionRequestSchema,
   cliAuthStartRequestSchema,
   machineCheckinRequestSchema,
   cliAuthTokenRequestSchema,
@@ -12,6 +13,9 @@ import {
   memorySubmitEnvelopeRequestSchema,
   prepareSnapshotRequestSchema,
   publishPublicStackVersionRequestSchema,
+  setProjectLifecycleRequestSchema,
+  setSkillPausedRequestSchema,
+  syncProjectsRequestSchema,
 } from '@stack/spec';
 
 import { CloudServiceError } from './errors.js';
@@ -96,6 +100,102 @@ export const handleCloudRequest = async (
     }
     if (method === 'GET' && matches(segments, ['machines']))
       return json(200, await service.listMachines(await authenticate()));
+
+    // --- P3 product read models + account-side writes (all authenticated) ---
+    if (method === 'GET' && matches(segments, ['overview'])) {
+      const user = await authenticate();
+      const machine = new URL(request.path, 'http://x').searchParams.get(
+        'machine',
+      );
+      return json(200, await service.getOverview(user, machine ?? undefined));
+    }
+    if (method === 'GET' && matches(segments, ['skills']))
+      return json(200, await service.getSkillsReadModel(await authenticate()));
+    if (method === 'GET' && segments.length === 2 && segments[0] === 'skills')
+      return json(
+        200,
+        await service.getSkillDetail(await authenticate(), segments[1] ?? ''),
+      );
+    if (
+      method === 'POST' &&
+      segments.length === 3 &&
+      segments[0] === 'skills' &&
+      segments[2] === 'approve'
+    ) {
+      const user = await authenticate();
+      const body = approveSkillVersionRequestSchema.parse({
+        skillId: segments[1],
+        ...(typeof request.jsonBody === 'object' && request.jsonBody
+          ? request.jsonBody
+          : {}),
+      });
+      return json(200, await service.approveSkillVersion(user, body));
+    }
+    if (
+      method === 'POST' &&
+      segments.length === 3 &&
+      segments[0] === 'skills' &&
+      segments[2] === 'pause'
+    ) {
+      const user = await authenticate();
+      const body = setSkillPausedRequestSchema.parse({
+        skillId: segments[1],
+        ...(typeof request.jsonBody === 'object' && request.jsonBody
+          ? request.jsonBody
+          : {}),
+      });
+      return json(200, await service.setSkillPaused(user, body));
+    }
+    if (method === 'GET' && matches(segments, ['machines', 'view']))
+      return json(
+        200,
+        await service.getMachinesReadModel(await authenticate()),
+      );
+    if (
+      method === 'POST' &&
+      segments.length === 3 &&
+      segments[0] === 'machines' &&
+      segments[2] === 'revoke'
+    )
+      return json(
+        200,
+        await service.revokeMachine(await authenticate(), segments[1] ?? ''),
+      );
+    if (method === 'GET' && matches(segments, ['projects']))
+      return json(
+        200,
+        await service.getProjectsReadModel(await authenticate()),
+      );
+    if (method === 'POST' && matches(segments, ['projects', 'sync'])) {
+      const user = await authenticate();
+      const body = syncProjectsRequestSchema.parse(request.jsonBody ?? {});
+      return json(200, await service.syncProjects(user, body));
+    }
+    if (
+      method === 'POST' &&
+      segments.length === 3 &&
+      segments[0] === 'projects' &&
+      segments[2] === 'lifecycle'
+    ) {
+      const user = await authenticate();
+      const body = setProjectLifecycleRequestSchema.parse({
+        projectId: segments[1],
+        ...(typeof request.jsonBody === 'object' && request.jsonBody
+          ? request.jsonBody
+          : {}),
+      });
+      return json(
+        200,
+        await service.setProjectLifecycle(user, body.projectId, body.lifecycle),
+      );
+    }
+    if (method === 'GET' && matches(segments, ['stacks-owned']))
+      return json(200, await service.getStacksReadModel(await authenticate()));
+    if (method === 'GET' && matches(segments, ['activity']))
+      return json(
+        200,
+        await service.getActivityReadModel(await authenticate()),
+      );
 
     // --- Environments ---
     if (
@@ -232,6 +332,14 @@ export const handleCloudRequest = async (
     // --- Remote Memory (all authenticated) ---
     if (segments[0] === 'memory') {
       const rest = segments.slice(1);
+      // P3 product read model + narrow destructive delete.
+      if (method === 'GET' && matches(rest, ['view']))
+        return json(
+          200,
+          await service.getMemoryReadModel(await authenticate()),
+        );
+      if (method === 'POST' && matches(rest, ['delete']))
+        return json(200, await service.deleteCloudMemory(await authenticate()));
       if (method === 'GET' && matches(rest, ['profile']))
         return json(200, await service.memoryGetProfile(await authenticate()));
       if (method === 'POST' && matches(rest, ['profile-ensure'])) {

@@ -298,6 +298,11 @@ export const cloudErrorCodeSchema = z.enum([
   'handle-unavailable',
   'invalid-request',
   'not-found',
+  // P3 product resource codes (404 / stale-review 409 is remote-environment-conflict).
+  'skill-not-found',
+  'machine-not-found',
+  'project-not-found',
+  'stale-candidate',
   'memory-not-found',
   'memory-conflict',
   'memory-too-large',
