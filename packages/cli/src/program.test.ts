@@ -1,5 +1,5 @@
 import { CommanderError } from 'commander';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type {
   AgentDetection,
@@ -12,8 +12,15 @@ import type {
   ResolvedLocalEnvironment,
   ScanResult,
 } from '@stack/spec';
+import type { MachineCheckinRequest } from '@stack/spec';
+import {
+  CloudUnavailableError,
+  NotAuthenticatedError,
+  type CloudClient,
+} from '@stack/cloud-client';
 
 import { createProgram, type ProgramDependencies } from './program.js';
+import { gatherCheckinInputs, reportCheckin } from './cloud/checkin.js';
 import type { PullPlan, PushPlan, TrialStackResolution } from '@stack/core';
 import type { DiscoveredMemoryItem } from '@stack/memory';
 
@@ -782,6 +789,119 @@ describe('STAK CLI', () => {
     expect(result.output).toContain('Cursor');
     expect(result.output).toContain('not found');
     expect(result.output).toContain('No changes were made.');
+  });
+
+  // P1 review (scan trigger): `scan` is read-only for projection but refreshes the machine's
+  // reported inventory (agentsDetected), which the 0.1.0 onboarding contract (P8) consumes.
+  // A successful scan must therefore publish the machine's detected agents via check-in.
+  describe('scan reports machine state via check-in', () => {
+    const clientWith = (
+      machineCheckin: (r: MachineCheckinRequest) => Promise<unknown>,
+    ): Pick<CloudClient, 'machineCheckin'> => ({
+      machineCheckin: machineCheckin as CloudClient['machineCheckin'],
+    });
+    // A faithful reporter: the real gather + report pipeline, so the offline/auth policy is
+    // exercised exactly as in production (offline swallowed, 401/403 re-thrown).
+    const scanReporter =
+      (client: Pick<CloudClient, 'machineCheckin'>, agents: string[]) =>
+      async () => {
+        const inputs = await gatherCheckinInputs({
+          machine: async () => ({
+            machineId: '00000000-0000-4000-8000-0000000000c3',
+            platform: 'linux',
+            arch: 'x64',
+          }),
+          hostname: () => 'test-host',
+          memoryBackedUp: async () => false,
+          installedSkills: async () => [],
+          projectPresence: async () => [],
+          agentsDetected: async () => agents,
+        });
+        await reportCheckin({ client, inputs });
+      };
+
+    it('a successful scan invokes check-in carrying the detected agents (#1, #2)', async () => {
+      const captured: MachineCheckinRequest[] = [];
+      const reportMachineCheckin = vi.fn(
+        scanReporter(
+          clientWith(async (r) => {
+            captured.push(r);
+            return { ok: true };
+          }),
+          ['claude', 'codex', 'cursor'],
+        ),
+      );
+      const result = await runProgram(['scan'], { reportMachineCheckin });
+
+      expect(result.exit?.exitCode ?? 0).toBe(0);
+      expect(reportMachineCheckin).toHaveBeenCalledOnce();
+      expect(reportMachineCheckin).toHaveBeenCalledWith('scan');
+      expect(captured).toHaveLength(1);
+      expect(captured[0]?.agentsDetected).toEqual([
+        'claude',
+        'codex',
+        'cursor',
+      ]);
+    });
+
+    it('scan still does not alter agent projection (#3)', async () => {
+      let scanned = false;
+      const applyUse = vi.fn(async () => undefined);
+      const applyRemove = vi.fn(async () => undefined);
+      const applyCodexBindings = vi.fn(async () => applyResult);
+      const reportMachineCheckin = vi.fn(
+        scanReporter(
+          clientWith(async () => ({ ok: true })),
+          ['claude'],
+        ),
+      );
+      await runProgram(['scan'], {
+        scan: async () => {
+          scanned = true;
+          return emptyResult;
+        },
+        applyUse,
+        applyRemove,
+        applyCodexBindings,
+        reportMachineCheckin,
+      });
+
+      expect(scanned).toBe(true); // read-only discovery ran
+      expect(applyUse).not.toHaveBeenCalled();
+      expect(applyRemove).not.toHaveBeenCalled();
+      expect(applyCodexBindings).not.toHaveBeenCalled();
+    });
+
+    it('an offline/failed check-in does not make scan fail (#4)', async () => {
+      const reportMachineCheckin = vi.fn(
+        scanReporter(
+          clientWith(async () => {
+            throw new CloudUnavailableError('offline');
+          }),
+          ['claude'],
+        ),
+      );
+      const result = await runProgram(['scan'], { reportMachineCheckin });
+
+      expect(result.exit?.exitCode ?? 0).toBe(0);
+      expect(result.output).toContain('No changes were made.');
+      expect(reportMachineCheckin).toHaveBeenCalledOnce();
+    });
+
+    it('a 401/403 during check-in stays explicit, not swallowed as offline (#5)', async () => {
+      const reportMachineCheckin = vi.fn(
+        scanReporter(
+          clientWith(async () => {
+            throw new NotAuthenticatedError('revoked');
+          }),
+          ['claude'],
+        ),
+      );
+
+      await expect(
+        runProgram(['scan'], { reportMachineCheckin }),
+      ).rejects.toBeInstanceOf(NotAuthenticatedError);
+    });
   });
 
   it('initializes from a fresh global scan', async () => {

@@ -188,13 +188,21 @@ export const nativeMemoryBackedUp = (
 
 /**
  * Leaf command names whose success materially changes this machine's reported state
- * (P1 review #4). Only commands that change installed skills, project presence, or
- * memory-backed-up are included — not commands that change account-side desired state
- * (use/push/pull), read-only discovery (scan), lifecycle (archive/unarchive), or sign-out.
+ * (P1 review #4). Included are commands that change installed skills, project presence,
+ * memory-backed-up, OR the machine's reported inventory (detected agents). Excluded are
+ * commands that change account-side desired state (use/push/pull), lifecycle
+ * (archive/unarchive), and sign-out.
+ *
+ * `scan` is included: although it does not mutate agent projection, it refreshes the
+ * machine's reported inventory (`agentsDetected`). The 0.1.0 onboarding contract (P8)
+ * derives "Agents found: …" from real check-in records, so a successful scan must publish
+ * the machine's detected agents. `use` remains excluded — it changes account-side desired
+ * state, not installed machine state.
  */
 export const CHECKIN_COMMANDS: ReadonlySet<string> = new Set([
   'login', // registers the machine; first check-in
   'status', // the explicit check-in
+  'scan', // refreshes reported inventory (agentsDetected) for onboarding
   'run', // projects main into agent dirs → installed skills change
   'backup', // native Memory now matches the latest backup
   'recover', // local store/registry reconciled → presence + memory-backed-up
