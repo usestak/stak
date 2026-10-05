@@ -1,0 +1,144 @@
+import type { Command } from 'commander';
+
+import type { AgentId } from '@stack/spec';
+import type { SetSkillPausedResult } from '@stack/core';
+
+/**
+ * `stak skill` — the Skill lifecycle on this machine (P2).
+ *
+ *   stak skill update [<skill>]   install/reconcile APPROVED desired versions onto THIS machine
+ *   stak skill pause  <skill>     stop projecting a Skill to agents (keeps version/provenance)
+ *   stak skill resume <skill>     project it again
+ *
+ * `update` changes installed machine state → it checks in on success. `pause`/`resume` change
+ * only machine-local DESIRED state (the lock's `paused` flag); the projection effect is realised
+ * on the next `run`/`skill update`, so they do NOT check in (desired ≠ installed).
+ */
+export type SkillUpdateAgentResult = {
+  agent: AgentId;
+  applied: number;
+  removed: number;
+  unchanged: number;
+};
+export type SkillUpdateResult =
+  | {
+      status: 'ok';
+      selector?: string;
+      entryId?: string;
+      agents: SkillUpdateAgentResult[];
+    }
+  | { status: 'no-environment' }
+  | { status: 'not-found' }
+  | { status: 'ambiguous'; matches: string[] };
+
+export type SkillCommandDependencies = {
+  skillUpdate(options: { selector?: string }): Promise<SkillUpdateResult>;
+  skillPause(options: { selector: string }): Promise<SetSkillPausedResult>;
+  skillResume(options: { selector: string }): Promise<SetSkillPausedResult>;
+  writeOut(value: string): void;
+};
+
+const renderUpdate = (result: SkillUpdateResult): string => {
+  switch (result.status) {
+    case 'no-environment':
+      return 'main does not exist. Run `stak init` first.\n';
+    case 'not-found':
+      return 'No matching Skill. Run `stak status` to see Skills STAK knows about.\n';
+    case 'ambiguous':
+      return (
+        `That selector matches ${result.matches.length} Skills with the same name. ` +
+        'Use a stable Skill id instead.\n'
+      );
+    case 'ok': {
+      const target = result.selector ? ` ${result.selector}` : '';
+      if (result.agents.length === 0)
+        return `No agents are installed on this machine, so there is nothing to update${target}.\n`;
+      const lines = [`Updated${target} on this machine:`, ''];
+      for (const agent of result.agents)
+        lines.push(
+          `  ${agent.agent}: ${agent.applied} installed/updated, ${agent.removed} removed, ${agent.unchanged} unchanged`,
+        );
+      lines.push('');
+      return lines.join('\n');
+    }
+  }
+};
+
+const renderPaused = (
+  result: SetSkillPausedResult,
+  target: 'paused' | 'active',
+): string => {
+  switch (result.status) {
+    case 'not-found':
+      return 'No matching Skill. Run `stak status` to see Skills STAK knows about.\n';
+    case 'ambiguous':
+      return (
+        `That selector matches ${result.matches.length} Skills with the same name. ` +
+        'Use a stable Skill id instead.\n'
+      );
+    case 'ok': {
+      const verb = target === 'paused' ? 'Paused' : 'Resumed';
+      if (!result.changed)
+        return `${result.name} is already ${target === 'paused' ? 'paused' : 'active'}.\n`;
+      return (
+        `${verb} ${result.name}.\n` +
+        'This changes desired state only; the per-agent effect is applied on your next ' +
+        '`stak run` or `stak skill update`.\n'
+      );
+    }
+  }
+};
+
+export const registerSkillCommand = (
+  program: Command,
+  dependencies: SkillCommandDependencies,
+): void => {
+  const skill = program
+    .command('skill')
+    .description('Manage the Skill lifecycle on this machine');
+
+  skill
+    .command('update [skill]')
+    .description('Install approved Skill versions on this machine')
+    .option('--json', 'emit structured JSON only')
+    .action(
+      async (selector: string | undefined, options: { json?: boolean }) => {
+        const result = await dependencies.skillUpdate(
+          selector ? { selector } : {},
+        );
+        dependencies.writeOut(
+          options.json
+            ? `${JSON.stringify(result, null, 2)}\n`
+            : renderUpdate(result),
+        );
+      },
+    );
+
+  skill
+    .command('pause <skill>')
+    .description(
+      'Stop projecting a Skill to agents (keeps its version and provenance)',
+    )
+    .option('--json', 'emit structured JSON only')
+    .action(async (selector: string, options: { json?: boolean }) => {
+      const result = await dependencies.skillPause({ selector });
+      dependencies.writeOut(
+        options.json
+          ? `${JSON.stringify(result, null, 2)}\n`
+          : renderPaused(result, 'paused'),
+      );
+    });
+
+  skill
+    .command('resume <skill>')
+    .description('Project a paused Skill to agents again')
+    .option('--json', 'emit structured JSON only')
+    .action(async (selector: string, options: { json?: boolean }) => {
+      const result = await dependencies.skillResume({ selector });
+      dependencies.writeOut(
+        options.json
+          ? `${JSON.stringify(result, null, 2)}\n`
+          : renderPaused(result, 'active'),
+      );
+    });
+};

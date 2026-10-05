@@ -315,6 +315,9 @@ const runProgram = async (
     projectMap: async () => ({ status: 'project-not-found' }),
     projectArchive: async () => ({ status: 'project-not-found' }),
     projectUnarchive: async () => ({ status: 'project-not-found' }),
+    skillUpdate: async () => ({ status: 'ok', agents: [] }),
+    skillPause: async () => ({ status: 'not-found' }),
+    skillResume: async () => ({ status: 'not-found' }),
     memoryBackupPreview: async () => ({
       provider: 'claude',
       native: [],
@@ -1967,5 +1970,186 @@ describe('STAK CLI', () => {
     });
     expect(confirmed).toBe(false); // unarchive is non-destructive; no prompt
     expect(result.output).toContain('is active');
+  });
+});
+
+describe('stak skill lifecycle (P2)', () => {
+  const clientWith = (
+    machineCheckin: (r: MachineCheckinRequest) => Promise<unknown>,
+  ): Pick<CloudClient, 'machineCheckin'> => ({
+    machineCheckin: machineCheckin as CloudClient['machineCheckin'],
+  });
+  // A faithful reporter, so the offline/auth policy is exercised exactly as in production.
+  const reporter =
+    (client: Pick<CloudClient, 'machineCheckin'>) => async () => {
+      const inputs = await gatherCheckinInputs({
+        machine: async () => ({
+          machineId: '00000000-0000-4000-8000-0000000000d4',
+          platform: 'linux',
+          arch: 'x64',
+        }),
+        hostname: () => 'test-host',
+        memoryBackedUp: async () => false,
+        installedSkills: async () => [],
+        projectPresence: async () => [],
+        agentsDetected: async () => [],
+      });
+      await reportCheckin({ client, inputs });
+    };
+
+  it('`skill update <skill>` targets one stable Skill', async () => {
+    let received: { selector?: string } | undefined;
+    const result = await runProgram(['skill', 'update', 'review-pr'], {
+      skillUpdate: async (options) => {
+        received = options;
+        return {
+          status: 'ok',
+          selector: 'review-pr',
+          entryId: 'skill_aaaaaaaa',
+          agents: [{ agent: 'codex', applied: 1, removed: 0, unchanged: 2 }],
+        };
+      },
+    });
+    expect(received).toEqual({ selector: 'review-pr' });
+    expect(result.output).toContain('review-pr');
+    expect(result.output).toContain('codex');
+  });
+
+  it('`skill update` with no argument updates all machine Skills', async () => {
+    let received: { selector?: string } | undefined = { selector: 'sentinel' };
+    await runProgram(['skill', 'update'], {
+      skillUpdate: async (options) => {
+        received = options;
+        return { status: 'ok', agents: [] };
+      },
+    });
+    expect(received).toEqual({}); // no selector → all
+  });
+
+  it('an ambiguous selector fails safely with guidance, no mutation', async () => {
+    const result = await runProgram(['skill', 'update', 'dup'], {
+      skillUpdate: async () => ({
+        status: 'ambiguous',
+        matches: ['skill_dup00001', 'skill_dup00002'],
+      }),
+    });
+    expect(result.exit?.exitCode ?? 0).toBe(0);
+    expect(result.output.toLowerCase()).toContain('stable skill id');
+  });
+
+  it('`skill pause` and `skill resume` call the lifecycle ops', async () => {
+    let paused: string | undefined;
+    let resumed: string | undefined;
+    await runProgram(['skill', 'pause', 'alpha'], {
+      skillPause: async ({ selector }) => {
+        paused = selector;
+        return {
+          status: 'ok',
+          entryId: 'skill_aaaaaaaa',
+          name: 'alpha',
+          paused: true,
+          changed: true,
+        };
+      },
+    });
+    await runProgram(['skill', 'resume', 'alpha'], {
+      skillResume: async ({ selector }) => {
+        resumed = selector;
+        return {
+          status: 'ok',
+          entryId: 'skill_aaaaaaaa',
+          name: 'alpha',
+          paused: false,
+          changed: true,
+        };
+      },
+    });
+    expect(paused).toBe('alpha');
+    expect(resumed).toBe('alpha');
+  });
+
+  it('a successful `skill update` reports installed state through check-in', async () => {
+    const captured: MachineCheckinRequest[] = [];
+    const reportMachineCheckin = vi.fn(
+      reporter(
+        clientWith(async (r) => {
+          captured.push(r);
+          return { ok: true };
+        }),
+      ),
+    );
+    const result = await runProgram(['skill', 'update'], {
+      skillUpdate: async () => ({ status: 'ok', agents: [] }),
+      reportMachineCheckin,
+    });
+    expect(result.exit?.exitCode ?? 0).toBe(0);
+    expect(reportMachineCheckin).toHaveBeenCalledOnce();
+    expect(reportMachineCheckin).toHaveBeenCalledWith('update');
+    expect(captured).toHaveLength(1);
+  });
+
+  it('`skill pause`/`resume` change desired state only and do NOT check in', async () => {
+    const reportMachineCheckin = vi.fn(async () => undefined);
+    const ok = {
+      status: 'ok' as const,
+      entryId: 'skill_aaaaaaaa',
+      name: 'alpha',
+      paused: true,
+      changed: true,
+    };
+    await runProgram(['skill', 'pause', 'alpha'], {
+      skillPause: async () => ok,
+      reportMachineCheckin,
+    });
+    await runProgram(['skill', 'resume', 'alpha'], {
+      skillResume: async () => ({ ...ok, paused: false }),
+      reportMachineCheckin,
+    });
+    expect(reportMachineCheckin).not.toHaveBeenCalled();
+  });
+
+  it('a failed `skill update` does not check in (update-failure path)', async () => {
+    const reportMachineCheckin = vi.fn(async () => undefined);
+    await expect(
+      runProgram(['skill', 'update'], {
+        skillUpdate: async () => {
+          throw new Error('rolled back');
+        },
+        reportMachineCheckin,
+      }),
+    ).rejects.toThrow('rolled back');
+    expect(reportMachineCheckin).not.toHaveBeenCalled();
+  });
+
+  it('an offline check-in after `skill update` is non-fatal', async () => {
+    const reportMachineCheckin = vi.fn(
+      reporter(
+        clientWith(async () => {
+          throw new CloudUnavailableError('offline');
+        }),
+      ),
+    );
+    const result = await runProgram(['skill', 'update'], {
+      skillUpdate: async () => ({ status: 'ok', agents: [] }),
+      reportMachineCheckin,
+    });
+    expect(result.exit?.exitCode ?? 0).toBe(0);
+    expect(reportMachineCheckin).toHaveBeenCalledOnce();
+  });
+
+  it('a 401/403 after `skill update` stays explicit (not swallowed)', async () => {
+    const reportMachineCheckin = vi.fn(
+      reporter(
+        clientWith(async () => {
+          throw new NotAuthenticatedError('revoked');
+        }),
+      ),
+    );
+    await expect(
+      runProgram(['skill', 'update'], {
+        skillUpdate: async () => ({ status: 'ok', agents: [] }),
+        reportMachineCheckin,
+      }),
+    ).rejects.toBeInstanceOf(NotAuthenticatedError);
   });
 });

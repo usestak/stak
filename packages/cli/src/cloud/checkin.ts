@@ -204,6 +204,7 @@ export const CHECKIN_COMMANDS: ReadonlySet<string> = new Set([
   'status', // the explicit check-in
   'scan', // refreshes reported inventory (agentsDetected) for onboarding
   'run', // projects main into agent dirs → installed skills change
+  'update', // `stak skill update` installs approved versions → installed skills change
   'backup', // native Memory now matches the latest backup
   'recover', // local store/registry reconciled → presence + memory-backed-up
   'restore', // writes native agent Memory → memory-backed-up

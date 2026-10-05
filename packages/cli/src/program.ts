@@ -18,15 +18,20 @@ import {
   prepareStackRemove,
   prepareStackUse,
   preserveRemoteTrialStack,
+  projectedLocalEnvironment,
   resolvePublicStackSource,
   resolveRemoteTrialStack,
+  resolveSkillSelector,
   resolveStackHome,
+  setSkillPaused,
   spawnGit,
+  StackStateError,
   statusMainEnvironment,
   preserveTrialStack,
   resolveTrialStack,
 } from '@stack/core';
 import {
+  BindingConflictError,
   CodexAdapter,
   CursorAdapter,
   ClaudeAdapter,
@@ -38,6 +43,7 @@ import {
 import type { InitializeMainEnvironmentResult } from '@stack/core';
 import type {
   RemoteTrialResolution,
+  SetSkillPausedResult,
   StackRemoteUseProposal,
   StackRemoveProposal,
   StackUseProposal,
@@ -130,6 +136,11 @@ import { registerPullCommand } from './commands/pull.js';
 import { registerPublishCommand } from './commands/publish.js';
 import { registerMemoryCommand } from './commands/memory.js';
 import { registerProjectCommand } from './commands/project.js';
+import {
+  registerSkillCommand,
+  type SkillUpdateResult,
+  type SkillUpdateAgentResult,
+} from './commands/skill.js';
 import {
   listProjects,
   mapProject,
@@ -257,6 +268,9 @@ export type ProgramDependencies = {
   }): Promise<MapProjectResult>;
   projectArchive(options: { project: string }): Promise<SetLifecycleResult>;
   projectUnarchive(options: { project: string }): Promise<SetLifecycleResult>;
+  skillUpdate(options: { selector?: string }): Promise<SkillUpdateResult>;
+  skillPause(options: { selector: string }): Promise<SetSkillPausedResult>;
+  skillResume(options: { selector: string }): Promise<SetSkillPausedResult>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
   /**
@@ -556,6 +570,84 @@ const defaultDependencies: ProgramDependencies = {
     }),
   projectUnarchive: async ({ project }) =>
     setProjectLifecycle({ stackHome, selector: project, lifecycle: 'active' }),
+  // `stak skill update` installs/reconciles APPROVED desired versions onto THIS machine across
+  // every detected agent (no launch) — reusing the same transactional binding plan/apply/verify
+  // as `run`. Paused Skills are excluded by `projectedLocalEnvironment`, so they are dropped
+  // from projection here too. A selector narrows the applied operations to one stable entryId
+  // without disturbing other Skills. Any rollback/verification failure throws, so the command
+  // fails and does NOT check in; that machine reports the drift at its next check-in.
+  skillUpdate: async ({ selector }) => {
+    let state;
+    try {
+      state = await loadMainEnvironment({ stackHome });
+    } catch (error) {
+      if (
+        error instanceof StackStateError &&
+        error.code === 'environment-not-found'
+      )
+        return { status: 'no-environment' as const };
+      throw error;
+    }
+    let entryId: string | undefined;
+    if (selector) {
+      const resolved = resolveSkillSelector(state.lock, selector);
+      if (resolved.status === 'not-found')
+        return { status: 'not-found' as const };
+      if (resolved.status === 'ambiguous')
+        return { status: 'ambiguous' as const, matches: resolved.matches };
+      entryId = resolved.entryId;
+    }
+    const environment = projectedLocalEnvironment(state);
+    const agentResults: SkillUpdateAgentResult[] = [];
+    for (const agentId of ['codex', 'cursor', 'claude'] as AgentId[]) {
+      const detection = await adapters[agentId].detect().catch(() => undefined);
+      if (!detection?.installed) continue;
+      const plan = await adapters[agentId].planBindings(environment);
+      if (!entryId && plan.blocking)
+        throw new BindingConflictError(
+          `${agentId} has a Skill binding conflict.`,
+        );
+      const operations = entryId
+        ? plan.operations.filter((operation) => operation.entryId === entryId)
+        : plan.operations;
+      const result = await adapters[agentId].applyBindings(
+        { ...plan, operations },
+        state.machine.machineId,
+      );
+      if (result.rolledBack)
+        throw new BindingConflictError(
+          `${agentId} Skill update failed and was rolled back.`,
+        );
+      const verifyEnvironment = entryId
+        ? {
+            ...environment,
+            skills: environment.skills.filter((s) => s.entryId === entryId),
+          }
+        : environment;
+      const verification =
+        await adapters[agentId].verifyBindings(verifyEnvironment);
+      if (!verification.healthy)
+        throw new BindingConflictError(
+          `${agentId} Skill binding verification failed.`,
+        );
+      agentResults.push({
+        agent: agentId,
+        applied: result.applied.length,
+        removed: result.removed.length,
+        unchanged: result.unchanged,
+      });
+    }
+    return {
+      status: 'ok' as const,
+      ...(selector ? { selector } : {}),
+      ...(entryId ? { entryId } : {}),
+      agents: agentResults,
+    };
+  },
+  skillPause: ({ selector }) =>
+    setSkillPaused({ stackHome, selector, paused: true }),
+  skillResume: ({ selector }) =>
+    setSkillPaused({ stackHome, selector, paused: false }),
   confirm: async (message) => {
     if (!process.stdin.isTTY) return false;
     const prompt = createInterface({
@@ -664,5 +756,6 @@ export const createProgram = (
   registerPublishCommand(program, dependencies);
   registerMemoryCommand(program, dependencies);
   registerProjectCommand(program, dependencies);
+  registerSkillCommand(program, dependencies);
   return program;
 };
