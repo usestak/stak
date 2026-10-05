@@ -289,6 +289,96 @@ export const supabaseRepository = (): CloudRepository &
         });
     },
 
+    // Phase P1: upsert the machine row (preserving first_seen_at) and REPLACE its
+    // skill versions + project presence. Presence only — no filesystem paths stored.
+    recordCheckin: async (input) => {
+      await db()
+        .from('machines')
+        .upsert(
+          {
+            user_id: input.userId,
+            machine_id: input.machineId,
+            name: input.name ?? null,
+            platform: input.platform ?? null,
+            arch: input.arch ?? null,
+            agents_detected: input.agentsDetected ?? [],
+            last_checkin_at: input.now,
+            memory_backed_up: input.memoryBackedUp,
+            first_seen_at: input.now,
+          },
+          { onConflict: 'user_id,machine_id', ignoreDuplicates: false },
+        );
+      await db()
+        .from('machine_skill_versions')
+        .delete()
+        .eq('user_id', input.userId)
+        .eq('machine_id', input.machineId);
+      if (input.skills.length > 0)
+        await db()
+          .from('machine_skill_versions')
+          .insert(
+            input.skills.map((s) => ({
+              user_id: input.userId,
+              machine_id: input.machineId,
+              skill_id: s.skillId,
+              installed_version: s.installedVersion,
+            })),
+          );
+      await db()
+        .from('machine_project_presence')
+        .delete()
+        .eq('user_id', input.userId)
+        .eq('machine_id', input.machineId);
+      if (input.projects.length > 0)
+        await db()
+          .from('machine_project_presence')
+          .insert(
+            input.projects.map((p) => ({
+              user_id: input.userId,
+              machine_id: input.machineId,
+              project_id: p.projectId,
+              present: p.present,
+            })),
+          );
+    },
+    listMachineStates: async (userId) => {
+      const [machinesRes, skillsRes, presenceRes] = await Promise.all([
+        db().from('machines').select('*').eq('user_id', userId),
+        db().from('machine_skill_versions').select('*').eq('user_id', userId),
+        db().from('machine_project_presence').select('*').eq('user_id', userId),
+      ]);
+      const rows = (machinesRes.data as any[] | null) ?? [];
+      const skills = (skillsRes.data as any[] | null) ?? [];
+      const presence = (presenceRes.data as any[] | null) ?? [];
+      return rows.map((m) => ({
+        userId: m.user_id,
+        machineId: m.machine_id,
+        firstSeenAt: m.first_seen_at,
+        ...(m.name != null ? { name: m.name } : {}),
+        ...(m.platform != null ? { platform: m.platform } : {}),
+        ...(m.arch != null ? { arch: m.arch } : {}),
+        ...(m.last_synced_at != null ? { lastSyncedAt: m.last_synced_at } : {}),
+        ...(m.last_checkin_at != null
+          ? { lastCheckinAt: m.last_checkin_at }
+          : {}),
+        ...(m.agents_detected != null
+          ? { agentsDetected: m.agents_detected as string[] }
+          : {}),
+        ...(m.memory_backed_up != null
+          ? { memoryBackedUp: m.memory_backed_up as boolean }
+          : {}),
+        skills: skills
+          .filter((s) => s.machine_id === m.machine_id)
+          .map((s) => ({
+            skillId: s.skill_id,
+            installedVersion: s.installed_version,
+          })),
+        projects: presence
+          .filter((p) => p.machine_id === m.machine_id)
+          .map((p) => ({ projectId: p.project_id, present: p.present })),
+      }));
+    },
+
     /* ---------------------------- public stacks --------------------------- */
     getHandleForUser: async (userId) => {
       const { data } = await db()

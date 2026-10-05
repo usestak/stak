@@ -6,6 +6,8 @@ import {
   getEnvironmentResponseSchema,
   getPublicStackResponseSchema,
   getPublicStackVersionResponseSchema,
+  listMachinesResponseSchema,
+  machineCheckinResponseSchema,
   meResponseSchema,
   prepareSnapshotResponseSchema,
   publicProfileResponseSchema,
@@ -24,6 +26,9 @@ import type {
   GetEnvironmentResponse,
   GetPublicStackResponse,
   GetPublicStackVersionResponse,
+  ListMachinesResponse,
+  MachineCheckinRequest,
+  MachineCheckinResponse,
   MeResponse,
   PrepareSnapshotRequest,
   PrepareSnapshotResponse,
@@ -66,6 +71,11 @@ export interface CloudClient {
     request: FinalizeSnapshotRequest,
   ): Promise<FinalizeSnapshotResponse>;
   downloadSnapshot(contentHash: string): Promise<DownloadedSnapshot>;
+  /** Phase P1: report this machine's check-in (presence only; no paths, no Memory). */
+  machineCheckin(
+    request: MachineCheckinRequest,
+  ): Promise<MachineCheckinResponse>;
+  listMachines(): Promise<ListMachinesResponse>;
 }
 
 export interface CloudAuthClient {
@@ -249,6 +259,16 @@ export const createCloudClient = (
     },
     me: async () =>
       json(meResponseSchema, await request('GET', 'me', { auth: true })),
+    machineCheckin: async (body) =>
+      json(
+        machineCheckinResponseSchema,
+        await request('POST', 'machines/checkin', { auth: true, json: body }),
+      ),
+    listMachines: async () =>
+      json(
+        listMachinesResponseSchema,
+        await request('GET', 'machines', { auth: true }),
+      ),
     getEnvironment: async (name) => {
       try {
         return json(

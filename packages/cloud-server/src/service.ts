@@ -14,6 +14,9 @@ import type {
   CommitEnvironmentVersionResponse,
   FinalizeSnapshotResponse,
   GetEnvironmentResponse,
+  ListMachinesResponse,
+  MachineCheckinRequest,
+  MachineCheckinResponse,
   MeResponse,
   PrepareSnapshotResponse,
   SnapshotDownloadResponse,
@@ -188,6 +191,67 @@ export const createCloudService = (config: CloudServiceConfig) => {
         lastUsedAt: nowIso(),
       });
       return { userId: token.userId, tokenId: token.tokenId };
+    },
+
+    /**
+     * Phase P1: record a machine check-in. The request is schema-validated and carries
+     * only presence (no paths) and no Memory content; identity is the authenticated user,
+     * never a request field.
+     */
+    recordCheckin: async (
+      user: AuthenticatedUser,
+      request: MachineCheckinRequest,
+    ): Promise<MachineCheckinResponse> => {
+      await config.repository.recordCheckin({
+        userId: user.userId,
+        machineId: request.machineId,
+        memoryBackedUp: request.memoryBackedUp,
+        skills: request.skills.map((s) => ({
+          skillId: s.skillId,
+          installedVersion: s.installedVersion,
+        })),
+        projects: request.projects.map((p) => ({
+          projectId: p.projectId,
+          present: p.present,
+        })),
+        now: nowIso(),
+        ...(request.name !== undefined ? { name: request.name } : {}),
+        ...(request.platform !== undefined
+          ? { platform: request.platform }
+          : {}),
+        ...(request.arch !== undefined ? { arch: request.arch } : {}),
+        ...(request.agentsDetected !== undefined
+          ? { agentsDetected: request.agentsDetected }
+          : {}),
+      });
+      return { ok: true };
+    },
+
+    /** Phase P1: the per-user machine read model (raw facts; status derived by callers). */
+    listMachines: async (
+      user: AuthenticatedUser,
+    ): Promise<ListMachinesResponse> => {
+      const states = await config.repository.listMachineStates(user.userId);
+      return {
+        machines: states.map((m) => ({
+          machineId: m.machineId,
+          agentsDetected: m.agentsDetected ?? [],
+          firstSeenAt: m.firstSeenAt,
+          lastCheckinAt: m.lastCheckinAt ?? null,
+          memoryBackedUp: m.memoryBackedUp ?? false,
+          skills: m.skills.map((s) => ({
+            skillId: s.skillId,
+            installedVersion: s.installedVersion,
+          })),
+          projects: m.projects.map((p) => ({
+            projectId: p.projectId,
+            present: p.present,
+          })),
+          ...(m.name !== undefined ? { name: m.name } : {}),
+          ...(m.platform !== undefined ? { platform: m.platform } : {}),
+          ...(m.arch !== undefined ? { arch: m.arch } : {}),
+        })),
+      };
     },
 
     startCliAuth: async (

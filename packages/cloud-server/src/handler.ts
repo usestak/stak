@@ -1,5 +1,6 @@
 import {
   cliAuthStartRequestSchema,
+  machineCheckinRequestSchema,
   cliAuthTokenRequestSchema,
   commitEnvironmentVersionRequestSchema,
   finalizeSnapshotRequestSchema,
@@ -86,6 +87,15 @@ export const handleCloudRequest = async (
     // --- Identity ---
     if (method === 'GET' && matches(segments, ['me']))
       return json(200, await service.me(await authenticate()));
+
+    // --- Machines (Phase P1 check-in) ---
+    if (method === 'POST' && matches(segments, ['machines', 'checkin'])) {
+      const user = await authenticate();
+      const body = machineCheckinRequestSchema.parse(request.jsonBody ?? {});
+      return json(200, await service.recordCheckin(user, body));
+    }
+    if (method === 'GET' && matches(segments, ['machines']))
+      return json(200, await service.listMachines(await authenticate()));
 
     // --- Environments ---
     if (

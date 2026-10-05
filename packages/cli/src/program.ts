@@ -11,6 +11,7 @@ import {
   applyRemoteStackUse,
   applyStackRemove,
   applyStackUse,
+  getOrCreateMachineIdentity,
   initializeMainEnvironment,
   loadMainEnvironment,
   prepareRemoteStackUse,
@@ -43,9 +44,12 @@ import type {
   TrialStackResolution,
 } from '@stack/core';
 import {
+  bindingFor,
   createClaudeMemoryAdapter,
   fileLocalMemoryKeyStore,
   generateRecoveryKey,
+  readLocalRegistry,
+  readMemoryManifest,
   readMemoryStatus,
   type BackupResult,
   type DiscoveredMemoryItem,
@@ -54,6 +58,12 @@ import {
   type RestorePlan,
 } from '@stack/memory';
 import { createCloudClient } from '@stack/cloud-client';
+import {
+  CHECKIN_COMMANDS,
+  gatherCheckinInputs,
+  reportCheckin,
+  type CheckinSkill,
+} from './cloud/checkin.js';
 import { resolveMemoryProjects } from './memory/resolve.js';
 import { resolveCloudBaseUrl } from './cloud/config.js';
 import { stackCloudRemoteMemoryBackend } from './memory/cloud-backend.js';
@@ -249,6 +259,12 @@ export type ProgramDependencies = {
   projectUnarchive(options: { project: string }): Promise<SetLifecycleResult>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
+  /**
+   * Phase P1: best-effort machine check-in after a state-changing command succeeds.
+   * Optional so the test harness can omit it; the real CLI wires it in
+   * `defaultDependencies`. Connectivity failures are non-fatal; a 401/403 is re-thrown.
+   */
+  reportMachineCheckin?(commandName: string): Promise<void>;
 };
 
 /**
@@ -554,6 +570,47 @@ const defaultDependencies: ProgramDependencies = {
     }
   },
   writeOut: (value) => process.stdout.write(value),
+  reportMachineCheckin: async () => {
+    // Best-effort check-in; signed out → nothing to report. Connectivity failures are
+    // swallowed by reportCheckin; a 401/403 propagates so a revoked machine is explicit.
+    const credential = await cloudDeps.credentials.read();
+    if (!credential) return;
+    const baseUrl = resolveCloudBaseUrl({
+      env: process.env,
+      ...(credential.apiUrl ? { storedApiUrl: credential.apiUrl } : {}),
+    });
+    const client = createCloudClient({ baseUrl, token: credential.token });
+    const inputs = await gatherCheckinInputs({
+      machine: () => getOrCreateMachineIdentity({ stackHome }),
+      memoryBackedUp: async () =>
+        (await readMemoryManifest(stackHome)) !== null,
+      installedSkills: async () => {
+        const state = await loadMainEnvironment({ stackHome });
+        return Object.values(state.lock.skills).map((skill): CheckinSkill => ({
+          skillId: skill.name,
+          installedVersion: skill.contentHash,
+        }));
+      },
+      projectPresence: async () => {
+        const registry = await readLocalRegistry(stackHome);
+        return registry.projects.map((project) => ({
+          projectId: project.projectId,
+          present: bindingFor(registry, project.projectId) !== undefined,
+        }));
+      },
+      agentsDetected: async () => {
+        const detections = await Promise.all(
+          [codex, cursor, claude].map((adapter) =>
+            adapter.detect().catch(() => undefined),
+          ),
+        );
+        return detections
+          .filter((d): d is AgentDetection => d != null && d.installed)
+          .map((d) => d.agent);
+      },
+    });
+    await reportCheckin({ client, inputs });
+  },
 };
 
 export const createProgram = (
@@ -563,6 +620,13 @@ export const createProgram = (
     .name('stak')
     .description('The control plane for portable AI agent environments.')
     .version(packageMetadata.version);
+  // Phase P1: after a state-changing command succeeds, report this machine's state
+  // best-effort (no daemon — only on user-run commands). Skipped for commands whose
+  // success does not change machine state; a 401/403 propagates (explicit, not offline).
+  program.hook('postAction', async (_thisCommand, actionCommand) => {
+    if (CHECKIN_COMMANDS.has(actionCommand.name()))
+      await dependencies.reportMachineCheckin?.(actionCommand.name());
+  });
   registerScanCommand(program, dependencies);
   registerInitCommand(program, dependencies);
   registerStatusCommand(program, dependencies);

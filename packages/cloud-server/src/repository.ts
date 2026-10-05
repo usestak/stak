@@ -67,6 +67,43 @@ export type CloudMachineRecord = {
   arch?: string;
   firstSeenAt: string;
   lastSyncedAt?: string;
+  // Phase P1 check-in fields (all optional for backward compatibility).
+  name?: string;
+  agentsDetected?: string[];
+  lastCheckinAt?: string;
+  memoryBackedUp?: boolean;
+};
+
+/** Phase P1: a machine's installed version of one skill, reported at check-in. */
+export type MachineSkillVersionRecord = {
+  skillId: string;
+  installedVersion: string;
+};
+
+/** Phase P1: whether a project is present on a machine. PRESENCE ONLY — never a path. */
+export type MachineProjectPresenceRecord = {
+  projectId: string;
+  present: boolean;
+};
+
+/** Phase P1: the full check-in a machine reports. Carries no paths and no Memory content. */
+export type RecordCheckinInput = {
+  userId: string;
+  machineId: string;
+  name?: string;
+  platform?: string;
+  arch?: string;
+  agentsDetected?: string[];
+  memoryBackedUp: boolean;
+  skills: MachineSkillVersionRecord[];
+  projects: MachineProjectPresenceRecord[];
+  now: string;
+};
+
+/** Phase P1: a machine's stored read model (machine + its reported skills/presence). */
+export type MachineStateRecord = CloudMachineRecord & {
+  skills: MachineSkillVersionRecord[];
+  projects: MachineProjectPresenceRecord[];
 };
 
 export type CommitVersionInput = {
@@ -136,6 +173,15 @@ export interface CloudRepository {
   putSnapshot(record: CloudSnapshotRecord): Promise<void>;
 
   upsertMachine(record: CloudMachineRecord): Promise<void>;
+
+  /**
+   * Phase P1: record a machine's check-in — upsert the machine row (name, OS,
+   * agents, last check-in, memory-backed-up) and REPLACE its skill versions and
+   * project presence atomically. Never stores a filesystem path.
+   */
+  recordCheckin(input: RecordCheckinInput): Promise<void>;
+  /** Phase P1: all machines for a user with their reported skill versions + presence. */
+  listMachineStates(userId: string): Promise<MachineStateRecord[]>;
 }
 
 /** Thrown by {@link CloudRepository.commitEnvironmentVersion} on a stale base. */

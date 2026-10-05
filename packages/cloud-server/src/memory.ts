@@ -13,6 +13,8 @@ import {
   type CloudEnvironmentRecord,
   type CloudEnvironmentVersionRecord,
   type CloudMachineRecord,
+  type MachineSkillVersionRecord,
+  type MachineProjectPresenceRecord,
   type CloudProfile,
   type CloudRepository,
   type CloudSnapshotRecord,
@@ -40,6 +42,8 @@ export const createInMemoryRepository = (): CloudRepository &
   const versions = new Map<string, CloudEnvironmentVersionRecord>();
   const snapshots = new Map<string, CloudSnapshotRecord>();
   const machines = new Map<string, CloudMachineRecord>();
+  const machineSkills = new Map<string, MachineSkillVersionRecord[]>();
+  const machineProjects = new Map<string, MachineProjectPresenceRecord[]>();
   const handlesByUser = new Map<string, PublicHandleRecord>();
   const handleOwners = new Map<string, string>();
   const publicStacks = new Map<string, PublicStackRecord>();
@@ -149,6 +153,47 @@ export const createInMemoryRepository = (): CloudRepository &
         firstSeenAt: existing?.firstSeenAt ?? record.firstSeenAt,
       });
     },
+
+    recordCheckin: async (input) => {
+      const k = key(input.userId, input.machineId);
+      const existing = machines.get(k);
+      machines.set(k, {
+        userId: input.userId,
+        machineId: input.machineId,
+        firstSeenAt: existing?.firstSeenAt ?? input.now,
+        ...(existing?.lastSyncedAt !== undefined
+          ? { lastSyncedAt: existing.lastSyncedAt }
+          : {}),
+        lastCheckinAt: input.now,
+        memoryBackedUp: input.memoryBackedUp,
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.platform !== undefined ? { platform: input.platform } : {}),
+        ...(input.arch !== undefined ? { arch: input.arch } : {}),
+        ...(input.agentsDetected !== undefined
+          ? { agentsDetected: input.agentsDetected }
+          : {}),
+      });
+      // Replace (not merge) the machine's reported skills and project presence.
+      machineSkills.set(
+        k,
+        input.skills.map((s) => ({ ...s })),
+      );
+      machineProjects.set(
+        k,
+        input.projects.map((p) => ({ ...p })),
+      );
+    },
+    listMachineStates: async (userId) =>
+      [...machines.values()]
+        .filter((m) => m.userId === userId)
+        .map((m) => {
+          const k = key(m.userId, m.machineId);
+          return {
+            ...m,
+            skills: (machineSkills.get(k) ?? []).map((s) => ({ ...s })),
+            projects: (machineProjects.get(k) ?? []).map((p) => ({ ...p })),
+          };
+        }),
 
     /* ---------------------------- public stacks --------------------------- */
     getHandleForUser: async (userId) =>

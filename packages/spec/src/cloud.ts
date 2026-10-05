@@ -221,6 +221,60 @@ export const machineSyncStateSchema = z.object({
   environments: z.record(z.string().min(1), environmentSyncStateSchema),
 });
 
+/* -------------------------------------------------------------------------- */
+/* Machine check-in (Phase P1)                                                */
+/*                                                                            */
+/* The CLI reports machine state best-effort during user-run operations (no   */
+/* daemon). The payload is PRESENCE ONLY: project entries carry {projectId,    */
+/* present} and NEVER a path (absolute or home-relative), and no Memory        */
+/* content is ever included. `.strict()` rejects any unexpected field (e.g. a  */
+/* sneaked-in path), which the no-leak tests rely on.                          */
+/* -------------------------------------------------------------------------- */
+
+export const machineCheckinSkillSchema = z
+  .object({
+    skillId: z.string().min(1).max(300),
+    installedVersion: z.string().min(1).max(100),
+  })
+  .strict();
+
+export const machineCheckinProjectSchema = z
+  .object({
+    projectId: z.string().min(1).max(100),
+    present: z.boolean(),
+  })
+  .strict();
+
+export const machineCheckinRequestSchema = z
+  .object({
+    machineId: z.uuid(),
+    name: z.string().min(1).max(200).optional(),
+    platform: z.string().min(1).max(100).optional(),
+    arch: z.string().min(1).max(50).optional(),
+    agentsDetected: z.array(z.string().min(1).max(50)).max(20).optional(),
+    memoryBackedUp: z.boolean(),
+    skills: z.array(machineCheckinSkillSchema).max(2000),
+    projects: z.array(machineCheckinProjectSchema).max(2000),
+  })
+  .strict();
+export const machineCheckinResponseSchema = z.object({ ok: z.literal(true) });
+
+export const machineStateSchema = z.object({
+  machineId: z.uuid(),
+  name: z.string().optional(),
+  platform: z.string().optional(),
+  arch: z.string().optional(),
+  agentsDetected: z.array(z.string()),
+  firstSeenAt: z.iso.datetime({ offset: true }),
+  lastCheckinAt: z.iso.datetime({ offset: true }).nullable(),
+  memoryBackedUp: z.boolean(),
+  skills: z.array(machineCheckinSkillSchema),
+  projects: z.array(machineCheckinProjectSchema),
+});
+export const listMachinesResponseSchema = z.object({
+  machines: z.array(machineStateSchema),
+});
+
 export const cloudErrorCodeSchema = z.enum([
   'not-authenticated',
   'authentication-expired',
@@ -312,3 +366,11 @@ export type CloudErrorCode = z.infer<typeof cloudErrorCodeSchema>;
 export type CloudErrorResponse = z.infer<typeof cloudErrorResponseSchema>;
 export type EnvironmentSyncState = z.infer<typeof environmentSyncStateSchema>;
 export type MachineSyncState = z.infer<typeof machineSyncStateSchema>;
+export type MachineCheckinSkill = z.infer<typeof machineCheckinSkillSchema>;
+export type MachineCheckinProject = z.infer<typeof machineCheckinProjectSchema>;
+export type MachineCheckinRequest = z.infer<typeof machineCheckinRequestSchema>;
+export type MachineCheckinResponse = z.infer<
+  typeof machineCheckinResponseSchema
+>;
+export type MachineState = z.infer<typeof machineStateSchema>;
+export type ListMachinesResponse = z.infer<typeof listMachinesResponseSchema>;
