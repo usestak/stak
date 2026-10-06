@@ -598,8 +598,10 @@ export const createProductMethods = (config: ProductServiceConfig) => {
             label: `Update available for ${skill.name}`,
             ref: skill.skillId,
           });
-      // Project not present on the viewing machine (only a truthful per-machine condition).
-      if (viewing) {
+      // Project not present on the viewing machine — a truthful per-machine condition ONLY once
+      // that machine has checked in. Before a first check-in, presence is UNKNOWN (not absent),
+      // so we must not flag every project as "not on this machine".
+      if (viewing && viewing.lastCheckinAt) {
         const presentIds = new Set(
           viewing.projects.filter((p) => p.present).map((p) => p.projectId),
         );
@@ -712,7 +714,12 @@ export const createProductMethods = (config: ProductServiceConfig) => {
           kind: 'memory-backed-up',
           at: generation.createdAt,
           sourceId: generation.backupId,
-          label: `Memory backup #${generation.generation}`,
+          // Meaningful secondary metadata is the privacy mode (persisted outside ciphertext),
+          // not the internal generation number. No source machine/project is inferred.
+          label:
+            generation.privacyMode === 'protected'
+              ? 'Protected backup'
+              : 'Standard backup',
         });
     for (const machine of await config.repository.listMachineStates(userId))
       if (machine.lastCheckinAt)

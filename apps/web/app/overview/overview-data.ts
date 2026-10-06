@@ -18,9 +18,12 @@ export type OverviewService = Pick<
 /** The web calls the P3 service as the signed-in session user (identity never from input). */
 const webAuth = (userId: string) => ({ userId, tokenId: 'web-session' });
 
+const MAX_CARDS = 4;
+
 export type MachineOption = {
   machineId: string;
-  label: string;
+  name: string;
+  secondary: string;
   statusLabel: string;
 };
 
@@ -29,46 +32,18 @@ export type OverviewSummary = { label: string; value: string; detail: string };
 export type OverviewMachineCard = {
   machineId: string;
   name: string;
-  platform?: string;
-  arch?: string;
+  meta: string;
   status: string;
   dot: 'ready' | 'attention' | 'neutral';
   seen: string;
-  skills: string;
-  projects: string;
-  memory: string;
-  agents: string;
+  checkedIn: boolean;
+  facts: {
+    skills: string;
+    projects: string;
+    memory: string;
+    agents: string;
+  } | null;
 };
-
-export type OverviewView =
-  | { kind: 'error' }
-  | { kind: 'no-machines' }
-  | { kind: 'choose-machine'; machines: MachineOption[] }
-  | {
-      kind: 'ready';
-      viewing: {
-        machineId: string;
-        name: string;
-        statusLabel: string;
-        dot: 'ready' | 'attention' | 'neutral';
-      };
-      machines: MachineOption[];
-      sidebar: SidebarCounts;
-      backedUp: boolean;
-      headline: string;
-      detail: string;
-      attentionCount: number;
-      summaries: {
-        skills: OverviewSummary;
-        memory: OverviewSummary;
-        projects: OverviewSummary;
-        machines: OverviewSummary;
-      };
-      needsAttention: NeedsAttentionView[];
-      activity: ActivityView[];
-      machineCards: OverviewMachineCard[];
-      dockCommand: string;
-    };
 
 export type NeedsAttentionView = {
   kind: NeedsAttention['kind'];
@@ -88,10 +63,45 @@ export type SidebarCounts = {
   stacks: string;
 };
 
+export type OverviewView =
+  | { kind: 'error' }
+  | { kind: 'no-machines' }
+  | { kind: 'choose-machine'; machines: MachineOption[]; anyCheckedIn: boolean }
+  | {
+      kind: 'ready';
+      viewing: {
+        machineId: string;
+        name: string;
+        statusLabel: string;
+        dot: 'ready' | 'attention' | 'neutral';
+      };
+      machines: MachineOption[];
+      sidebar: SidebarCounts;
+      backedUp: boolean;
+      checkedIn: boolean;
+      headline: string;
+      detail: string;
+      attentionCount: number;
+      summaries: {
+        skills: OverviewSummary;
+        memory: OverviewSummary;
+        projects: OverviewSummary;
+        machines: OverviewSummary;
+      };
+      needsAttention: NeedsAttentionView[];
+      activity: ActivityView[];
+      machineCards: OverviewMachineCard[];
+      overflowCount: number;
+      machineTotal: number;
+      dockCommand: string;
+    };
+
 const relative = (iso: string | null): string => {
   if (!iso) return 'never';
-  const then = new Date(iso).getTime();
-  const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+  const secs = Math.max(
+    0,
+    Math.round((Date.now() - new Date(iso).getTime()) / 1000),
+  );
   if (secs < 90) return 'just now';
   const mins = Math.round(secs / 60);
   if (mins < 90) return `${mins} min ago`;
@@ -101,12 +111,27 @@ const relative = (iso: string | null): string => {
   return `${days} day${days === 1 ? '' : 's'} ago`;
 };
 
-const machineStatusLabel = (m: MachineSummary): string => {
-  if (m.status === 'never-checked-in') return 'Never checked in';
-  if (m.status === 'updates-waiting') return 'Updates waiting';
-  if (m.status === 'up-to-date')
-    return `Up to date · ${relative(m.lastCheckinAt)}`;
-  return `Last seen ${relative(m.lastCheckinAt)}`;
+const displayName = (m: MachineSummary): string => m.name ?? 'Unnamed machine';
+const shortId = (id: string) => id.slice(0, 8);
+const checkedIn = (m: MachineSummary): boolean => m.lastCheckinAt !== null;
+
+const metaLine = (m: MachineSummary): string => {
+  const hw = [m.platform, m.arch].filter(Boolean).join(' · ');
+  // Platform/arch arrive at first check-in; before that the short id is the only safe context.
+  return hw || `ID ${shortId(m.machineId)}`;
+};
+
+const statusLabel = (m: MachineSummary): string => {
+  switch (m.status) {
+    case 'never-checked-in':
+      return 'No check-in yet';
+    case 'updates-waiting':
+      return 'Updates waiting';
+    case 'up-to-date':
+      return `Up to date · ${relative(m.lastCheckinAt)}`;
+    default:
+      return `Last seen ${relative(m.lastCheckinAt)}`;
+  }
 };
 const machineDot = (m: MachineSummary): 'ready' | 'attention' | 'neutral' =>
   m.status === 'up-to-date'
@@ -114,6 +139,28 @@ const machineDot = (m: MachineSummary): 'ready' | 'attention' | 'neutral' =>
     : m.status === 'updates-waiting'
       ? 'attention'
       : 'neutral';
+
+const option = (m: MachineSummary): MachineOption => ({
+  machineId: m.machineId,
+  name: displayName(m),
+  secondary: `${metaLine(m)} · ${statusLabel(m)}`,
+  statusLabel: statusLabel(m),
+});
+
+/** Overview order: attention first (updates waiting), then most recently checked in, then
+ *  checked-in machines by recency, then never-checked-in last. */
+const sortForOverview = (a: MachineSummary, b: MachineSummary): number => {
+  const rank = (m: MachineSummary) =>
+    m.status === 'updates-waiting'
+      ? 0
+      : m.status === 'never-checked-in'
+        ? 3
+        : 1;
+  const ra = rank(a);
+  const rb = rank(b);
+  if (ra !== rb) return ra - rb;
+  return (b.lastCheckinAt ?? '').localeCompare(a.lastCheckinAt ?? '');
+};
 
 const attentionView = (item: NeedsAttention): NeedsAttentionView => {
   switch (item.kind) {
@@ -167,7 +214,7 @@ const activityView = (item: ActivityItem): ActivityView => ({
 
 const memorySummary = (
   overview: OverviewReadModel,
-  projects: ProjectSummary[],
+  projectCount: number,
 ): OverviewSummary => {
   if (!overview.lastBackupAt)
     return {
@@ -175,18 +222,46 @@ const memorySummary = (
       value: 'Not backed up yet',
       detail: 'STAK has no backup of your agent Memory yet.',
     };
-  const mode = overview.memory.mode;
-  if (mode === 'protected')
-    // Protected: never per-file counts from ciphertext. Only the safe project count.
+  if (overview.memory.mode === 'protected')
     return {
       label: 'MEMORY',
       value: 'Backed up',
-      detail: `${projects.length} project${projects.length === 1 ? '' : 's'} known to STAK. Protected: encrypted on your machine.`,
+      detail: `${projectCount} project${projectCount === 1 ? '' : 's'} known to STAK. Protected: encrypted on your machine.`,
     };
   return {
     label: 'MEMORY',
     value: 'Backed up',
     detail: `Standard: private to your account; STAK's service can read it to deliver it.`,
+  };
+};
+
+const machineCard = (m: MachineSummary): OverviewMachineCard => {
+  const base = {
+    machineId: m.machineId,
+    name: displayName(m),
+    meta: metaLine(m),
+    status: statusLabel(m),
+    dot: machineDot(m),
+  };
+  if (!checkedIn(m))
+    // Unknown looks unknown — one coherent empty state, never measured-looking zeros.
+    return { ...base, seen: '', checkedIn: false, facts: null };
+  return {
+    ...base,
+    seen:
+      m.status === 'up-to-date'
+        ? `Checked in ${relative(m.lastCheckinAt)}`
+        : `Last seen ${relative(m.lastCheckinAt)}`,
+    checkedIn: true,
+    facts: {
+      skills:
+        m.updatesWaiting.length === 0
+          ? 'All skills at approved version'
+          : `${m.updatesWaiting.length} update${m.updatesWaiting.length === 1 ? '' : 's'} waiting`,
+      projects: `${m.projectsPresent} project${m.projectsPresent === 1 ? '' : 's'} present`,
+      memory: m.memoryBackedUp ? 'Memory backed up' : 'Memory not backed up',
+      agents: m.agentsDetected.join(' · ') || 'No agents detected',
+    },
   };
 };
 
@@ -202,24 +277,23 @@ export const loadOverview = async (
   } catch {
     return { kind: 'error' };
   }
-  const machines = machinesModel.machines;
-  if (machines.length === 0) return { kind: 'no-machines' };
+  // Revoked machines are audit records — never a selectable viewing context, never counted.
+  const active = machinesModel.machines.filter((m) => !m.revoked);
+  if (active.length === 0) return { kind: 'no-machines' };
 
-  const options: MachineOption[] = machines.map((m) => ({
-    machineId: m.machineId,
-    label: m.name ?? m.machineId.slice(0, 8),
-    statusLabel: machineStatusLabel(m),
-  }));
+  const ordered = [...active].sort(sortForOverview);
+  const options = ordered.map(option);
+  const anyCheckedIn = active.some(checkedIn);
 
-  // URL machine context takes precedence when valid; else a single machine; else ask.
   const requestedValid =
-    requestedMachine && machines.some((m) => m.machineId === requestedMachine);
+    requestedMachine && active.some((m) => m.machineId === requestedMachine);
   const viewingId = requestedValid
     ? requestedMachine
-    : machines.length === 1
-      ? machines[0]?.machineId
+    : active.length === 1
+      ? active[0]?.machineId
       : undefined;
-  if (!viewingId) return { kind: 'choose-machine', machines: options };
+  if (!viewingId)
+    return { kind: 'choose-machine', machines: options, anyCheckedIn };
 
   let overview: OverviewReadModel;
   let projects: ProjectSummary[];
@@ -231,113 +305,133 @@ export const loadOverview = async (
     overview = o;
     projects = p.projects;
   } catch (error) {
-    // An unknown/not-owned machine id fails safely as "choose", not a hard error.
     if (
       error instanceof CloudServiceError &&
       error.code === 'machine-not-found'
     )
-      return { kind: 'choose-machine', machines: options };
+      return { kind: 'choose-machine', machines: options, anyCheckedIn };
     return { kind: 'error' };
   }
 
-  const viewing = machines.find(
+  const viewing = active.find(
     (m) => m.machineId === viewingId,
   ) as MachineSummary;
+  const viewingName = displayName(viewing);
+  const isCheckedIn = checkedIn(viewing);
   const attentionCount = overview.needsAttention.length;
   const presentHere = projects.filter((p) =>
     p.presentOn.includes(viewingId),
   ).length;
-  const viewingName = viewing.name ?? viewingId.slice(0, 8);
+  const projectTotal = overview.projects.total;
+  const skillTotal = overview.skills.total;
+  const readyCount = Math.max(
+    0,
+    skillTotal - overview.skills.paused - viewing.updatesWaiting.length,
+  );
+  const allCurrent = active.every((m) => m.status === 'up-to-date');
+  const updatesWaitingMachines = active.filter(
+    (m) => m.status === 'updates-waiting',
+  ).length;
 
-  const headline = overview.lastBackupAt
-    ? 'Your STAK is backed up.'
-    : "Your STAK isn't backed up yet.";
-  const attentionClause =
-    attentionCount > 0
-      ? ` ${attentionCount} thing${attentionCount === 1 ? '' : 's'} need${attentionCount === 1 ? 's' : ''} you.`
+  // Status sentence — account-level backup fact + a truthful machine/fleet clause.
+  const headline = `${overview.lastBackupAt ? 'Your STAK is backed up.' : "Your STAK isn't backed up yet."}${attentionCount > 0 ? ` ${attentionCount} thing${attentionCount === 1 ? '' : 's'} need${attentionCount === 1 ? 's' : ''} you.` : ''}`;
+  const backupClause = overview.lastBackupAt
+    ? `Latest Memory backup ${relative(overview.lastBackupAt)}.`
+    : 'No Memory backup yet.';
+  const machineClause = !isCheckedIn
+    ? `${viewingName} hasn't checked in yet.`
+    : viewing.status === 'updates-waiting'
+      ? `${viewingName} has updates waiting.`
+      : viewing.status === 'up-to-date'
+        ? `${viewingName} is up to date.`
+        : `${viewingName} last checked in ${relative(viewing.lastCheckinAt)}.`;
+  const fleetClause = allCurrent
+    ? ' All machines are current.'
+    : updatesWaitingMachines > 0
+      ? ` ${updatesWaitingMachines} machine${updatesWaitingMachines === 1 ? '' : 's'} ${updatesWaitingMachines === 1 ? 'has' : 'have'} updates waiting.`
       : '';
+
+  const cards = ordered.slice(0, MAX_CARDS).map(machineCard);
 
   return {
     kind: 'ready',
     viewing: {
       machineId: viewingId,
       name: viewingName,
-      statusLabel: machineStatusLabel(viewing),
+      statusLabel: statusLabel(viewing),
       dot: machineDot(viewing),
     },
     machines: options,
     sidebar: {
-      overview: {
-        n: attentionCount > 0 ? String(attentionCount) : '—',
-        tone: attentionCount > 0 ? 'attention' : 'neutral',
-      },
-      skills: String(overview.skills.total),
+      overview:
+        attentionCount > 0
+          ? { n: String(attentionCount), tone: 'attention' }
+          : { n: '', tone: 'neutral' },
+      skills: String(skillTotal),
       memory: overview.lastBackupAt
         ? { n: 'Backed up', tone: 'ready' }
-        : { n: '—', tone: 'neutral' },
-      projects: String(overview.projects.total),
-      machines: String(overview.machines.total),
-      // Stacks count is not part of the Overview aggregate; shown blank until the Stacks phase.
-      stacks: '—',
+        : { n: '', tone: 'neutral' },
+      projects: projectTotal > 0 ? String(projectTotal) : '',
+      machines: String(active.length),
+      stacks: '',
     },
     backedUp: overview.lastBackupAt !== null,
-    headline: `${headline}${attentionClause}`,
-    detail: `${viewingName} ${overview.lastBackupAt ? `backed up ${relative(overview.lastBackupAt)}` : 'has no backup yet'}. ${overview.machines.updatesWaiting > 0 ? `${overview.machines.updatesWaiting} machine${overview.machines.updatesWaiting === 1 ? ' has' : 's have'} updates waiting.` : 'All machines are current.'}`,
+    checkedIn: isCheckedIn,
+    headline,
+    detail: `${backupClause} ${machineClause}${fleetClause}`,
     attentionCount,
     summaries: {
-      skills: {
-        label: 'SKILLS',
-        value: `${overview.skills.total} ready`,
-        detail:
-          overview.skills.updatesAvailable > 0
-            ? `Instructions your agents follow. ${overview.skills.updatesAvailable} update${overview.skills.updatesAvailable === 1 ? '' : 's'} to review.`
-            : 'Instructions your agents follow.',
-      },
-      memory: memorySummary(overview, projects),
-      projects: {
-        label: 'PROJECTS',
-        value: `${presentHere} of ${overview.projects.total} here`,
-        detail:
-          overview.projects.total - presentHere > 0
-            ? `${overview.projects.total - presentHere} not on ${viewingName}. Their Memory is safe.`
-            : 'All present on this machine.',
-      },
+      skills: isCheckedIn
+        ? {
+            label: 'SKILLS',
+            value: `${readyCount} ready`,
+            detail:
+              overview.skills.updatesAvailable > 0
+                ? `Instructions your agents follow. ${overview.skills.updatesAvailable} update${overview.skills.updatesAvailable === 1 ? '' : 's'} to review.`
+                : 'Instructions your agents follow.',
+          }
+        : {
+            label: 'SKILLS',
+            value: `${skillTotal} skill${skillTotal === 1 ? '' : 's'} in STAK`,
+            detail: "This machine hasn't reported which are installed yet.",
+          },
+      memory: memorySummary(overview, projectTotal),
+      projects:
+        projectTotal === 0
+          ? {
+              label: 'PROJECTS',
+              value: 'No projects yet',
+              detail:
+                'Projects appear once an agent writes Memory and you back it up.',
+            }
+          : isCheckedIn
+            ? {
+                label: 'PROJECTS',
+                value: `${presentHere} of ${projectTotal} here`,
+                detail:
+                  projectTotal - presentHere > 0
+                    ? `${projectTotal - presentHere} not on ${viewingName}. Their Memory is safe.`
+                    : 'All present on this machine.',
+              }
+            : {
+                label: 'PROJECTS',
+                value: `${projectTotal} project${projectTotal === 1 ? '' : 's'}`,
+                detail: "This machine hasn't reported which are here yet.",
+              },
       machines: {
         label: 'MACHINES',
-        value: `${overview.machines.total} machine${overview.machines.total === 1 ? '' : 's'}`,
+        value: `${active.length} machine${active.length === 1 ? '' : 's'}`,
         detail:
-          overview.machines.total === 1
+          active.length === 1
             ? `Your STAK lives on ${viewingName} alone.`
             : 'If one is lost, restore on another.',
       },
     },
     needsAttention: overview.needsAttention.map(attentionView),
     activity: overview.recentActivity.map(activityView),
-    machineCards: machines.map((m) => ({
-      machineId: m.machineId,
-      name: m.name ?? m.machineId.slice(0, 8),
-      ...(m.platform ? { platform: m.platform } : {}),
-      ...(m.arch ? { arch: m.arch } : {}),
-      status:
-        m.status === 'updates-waiting'
-          ? 'Updates waiting'
-          : m.status === 'up-to-date'
-            ? 'Up to date'
-            : m.status === 'never-checked-in'
-              ? 'Never checked in'
-              : 'Last seen',
-      dot: machineDot(m),
-      seen:
-        m.status === 'never-checked-in'
-          ? 'No check-in yet'
-          : m.status === 'up-to-date'
-            ? `Checked in ${relative(m.lastCheckinAt)}`
-            : `Last seen ${relative(m.lastCheckinAt)}`,
-      skills: `${m.updatesWaiting.length === 0 ? 'all skills' : `${m.updatesWaiting.length} waiting`}`,
-      projects: `${m.projectsPresent} present`,
-      memory: m.memoryBackedUp ? 'Memory backed up' : 'Memory not backed up',
-      agents: m.agentsDetected.join(' · ') || 'No agents detected',
-    })),
+    machineCards: cards,
+    overflowCount: Math.max(0, active.length - cards.length),
+    machineTotal: active.length,
     dockCommand: 'stak memory backup',
   };
 };

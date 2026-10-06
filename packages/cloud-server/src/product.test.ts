@@ -716,7 +716,7 @@ describe('P3 stacks / activity / overview', () => {
     });
     const body = (await env.call('GET', 'activity', { token: alice }))
       .jsonBody as {
-      items: Array<{ kind: string }>;
+      items: Array<{ kind: string; label?: string }>;
     };
     const kinds = body.items.map((i) => i.kind);
     expect(kinds).toContain('memory-backed-up');
@@ -727,6 +727,10 @@ describe('P3 stacks / activity / overview', () => {
         ['memory-backed-up', 'machine-checked-in'].includes(k),
       ),
     ).toBe(true);
+    // The backup label is the privacy mode (meaningful), not an internal "#N" number.
+    const backup = body.items.find((i) => i.kind === 'memory-backed-up');
+    expect(backup?.label).toBe('Standard backup');
+    expect(backup?.label).not.toMatch(/#\d/);
   });
 
   it('overview needs-attention: Protected without recovery + viewing-machine project gap', async () => {

@@ -16,10 +16,10 @@
   --red: #e5776a;
   --sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
-  background: #232220;
+  background: var(--bg);
   color: var(--ink);
   font-family: var(--sans);
-  min-height: 100vh;
+  min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -27,10 +27,11 @@
   box-sizing: border-box;
 }
 
+/* The application frame fills the viewport. 1280px is the DESIGN REFERENCE width, not a
+   production max — no centered wrapper, no outer gutters on wide desktops. */
 .stak-frame {
-  max-width: 1280px;
-  margin: 0 auto;
-  min-height: 100vh;
+  width: 100%;
+  min-height: 100dvh;
   background: var(--bg);
   display: flex;
 }
@@ -88,13 +89,18 @@
   border-radius: 6px;
   font-size: 13.5px;
   color: var(--faint);
-  text-decoration: none;
   background: none;
   border: none;
   width: 100%;
   text-align: left;
   font-family: var(--sans);
   cursor: pointer;
+}
+/* Nav labels are never underlined — the global a:hover underline would double the right-side
+   metadata (the "double dash"). */
+.stak-nav-item,
+.stak-nav-item:hover {
+  text-decoration: none;
 }
 .stak-nav-item .n {
   font: 500 11px var(--mono);
@@ -300,22 +306,69 @@
   border-color: var(--faint);
 }
 
-.stak-select {
-  appearance: none;
+/* Custom machine selector (dark listbox) */
+.stak-ms {
+  position: relative;
+}
+.stak-ms-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
   background: none;
   border: none;
+  padding: 0;
   color: var(--ink);
   font: 500 13.5px var(--sans);
   cursor: pointer;
-  padding: 0;
-  width: 100%;
+}
+.stak-ms-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stak-ms-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: -4px;
+  right: -4px;
+  z-index: 20;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: #171615;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  max-height: 280px;
+  overflow-y: auto;
+}
+.stak-ms-opt {
   display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.stak-ms-opt.active,
+.stak-ms-opt[aria-selected='true'] {
+  background: #1e1d1b;
+}
+.stak-ms-opt-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+.stak-ms-opt-sec {
+  font: 11px var(--mono);
+  color: var(--dim);
 }
 
 .stak :focus-visible,
 .stak-nav-item:focus-visible,
 .stak-copy:focus-visible,
-.stak-select:focus-visible {
+.stak-ms-trigger:focus-visible {
   outline: 2px solid var(--orange);
   outline-offset: 2px;
   border-radius: 4px;

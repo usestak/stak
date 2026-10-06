@@ -64,18 +64,7 @@ export function AppSidebar({
       {viewing ? (
         <div className="stak-viewing">
           <span className="stak-viewing-label">VIEWING AS</span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <MachineSelector
-              current={viewing.machineId}
-              options={machines.map((m) => ({
-                machineId: m.machineId,
-                label: m.label,
-              }))}
-            />
-            <span style={{ fontSize: 11, color: '#85817a' }} aria-hidden>
-              ▾
-            </span>
-          </span>
+          <MachineSelector current={viewing.machineId} options={machines} />
           <span className="stak-status" style={{ color: '#c9c5bc' }}>
             <span
               className="stak-dot"
@@ -97,12 +86,14 @@ export function AppSidebar({
               aria-current={active === item.key ? 'page' : undefined}
             >
               <span>{item.label}</span>
-              <span
-                className="n"
-                style={{ color: DOT[item.tone] ?? '#85817a' }}
-              >
-                {item.n}
-              </span>
+              {item.n ? (
+                <span
+                  className="n"
+                  style={{ color: DOT[item.tone] ?? '#85817a' }}
+                >
+                  {item.n}
+                </span>
+              ) : null}
             </Link>
           ) : (
             <div
@@ -112,12 +103,14 @@ export function AppSidebar({
               title="Arrives in a later phase"
             >
               <span>{item.label}</span>
-              <span
-                className="n"
-                style={{ color: DOT[item.tone] ?? '#85817a' }}
-              >
-                {item.n}
-              </span>
+              {item.n ? (
+                <span
+                  className="n"
+                  style={{ color: DOT[item.tone] ?? '#85817a' }}
+                >
+                  {item.n}
+                </span>
+              ) : null}
             </div>
           ),
         )}

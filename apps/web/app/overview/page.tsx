@@ -16,12 +16,12 @@ import {
 export const dynamic = 'force-dynamic';
 
 const PLACEHOLDER_COUNTS: SidebarCounts = {
-  overview: { n: '—', tone: 'neutral' },
-  skills: '—',
-  memory: { n: '—', tone: 'neutral' },
-  projects: '—',
-  machines: '—',
-  stacks: '—',
+  overview: { n: '', tone: 'neutral' },
+  skills: '',
+  memory: { n: '', tone: 'neutral' },
+  projects: '',
+  machines: '',
+  stacks: '',
 };
 
 const DOT: Record<string, string> = {
@@ -77,6 +77,7 @@ const MachineCard = ({ card }: { card: OverviewMachineCard }) => (
         display: 'flex',
         justifyContent: 'space-between',
         fontSize: 13.5,
+        gap: 10,
       }}
     >
       <span style={{ fontWeight: 600 }}>{card.name}</span>
@@ -89,11 +90,23 @@ const MachineCard = ({ card }: { card: OverviewMachineCard }) => (
         {card.status}
       </span>
     </span>
-    <span style={{ fontSize: 12, color: '#a19d94' }}>{card.seen}</span>
-    <span style={{ fontSize: 12, color: '#85817a' }}>
-      {card.skills} · {card.projects} · {card.memory}
-    </span>
-    <span style={{ fontSize: 12, color: '#85817a' }}>{card.agents}</span>
+    <span style={{ fontSize: 12, color: '#85817a' }}>{card.meta}</span>
+    {card.checkedIn && card.facts ? (
+      <>
+        <span style={{ fontSize: 12, color: '#a19d94' }}>{card.seen}</span>
+        <span style={{ fontSize: 12, color: '#85817a' }}>
+          {card.facts.skills} · {card.facts.projects} · {card.facts.memory}
+        </span>
+        <span style={{ fontSize: 12, color: '#85817a' }}>
+          {card.facts.agents}
+        </span>
+      </>
+    ) : (
+      <span style={{ fontSize: 12, color: '#85817a', lineHeight: 1.5 }}>
+        This machine hasn&apos;t reported its STAK state yet. Run{' '}
+        <span style={{ fontFamily: 'var(--mono)' }}>stak status</span> on it.
+      </span>
+    )}
   </div>
 );
 
@@ -101,12 +114,10 @@ function Notice({
   handle,
   title,
   children,
-  choose,
 }: {
   handle: string;
   title: string;
   children: React.ReactNode;
-  choose?: MachineOption[];
 }) {
   return (
     <div className="stak-frame">
@@ -121,34 +132,24 @@ function Notice({
         <div className="stak-notice">
           <h1>{title}</h1>
           {children}
-          {choose ? (
-            <ul
-              style={{
-                listStyle: 'none',
-                padding: 0,
-                margin: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 6,
-              }}
-            >
-              {choose.map((m) => (
-                <li key={m.machineId}>
-                  <a
-                    className="stak-pill"
-                    href={`/overview?machine=${encodeURIComponent(m.machineId)}`}
-                  >
-                    Viewing as {m.label} — {m.statusLabel}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          ) : null}
         </div>
       </main>
     </div>
   );
 }
+
+const ChooseRow = ({ m }: { m: MachineOption }) => (
+  <a
+    href={`/overview?machine=${encodeURIComponent(m.machineId)}`}
+    className="stak-mcard"
+    style={{ textDecoration: 'none', color: 'inherit' }}
+  >
+    <span style={{ fontWeight: 600, fontSize: 13.5 }}>{m.name}</span>
+    <span style={{ fontSize: 12, font: '11px var(--mono)', color: '#85817a' }}>
+      {m.secondary}
+    </span>
+  </a>
+);
 
 export default async function OverviewPage({
   searchParams,
@@ -183,17 +184,25 @@ export default async function OverviewPage({
     );
   if (view.kind === 'choose-machine')
     return (
-      <Notice
-        handle={handle}
-        title="Which machine are you viewing?"
-        choose={view.machines}
-      >
+      <Notice handle={handle} title="Choose a machine">
         <p>
-          STAK can&apos;t know which computer you&apos;re at. Pick the machine
-          whose STAK you want to see — or run{' '}
+          STAK shows machine-specific state from that machine&apos;s last CLI
+          check-in. Pick the machine you want to view — or run{' '}
           <code style={{ fontFamily: 'var(--mono)' }}>stak open</code> on a
           machine to jump straight there.
         </p>
+        {!view.anyCheckedIn ? (
+          <p>
+            None of your machines has checked in yet. Run{' '}
+            <code style={{ fontFamily: 'var(--mono)' }}>stak status</code> on
+            the machine you want STAK to inspect, then pick it here.
+          </p>
+        ) : null}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {view.machines.map((m) => (
+            <ChooseRow key={m.machineId} m={m} />
+          ))}
+        </div>
       </Notice>
     );
 
@@ -298,6 +307,19 @@ export default async function OverviewPage({
             {view.machineCards.map((card) => (
               <MachineCard key={card.machineId} card={card} />
             ))}
+            {view.overflowCount > 0 ? (
+              <span
+                className="stak-mcard"
+                aria-disabled="true"
+                style={{
+                  color: '#85817a',
+                  fontSize: 12.5,
+                  textAlign: 'center',
+                }}
+              >
+                +{view.overflowCount} more · {view.machineTotal} machines total
+              </span>
+            ) : null}
             <span style={{ fontSize: 12.5, lineHeight: 1.5, color: '#85817a' }}>
               Machines catch up when you use the CLI on them. Status reflects
               each machine&apos;s last check-in — not a live connection.
