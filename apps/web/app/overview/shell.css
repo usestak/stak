@@ -1,0 +1,345 @@
+/* STAK signed-in shell — Final Contract visual system (dark graphite instrument panel).
+   Palette and spacing match STAK Final Contract.dc.html. Not the generic light globals.css. */
+.stak {
+  --bg: #121211;
+  --panel: #0e0e0d;
+  --ink: #edeae3;
+  --muted: #c9c5bc;
+  --faint: #a19d94;
+  --dim: #85817a;
+  --line: #232220;
+  --line-2: #2a2926;
+  --chip: #34332f;
+  --orange: #ee7a3b;
+  --green: #84cb8e;
+  --amber: #e5b85c;
+  --red: #e5776a;
+  --sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  background: #232220;
+  color: var(--ink);
+  font-family: var(--sans);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+.stak * {
+  box-sizing: border-box;
+}
+
+.stak-frame {
+  max-width: 1280px;
+  margin: 0 auto;
+  min-height: 100vh;
+  background: var(--bg);
+  display: flex;
+}
+
+/* Sidebar */
+.stak-side {
+  width: 216px;
+  flex: none;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 10px;
+  gap: 18px;
+}
+.stak-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px 0;
+}
+.stak-brand b {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.18em;
+}
+.stak-brand span {
+  font: 500 11px var(--mono);
+  color: var(--dim);
+}
+.stak-viewing {
+  margin: 0 2px;
+  padding: 9px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.stak-viewing-label {
+  font: 500 10px var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+.stak-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stak-nav-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13.5px;
+  color: var(--faint);
+  text-decoration: none;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  font-family: var(--sans);
+  cursor: pointer;
+}
+.stak-nav-item .n {
+  font: 500 11px var(--mono);
+  color: var(--dim);
+}
+.stak-nav-item:hover:not([aria-disabled='true']) {
+  background: #171615;
+  color: var(--ink);
+}
+.stak-nav-item[aria-current='page'] {
+  background: #1e1d1b;
+  color: var(--ink);
+  font-weight: 500;
+}
+.stak-nav-item[aria-disabled='true'] {
+  cursor: default;
+}
+.stak-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.stak-foot .docs {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+/* Content */
+.stak-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.stak-head {
+  padding: 30px 32px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.stak-sentence {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.stak-sub {
+  font-size: 14.5px;
+  color: var(--faint);
+  padding-left: 22px;
+}
+.stak-summaries {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-bottom: 1px solid var(--line);
+}
+.stak-sum {
+  padding: 18px 22px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-left: 1px solid var(--line);
+}
+.stak-sum:first-child {
+  border-left: none;
+  padding-left: 32px;
+}
+.stak-sum .k {
+  font: 500 11px var(--mono);
+  color: var(--dim);
+}
+.stak-sum .v {
+  font-size: 19px;
+  font-weight: 600;
+}
+.stak-sum .d {
+  font-size: 12.5px;
+  color: var(--faint);
+  line-height: 1.45;
+}
+.stak-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 330px;
+}
+.stak-col {
+  padding: 22px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  border-right: 1px solid var(--line);
+}
+.stak-col h2,
+.stak-rail h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+.stak-rail {
+  padding: 22px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.stak-list {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+.stak-attn {
+  display: grid;
+  grid-template-columns: 160px 1fr auto;
+  gap: 18px;
+  align-items: center;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+}
+.stak-status {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  font-size: 12.5px;
+}
+.stak-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+.stak-pill {
+  border: 1px solid var(--chip);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: none;
+  cursor: default;
+  font-family: var(--sans);
+}
+.stak-act {
+  display: grid;
+  grid-template-columns: 160px 1fr auto;
+  gap: 18px;
+  padding: 10px 0;
+  border-bottom: 1px solid #1e1d1b;
+  font-size: 13px;
+}
+.stak-mcard {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* Command dock */
+.stak-dock {
+  flex: none;
+  border-top: 1px solid var(--line-2);
+  background: #0b0b0a;
+  padding: 11px 32px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font: 13px var(--mono);
+}
+.stak-dock .scope {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  color: var(--orange);
+}
+.stak-dock .cmd {
+  flex: 1;
+}
+.stak-dock .cmd .p {
+  color: var(--dim);
+}
+.stak-dock .hint {
+  font-size: 12px;
+  color: var(--dim);
+  font-family: var(--sans);
+}
+.stak-copy {
+  font-size: 12px;
+  border: 1px solid var(--chip);
+  padding: 4px 10px;
+  border-radius: 5px;
+  color: var(--ink);
+  background: none;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+.stak-copy:hover {
+  border-color: var(--faint);
+}
+
+.stak-select {
+  appearance: none;
+  background: none;
+  border: none;
+  color: var(--ink);
+  font: 500 13.5px var(--sans);
+  cursor: pointer;
+  padding: 0;
+  width: 100%;
+  display: flex;
+}
+
+.stak :focus-visible,
+.stak-nav-item:focus-visible,
+.stak-copy:focus-visible,
+.stak-select:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.stak-notice {
+  margin: 48px auto;
+  max-width: 560px;
+  padding: 28px 32px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.stak-notice h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+.stak-notice p {
+  margin: 0;
+  color: var(--faint);
+  line-height: 1.55;
+  font-size: 14.5px;
+}

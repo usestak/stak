@@ -1,0 +1,316 @@
+import { redirect } from 'next/navigation';
+
+import { AppSidebar } from '@/app/_components/app-sidebar';
+import { CommandDock } from '@/app/_components/command-dock';
+import { getCloudService } from '@/lib/cloud-service';
+import { displayNameOf, getSessionUser } from '@/lib/session';
+
+import {
+  loadOverview,
+  type MachineOption,
+  type NeedsAttentionView,
+  type OverviewMachineCard,
+  type SidebarCounts,
+} from './overview-data';
+
+export const dynamic = 'force-dynamic';
+
+const PLACEHOLDER_COUNTS: SidebarCounts = {
+  overview: { n: '—', tone: 'neutral' },
+  skills: '—',
+  memory: { n: '—', tone: 'neutral' },
+  projects: '—',
+  machines: '—',
+  stacks: '—',
+};
+
+const DOT: Record<string, string> = {
+  ready: '#84cb8e',
+  attention: '#ee7a3b',
+  neutral: '#a19d94',
+};
+
+const AttentionRow = ({ item }: { item: NeedsAttentionView }) => (
+  <div className="stak-attn">
+    <span
+      className="stak-status"
+      style={{ color: item.dot === 'attention' ? '#ee7a3b' : '#c9c5bc' }}
+    >
+      {item.dot === 'attention' ? (
+        <span
+          className="stak-dot"
+          style={{ background: '#ee7a3b' }}
+          aria-hidden
+        />
+      ) : (
+        <span
+          className="stak-dot"
+          style={{ border: '1.5px solid #8a867e', background: 'transparent' }}
+          aria-hidden
+        />
+      )}
+      {item.statusLabel}
+    </span>
+    <div>
+      <div style={{ fontSize: 14, fontFamily: 'var(--mono)' }}>
+        {item.title}
+      </div>
+      <div style={{ fontSize: 12.5, color: '#a19d94', marginTop: 3 }}>
+        {item.why} {item.action}
+      </div>
+    </div>
+    <span className="stak-pill">{actionLabel(item.kind)}</span>
+  </div>
+);
+
+const actionLabel = (kind: NeedsAttentionView['kind']): string =>
+  kind === 'update-available'
+    ? 'Review changes'
+    : kind === 'project-not-on-machine'
+      ? 'How to map'
+      : 'Details';
+
+const MachineCard = ({ card }: { card: OverviewMachineCard }) => (
+  <div className="stak-mcard">
+    <span
+      style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        fontSize: 13.5,
+      }}
+    >
+      <span style={{ fontWeight: 600 }}>{card.name}</span>
+      <span className="stak-status" style={{ color: '#c9c5bc' }}>
+        <span
+          className="stak-dot"
+          style={{ background: DOT[card.dot] }}
+          aria-hidden
+        />
+        {card.status}
+      </span>
+    </span>
+    <span style={{ fontSize: 12, color: '#a19d94' }}>{card.seen}</span>
+    <span style={{ fontSize: 12, color: '#85817a' }}>
+      {card.skills} · {card.projects} · {card.memory}
+    </span>
+    <span style={{ fontSize: 12, color: '#85817a' }}>{card.agents}</span>
+  </div>
+);
+
+function Notice({
+  handle,
+  title,
+  children,
+  choose,
+}: {
+  handle: string;
+  title: string;
+  children: React.ReactNode;
+  choose?: MachineOption[];
+}) {
+  return (
+    <div className="stak-frame">
+      <AppSidebar
+        active="overview"
+        handle={handle}
+        counts={PLACEHOLDER_COUNTS}
+        viewing={null}
+        machines={[]}
+      />
+      <main className="stak-main">
+        <div className="stak-notice">
+          <h1>{title}</h1>
+          {children}
+          {choose ? (
+            <ul
+              style={{
+                listStyle: 'none',
+                padding: 0,
+                margin: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+              }}
+            >
+              {choose.map((m) => (
+                <li key={m.machineId}>
+                  <a
+                    className="stak-pill"
+                    href={`/overview?machine=${encodeURIComponent(m.machineId)}`}
+                  >
+                    Viewing as {m.label} — {m.statusLabel}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+export default async function OverviewPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ machine?: string }>;
+}) {
+  const user = await getSessionUser();
+  if (!user) redirect('/');
+  const { machine } = await searchParams;
+  const handle = user.githubUsername ?? displayNameOf(user);
+  const view = await loadOverview(getCloudService(), user, machine);
+
+  if (view.kind === 'error')
+    return (
+      <Notice handle={handle} title="Couldn't load your Overview">
+        <p>
+          STAK Cloud didn&apos;t respond. This is a temporary problem, not a
+          change to your data. Reload to try again.
+        </p>
+      </Notice>
+    );
+  if (view.kind === 'no-machines')
+    return (
+      <Notice handle={handle} title="No machines yet">
+        <p>
+          Connect this computer to your account to see your STAK here. In your
+          terminal, run{' '}
+          <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>, then{' '}
+          <code style={{ fontFamily: 'var(--mono)' }}>stak memory backup</code>.
+        </p>
+      </Notice>
+    );
+  if (view.kind === 'choose-machine')
+    return (
+      <Notice
+        handle={handle}
+        title="Which machine are you viewing?"
+        choose={view.machines}
+      >
+        <p>
+          STAK can&apos;t know which computer you&apos;re at. Pick the machine
+          whose STAK you want to see — or run{' '}
+          <code style={{ fontFamily: 'var(--mono)' }}>stak open</code> on a
+          machine to jump straight there.
+        </p>
+      </Notice>
+    );
+
+  return (
+    <div className="stak-frame">
+      <AppSidebar
+        active="overview"
+        handle={handle}
+        counts={view.sidebar}
+        viewing={view.viewing}
+        machines={view.machines}
+      />
+      <main className="stak-main">
+        <div className="stak-head">
+          <div className="stak-sentence">
+            <span
+              className="stak-dot"
+              style={{
+                width: 10,
+                height: 10,
+                background: view.backedUp ? '#84cb8e' : '#e5b85c',
+              }}
+              aria-hidden
+            />
+            <span>{view.headline}</span>
+          </div>
+          <span className="stak-sub">{view.detail}</span>
+        </div>
+
+        <div className="stak-summaries">
+          {[
+            view.summaries.skills,
+            view.summaries.memory,
+            view.summaries.projects,
+            view.summaries.machines,
+          ].map((s) => (
+            <div className="stak-sum" key={s.label}>
+              <span className="k">{s.label}</span>
+              <span className="v">{s.value}</span>
+              <span className="d">{s.detail}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="stak-body">
+          <div className="stak-col">
+            <section
+              style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+            >
+              <h2>Needs attention</h2>
+              {view.needsAttention.length > 0 ? (
+                <div className="stak-list">
+                  {view.needsAttention.map((item) => (
+                    <AttentionRow
+                      key={`${item.kind}:${item.title}`}
+                      item={item}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p
+                  style={{ fontSize: 13, color: '#85817a', margin: '6px 0 0' }}
+                >
+                  Nothing needs you right now.
+                </p>
+              )}
+            </section>
+            <section
+              style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+            >
+              <h2>Recent activity</h2>
+              <div className="stak-list">
+                {view.activity.length > 0 ? (
+                  view.activity.map((a, index) => (
+                    <div className="stak-act" key={index}>
+                      <span style={{ color: '#c9c5bc' }}>{a.what}</span>
+                      <span style={{ color: '#a19d94' }}>{a.detail}</span>
+                      <span
+                        style={{ font: '12px var(--mono)', color: '#85817a' }}
+                      >
+                        {a.when}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <p
+                    style={{
+                      fontSize: 13,
+                      color: '#85817a',
+                      margin: '6px 0 0',
+                    }}
+                  >
+                    Activity appears as you back up Memory and your machines
+                    check in.
+                  </p>
+                )}
+              </div>
+            </section>
+          </div>
+          <aside className="stak-rail">
+            <h2>Machines</h2>
+            {view.machineCards.map((card) => (
+              <MachineCard key={card.machineId} card={card} />
+            ))}
+            <span style={{ fontSize: 12.5, lineHeight: 1.5, color: '#85817a' }}>
+              Machines catch up when you use the CLI on them. Status reflects
+              each machine&apos;s last check-in — not a live connection.
+            </span>
+          </aside>
+        </div>
+
+        <CommandDock
+          machineName={view.viewing.name}
+          command={view.dockCommand}
+          hint="Back up after a long session"
+        />
+      </main>
+    </div>
+  );
+}

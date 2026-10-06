@@ -318,6 +318,10 @@ const runProgram = async (
     skillUpdate: async () => ({ status: 'ok', agents: [] }),
     skillPause: async () => ({ status: 'not-found' }),
     skillResume: async () => ({ status: 'not-found' }),
+    machineId: async () => '00000000-0000-4000-8000-000000000001',
+    openUrl: (machineId) =>
+      `http://localhost:3000/overview?machine=${encodeURIComponent(machineId)}`,
+    openBrowser: async () => undefined,
     memoryBackupPreview: async () => ({
       provider: 'claude',
       native: [],
@@ -2182,5 +2186,76 @@ describe('stak skill lifecycle (P2)', () => {
         reportMachineCheckin,
       }),
     ).rejects.toBeInstanceOf(NotAuthenticatedError);
+  });
+});
+
+describe('stak open (P4)', () => {
+  const MACHINE = '00000000-0000-4000-8000-0000000000a1';
+  const openUrl = (machineId: string) =>
+    `https://app.stak.test/overview?machine=${encodeURIComponent(machineId)}`;
+
+  it('launches the browser at the machine-context URL (no secrets)', async () => {
+    let opened = '';
+    const result = await runProgram(['open'], {
+      machineId: async () => MACHINE,
+      openUrl,
+      openBrowser: async (url) => {
+        opened = url;
+      },
+    });
+    expect(result.exit?.exitCode ?? 0).toBe(0);
+    expect(opened).toBe(`https://app.stak.test/overview?machine=${MACHINE}`);
+    expect(opened).not.toMatch(/token|secret|authorization|bearer/i);
+    expect(result.output).toContain(MACHINE);
+  });
+
+  it('--print emits the URL and does NOT launch a browser', async () => {
+    let launched = false;
+    const result = await runProgram(['open', '--print'], {
+      machineId: async () => MACHINE,
+      openUrl,
+      openBrowser: async () => {
+        launched = true;
+      },
+    });
+    expect(launched).toBe(false);
+    expect(result.output.trim()).toBe(
+      `https://app.stak.test/overview?machine=${MACHINE}`,
+    );
+  });
+
+  it('fails clearly when the machine identity cannot be determined', async () => {
+    await expect(
+      runProgram(['open'], {
+        machineId: async () => {
+          throw new Error('Machine identity is corrupt or unreadable.');
+        },
+        openUrl,
+        openBrowser: async () => undefined,
+      }),
+    ).rejects.toThrow(/machine identity/i);
+  });
+
+  it('surfaces a browser-launch failure', async () => {
+    await expect(
+      runProgram(['open'], {
+        machineId: async () => MACHINE,
+        openUrl,
+        openBrowser: async () => {
+          throw new Error('no browser');
+        },
+      }),
+    ).rejects.toThrow('no browser');
+  });
+
+  it('does not check in (opening the browser mutates no machine state)', async () => {
+    const reportMachineCheckin = vi.fn(async () => undefined);
+    await runProgram(['open'], {
+      machineId: async () => MACHINE,
+      openUrl,
+      openBrowser: async () => undefined,
+      reportMachineCheckin,
+    });
+    expect(reportMachineCheckin).not.toHaveBeenCalled();
   });
 });

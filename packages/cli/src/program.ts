@@ -72,7 +72,12 @@ import {
   reportCheckin,
 } from './cloud/checkin.js';
 import { resolveMemoryProjects } from './memory/resolve.js';
-import { resolveCloudBaseUrl } from './cloud/config.js';
+import {
+  buildOpenUrl,
+  resolveCloudAppUrl,
+  resolveCloudBaseUrl,
+} from './cloud/config.js';
+import { registerOpenCommand } from './commands/open.js';
 import { stackCloudRemoteMemoryBackend } from './memory/cloud-backend.js';
 import {
   readBackupSupersession,
@@ -275,6 +280,9 @@ export type ProgramDependencies = {
   skillUpdate(options: { selector?: string }): Promise<SkillUpdateResult>;
   skillPause(options: { selector: string }): Promise<SetSkillPausedResult>;
   skillResume(options: { selector: string }): Promise<SetSkillPausedResult>;
+  machineId(): Promise<string>;
+  openUrl(machineId: string): string;
+  openBrowser(url: string): Promise<void>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
   /**
@@ -431,6 +439,26 @@ const propagateProjectLifecycle = async (
   } catch {
     return 'failed';
   }
+};
+
+/**
+ * Launch the OS default browser at a URL, detached, without blocking or capturing output. No
+ * network call of our own; the browser handles everything (including web sign-in if needed).
+ */
+const launchBrowser = async (url: string): Promise<void> => {
+  const { spawn } = await import('node:child_process');
+  const [command, args] =
+    process.platform === 'win32'
+      ? (['cmd', ['/c', 'start', '', url]] as const)
+      : process.platform === 'darwin'
+        ? (['open', [url]] as const)
+        : (['xdg-open', [url]] as const);
+  const child = spawn(command, [...args], {
+    stdio: 'ignore',
+    detached: true,
+    windowsHide: true,
+  });
+  child.unref();
 };
 
 const defaultDependencies: ProgramDependencies = {
@@ -692,6 +720,13 @@ const defaultDependencies: ProgramDependencies = {
     setSkillPaused({ stackHome, selector, paused: true }),
   skillResume: ({ selector }) =>
     setSkillPaused({ stackHome, selector, paused: false }),
+  // `stak open` — this machine's stable id → the web Overview URL (machine id only). Reading
+  // the identity fails clearly on corrupt/ambiguous state; no network call, no mutation.
+  machineId: async () =>
+    (await getOrCreateMachineIdentity({ stackHome })).machineId,
+  openUrl: (machineId) =>
+    buildOpenUrl(resolveCloudAppUrl({ env: process.env }), machineId),
+  openBrowser: launchBrowser,
   confirm: async (message) => {
     if (!process.stdin.isTTY) return false;
     const prompt = createInterface({
@@ -818,5 +853,6 @@ export const createProgram = (
   registerMemoryCommand(program, dependencies);
   registerProjectCommand(program, dependencies);
   registerSkillCommand(program, dependencies);
+  registerOpenCommand(program, dependencies);
   return program;
 };
