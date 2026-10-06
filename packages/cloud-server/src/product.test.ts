@@ -1142,3 +1142,118 @@ describe('P3 delete Cloud Memory retry cleans the orphaned payload', () => {
     expect((await call('POST', 'memory/delete', { token })).status).toBe(200);
   });
 });
+
+/* ------------------- REVOKED EXCLUSION + STALE NEVER-CHECKED-IN (P4 pass 2) ------------------- */
+
+describe('P3 revoked machines excluded from active calculations', () => {
+  it('a revoked machine is excluded from machines.total, updatesWaiting, and viewing context', async () => {
+    const env = setup();
+    const alice = await env.signIn('alice', MACHINE_A);
+    const MACHINE_B = '00000000-0000-4000-8000-0000000000b2';
+    await env.call('POST', 'machines/checkin', {
+      token: alice,
+      body: {
+        machineId: MACHINE_A,
+        memoryBackedUp: true,
+        skills: [],
+        projects: [],
+      },
+    });
+    await env.signIn('alice', MACHINE_B);
+    await env.call('POST', 'machines/checkin', {
+      token: alice,
+      body: {
+        machineId: MACHINE_B,
+        memoryBackedUp: true,
+        skills: [],
+        projects: [],
+      },
+    });
+    await env.call('POST', `machines/${MACHINE_B}/revoke`, { token: alice });
+
+    const overview = (
+      await env.call('GET', `overview?machine=${MACHINE_A}`, { token: alice })
+    ).jsonBody as { machines: { total: number } };
+    expect(overview.machines.total).toBe(1); // only the active machine counts
+
+    // Requesting the revoked machine as viewing context fails safely (not-found), never
+    // silently selects it.
+    const res = await env.call('GET', `overview?machine=${MACHINE_B}`, {
+      token: alice,
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('a revoked machine never generates a stale-machine Needs-attention item', async () => {
+    const env = setup();
+    const MACHINE_D = '00000000-0000-4000-8000-0000000000d4';
+    const tokenForA = await env.signIn('alice', MACHINE_A);
+    await env.call('POST', 'machines/checkin', {
+      token: tokenForA,
+      body: {
+        machineId: MACHINE_A,
+        memoryBackedUp: true,
+        skills: [],
+        projects: [],
+      },
+    });
+    env.setClock('2026-11-10T00:00:00.000Z'); // 36 days later: would be stale if active
+    // Revoking the machine also revokes the token bound to it — sign in again with a second
+    // machine to get a live token for querying the account afterward.
+    await env.call('POST', `machines/${MACHINE_A}/revoke`, {
+      token: tokenForA,
+    });
+    const tokenForD = await env.signIn('alice', MACHINE_D);
+    await env.call('POST', 'machines/checkin', {
+      token: tokenForD,
+      body: {
+        machineId: MACHINE_D,
+        memoryBackedUp: true,
+        skills: [],
+        projects: [],
+      },
+    });
+    const overview = (await env.call('GET', 'overview', { token: tokenForD }))
+      .jsonBody as { needsAttention: Array<{ kind: string; ref?: string }> };
+    expect(overview.needsAttention.some((n) => n.ref === MACHINE_A)).toBe(
+      false,
+    );
+  });
+});
+
+describe('P3 never-checked-in staleness uses firstSeenAt with a grace period', () => {
+  it('a brand-new login is not flagged stale', async () => {
+    const env = setup();
+    const alice = await env.signIn('alice', MACHINE_A);
+    const body = (await env.call('GET', 'overview', { token: alice }))
+      .jsonBody as { needsAttention: Array<{ kind: string }> };
+    expect(body.needsAttention.some((n) => n.kind === 'machine-stale')).toBe(
+      false,
+    );
+  });
+
+  it('a machine authorized 30+ days ago that never checked in becomes eligible for attention', async () => {
+    const env = setup();
+    const alice = await env.signIn('alice', MACHINE_A);
+    env.setClock('2026-11-10T00:00:00.000Z'); // 36 days after signIn, still no check-in
+    const overview = (await env.call('GET', 'overview', { token: alice }))
+      .jsonBody as {
+      needsAttention: Array<{ kind: string; ref?: string; label: string }>;
+    };
+    const item = overview.needsAttention.find(
+      (n) => n.kind === 'machine-stale' && n.ref === MACHINE_A,
+    );
+    expect(item).toBeDefined();
+    expect(item?.label.toLowerCase()).toContain('never checked in');
+  });
+
+  it('firstSeenAt is exposed on the machines read model', async () => {
+    const env = setup();
+    const alice = await env.signIn('alice', MACHINE_A);
+    const list = (await env.call('GET', 'machines', { token: alice }))
+      .jsonBody as {
+      machines: Array<{ machineId: string; firstSeenAt: string }>;
+    };
+    expect(list.machines[0]?.firstSeenAt).toBe('2026-10-05T00:00:00.000Z');
+  });
+});

@@ -288,6 +288,18 @@ export const supabaseRepository = (): CloudRepository &
     },
 
     upsertMachine: async (record: CloudMachineRecord) => {
+      // Preserve the ORIGINAL authorization time: a later login/push must not reset
+      // first_seen_at to "now" (it previously did — that corrupted the audit trail and the
+      // never-checked-in staleness/sort rules that key off it).
+      const { data: existingRow } = await db()
+        .from('machines')
+        .select('first_seen_at')
+        .eq('user_id', record.userId)
+        .eq('machine_id', record.machineId)
+        .maybeSingle();
+      const preservedFirstSeenAt =
+        (existingRow as { first_seen_at?: string } | null)?.first_seen_at ??
+        record.firstSeenAt;
       await db()
         .from('machines')
         .upsert({
@@ -295,27 +307,46 @@ export const supabaseRepository = (): CloudRepository &
           machine_id: record.machineId,
           platform: record.platform ?? null,
           arch: record.arch ?? null,
-          first_seen_at: record.firstSeenAt,
+          first_seen_at: preservedFirstSeenAt,
           last_synced_at: record.lastSyncedAt ?? null,
         });
     },
 
-    // Phase P1: upsert the machine row (preserving first_seen_at) and REPLACE its
-    // skill versions + project presence. Presence only — no filesystem paths stored.
+    // Phase P1/P4: upsert the machine row (preserving first_seen_at AND an existing non-empty
+    // friendly name) and REPLACE its skill versions + project presence. Presence only — no
+    // filesystem paths stored. Friendly-name contract: on first check-in with no name yet,
+    // populate it from the reported hostname; a later automatic check-in never overwrites a
+    // name that is already set.
     recordCheckin: async (input) => {
+      const { data: existingRow } = await db()
+        .from('machines')
+        .select('name, first_seen_at')
+        .eq('user_id', input.userId)
+        .eq('machine_id', input.machineId)
+        .maybeSingle();
+      const existing = existingRow as {
+        name: string | null;
+        first_seen_at: string;
+      } | null;
+      const existingName = existing?.name ?? null;
+      const nextName =
+        existingName !== null && existingName.trim().length > 0
+          ? existingName
+          : (input.name ?? null);
+      const preservedFirstSeenAt = existing?.first_seen_at ?? input.now;
       await db()
         .from('machines')
         .upsert(
           {
             user_id: input.userId,
             machine_id: input.machineId,
-            name: input.name ?? null,
+            name: nextName,
             platform: input.platform ?? null,
             arch: input.arch ?? null,
             agents_detected: input.agentsDetected ?? [],
             last_checkin_at: input.now,
             memory_backed_up: input.memoryBackedUp,
-            first_seen_at: input.now,
+            first_seen_at: preservedFirstSeenAt,
           },
           { onConflict: 'user_id,machine_id', ignoreDuplicates: false },
         );

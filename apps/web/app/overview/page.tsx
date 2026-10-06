@@ -2,12 +2,12 @@ import { redirect } from 'next/navigation';
 
 import { AppSidebar } from '@/app/_components/app-sidebar';
 import { CommandDock } from '@/app/_components/command-dock';
+import { MachineChooser } from '@/app/_components/machine-chooser';
 import { getCloudService } from '@/lib/cloud-service';
 import { displayNameOf, getSessionUser } from '@/lib/session';
 
 import {
   loadOverview,
-  type MachineOption,
   type NeedsAttentionView,
   type OverviewMachineCard,
   type SidebarCounts,
@@ -138,19 +138,6 @@ function Notice({
   );
 }
 
-const ChooseRow = ({ m }: { m: MachineOption }) => (
-  <a
-    href={`/overview?machine=${encodeURIComponent(m.machineId)}`}
-    className="stak-mcard"
-    style={{ textDecoration: 'none', color: 'inherit' }}
-  >
-    <span style={{ fontWeight: 600, fontSize: 13.5 }}>{m.name}</span>
-    <span style={{ fontSize: 12, font: '11px var(--mono)', color: '#85817a' }}>
-      {m.secondary}
-    </span>
-  </a>
-);
-
 export default async function OverviewPage({
   searchParams,
 }: {
@@ -198,11 +185,7 @@ export default async function OverviewPage({
             the machine you want STAK to inspect, then pick it here.
           </p>
         ) : null}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {view.machines.map((m) => (
-            <ChooseRow key={m.machineId} m={m} />
-          ))}
-        </div>
+        <MachineChooser options={view.machines} />
       </Notice>
     );
 

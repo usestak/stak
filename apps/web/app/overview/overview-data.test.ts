@@ -21,6 +21,7 @@ const machine = (over: Partial<MachineSummary> = {}): MachineSummary => ({
   platform: 'darwin',
   arch: 'arm64',
   agentsDetected: ['Claude Code', 'Codex'],
+  firstSeenAt: nowIso(60 * 24 * 10),
   lastCheckinAt: nowIso(12),
   memoryBackedUp: true,
   revoked: false,
@@ -184,6 +185,36 @@ describe('loadOverview — never-checked-in is UNKNOWN, not zero (P4 §3/§4/§5
     expect(card?.facts).toBeNull();
     expect(card?.status).toBe('No check-in yet');
   });
+
+  it('Machines summary says "authorized machines" / "None has reported" when none checked in', async () => {
+    const v = await view();
+    expect(v.summaries.machines.value).toBe('1 authorized machine');
+    expect(v.summaries.machines.detail).toBe(
+      'None has reported its STAK state yet.',
+    );
+    expect(v.summaries.machines.detail).not.toContain('restore on another');
+  });
+
+  it('top status sentence never overstates: account backup truth stays separate from machine truth', async () => {
+    const v = await view();
+    // The headline (account-level) still truthfully says backed up...
+    expect(v.headline).toBe('Your STAK is backed up.');
+    // ...but the detail (machine-level) does not imply the selected machine's state is known.
+    expect(v.detail).toMatch(/^Latest Memory backup/);
+    expect(v.detail).toContain("Unnamed machine hasn't checked in yet");
+  });
+
+  it('command dock never shows a raw UUID as the target machine name', async () => {
+    const v = ready(
+      await loadOverview(
+        service({ machines: [neverCheckedIn({ machineId: A1 })] }),
+        USER,
+        A1,
+      ),
+    );
+    expect(v.viewing.name).toBe('Unnamed machine');
+    expect(v.viewing.name).not.toMatch(/^[0-9a-f-]{8,}$/i);
+  });
 });
 
 describe('loadOverview — checked-in truth (P4 §4/§5)', () => {
@@ -302,6 +333,27 @@ describe('loadOverview — bounded machine list (P4 §12)', () => {
     expect(v.machineTotal).toBe(6);
     expect(v.machineCards[0]?.name).toBe('Studio'); // updates-waiting sorts first
   });
+
+  it('never-checked-in machines sort by newest firstSeenAt, not online/offline ordering', async () => {
+    const older = machine({
+      machineId: A1,
+      name: 'Old',
+      status: 'never-checked-in',
+      lastCheckinAt: null,
+      firstSeenAt: nowIso(60 * 24 * 10), // 10 days ago
+    });
+    const newer = machine({
+      machineId: B2,
+      name: 'New',
+      status: 'never-checked-in',
+      lastCheckinAt: null,
+      firstSeenAt: nowIso(5), // 5 minutes ago
+    });
+    const v = ready(
+      await loadOverview(service({ machines: [older, newer] }), USER, A1),
+    );
+    expect(v.machineCards.map((c) => c.name)).toEqual(['New', 'Old']);
+  });
 });
 
 describe('loadOverview — language, activity, privacy (P4 §10/§13/PRIVACY)', () => {
@@ -323,6 +375,22 @@ describe('loadOverview — language, activity, privacy (P4 §10/§13/PRIVACY)', 
     );
     const serialized = JSON.stringify(v);
     for (const word of BANNED) expect(serialized).not.toContain(word);
+  });
+
+  it('caps recent activity (does not dump a long repetitive backup list)', async () => {
+    const recentActivity = Array.from({ length: 8 }, (_, i) => ({
+      kind: 'memory-backed-up' as const,
+      at: nowIso(i * 60),
+      label: 'Standard backup',
+    }));
+    const v = ready(
+      await loadOverview(
+        service({ overview: overview({ recentActivity }) }),
+        USER,
+        A1,
+      ),
+    );
+    expect(v.activity.length).toBeLessThanOrEqual(4);
   });
 
   it('activity renders the provided (mode) label, not a generic number', async () => {

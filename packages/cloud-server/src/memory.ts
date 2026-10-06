@@ -149,8 +149,14 @@ export const createInMemoryRepository = (): CloudRepository &
     },
 
     upsertMachine: async (record) => {
-      const existing = machines.get(key(record.userId, record.machineId));
-      machines.set(key(record.userId, record.machineId), {
+      const k = key(record.userId, record.machineId);
+      const existing = machines.get(k);
+      // Merge onto the existing row: upsertMachine (login/push) never reports name,
+      // agentsDetected, lastCheckinAt, memoryBackedUp, or revokedAt, so spreading `existing`
+      // first means those fields survive a later login/push instead of being wiped to
+      // undefined. firstSeenAt always prefers the ORIGINAL authorization time.
+      machines.set(k, {
+        ...existing,
         ...record,
         firstSeenAt: existing?.firstSeenAt ?? record.firstSeenAt,
       });
@@ -159,16 +165,23 @@ export const createInMemoryRepository = (): CloudRepository &
     recordCheckin: async (input) => {
       const k = key(input.userId, input.machineId);
       const existing = machines.get(k);
+      // Friendly-name contract (P4): on first check-in, if the machine has no name yet,
+      // populate it from the reported hostname. A later automatic check-in must NEVER
+      // overwrite an existing non-empty friendly name (a rename, if ever added, is a
+      // distinct explicit action — not something a routine check-in should undo).
+      const existingName = existing?.name;
+      const nextName =
+        existingName !== undefined && existingName.trim().length > 0
+          ? existingName
+          : input.name;
       machines.set(k, {
+        ...existing,
         userId: input.userId,
         machineId: input.machineId,
         firstSeenAt: existing?.firstSeenAt ?? input.now,
-        ...(existing?.lastSyncedAt !== undefined
-          ? { lastSyncedAt: existing.lastSyncedAt }
-          : {}),
         lastCheckinAt: input.now,
         memoryBackedUp: input.memoryBackedUp,
-        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(nextName !== undefined ? { name: nextName } : {}),
         ...(input.platform !== undefined ? { platform: input.platform } : {}),
         ...(input.arch !== undefined ? { arch: input.arch } : {}),
         ...(input.agentsDetected !== undefined

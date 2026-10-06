@@ -350,6 +350,7 @@ export const createProductMethods = (config: ProductServiceConfig) => {
               : {}),
             ...(machine.arch !== undefined ? { arch: machine.arch } : {}),
             agentsDetected: machine.agentsDetected ?? [],
+            firstSeenAt: machine.firstSeenAt,
             lastCheckinAt: machine.lastCheckinAt ?? null,
             memoryBackedUp: machine.memoryBackedUp ?? false,
             revoked: machine.revokedAt !== undefined,
@@ -584,9 +585,14 @@ export const createProductMethods = (config: ProductServiceConfig) => {
           deriveActivity(user.userId),
           latestBundle(user.userId),
         ]);
-      const viewing = resolveViewingMachine(machines, viewingMachineId);
+      // Revoked machines are historical/audit records, never part of "active" product
+      // surfaces: not selectable as viewing context, not counted, not eligible for
+      // stale-machine attention. (They still appear, flagged revoked, via
+      // getMachinesReadModel/listMachineStates for a Machines page's history view.)
+      const activeMachines = machines.filter((m) => m.revokedAt === undefined);
+      const viewing = resolveViewingMachine(activeMachines, viewingMachineId);
       const approved = approvedList(current?.bundle ?? null);
-      const machineStates = machines.map((m) => ({
+      const machineStates = activeMachines.map((m) => ({
         machine: m,
         derived: deriveMachineState(factsOf(m), approved),
       }));
@@ -616,17 +622,32 @@ export const createProductMethods = (config: ProductServiceConfig) => {
               ref: project.projectId,
             });
       }
-      for (const { machine } of machineStates)
+      for (const { machine } of machineStates) {
         if (
           machine.lastCheckinAt &&
           nowMs() - new Date(machine.lastCheckinAt).getTime() >=
             STALE_MACHINE_MS
-        )
+        ) {
           needsAttention.push({
             kind: 'machine-stale',
             label: `${machine.name ?? 'A machine'} hasn't checked in for 30+ days`,
             ref: machine.machineId,
           });
+          continue;
+        }
+        // A machine that has NEVER checked in gets a grace period (a brand-new login is not
+        // stale) but is not invisible forever: once authorized more than 30 days ago with
+        // still no check-in, it becomes eligible for attention using firstSeenAt.
+        if (
+          !machine.lastCheckinAt &&
+          nowMs() - new Date(machine.firstSeenAt).getTime() >= STALE_MACHINE_MS
+        )
+          needsAttention.push({
+            kind: 'machine-stale',
+            label: `${machine.name ?? 'A machine'} has never checked in since being authorized`,
+            ref: machine.machineId,
+          });
+      }
       if (memory.mode === 'protected' && !memory.hasRecovery)
         needsAttention.push({
           kind: 'protected-no-recovery',
@@ -649,7 +670,7 @@ export const createProductMethods = (config: ProductServiceConfig) => {
           archived: projects.filter((p) => p.lifecycle === 'archived').length,
         },
         machines: {
-          total: machines.length,
+          total: activeMachines.length,
           updatesWaiting: machineStates.filter(
             (m) => m.derived.status === 'updates-waiting',
           ).length,

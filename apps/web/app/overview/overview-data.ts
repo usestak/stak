@@ -19,6 +19,7 @@ export type OverviewService = Pick<
 const webAuth = (userId: string) => ({ userId, tokenId: 'web-session' });
 
 const MAX_CARDS = 4;
+const MAX_ACTIVITY = 4;
 
 export type MachineOption = {
   machineId: string;
@@ -147,18 +148,20 @@ const option = (m: MachineSummary): MachineOption => ({
   statusLabel: statusLabel(m),
 });
 
-/** Overview order: attention first (updates waiting), then most recently checked in, then
- *  checked-in machines by recency, then never-checked-in last. */
+/** Overview order (P4 §4): needs-attention (updates waiting) first, then checked-in machines
+ *  by most recent check-in, then never-checked-in machines by newest first_seen_at. This is
+ *  NOT online/offline ordering — it is purely "what does this machine most need from you". */
 const sortForOverview = (a: MachineSummary, b: MachineSummary): number => {
   const rank = (m: MachineSummary) =>
     m.status === 'updates-waiting'
       ? 0
       : m.status === 'never-checked-in'
-        ? 3
+        ? 2
         : 1;
   const ra = rank(a);
   const rb = rank(b);
   if (ra !== rb) return ra - rb;
+  if (ra === 2) return b.firstSeenAt.localeCompare(a.firstSeenAt); // newest authorization first
   return (b.lastCheckinAt ?? '').localeCompare(a.lastCheckinAt ?? '');
 };
 
@@ -183,12 +186,17 @@ const attentionView = (item: NeedsAttention): NeedsAttentionView => {
         action: 'Map its folder on this machine to use it here.',
       };
     case 'machine-stale':
+      // Covers two distinct truthful conditions (same product-facing attention kind): a
+      // machine that checked in before and has gone quiet for 30+ days, and a machine that
+      // was authorized but has NEVER checked in, also 30+ days on. The server label text
+      // already distinguishes them ("hasn't checked in for 30+ days" vs "has never checked
+      // in since being authorized"); the shared "why"/"action" wording stays true for both.
       return {
         kind: item.kind,
         statusLabel: 'Needs attention',
         dot: 'attention',
         title: item.label,
-        why: "This machine's CLI hasn't talked to STAK in over 30 days.",
+        why: "This machine hasn't reported in to STAK for 30+ days.",
         action: 'Open the CLI there, or revoke it in Settings.',
       };
     case 'protected-no-recovery':
@@ -420,15 +428,18 @@ export const loadOverview = async (
               },
       machines: {
         label: 'MACHINES',
-        value: `${active.length} machine${active.length === 1 ? '' : 's'}`,
-        detail:
-          active.length === 1
+        value: `${active.length} ${anyCheckedIn ? 'machine' : 'authorized machine'}${active.length === 1 ? '' : 's'}`,
+        detail: !anyCheckedIn
+          ? 'None has reported its STAK state yet.'
+          : active.length === 1
             ? `Your STAK lives on ${viewingName} alone.`
             : 'If one is lost, restore on another.',
       },
     },
     needsAttention: overview.needsAttention.map(attentionView),
-    activity: overview.recentActivity.map(activityView),
+    // Overview stays an overview: cap recent activity so it never dumps a long, repetitive
+    // list of near-identical backup rows. Full history belongs to the Memory page.
+    activity: overview.recentActivity.slice(0, MAX_ACTIVITY).map(activityView),
     machineCards: cards,
     overflowCount: Math.max(0, active.length - cards.length),
     machineTotal: active.length,

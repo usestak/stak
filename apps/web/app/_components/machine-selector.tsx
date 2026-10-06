@@ -1,9 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 
-import { nextActiveIndex } from './machine-selector-logic';
+import {
+  SEARCH_THRESHOLD,
+  filterOptions,
+  nextActiveIndex,
+} from './machine-selector-logic';
 
 export type SelectorOption = {
   machineId: string;
@@ -13,10 +17,12 @@ export type SelectorOption = {
 
 /**
  * "Viewing as <machine>" selector — an accessible dark listbox (not a native system dropdown,
- * which breaks the Control Center look). Primary friendly name + secondary platform/arch/status;
- * keyboard: ↑/↓/Home/End move, Enter selects, Escape/Tab close; visible focus; aria listbox
- * semantics. Selecting updates the URL to `?machine=<id>` (URL context wins). No raw UUID as the
- * primary label; no data leakage.
+ * which breaks the Control Center look and shows a visible system scrollbar). Primary friendly
+ * name + secondary platform/arch/status; bounded to ~5-6 visible rows with a hidden scrollbar
+ * and a top/bottom fade cue when more rows exist; a search field appears above the list once
+ * there are more than a handful of machines (P4 §3). Keyboard: ↑/↓/Home/End move, Enter
+ * selects, Escape/Tab close; visible focus; aria listbox semantics. Selecting updates the URL
+ * to `?machine=<id>` (URL context wins). No raw UUID as the primary label; no data leakage.
  */
 export function MachineSelector({
   current,
@@ -28,14 +34,16 @@ export function MachineSelector({
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const [active, setActive] = useState(() =>
-    Math.max(
-      0,
-      options.findIndex((o) => o.machineId === current),
-    ),
-  );
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const currentOption = options.find((o) => o.machineId === current);
+  const showSearch = options.length > SEARCH_THRESHOLD;
+  const filtered = useMemo(
+    () => (showSearch ? filterOptions(options, query) : options),
+    [options, query, showSearch],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -47,34 +55,48 @@ export function MachineSelector({
     return () => document.removeEventListener('mousedown', onDocDown);
   }, [open]);
 
+  useEffect(() => {
+    if (open && showSearch) searchRef.current?.focus();
+  }, [open, showSearch]);
+
   const choose = (machineId: string) => {
     setOpen(false);
+    setQuery('');
     if (machineId !== current)
       router.replace(`${pathname}?machine=${encodeURIComponent(machineId)}`);
   };
 
-  const onKeyDown = (e: React.KeyboardEvent) => {
+  const openMenu = () => {
+    setActive(
+      Math.max(
+        0,
+        filtered.findIndex((o) => o.machineId === current),
+      ),
+    );
+    setOpen(true);
+  };
+
+  const onTriggerKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      openMenu();
+    }
+  };
+
+  const onListKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape' || e.key === 'Tab') {
       setOpen(false);
       return;
     }
-    if (
-      !open &&
-      (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown')
-    ) {
+    if (e.key === 'Enter') {
       e.preventDefault();
-      setOpen(true);
-      return;
-    }
-    if (open && e.key === 'Enter') {
-      e.preventDefault();
-      const picked = options[active];
+      const picked = filtered[active];
       if (picked) choose(picked.machineId);
       return;
     }
-    if (open && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
       e.preventDefault();
-      setActive((i) => nextActiveIndex(i, e.key, options.length));
+      setActive((i) => nextActiveIndex(i, e.key, filtered.length));
     }
   };
 
@@ -86,8 +108,8 @@ export function MachineSelector({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`Viewing as ${currentOption?.name ?? 'a machine'}. Change machine.`}
-        onClick={() => setOpen((v) => !v)}
-        onKeyDown={onKeyDown}
+        onClick={() => (open ? setOpen(false) : openMenu())}
+        onKeyDown={onTriggerKeyDown}
       >
         <span className="stak-ms-name">
           {currentOption?.name ?? 'Choose a machine'}
@@ -97,24 +119,55 @@ export function MachineSelector({
         </span>
       </button>
       {open ? (
-        <ul className="stak-ms-list" role="listbox" aria-label="Machines">
-          {options.map((o, i) => (
-            <li
-              key={o.machineId}
-              role="option"
-              aria-selected={o.machineId === current}
-              className={`stak-ms-opt${i === active ? ' active' : ''}`}
-              onMouseEnter={() => setActive(i)}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                choose(o.machineId);
+        <div className="stak-ms-popover">
+          {showSearch ? (
+            <input
+              ref={searchRef}
+              type="text"
+              className="stak-ms-search"
+              placeholder="Search machines"
+              aria-label="Search machines"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setActive(0);
               }}
+              onKeyDown={onListKeyDown}
+            />
+          ) : null}
+          <div className="stak-ms-fade-wrap">
+            <ul
+              className="stak-ms-list"
+              role="listbox"
+              aria-label="Machines"
+              tabIndex={showSearch ? undefined : 0}
+              onKeyDown={showSearch ? undefined : onListKeyDown}
             >
-              <span className="stak-ms-opt-name">{o.name}</span>
-              <span className="stak-ms-opt-sec">{o.secondary}</span>
-            </li>
-          ))}
-        </ul>
+              {filtered.length === 0 ? (
+                <li className="stak-ms-empty">
+                  No machines match &quot;{query}&quot;
+                </li>
+              ) : (
+                filtered.map((o, i) => (
+                  <li
+                    key={o.machineId}
+                    role="option"
+                    aria-selected={o.machineId === current}
+                    className={`stak-ms-opt${i === active ? ' active' : ''}`}
+                    onMouseEnter={() => setActive(i)}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      choose(o.machineId);
+                    }}
+                  >
+                    <span className="stak-ms-opt-name">{o.name}</span>
+                    <span className="stak-ms-opt-sec">{o.secondary}</span>
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+        </div>
       ) : null}
     </div>
   );

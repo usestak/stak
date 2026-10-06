@@ -328,21 +328,63 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.stak-ms-list {
+.stak-ms-popover {
   position: absolute;
   top: calc(100% + 6px);
   left: -4px;
   right: -4px;
   z-index: 20;
-  margin: 0;
-  padding: 4px;
-  list-style: none;
   background: #171615;
   border: 1px solid var(--line-2);
   border-radius: 8px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
-  max-height: 280px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.stak-ms-search {
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  color: var(--ink);
+  font: 13px var(--sans);
+  padding: 7px 9px;
+  outline: none;
+}
+.stak-ms-search:focus-visible {
+  border-color: var(--orange);
+}
+/* Bounded to ~5.5 visible rows (each ~42-44px). The scrollbar is visually hidden; a
+   top/bottom mask fades the edge rows as a "more content" cue while wheel/touchpad
+   scrolling and arrow-key navigation keep working. */
+.stak-ms-fade-wrap {
+  position: relative;
+}
+.stak-ms-list {
+  margin: 0;
+  padding: 2px;
+  list-style: none;
+  max-height: 236px;
   overflow-y: auto;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 10px,
+    #000 calc(100% - 10px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 10px,
+    #000 calc(100% - 10px),
+    transparent 100%
+  );
+}
+.stak-ms-list::-webkit-scrollbar {
+  display: none;
 }
 .stak-ms-opt {
   display: flex;
@@ -364,11 +406,52 @@
   font: 11px var(--mono);
   color: var(--dim);
 }
+.stak-ms-empty {
+  padding: 10px 9px;
+  font-size: 12.5px;
+  color: var(--dim);
+}
+
+/* No-context machine chooser (P4 §5/§9) — reuses the search + bounded/fade list language. */
+.stak-chooser {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.stak-chooser-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 10px,
+    #000 calc(100% - 10px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 10px,
+    #000 calc(100% - 10px),
+    transparent 100%
+  );
+}
+.stak-chooser-list::-webkit-scrollbar {
+  display: none;
+}
 
 .stak :focus-visible,
 .stak-nav-item:focus-visible,
 .stak-copy:focus-visible,
-.stak-ms-trigger:focus-visible {
+.stak-ms-trigger:focus-visible,
+.stak-ms-list:focus-visible {
   outline: 2px solid var(--orange);
   outline-offset: 2px;
   border-radius: 4px;

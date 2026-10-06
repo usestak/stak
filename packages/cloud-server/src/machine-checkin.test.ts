@@ -262,3 +262,126 @@ describe('deriveMachineState edge cases (P1)', () => {
     expect(state.updatesWaiting).toEqual(['a']);
   });
 });
+
+describe('machine friendly-name contract (P4)', () => {
+  it('A. null name + first check-in populates the name from the reported hostname', async () => {
+    const { call, signIn } = setup();
+    const token = await signIn('user-1');
+    await call('POST', 'machines/checkin', {
+      token,
+      body: {
+        machineId: ATLAS,
+        name: 'atlas-macbook',
+        memoryBackedUp: false,
+        skills: [],
+        projects: [],
+      },
+    });
+    const list = await call('GET', 'machines', { token });
+    const machines = (list.jsonBody as { machines: Array<{ name?: string }> })
+      .machines;
+    expect(machines[0]?.name).toBe('atlas-macbook');
+  });
+
+  it('B. an existing friendly name survives a later hostname change', async () => {
+    const { call, signIn } = setup();
+    const token = await signIn('user-1');
+    await call('POST', 'machines/checkin', {
+      token,
+      body: {
+        machineId: ATLAS,
+        name: 'atlas-macbook',
+        memoryBackedUp: false,
+        skills: [],
+        projects: [],
+      },
+    });
+    // The machine's hostname changes (renamed at the OS level) on a later check-in.
+    await call('POST', 'machines/checkin', {
+      token,
+      body: {
+        machineId: ATLAS,
+        name: 'some-new-hostname',
+        memoryBackedUp: true,
+        skills: [],
+        projects: [],
+      },
+    });
+    const list = await call('GET', 'machines', { token });
+    const machines = (list.jsonBody as { machines: Array<{ name?: string }> })
+      .machines;
+    expect(machines[0]?.name).toBe('atlas-macbook'); // the original friendly name is kept
+  });
+
+  it('C. two machines sharing a reported hostname remain distinct by machine_id', async () => {
+    const { call, signIn } = setup();
+    const token = await signIn('user-1');
+    await call('POST', 'machines/checkin', {
+      token,
+      body: {
+        machineId: ATLAS,
+        name: 'laptop',
+        memoryBackedUp: false,
+        skills: [],
+        projects: [],
+      },
+    });
+    await call('POST', 'machines/checkin', {
+      token,
+      body: {
+        machineId: STUDIO,
+        name: 'laptop',
+        memoryBackedUp: false,
+        skills: [],
+        projects: [],
+      },
+    });
+    const list = await call('GET', 'machines', { token });
+    const machines = (
+      list.jsonBody as {
+        machines: Array<{ machineId: string; name?: string }>;
+      }
+    ).machines;
+    expect(machines).toHaveLength(2);
+    expect(machines.find((m) => m.machineId === ATLAS)?.name).toBe('laptop');
+    expect(machines.find((m) => m.machineId === STUDIO)?.name).toBe('laptop');
+  });
+
+  it('a later upsertMachine (login/push) never wipes the name or resets first_seen_at', async () => {
+    const { call, repository, signIn, setClock } = setup();
+    const token = await signIn('user-1');
+    setClock('2026-10-05T00:00:00.000Z');
+    await call('POST', 'machines/checkin', {
+      token,
+      body: {
+        machineId: ATLAS,
+        name: 'atlas-macbook',
+        memoryBackedUp: false,
+        skills: [],
+        projects: [],
+      },
+    });
+    const firstList = (await call('GET', 'machines', { token })).jsonBody as {
+      machines: Array<{ machineId: string; name?: string }>;
+    };
+    expect(firstList.machines[0]?.name).toBe('atlas-macbook');
+    const firstSeenAt = (await repository.listMachineStates('user-1'))[0]
+      ?.firstSeenAt;
+
+    // A later login/push calls upsertMachine directly (never reporting name), which must
+    // neither erase the name established by check-in nor reset first_seen_at to "now".
+    setClock('2026-10-10T00:00:00.000Z');
+    await repository.upsertMachine({
+      userId: 'user-1',
+      machineId: ATLAS,
+      firstSeenAt: '2026-10-10T00:00:00.000Z',
+    });
+
+    const secondList = (await call('GET', 'machines', { token })).jsonBody as {
+      machines: Array<{ machineId: string; name?: string }>;
+    };
+    expect(secondList.machines[0]?.name).toBe('atlas-macbook');
+    const secondState = await repository.listMachineStates('user-1');
+    expect(secondState[0]?.firstSeenAt).toBe(firstSeenAt); // unchanged, not reset to "now"
+  });
+});

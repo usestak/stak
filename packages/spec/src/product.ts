@@ -99,6 +99,7 @@ export const machineSummarySchema = z.object({
   platform: z.string().optional(),
   arch: z.string().optional(),
   agentsDetected: z.array(z.string()),
+  firstSeenAt: timestamp,
   lastCheckinAt: timestamp.nullable(),
   memoryBackedUp: z.boolean(),
   revoked: z.boolean(),
