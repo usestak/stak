@@ -8,6 +8,7 @@ export * from './secure-file.js';
 export * from './cipher.js';
 export * from './kdf.js';
 export * from './bundle-codec.js';
+export * from './project-counts.js';
 export * from './mmk.js';
 export * from './recovery-methods.js';
 export * from './bridge.js';

@@ -22,7 +22,10 @@ import type {
   StacksReadModel,
   SyncProjectsRequest,
 } from '@stack/spec';
-import type { RemoteMemoryBackend } from '@stack/memory';
+import {
+  standardProjectCountsFromBundle,
+  type RemoteMemoryBackend,
+} from '@stack/memory';
 
 import { invalidRequest, notFound, remoteConflict } from './errors.js';
 import { deriveMachineState } from './machine-state.js';
@@ -50,6 +53,32 @@ export type SkillSourceChecker = (input: {
 export type MemoryProjectCounts = (
   userId: string,
 ) => Promise<{ projectId: string; fileCount: number }[] | null>;
+
+/** Default max Standard payload bytes the server will read for per-project derivation. */
+export const DEFAULT_STANDARD_COUNT_MAX_BYTES = 64 * 1024 * 1024;
+
+/**
+ * The production Standard per-project deriver (P3 §2). For STANDARD Memory only, it reads the
+ * authenticated user's latest Standard backup payload (bounded) and groups the manifest's
+ * project-scoped items by stable Project ID — aggregate counts only, no bodies, no paths, no
+ * names. For PROTECTED it returns null and NEVER reads/decrypts the ciphertext. Malformed or
+ * oversized payloads fail safe (null).
+ */
+export const createStandardMemoryProjectCounts =
+  (
+    backendFor: (userId: string) => RemoteMemoryBackend,
+    maxBytes: number = DEFAULT_STANDARD_COUNT_MAX_BYTES,
+  ): MemoryProjectCounts =>
+  async (userId) => {
+    const backend = backendFor(userId);
+    const profile = await backend.getProfile();
+    if (profile?.privacyMode !== 'standard') return null; // never touch Protected/none
+    const latest = await backend.getLatest();
+    if (!latest) return null;
+    const payload = await backend.getPayload(latest.backupId);
+    if (payload.byteLength > maxBytes) return null; // bounded read
+    return standardProjectCountsFromBundle(payload);
+  };
 
 export type ProductServiceConfig = {
   repository: CloudRepository;
@@ -478,16 +507,21 @@ export const createProductMethods = (config: ProductServiceConfig) => {
           deletedRecoveryMethods: 0,
           recoverable: false,
         };
-      const [generations, methods] = await Promise.all([
+      const [committed, allBackupIds, methods] = await Promise.all([
         backend.listGenerations(),
+        backend.listAllBackupIds(),
         backend.listRecoveryMethods(),
       ]);
-      for (const generation of generations)
-        await backend.retireGeneration(generation.backupId, config.now);
+      // Retire + purge EVERY backup id, including ones already retired whose payload may have
+      // been orphaned by an earlier partial failure. retireGeneration is idempotent and removes
+      // the payload object; if removal fails it throws, so this action reports failure (no false
+      // success) and a retry re-runs safely. Recovery methods are revoked only after payloads.
+      for (const backupId of allBackupIds)
+        await backend.retireGeneration(backupId, config.now);
       for (const method of methods)
         await backend.revokeRecoveryMethod(method.methodId, config.now);
       return {
-        deletedGenerations: generations.length,
+        deletedGenerations: committed.length,
         deletedRecoveryMethods: methods.length,
         recoverable: false,
       };

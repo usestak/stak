@@ -44,6 +44,7 @@ import { createPublicStackService } from './public-service.js';
 import { createMemoryMethods } from './memory-service.js';
 import {
   createProductMethods,
+  createStandardMemoryProjectCounts,
   type MemoryProjectCounts,
   type SkillSourceChecker,
 } from './product-service.js';
@@ -183,9 +184,17 @@ export const createCloudService = (config: CloudServiceConfig) => {
     ...(config.checkSkillSource
       ? { checkSkillSource: config.checkSkillSource }
       : {}),
+    // Default to the real Standard deriver when a Memory backend is present; an explicit
+    // override still wins (e.g. tests). Protected stays null inside the deriver.
     ...(config.memoryProjectCounts
       ? { memoryProjectCounts: config.memoryProjectCounts }
-      : {}),
+      : config.memoryBackendFor
+        ? {
+            memoryProjectCounts: createStandardMemoryProjectCounts(
+              config.memoryBackendFor,
+            ),
+          }
+        : {}),
   });
 
   return {

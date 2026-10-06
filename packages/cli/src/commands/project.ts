@@ -14,14 +14,26 @@ import type {
  * (`archive`/`unarchive`, Phase 15C). No delete: hard deletion is out of scope.
  * Lifecycle (active | archived) is independent of machine availability.
  */
+/**
+ * Whether an explicit CLI lifecycle change propagated to the account (Cloud). Lifecycle is
+ * ONE logical account-level state; the CLI mirrors the local Phase-15 change to Cloud so the
+ * two don't split-brain. Offline/failed is reported truthfully so the user can re-run.
+ */
+export type CloudLifecyclePropagation = 'ok' | 'not-signed-in' | 'failed';
+export type LifecycleCommandResult = SetLifecycleResult & {
+  cloudPropagation?: CloudLifecyclePropagation;
+};
+
 export type ProjectCommandDependencies = {
   projectList(): Promise<ProjectListRow[]>;
   projectMap(options: {
     project: string;
     dir: string;
   }): Promise<MapProjectResult>;
-  projectArchive(options: { project: string }): Promise<SetLifecycleResult>;
-  projectUnarchive(options: { project: string }): Promise<SetLifecycleResult>;
+  projectArchive(options: { project: string }): Promise<LifecycleCommandResult>;
+  projectUnarchive(options: {
+    project: string;
+  }): Promise<LifecycleCommandResult>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -72,7 +84,7 @@ export const renderProjectList = (rows: ProjectListRow[]): string => {
 };
 
 const renderLifecycleResult = (
-  result: SetLifecycleResult,
+  result: LifecycleCommandResult,
   target: 'archived' | 'active',
 ): string => {
   switch (result.status) {
@@ -87,13 +99,15 @@ const renderLifecycleResult = (
         ? target === 'archived'
           ? `Archived ${id}.`
           : `${id} is active.`
-        : `${id} is already ${state}.`;
-      return (
-        `${head}\n` +
-        (result.changed
-          ? 'Run `stak memory backup` to include this lifecycle change in your next Cloud backup.\n'
-          : '')
-      );
+        : `${id} is already ${state} on this machine.`;
+      // Lifecycle is one account-level state; report whether the Cloud was updated so the
+      // local and account views never silently diverge.
+      const cloud =
+        result.cloudPropagation === 'failed'
+          ? `Local change saved, but STAK Cloud was not updated (offline or unreachable). ` +
+            `Run \`stak project ${target === 'archived' ? 'archive' : 'unarchive'} ${id}\` again when connected.\n`
+          : '';
+      return `${head}\n${cloud}`;
     }
   }
 };

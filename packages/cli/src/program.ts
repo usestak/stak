@@ -136,7 +136,10 @@ import { registerPushCommand } from './commands/push.js';
 import { registerPullCommand } from './commands/pull.js';
 import { registerPublishCommand } from './commands/publish.js';
 import { registerMemoryCommand } from './commands/memory.js';
-import { registerProjectCommand } from './commands/project.js';
+import {
+  registerProjectCommand,
+  type CloudLifecyclePropagation,
+} from './commands/project.js';
 import {
   registerSkillCommand,
   type SkillUpdateResult,
@@ -405,6 +408,31 @@ const writeRecoveryFile = async (
   });
 };
 
+/**
+ * Mirror an explicit CLI lifecycle change to the account (Cloud). Best-effort and truthful:
+ * signed out → `not-signed-in` (nothing to propagate); a connectivity/other failure →
+ * `failed` so the CLI tells the user to re-run when connected. This is explicit lifecycle
+ * intent, never discovery sync, so it is the Cloud lifecycle authority alongside the web.
+ */
+const propagateProjectLifecycle = async (
+  projectId: string,
+  lifecycle: 'active' | 'archived',
+): Promise<CloudLifecyclePropagation> => {
+  const credential = await cloudDeps.credentials.read();
+  if (!credential) return 'not-signed-in';
+  try {
+    const baseUrl = resolveCloudBaseUrl({
+      env: process.env,
+      ...(credential.apiUrl ? { storedApiUrl: credential.apiUrl } : {}),
+    });
+    const client = createCloudClient({ baseUrl, token: credential.token });
+    await client.setProjectLifecycle(projectId, lifecycle);
+    return 'ok';
+  } catch {
+    return 'failed';
+  }
+};
+
 const defaultDependencies: ProgramDependencies = {
   scan: async ({ project }) =>
     scanSkills({ roots: resolveScanRoots({ includeProject: project }) }),
@@ -553,14 +581,39 @@ const defaultDependencies: ProgramDependencies = {
     }),
   projectMap: async ({ project, dir }) =>
     mapProject({ stackHome, selector: project, dir, gitOrigin: gitOriginOf }),
-  projectArchive: async ({ project }) =>
-    setProjectLifecycle({
+  projectArchive: async ({ project }) => {
+    const result = await setProjectLifecycle({
       stackHome,
       selector: project,
       lifecycle: 'archived',
-    }),
-  projectUnarchive: async ({ project }) =>
-    setProjectLifecycle({ stackHome, selector: project, lifecycle: 'active' }),
+    });
+    if (result.status !== 'ok') return result;
+    // Mirror the explicit lifecycle intent to the account (Cloud) — always, even when the
+    // local state was already archived, so re-running while connected reconciles a prior
+    // offline change. Lifecycle is one logical account state, never discovery sync.
+    return {
+      ...result,
+      cloudPropagation: await propagateProjectLifecycle(
+        result.projectId,
+        'archived',
+      ),
+    };
+  },
+  projectUnarchive: async ({ project }) => {
+    const result = await setProjectLifecycle({
+      stackHome,
+      selector: project,
+      lifecycle: 'active',
+    });
+    if (result.status !== 'ok') return result;
+    return {
+      ...result,
+      cloudPropagation: await propagateProjectLifecycle(
+        result.projectId,
+        'active',
+      ),
+    };
+  },
   // `stak skill update` installs/reconciles APPROVED desired versions onto THIS machine across
   // every detected agent (no launch) — reusing the same transactional binding plan/apply/verify
   // as `run`. Paused Skills are excluded by `projectedLocalEnvironment`, so they are dropped

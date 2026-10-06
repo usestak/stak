@@ -12,6 +12,7 @@ import {
   prepareSnapshotResponseSchema,
   publicProfileResponseSchema,
   publishPublicStackVersionResponseSchema,
+  setProjectLifecycleResponseSchema,
   snapshotDownloadResponseSchema,
   syncProjectsResponseSchema,
 } from '@stack/spec';
@@ -34,8 +35,10 @@ import type {
   PrepareSnapshotRequest,
   PrepareSnapshotResponse,
   PublicProfileResponse,
+  ProjectLifecycle,
   PublishPublicStackVersionRequest,
   PublishPublicStackVersionResponse,
+  SetProjectLifecycleResponse,
   SyncProjectsRequest,
   SyncProjectsResponse,
 } from '@stack/spec';
@@ -79,8 +82,13 @@ export interface CloudClient {
     request: MachineCheckinRequest,
   ): Promise<MachineCheckinResponse>;
   listMachines(): Promise<ListMachinesResponse>;
-  /** Phase P3: sync this account's project registry (lifecycle + name only; never paths). */
+  /** Phase P3: discovery sync of this account's project registry (safe name only; no paths). */
   syncProjects(request: SyncProjectsRequest): Promise<SyncProjectsResponse>;
+  /** Phase P3: explicit account-side lifecycle intent (archive/unarchive) for one Project. */
+  setProjectLifecycle(
+    projectId: string,
+    lifecycle: ProjectLifecycle,
+  ): Promise<SetProjectLifecycleResponse>;
 }
 
 export interface CloudAuthClient {
@@ -278,6 +286,18 @@ export const createCloudClient = (
       json(
         syncProjectsResponseSchema,
         await request('POST', 'projects/sync', { auth: true, json: body }),
+      ),
+    setProjectLifecycle: async (projectId, lifecycle) =>
+      json(
+        setProjectLifecycleResponseSchema,
+        await request(
+          'POST',
+          `projects/${encodeURIComponent(projectId)}/lifecycle`,
+          {
+            auth: true,
+            json: { lifecycle },
+          },
+        ),
       ),
     getEnvironment: async (name) => {
       try {

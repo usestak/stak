@@ -1948,10 +1948,25 @@ describe('STAK CLI', () => {
         projectId: 'prj_aaaaaaaaaaaaaaaaaaaaaaaaaa',
         lifecycle: 'archived',
         changed: true,
+        cloudPropagation: 'ok',
       }),
     });
     expect(ok.output).toContain('Archived');
-    expect(ok.output).toContain('stak memory backup');
+  });
+
+  it('project archive warns truthfully when Cloud propagation fails (offline)', async () => {
+    const result = await runProgram(['project', 'archive', 'prj_x', '--yes'], {
+      projectArchive: async () => ({
+        status: 'ok',
+        projectId: 'prj_aaaaaaaaaaaaaaaaaaaaaaaaaa',
+        lifecycle: 'archived',
+        changed: true,
+        cloudPropagation: 'failed',
+      }),
+    });
+    expect(result.output).toContain('Archived');
+    expect(result.output.toLowerCase()).toContain('cloud was not updated');
+    expect(result.output).toContain('again when connected');
   });
 
   it('project unarchive reactivates without a prompt', async () => {

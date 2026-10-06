@@ -140,6 +140,12 @@ export interface RemoteMemoryBackend {
   createGeneration(input: CreateGenerationInput): Promise<MemoryGenerationMeta>;
   getPayload(backupId: string): Promise<Uint8Array>;
   retireGeneration(backupId: string, now?: () => Date): Promise<void>;
+  /**
+   * Every backup id for this user, INCLUDING already-retired ones (P3). Delete Cloud Memory
+   * uses this so a retry can re-remove a payload orphaned by an earlier partial failure —
+   * `listGenerations` (committed-only) would hide a retired-but-not-yet-purged generation.
+   */
+  listAllBackupIds(): Promise<string[]>;
 
   addRecoveryMethod(
     input: AddRecoveryMethodInput,
@@ -337,9 +343,14 @@ class InMemoryRemoteMemoryBackend implements RemoteMemoryBackend {
     if (record) {
       record.state = 'retired';
       record.softDeletedAt = iso(now);
-      this.store.payloads.delete(locatorFor(this.userId, backupId));
     }
+    // Idempotent: always drop the payload, even if already retired (retry orphan cleanup).
+    this.store.payloads.delete(locatorFor(this.userId, backupId));
     return Promise.resolve();
+  }
+
+  listAllBackupIds(): Promise<string[]> {
+    return Promise.resolve(this.myGenerations().map((g) => g.backupId));
   }
 
   addRecoveryMethod(

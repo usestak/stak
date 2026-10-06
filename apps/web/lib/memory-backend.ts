@@ -258,6 +258,18 @@ export const supabaseRemoteMemoryBackend = (
         );
     },
 
+    listAllBackupIds: async () => {
+      // Every backup id for this user, INCLUDING retired, so Delete Cloud Memory retry can
+      // re-remove a payload orphaned by an earlier partial failure.
+      const { data } = await db()
+        .from('memory_backups')
+        .select('backup_id')
+        .eq('user_id', userId);
+      return ((data as { backup_id: string }[] | null) ?? []).map(
+        (row) => row.backup_id,
+      );
+    },
+
     addRecoveryMethod: async (input: AddRecoveryMethodInput, now) => {
       const nowIso = (now ?? (() => new Date()))().toISOString();
       const record = {

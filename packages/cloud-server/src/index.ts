@@ -29,6 +29,7 @@ export {
 export { createInProcessFetch } from './in-process.js';
 export {
   createProductMethods,
+  createStandardMemoryProjectCounts,
   type ProductServiceConfig,
   type SkillSourceChecker,
   type SourceLatest,

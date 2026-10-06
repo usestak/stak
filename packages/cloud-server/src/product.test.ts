@@ -945,8 +945,10 @@ describe('P3 delete Cloud Memory removes the recoverable payload', () => {
               createdAt: '2026-10-05T00:00:00.000Z',
             },
           ],
+          listAllBackupIds: async () => ['b1'],
           listRecoveryMethods: async () => [],
           retireGeneration: async () => {
+            // Simulate the object-storage removal failing.
             throw new Error('storage remove failed');
           },
           revokeRecoveryMethod: async () => undefined,
@@ -980,5 +982,159 @@ describe('P3 delete Cloud Memory removes the recoverable payload', () => {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(res.status).not.toBe(200); // no false success on storage failure
+  });
+});
+
+/* --------------- PROJECT LIFECYCLE: EXPLICIT INTENT WINS (review §1) --------------- */
+
+describe('P3 explicit lifecycle intent reconciles', () => {
+  it('an explicit unarchive after a web archive wins (newer explicit intent)', async () => {
+    const env = setup();
+    const alice = await env.signIn('alice');
+    await env.call('POST', 'projects/sync', {
+      token: alice,
+      body: { projects: [{ projectId: 'prj_recon', name: 'Recon' }] },
+    });
+    await env.call('POST', 'projects/prj_recon/lifecycle', {
+      token: alice,
+      body: { lifecycle: 'archived' },
+    });
+    const un = await env.call('POST', 'projects/prj_recon/lifecycle', {
+      token: alice,
+      body: { lifecycle: 'active' },
+    });
+    expect(un.jsonBody).toMatchObject({ lifecycle: 'active' });
+    const body = (await env.call('GET', 'projects', { token: alice }))
+      .jsonBody as {
+      projects: Array<{ projectId: string; lifecycle: string }>;
+    };
+    expect(
+      body.projects.find((p) => p.projectId === 'prj_recon')?.lifecycle,
+    ).toBe('active');
+  });
+});
+
+/* --------------- LEGACY TOKEN CROSS-ACCOUNT SAFETY (review §4) --------------- */
+
+describe('P3 legacy token binding is account-scoped', () => {
+  it("a legacy token for user A cannot bind to or revoke user B's machine", async () => {
+    const env = setup();
+    const SHARED = '00000000-0000-4000-8000-0000000000c3';
+    const bob = await env.signIn('bob', SHARED);
+    await env.call('POST', 'machines/checkin', {
+      token: bob,
+      body: {
+        machineId: SHARED,
+        memoryBackedUp: false,
+        skills: [],
+        projects: [],
+      },
+    });
+    // Alice (legacy, no machine binding) checks in claiming the SAME machine id. It binds to
+    // ALICE's own machine row (every row is keyed under the authenticated account), never Bob's.
+    const alice = await env.signIn('alice');
+    await env.call('POST', 'machines/checkin', {
+      token: alice,
+      body: {
+        machineId: SHARED,
+        memoryBackedUp: false,
+        skills: [],
+        projects: [],
+      },
+    });
+    await env.call('POST', `machines/${SHARED}/revoke`, { token: alice });
+    // Bob's machine + token are untouched.
+    const bobMachines = (await env.call('GET', 'machines/view', { token: bob }))
+      .jsonBody as { machines: Array<{ machineId: string; revoked: boolean }> };
+    expect(
+      bobMachines.machines.find((m) => m.machineId === SHARED)?.revoked,
+    ).toBe(false);
+    expect((await env.call('GET', 'skills', { token: bob })).status).toBe(200);
+    // Alice's own token is the one revoked.
+    expect((await env.call('GET', 'skills', { token: alice })).status).toBe(
+      401,
+    );
+  });
+});
+
+/* --------------- DELETE FAIL -> RETRY REMOVES PAYLOAD (review §3) --------------- */
+
+describe('P3 delete Cloud Memory retry cleans the orphaned payload', () => {
+  it('first delete fails (storage), payload remains; retry removes it; third is idempotent', async () => {
+    const repository = createInMemoryRepository();
+    const memory = createInMemoryMemoryBackends();
+    let failRemoval = true;
+    let counter = 0;
+    const service = createCloudService({
+      repository,
+      blobStore: createInMemoryBlobStore(),
+      appUrl: 'http://localhost:3000',
+      ticketSecret: 'test-secret',
+      now: () => new Date('2026-10-05T00:00:00.000Z'),
+      randomId: () =>
+        `00000000-0000-4000-8000-${(counter++).toString().padStart(12, '0')}`,
+      randomSecret: () => `secret-${counter++}`,
+      memoryBackendFor: (userId) => {
+        const inner = memory.memoryBackendFor(userId);
+        return new Proxy(inner, {
+          get(target, prop, receiver) {
+            if (prop === 'retireGeneration' && failRemoval)
+              return async () => {
+                throw new Error('storage remove failed');
+              };
+            const value = Reflect.get(target, prop, receiver);
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        }) as any;
+      },
+    });
+    const call = (
+      method: string,
+      path: string,
+      opts: { token?: string; body?: unknown } = {},
+    ) =>
+      handleCloudRequest(service, {
+        method,
+        path: `/api/v1/${path}`,
+        headers: opts.token ? { authorization: `Bearer ${opts.token}` } : {},
+        ...(opts.body !== undefined ? { jsonBody: opts.body } : {}),
+      });
+    const start = await call('POST', 'cli/auth/start', { body: {} });
+    const { userCode, deviceSecret } = start.jsonBody as {
+      userCode: string;
+      deviceSecret: string;
+    };
+    await service.approveCliAuth({ userCode, profile: { userId: 'alice' } });
+    const token = (
+      (await call('POST', 'cli/auth/token', { body: { deviceSecret } }))
+        .jsonBody as { token: string }
+    ).token;
+
+    const setupBackend = memory.memoryBackendFor('alice');
+    await setupBackend.ensureProfile('1');
+    await setupBackend.createGeneration({
+      backupId: 'b-retry-1',
+      expectedParent: null,
+      privacyMode: 'standard',
+      payload: new Uint8Array([7, 7, 7]),
+      bundleFormatVersion: '1',
+    });
+
+    // 1. first delete fails at storage removal → non-200, payload still present.
+    expect((await call('POST', 'memory/delete', { token })).status).not.toBe(
+      200,
+    );
+    expect(setupBackend.getPayload('b-retry-1')).toBeDefined(); // not thrown → present
+
+    // 2. retry with working storage → payload physically removed, nothing recoverable.
+    failRemoval = false;
+    const retry = await call('POST', 'memory/delete', { token });
+    expect(retry.status).toBe(200);
+    expect(() => setupBackend.getPayload('b-retry-1')).toThrow(/not found/i);
+    expect(await setupBackend.getLatest()).toBeNull();
+
+    // 3. a third delete remains safe/idempotent.
+    expect((await call('POST', 'memory/delete', { token })).status).toBe(200);
   });
 });

@@ -85,6 +85,10 @@ export const stackCloudRemoteMemoryBackend = (
     toProfile((await client.memorySetPrivacyMode(mode)).profile),
   listGenerations: async () =>
     (await client.memoryListGenerations()).generations.map(toGeneration),
+  // The CLI backend only sees committed generations via the client; Delete Cloud Memory
+  // (which needs retired ids too) runs server-side, not through this backend.
+  listAllBackupIds: async () =>
+    (await client.memoryListGenerations()).generations.map((g) => g.backupId),
   getLatest: async () => {
     const { generation } = await client.memoryGetLatest();
     return generation ? toGeneration(generation) : null;

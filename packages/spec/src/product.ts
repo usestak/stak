@@ -138,6 +138,10 @@ export const setProjectLifecycleRequestSchema = z
     lifecycle: projectLifecycleSchema,
   })
   .strict();
+export const setProjectLifecycleResponseSchema = z.object({
+  projectId: z.string(),
+  lifecycle: projectLifecycleSchema,
+});
 export const syncProjectsResponseSchema = z.object({ ok: z.literal(true) });
 /**
  * CLI → cloud project DISCOVERY sync. This conveys only that a stable Project exists and its
@@ -299,6 +303,9 @@ export type SetProjectLifecycleRequest = z.infer<
 >;
 export type SyncProjectsRequest = z.infer<typeof syncProjectsRequestSchema>;
 export type SyncProjectsResponse = z.infer<typeof syncProjectsResponseSchema>;
+export type SetProjectLifecycleResponse = z.infer<
+  typeof setProjectLifecycleResponseSchema
+>;
 export type MemoryMode = z.infer<typeof memoryModeSchema>;
 export type RecoveryMethodState = z.infer<typeof recoveryMethodStateSchema>;
 export type MemoryBackupSummary = z.infer<typeof memoryBackupSummarySchema>;
