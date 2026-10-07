@@ -1036,6 +1036,50 @@ describe('uploadSkillReviewArtifact', () => {
     ).toEqual(a.payload);
   });
 
+  it('re-uploading the exact same artifact is idempotent: no error, no double-create', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const a = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    const first = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      a.request,
+      a.payload,
+    );
+    // Re-upload the identical request + payload a second (and third) time.
+    const second = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      a.request,
+      a.payload,
+    );
+    const third = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      a.request,
+      a.payload,
+    );
+    expect(second.reviewArtifactId).toBeDefined();
+    expect(third.reviewArtifactId).toBeDefined();
+    // Still exactly ONE current artifact (latest-only) — no double-create.
+    const detail = await env.service.getSkillDetail(seed.user, seed.skillId);
+    expect(detail.reviewArtifact?.reviewArtifactId).toBe(third.reviewArtifactId);
+    expect(detail.reviewArtifact?.candidateRevision).toBe('b'.repeat(40));
+    expect(detail.reviewArtifact?.files[0]?.afterText).toBe(a.afterText);
+    // The identical payload bytes are still retrievable under their one content-addressed key.
+    expect(
+      await env.blobStore.get(seed.user.userId, a.request.artifactPayloadHash),
+    ).toEqual(a.payload);
+    // Approving by the LATEST id (not stale `first`/`second` ids) still succeeds.
+    const approval = await env.service.approveSkillVersion(seed.user, {
+      skillId: seed.skillId,
+      reviewArtifactId: third.reviewArtifactId,
+    });
+    expect(approval.createdNew).toBe(true);
+  });
+
   it('safe replacement: if the new metadata fails to commit, the old artifact stays fully intact', async () => {
     const env = setup();
     const seed = await seedSkill(env);

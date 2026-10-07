@@ -236,6 +236,20 @@ describe('materializeExactRevision (real git fixture, local only)', () => {
     ).rejects.toThrow();
   });
 
+  it('rejects an absolute path injected as the skill path', async () => {
+    const head = (await run(repoDir, ['rev-parse', 'HEAD'])).stdout.trim();
+    const absolute =
+      process.platform === 'win32' ? 'C:\\Windows\\System32' : '/etc';
+    await expect(
+      materializeExactRevision({
+        workRoot,
+        remote: repoDir,
+        revision: head,
+        skillPath: absolute,
+      }),
+    ).rejects.toThrow();
+  });
+
   it('cleans up its temp working directory even on failure', async () => {
     const before = (await import('node:fs/promises')).readdir;
     await expect(
