@@ -513,7 +513,7 @@ describe('P3 skills read model', () => {
     expect(resumed.jsonBody).toMatchObject({ changed: true, paused: false });
   });
 
-  it('approve (by review artifact, over HTTP) advances desired version; re-approving the consumed artifact creates nothing new', async () => {
+  it('approve (by review artifact, over HTTP) advances desired version; re-approving the consumed artifact replays the same success idempotently', async () => {
     const env = setup();
     const seed = await seedSkill(env, 'alice', {
       skill_approve01: gitSkill('ap', h('a'), { ref: 'refs/heads/main' }),
@@ -546,12 +546,13 @@ describe('P3 skills read model', () => {
     expect(skills.skills[0]?.approvedVersion).toBe(h('b'));
     // The consumed artifact no longer describes a pending delta.
     expect(skills.skills[0]?.sourceCheckState).toBe('not-checked');
-    // Re-approving the SAME (now consumed) artifact is refused and commits no new version.
+    // Re-approving the SAME (now consumed) artifact replays the same success and commits no new version.
     const again = await env.call('POST', 'skills/skill_approve01/approve', {
       token: seed.token,
       body: { reviewArtifactId },
     });
-    expect(again.status).toBe(409);
+    expect(again.status).toBe(200);
+    expect(again.jsonBody).toMatchObject({ approvedVersion: h('b') });
     const stacks = (
       await env.call('GET', 'stacks-owned', { token: seed.token })
     ).jsonBody as { owned: Array<{ latestVersionNumber: number }> };
@@ -1354,10 +1355,18 @@ describe('approveSkillVersion — by artifact (P5a)', () => {
       'https://github.com/acme/skills.git',
     );
     expect(approved.reference?.ref).toBe('refs/heads/main');
-    // Approval success deletes the consumed check row.
-    expect(
-      await env.repository.getSkillReviewCheck(seed.user.userId, seed.skillId),
-    ).toBeNull();
+    // Approval success leaves a 'consumed' tombstone (for idempotent replay), not a
+    // deleted row — its approvedContentHash deliberately names the OLD base, so it is
+    // invisible as a live fact once the Skill's contentHash has advanced.
+    const tombstone = await env.repository.getSkillReviewCheck(
+      seed.user.userId,
+      seed.skillId,
+    );
+    expect(tombstone).toMatchObject({
+      sourceCheckState: 'consumed',
+      reviewArtifactId,
+      candidateContentHash: h('b'),
+    });
   });
 
   it('rejects an artifact that belongs to a different account', async () => {
@@ -1569,7 +1578,7 @@ describe('approveSkillVersion — by artifact (P5a)', () => {
     expect(approved.reference?.expectedContentHash).toBe(h('b'));
   });
 
-  it('approving the same artifact twice never commits twice', async () => {
+  it('approving the same artifact twice never commits twice (idempotent replay)', async () => {
     const env = setup();
     const seed = await seedSkill(env);
     const a = await upload(env, seed, {
@@ -1581,12 +1590,14 @@ describe('approveSkillVersion — by artifact (P5a)', () => {
       reviewArtifactId: a.reviewArtifactId,
     });
     expect(first.createdNew).toBe(true);
-    await expect(
-      env.service.approveSkillVersion(seed.user, {
-        skillId: seed.skillId,
-        reviewArtifactId: a.reviewArtifactId,
-      }),
-    ).rejects.toMatchObject({ code: 'remote-environment-conflict' });
+    const second = await env.service.approveSkillVersion(seed.user, {
+      skillId: seed.skillId,
+      reviewArtifactId: a.reviewArtifactId,
+    });
+    expect(second).toMatchObject({
+      skillId: seed.skillId,
+      approvedVersion: h('b'),
+    });
     const stacks = (
       await env.call('GET', 'stacks-owned', { token: seed.token })
     ).jsonBody as { owned: Array<{ latestVersionNumber: number }> };
@@ -1620,6 +1631,457 @@ describe('approveSkillVersion — by artifact (P5a)', () => {
       reviewArtifactId: a.reviewArtifactId,
     });
     expect(retry.createdNew).toBe(true);
+  });
+
+  describe('idempotent replay (P5a final micro-gate §2)', () => {
+    it('A: approving A succeeds', async () => {
+      const env = setup();
+      const seed = await seedSkill(env);
+      const a = await upload(env, seed, {
+        revision: 'b'.repeat(40),
+        contentHash: h('b'),
+      });
+      const first = await env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId: a.reviewArtifactId,
+      });
+      expect(first.createdNew).toBe(true);
+      expect(first.approvedVersion).toBe(h('b'));
+    });
+
+    it('B: an immediate retry of the same reviewArtifactId is idempotent — same success, no second commit', async () => {
+      const env = setup();
+      const seed = await seedSkill(env);
+      const a = await upload(env, seed, {
+        revision: 'b'.repeat(40),
+        contentHash: h('b'),
+      });
+      const first = await env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId: a.reviewArtifactId,
+      });
+      const retry = await env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId: a.reviewArtifactId,
+      });
+      expect(retry).toEqual({
+        skillId: seed.skillId,
+        approvedVersion: h('b'),
+        createdNew: true,
+      });
+      // No second commit: the replay's result carries no environmentVersionNumber at all
+      // (it never calls commitBundleMutation), unlike the real first approval above.
+      expect(retry.environmentVersionNumber).toBeUndefined();
+      expect(first.approvedVersion).toBe(retry.approvedVersion);
+    });
+
+    it('C: the replay succeeds even after the artifact payload has already been deleted', async () => {
+      const env = setup();
+      const seed = await seedSkill(env);
+      const a = await upload(env, seed, {
+        revision: 'b'.repeat(40),
+        contentHash: h('b'),
+      });
+      await env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId: a.reviewArtifactId,
+      });
+      // The payload is genuinely gone — the replay must not need it.
+      expect(
+        await env.blobStore.getReviewPayload(
+          seed.user.userId,
+          a.reviewArtifactId,
+        ),
+      ).toBeNull();
+      const retry = await env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId: a.reviewArtifactId,
+      });
+      expect(retry.approvedVersion).toBe(h('b'));
+    });
+
+    it('D: replaying A after the Skill has since moved to B does NOT roll it back — returns a stale conflict, never resurrects A or touches current state', async () => {
+      const env = setup();
+      const seed = await seedSkill(env);
+      const a = await upload(env, seed, {
+        revision: 'b'.repeat(40),
+        contentHash: h('b'),
+      });
+      await env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId: a.reviewArtifactId,
+      });
+      // A fresh check against the NEW approved base (h('b')) finds candidate C, approved as B.
+      const c = await upload(
+        env,
+        { ...seed, approvedContentHash: h('b') },
+        { revision: 'c'.repeat(40), contentHash: h('c') },
+      );
+      const b = await env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId: c.reviewArtifactId,
+      });
+      expect(b.approvedVersion).toBe(h('c'));
+      // Replaying the OLD artifact A must not roll the Skill back to h('b').
+      await expect(
+        env.service.approveSkillVersion(seed.user, {
+          skillId: seed.skillId,
+          reviewArtifactId: a.reviewArtifactId,
+        }),
+      ).rejects.toThrow(/no longer current/);
+      const current = await env.service.getSkillDetail(seed.user, seed.skillId);
+      expect(current.approvedVersion).toBe(h('c'));
+    });
+
+    it('E: an artifact that was superseded but never approved still returns a stale conflict (unaffected by replay support)', async () => {
+      const env = setup();
+      const seed = await seedSkill(env);
+      const a = await upload(env, seed, {
+        revision: 'b'.repeat(40),
+        contentHash: h('b'),
+      });
+      await upload(env, seed, {
+        revision: 'c'.repeat(40),
+        contentHash: h('c'),
+      });
+      await expect(
+        env.service.approveSkillVersion(seed.user, {
+          skillId: seed.skillId,
+          reviewArtifactId: a.reviewArtifactId,
+        }),
+      ).rejects.toThrow(/no longer current/);
+    });
+
+    it('F: a consumed tombstone cannot be replayed from a different account', async () => {
+      const env = setup();
+      const alice = await seedSkill(env, 'alice');
+      const bob = await seedSkill(env, 'bob');
+      const a = await upload(env, alice, {
+        revision: 'b'.repeat(40),
+        contentHash: h('b'),
+      });
+      await env.service.approveSkillVersion(alice.user, {
+        skillId: alice.skillId,
+        reviewArtifactId: a.reviewArtifactId,
+      });
+      await expect(
+        env.service.approveSkillVersion(bob.user, {
+          skillId: bob.skillId,
+          reviewArtifactId: a.reviewArtifactId,
+        }),
+      ).rejects.toThrow();
+    });
+  });
+});
+
+describe('durable review-payload cleanup (P5a final micro-gate §1)', () => {
+  it("A: upload B after A — metadata commits, but A's payload delete fails — the obligation stays durably recorded, never swallowed", async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const a = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      reviewUpload({
+        skillId: seed.skillId,
+        approvedContentHash: seed.approvedContentHash,
+        candidateRevision: 'b'.repeat(40),
+        candidateContentHash: h('b'),
+      }).request,
+      reviewUpload({
+        skillId: seed.skillId,
+        approvedContentHash: seed.approvedContentHash,
+        candidateRevision: 'b'.repeat(40),
+        candidateContentHash: h('b'),
+      }).payload,
+    );
+    const realDelete = env.blobStore.deleteReviewPayload;
+    env.blobStore.deleteReviewPayload = async () => {
+      throw new Error('storage unavailable');
+    };
+    const bPayload = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'c'.repeat(40),
+      candidateContentHash: h('c'),
+    });
+    const b = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      bPayload.request,
+      bPayload.payload,
+    );
+    env.blobStore.deleteReviewPayload = realDelete;
+    // B is current and correct despite A's cleanup failing.
+    const detail = await env.service.getSkillDetail(seed.user, seed.skillId);
+    expect(detail.reviewArtifact?.reviewArtifactId).toBe(b.reviewArtifactId);
+    // The obligation to delete A is durably recorded on the row, not lost.
+    const stored = await env.repository.getSkillReviewCheck(
+      seed.user.userId,
+      seed.skillId,
+    );
+    expect(stored?.pendingCleanupArtifactIds).toEqual([a.reviewArtifactId]);
+  });
+
+  it('B: a later write retries the durable obligation and clears it once deletion succeeds', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const a = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      reviewUpload({
+        skillId: seed.skillId,
+        approvedContentHash: seed.approvedContentHash,
+        candidateRevision: 'b'.repeat(40),
+        candidateContentHash: h('b'),
+      }).request,
+      reviewUpload({
+        skillId: seed.skillId,
+        approvedContentHash: seed.approvedContentHash,
+        candidateRevision: 'b'.repeat(40),
+        candidateContentHash: h('b'),
+      }).payload,
+    );
+    const realDelete = env.blobStore.deleteReviewPayload;
+    env.blobStore.deleteReviewPayload = async () => {
+      throw new Error('storage unavailable');
+    };
+    const bPayload = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'c'.repeat(40),
+      candidateContentHash: h('c'),
+    });
+    await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      bPayload.request,
+      bPayload.payload,
+    );
+    env.blobStore.deleteReviewPayload = realDelete; // storage recovers
+    // A later write to the SAME row (another check, finding no further update) retries and
+    // clears the stuck obligation.
+    await env.service.reportSkillSourceCheck(seed.user, {
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      sourceCheckState: 'no-update',
+      checkedAt: '2026-10-06T00:00:00.000Z',
+    });
+    expect(
+      await env.blobStore.getReviewPayload(
+        seed.user.userId,
+        a.reviewArtifactId,
+      ),
+    ).toBeNull();
+    const stored = await env.repository.getSkillReviewCheck(
+      seed.user.userId,
+      seed.skillId,
+    );
+    expect(stored?.pendingCleanupArtifactIds ?? []).toEqual([]);
+  });
+
+  it("C: if B's metadata write itself fails, A remains current and fully readable (never half-replaced)", async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const a = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      reviewUpload({
+        skillId: seed.skillId,
+        approvedContentHash: seed.approvedContentHash,
+        candidateRevision: 'b'.repeat(40),
+        candidateContentHash: h('b'),
+      }).request,
+      reviewUpload({
+        skillId: seed.skillId,
+        approvedContentHash: seed.approvedContentHash,
+        candidateRevision: 'b'.repeat(40),
+        candidateContentHash: h('b'),
+      }).payload,
+    );
+    const realPut = env.repository.putSkillReviewCheck;
+    env.repository.putSkillReviewCheck = async () => {
+      throw new Error('metadata write failed');
+    };
+    const bPayload = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'c'.repeat(40),
+      candidateContentHash: h('c'),
+    });
+    await expect(
+      env.service.uploadSkillReviewArtifact(
+        seed.user,
+        bPayload.request,
+        bPayload.payload,
+      ),
+    ).rejects.toThrow('metadata write failed');
+    env.repository.putSkillReviewCheck = realPut;
+    const detail = await env.service.getSkillDetail(seed.user, seed.skillId);
+    expect(detail.reviewArtifact?.reviewArtifactId).toBe(a.reviewArtifactId);
+    expect(
+      await env.blobStore.getReviewPayload(
+        seed.user.userId,
+        a.reviewArtifactId,
+      ),
+    ).not.toBeNull();
+  });
+
+  it('D: approval succeeds even when the payload delete fails — the commit is never undone, and cleanup stays durably retryable', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const upload = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    const a = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      upload.request,
+      upload.payload,
+    );
+    const realDelete = env.blobStore.deleteReviewPayload;
+    env.blobStore.deleteReviewPayload = async () => {
+      throw new Error('storage unavailable');
+    };
+    const approval = await env.service.approveSkillVersion(seed.user, {
+      skillId: seed.skillId,
+      reviewArtifactId: a.reviewArtifactId,
+    });
+    env.blobStore.deleteReviewPayload = realDelete;
+    // The approval itself is fully committed despite the cleanup failure.
+    expect(approval.approvedVersion).toBe(h('b'));
+    const detail = await env.service.getSkillDetail(seed.user, seed.skillId);
+    expect(detail.approvedVersion).toBe(h('b'));
+    // The obligation to clean up A's payload is durably recorded on the consumed tombstone.
+    const stored = await env.repository.getSkillReviewCheck(
+      seed.user.userId,
+      seed.skillId,
+    );
+    expect(stored?.sourceCheckState).toBe('consumed');
+    expect(stored?.pendingCleanupArtifactIds).toEqual([a.reviewArtifactId]);
+  });
+
+  it("E: a later write retries and clears the consumed artifact's payload once deletion succeeds", async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const upload = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    const a = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      upload.request,
+      upload.payload,
+    );
+    const realDelete = env.blobStore.deleteReviewPayload;
+    env.blobStore.deleteReviewPayload = async () => {
+      throw new Error('storage unavailable');
+    };
+    await env.service.approveSkillVersion(seed.user, {
+      skillId: seed.skillId,
+      reviewArtifactId: a.reviewArtifactId,
+    });
+    env.blobStore.deleteReviewPayload = realDelete; // storage recovers
+    await env.service.reportSkillSourceCheck(seed.user, {
+      skillId: seed.skillId,
+      approvedContentHash: h('b'),
+      sourceCheckState: 'no-update',
+      checkedAt: '2026-10-06T00:00:00.000Z',
+    });
+    expect(
+      await env.blobStore.getReviewPayload(
+        seed.user.userId,
+        a.reviewArtifactId,
+      ),
+    ).toBeNull();
+  });
+
+  it('F: repeated cleanup attempts are safe/idempotent — deleting an already-gone payload never throws', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const upload = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    const a = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      upload.request,
+      upload.payload,
+    );
+    await env.blobStore.deleteReviewPayload(
+      seed.user.userId,
+      a.reviewArtifactId,
+    );
+    await expect(
+      env.blobStore.deleteReviewPayload(seed.user.userId, a.reviewArtifactId),
+    ).resolves.toBeUndefined();
+    await expect(
+      env.blobStore.deleteReviewPayload(seed.user.userId, a.reviewArtifactId),
+    ).resolves.toBeUndefined();
+  });
+
+  it("G: cleanup for one Skill never touches another Skill's (or another account's) artifact", async () => {
+    const env = setup();
+    const alice = await seedSkill(env, 'alice', {
+      skill_review001: gitSkill('reviewed-x', h('a'), {
+        ref: 'refs/heads/main',
+      }),
+    });
+    const bob = await seedSkill(env, 'bob', {
+      skill_review001: gitSkill('reviewed-y', h('a'), {
+        ref: 'refs/heads/main',
+      }),
+    });
+    const aliceUpload = reviewUpload({
+      skillId: alice.skillId,
+      approvedContentHash: alice.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    const bobUpload = reviewUpload({
+      skillId: bob.skillId,
+      approvedContentHash: bob.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    const aArtifact = await env.service.uploadSkillReviewArtifact(
+      alice.user,
+      aliceUpload.request,
+      aliceUpload.payload,
+    );
+    const bobArtifact = await env.service.uploadSkillReviewArtifact(
+      bob.user,
+      bobUpload.request,
+      bobUpload.payload,
+    );
+    // Supersede ALICE's artifact only; bob's must be completely unaffected.
+    const aliceSecond = reviewUpload({
+      skillId: alice.skillId,
+      approvedContentHash: alice.approvedContentHash,
+      candidateRevision: 'c'.repeat(40),
+      candidateContentHash: h('c'),
+    });
+    await env.service.uploadSkillReviewArtifact(
+      alice.user,
+      aliceSecond.request,
+      aliceSecond.payload,
+    );
+    expect(
+      await env.blobStore.getReviewPayload(
+        alice.user.userId,
+        aArtifact.reviewArtifactId,
+      ),
+    ).toBeNull();
+    expect(
+      await env.blobStore.getReviewPayload(
+        bob.user.userId,
+        bobArtifact.reviewArtifactId,
+      ),
+    ).not.toBeNull();
+    const bobDetail = await env.service.getSkillDetail(bob.user, bob.skillId);
+    expect(bobDetail.reviewArtifact?.reviewArtifactId).toBe(
+      bobArtifact.reviewArtifactId,
+    );
   });
 });
 

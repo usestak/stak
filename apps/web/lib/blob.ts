@@ -74,7 +74,14 @@ export const supabaseBlobStore = (): CloudBlobStore => {
       return toBytes(data);
     },
     deleteReviewPayload: async (userId, reviewArtifactId) => {
-      await storage().remove([reviewPayloadKey(userId, reviewArtifactId)]);
+      // Must genuinely throw on failure — the durable cleanup-retry mechanism (P5a gate §1)
+      // depends on a real failure surfacing here, not being silently swallowed by the
+      // Supabase client's {data,error} return convention.
+      const { error } = await storage().remove([
+        reviewPayloadKey(userId, reviewArtifactId),
+      ]);
+      if (error)
+        throw new Error(`Review payload delete failed: ${error.message}`);
     },
   };
 };

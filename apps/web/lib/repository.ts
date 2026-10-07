@@ -143,6 +143,9 @@ const mapSkillReviewCheck = (row: any): SkillReviewCheckRecord => ({
     ? { artifactPayloadHash: row.artifact_payload_hash }
     : {}),
   ...(row.diff_files ? { diffFiles: row.diff_files } : {}),
+  ...(row.pending_cleanup_artifact_ids?.length
+    ? { pendingCleanupArtifactIds: row.pending_cleanup_artifact_ids }
+    : {}),
 });
 
 /** Production repository backed by Supabase Postgres. */
@@ -344,6 +347,10 @@ export const supabaseRepository = (): CloudRepository &
           review_artifact_id: record.reviewArtifactId ?? null,
           artifact_payload_hash: record.artifactPayloadHash ?? null,
           diff_files: record.diffFiles ?? null,
+          // Explicitly null when clearing — this is a full-row upsert, so an omitted field
+          // would leave a stale value from a prior row state rather than actually clearing it.
+          pending_cleanup_artifact_ids:
+            record.pendingCleanupArtifactIds ?? null,
         });
     },
     deleteSkillReviewCheck: async (userId, skillId) => {

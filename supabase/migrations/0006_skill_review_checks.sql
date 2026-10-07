@@ -23,13 +23,28 @@
 -- reviewable artifact for it, e.g. it exceeds V0 bounds). Mutually exclusive with
 -- review_artifact_id — a Skill either has a reviewable artifact or an unavailable-reason,
 -- never both.
+--
+-- 'consumed' is a repository-internal tombstone state, never exposed through the public
+-- Skills read model (its approved_content_hash deliberately names the OLD base it was
+-- reviewed against, so the existing base-bound read logic naturally treats it as not-current
+-- the moment approval advances the Skill). It exists ONLY to make approval genuinely
+-- idempotent: replaying the same reviewArtifactId after a lost response returns the same
+-- success instead of a spurious conflict, without resurrecting the artifact or retaining its
+-- changed-file text (the review payload is deleted; only skillId/candidateContentHash/
+-- reviewArtifactId survive, which is exactly what a replay needs to verify, nothing more).
+--
+-- pending_cleanup_artifact_ids is a durable cleanup obligation (not best-effort-only): when an
+-- artifact is superseded or consumed, the id whose payload needs deleting is written into THIS
+-- column as part of the SAME commit that performs the supersession — never as an afterthought
+-- a failed delete can silently lose. Cleared (or shrunk) once deletion actually succeeds;
+-- retried opportunistically on the next write to this (user_id, skill_id) row.
 
 create table if not exists public.skill_review_checks (
   user_id uuid not null references auth.users (id) on delete cascade,
   skill_id text not null,
   approved_content_hash text not null,
   source_check_state text not null
-    check (source_check_state in ('no-update', 'update-available', 'cannot-check', 'check-failed')),
+    check (source_check_state in ('no-update', 'update-available', 'cannot-check', 'check-failed', 'consumed')),
   checked_at timestamptz not null,
 
   cannot_check_reason text
@@ -46,6 +61,9 @@ create table if not exists public.skill_review_checks (
   -- Changed-file list: [{ relativePath, kind, binary, before?: {byteSize,hash}, after?: {byteSize,hash} }].
   -- Never contains file text content — that lives in the blob store keyed by review_artifact_id.
   diff_files jsonb,
+  -- Durable cleanup obligation: artifact ids whose blob payload still needs deleting. See the
+  -- header comment above. Empty/null means nothing is currently stuck.
+  pending_cleanup_artifact_ids text[],
 
   created_at timestamptz not null default now(),
   primary key (user_id, skill_id)

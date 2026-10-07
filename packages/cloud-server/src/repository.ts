@@ -116,8 +116,18 @@ export type SkillReviewCheckRecord = {
   userId: string;
   skillId: string;
   approvedContentHash: string;
+  // 'consumed' is a REPOSITORY-INTERNAL state only — never exposed through the public
+  // SkillSummary/SkillDetail schemas in @stack/spec. It is a durable tombstone proving exactly
+  // what was approved (for idempotent approval replay, P5a gate §2), never a live check result.
+  // Its `approvedContentHash` deliberately stays the OLD base it was reviewed against, so the
+  // existing base-bound read-model check (`stored.approvedContentHash === skill.contentHash`)
+  // naturally and correctly treats it as not-current the moment approval advances the Skill.
   sourceCheckState:
-    'no-update' | 'update-available' | 'cannot-check' | 'check-failed';
+    | 'no-update'
+    | 'update-available'
+    | 'cannot-check'
+    | 'check-failed'
+    | 'consumed';
   checkedAt: string;
   // Reserved for intrinsic, zero-network-I/O facts about the Skill's own restoration record.
   // A failed NETWORK operation (DNS/timeout/host-down/auth) is `check-failed`, never this.
@@ -133,6 +143,11 @@ export type SkillReviewCheckRecord = {
   reviewArtifactId?: string;
   artifactPayloadHash?: string;
   diffFiles?: ReviewArtifactFileRecord[];
+  // Durable cleanup obligation (P5a gate §1): artifact ids whose blob payload still needs
+  // deleting. Written as part of the SAME commit that performs a supersession/consumption —
+  // never an afterthought a failed best-effort delete can silently lose. Retried on the next
+  // write to this (userId, skillId) row; cleared (or shrunk) once deletion succeeds.
+  pendingCleanupArtifactIds?: string[];
 };
 
 /** Phase P1: the full check-in a machine reports. Carries no paths and no Memory content. */

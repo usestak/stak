@@ -170,11 +170,28 @@ const sourceSummaryOf = (skill: PortableLockedSkill): SkillSourceSummary => {
  * computed against the Skill's CURRENT approved content hash. A check against any other base
  * is stale and reads as no check at all (`not-checked`) — never as a diff against the wrong base.
  */
+/** A stored check, narrowed to exclude the repository-internal 'consumed' tombstone state —
+ *  the only shape the public SkillSummary/SkillDetail schemas know how to represent. */
+type LiveSkillReviewCheck = SkillReviewCheckRecord & {
+  sourceCheckState: Exclude<
+    SkillReviewCheckRecord['sourceCheckState'],
+    'consumed'
+  >;
+};
+
 const currentCheckOf = (
   stored: SkillReviewCheckRecord | null,
   skill: PortableLockedSkill,
-): SkillReviewCheckRecord | null =>
-  stored && stored.approvedContentHash === skill.contentHash ? stored : null;
+): LiveSkillReviewCheck | null => {
+  // 'consumed' is a repository-internal idempotency tombstone (P5a gate §2) — never a live
+  // check result. Explicitly excluded here as defense in depth even though its
+  // approvedContentHash (deliberately the OLD base) should already make this comparison false
+  // in the overwhelming common case; this guards the one-in-2^256 coincidence where it wouldn't.
+  if (!stored || stored.sourceCheckState === 'consumed') return null;
+  return stored.approvedContentHash === skill.contentHash
+    ? (stored as LiveSkillReviewCheck)
+    : null;
+};
 
 const capabilityStateOf = (skill: PortableLockedSkill) => {
   const declared = skill.metadata?.capabilities;
@@ -310,6 +327,57 @@ export const createProductMethods = (config: ProductServiceConfig) => {
     const skill = current?.bundle.resolved.skills[skillId];
     if (!skill) throw notFound('skill-not-found', 'No such Skill.');
     return skill;
+  };
+
+  /**
+   * Best-effort delete each id, but NEVER swallow a failure into nothing (P5a gate §1): returns
+   * exactly the ids that are still pending after this attempt, so the caller can durably persist
+   * them rather than lose track. Each id is independently scoped (own artifact-id-keyed blob), so
+   * one failure never blocks or risks another.
+   */
+  const attemptCleanup = async (
+    userId: string,
+    ids: readonly string[],
+  ): Promise<string[]> => {
+    const stillPending: string[] = [];
+    for (const id of ids) {
+      try {
+        await config.blobStore.deleteReviewPayload(userId, id);
+      } catch {
+        stillPending.push(id);
+      }
+    }
+    return stillPending;
+  };
+
+  /**
+   * Commit a SkillReviewCheckRecord together with a durable cleanup obligation (P5a gate §1):
+   * the obligation (superseded/consumed artifact ids, plus any still-stuck from a prior attempt)
+   * is written into the SAME row, in the SAME commit, that performs the supersession/consumption
+   * — never as an afterthought a failed best-effort delete could silently lose. Only after that
+   * commit succeeds do we attempt the actual deletions; whatever still fails stays durably
+   * recorded on the row (a second, smaller write) for the next call to retry. Idempotent: deleting
+   * an already-gone blob never throws from the in-memory/Supabase implementations.
+   */
+  const commitWithCleanup = async (
+    userId: string,
+    record: SkillReviewCheckRecord,
+    obligations: readonly string[],
+  ): Promise<void> => {
+    const pending = obligations.length > 0 ? [...obligations] : undefined;
+    await config.repository.putSkillReviewCheck({
+      ...record,
+      ...(pending ? { pendingCleanupArtifactIds: pending } : {}),
+    });
+    if (!pending) return;
+    const stillPending = await attemptCleanup(userId, pending);
+    if (stillPending.length !== pending.length)
+      await config.repository.putSkillReviewCheck({
+        ...record,
+        ...(stillPending.length > 0
+          ? { pendingCleanupArtifactIds: stillPending }
+          : {}),
+      });
   };
 
   /**
@@ -468,12 +536,17 @@ export const createProductMethods = (config: ProductServiceConfig) => {
           'A candidate identical to the approved version is not an update.',
         );
       const reviewArtifactId = config.newId();
-      // Capture whatever artifact is current BEFORE we overwrite it, so it can be safely
-      // cleaned up only AFTER the new one is fully committed (never before).
+      // Capture whatever artifact is current (plus any already-stuck cleanup obligation)
+      // BEFORE we overwrite it, so it can be safely cleaned up only AFTER the new one is fully
+      // committed (never before), and so a prior failed cleanup is never lost.
       const previous = await config.repository.getSkillReviewCheck(
         user.userId,
         request.skillId,
       );
+      const obligations = [
+        ...(previous?.pendingCleanupArtifactIds ?? []),
+        ...(previous?.reviewArtifactId ? [previous.reviewArtifactId] : []),
+      ];
       // Safe replacement order (P5a §5a): the new payload is stored first, under its OWN
       // artifact-id-keyed slot (never the prior artifact's key — collision-proof by
       // construction), then the new metadata row replaces the old one in a single write. If
@@ -483,26 +556,22 @@ export const createProductMethods = (config: ProductServiceConfig) => {
         reviewArtifactId,
         payloadBytes,
       );
-      await config.repository.putSkillReviewCheck({
-        userId: user.userId,
-        skillId: request.skillId,
-        approvedContentHash: request.approvedContentHash,
-        sourceCheckState: 'update-available',
-        checkedAt: request.checkedAt,
-        candidateRevision: request.candidateRevision,
-        candidateContentHash: request.candidateContentHash,
-        reviewArtifactId,
-        artifactPayloadHash: request.artifactPayloadHash,
-        diffFiles,
-      });
-      // Only now that the new artifact is safely current do we clean up the one it replaced.
-      // Best-effort: a cleanup failure leaves a harmless orphan (owner-scoped, unreferenced,
-      // artifact-id-keyed — never confusable with anything else) and must never undo or fail
-      // an otherwise-successful upload.
-      if (previous?.reviewArtifactId)
-        await config.blobStore
-          .deleteReviewPayload(user.userId, previous.reviewArtifactId)
-          .catch(() => undefined);
+      await commitWithCleanup(
+        user.userId,
+        {
+          userId: user.userId,
+          skillId: request.skillId,
+          approvedContentHash: request.approvedContentHash,
+          sourceCheckState: 'update-available',
+          checkedAt: request.checkedAt,
+          candidateRevision: request.candidateRevision,
+          candidateContentHash: request.candidateContentHash,
+          reviewArtifactId,
+          artifactPayloadHash: request.artifactPayloadHash,
+          diffFiles,
+        },
+        obligations,
+      );
       return { reviewArtifactId };
     },
 
@@ -544,42 +613,49 @@ export const createProductMethods = (config: ProductServiceConfig) => {
         throw remoteConflict(
           'The approved version changed since this check ran. Check again.',
         );
-      // Capture whatever artifact is current BEFORE we overwrite it (this result — including
-      // a reviewable-update's absence of one — supersedes it just as much as a new upload
-      // would), so it can be cleaned up only AFTER the new result is fully committed.
+      // Capture whatever artifact is current (plus any already-stuck cleanup obligation)
+      // BEFORE we overwrite it (this result — including a reviewable-update's absence of one —
+      // supersedes it just as much as a new upload would), so nothing is lost if a prior
+      // cleanup already failed once.
       const previous = await config.repository.getSkillReviewCheck(
         user.userId,
         request.skillId,
       );
+      const obligations = [
+        ...(previous?.pendingCleanupArtifactIds ?? []),
+        ...(previous?.reviewArtifactId ? [previous.reviewArtifactId] : []),
+      ];
       // Latest-only: this replaces any prior result for the Skill, including a previous
       // update-available artifact, which therefore stops being approvable.
-      await config.repository.putSkillReviewCheck({
-        userId: user.userId,
-        skillId: request.skillId,
-        approvedContentHash: request.approvedContentHash,
-        sourceCheckState: request.sourceCheckState,
-        checkedAt: request.checkedAt,
-        ...(request.cannotCheckReason
-          ? { cannotCheckReason: request.cannotCheckReason }
-          : {}),
-        ...(request.failureReason
-          ? { checkFailedReason: request.failureReason }
-          : {}),
-        ...(request.sourceCheckState === 'update-available'
-          ? {
-              ...(request.candidateRevision
-                ? { candidateRevision: request.candidateRevision }
-                : {}),
-              ...(request.reviewUnavailableReason
-                ? { reviewUnavailableReason: request.reviewUnavailableReason }
-                : {}),
-            }
-          : {}),
-      });
-      if (previous?.reviewArtifactId)
-        await config.blobStore
-          .deleteReviewPayload(user.userId, previous.reviewArtifactId)
-          .catch(() => undefined);
+      await commitWithCleanup(
+        user.userId,
+        {
+          userId: user.userId,
+          skillId: request.skillId,
+          approvedContentHash: request.approvedContentHash,
+          sourceCheckState: request.sourceCheckState,
+          checkedAt: request.checkedAt,
+          ...(request.cannotCheckReason
+            ? { cannotCheckReason: request.cannotCheckReason }
+            : {}),
+          ...(request.failureReason
+            ? { checkFailedReason: request.failureReason }
+            : {}),
+          ...(request.sourceCheckState === 'update-available'
+            ? {
+                ...(request.candidateRevision
+                  ? { candidateRevision: request.candidateRevision }
+                  : {}),
+                ...(request.reviewUnavailableReason
+                  ? {
+                      reviewUnavailableReason: request.reviewUnavailableReason,
+                    }
+                  : {}),
+              }
+            : {}),
+        },
+        obligations,
+      );
       return { ok: true };
     },
 
@@ -601,6 +677,30 @@ export const createProductMethods = (config: ProductServiceConfig) => {
         user.userId,
         request.skillId,
       );
+      // Idempotent replay (P5a gate §2): this EXACT artifact was already successfully
+      // approved — the 'consumed' tombstone proves it. Return the same semantic success
+      // WITHOUT touching current state at all: never re-commit, never re-derive, never look
+      // at `skill`'s current contentHash. This is what makes a lost-response retry safe even
+      // if the Skill has since moved again to a newer approval — replaying old history must
+      // never roll a later approval backwards. A tombstone superseded by a LATER consumption
+      // (its reviewArtifactId no longer matches) falls through to the stale-conflict check
+      // below, exactly like any other superseded artifact.
+      if (
+        stored?.sourceCheckState === 'consumed' &&
+        stored.reviewArtifactId === request.reviewArtifactId
+      ) {
+        // A tombstone's candidateContentHash is always set by construction (see the
+        // commitWithCleanup call below) — defensive guard only, never expected to trip.
+        if (!stored.candidateContentHash)
+          throw remoteConflict(
+            'This review is no longer current. A newer check has superseded it — review again.',
+          );
+        return {
+          skillId: request.skillId,
+          approvedVersion: stored.candidateContentHash,
+          createdNew: true,
+        };
+      }
       if (
         !stored ||
         stored.skillId !== request.skillId ||
@@ -644,19 +744,27 @@ export const createProductMethods = (config: ProductServiceConfig) => {
       const approvedVersion = await commitBundleMutation(user.userId, current, {
         [request.skillId]: nextSkill,
       });
-      // Consumed: the artifact described a delta from a base that is no longer approved.
-      // (Were this delete to fail, the row would still be inert: its base no longer matches,
-      // so it reads as not-checked and can never be approved again.)
-      await config.repository.deleteSkillReviewCheck(
+      // Consumed tombstone (P5a gate §2), not a bare delete: durable proof of exactly what was
+      // approved — skillId/reviewArtifactId/candidateContentHash/candidateRevision — so a
+      // lost-response retry can be answered idempotently, WITHOUT retaining the changed-file
+      // text (the review payload itself is cleaned up below, durably). `approvedContentHash`
+      // deliberately stays the OLD base: the existing base-bound read-model check already makes
+      // this invisible as a live "update-available" fact the instant approval advances the
+      // Skill, with zero changes to that logic needed.
+      await commitWithCleanup(
         user.userId,
-        request.skillId,
+        {
+          userId: user.userId,
+          skillId: request.skillId,
+          approvedContentHash: stored.approvedContentHash,
+          sourceCheckState: 'consumed',
+          checkedAt: stored.checkedAt,
+          candidateRevision,
+          candidateContentHash,
+          reviewArtifactId: request.reviewArtifactId,
+        },
+        [...(stored.pendingCleanupArtifactIds ?? []), request.reviewArtifactId],
       );
-      // Best-effort payload cleanup: the DB row above is what makes the artifact unapprovable
-      // going forward — a failure here leaves a harmless, already-unreferenced orphan, never
-      // a correctness or security issue, and must never fail an otherwise-successful approval.
-      await config.blobStore
-        .deleteReviewPayload(user.userId, request.reviewArtifactId)
-        .catch(() => undefined);
       return {
         skillId: request.skillId,
         approvedVersion: candidateContentHash,
