@@ -16,7 +16,13 @@ export type ChooserOption = {
  * rows. A search field appears once there are enough machines to need one; the visible list is
  * height-bounded with a hidden scrollbar + fade cue, same as the selector popover.
  */
-export function MachineChooser({ options }: { options: ChooserOption[] }) {
+export function MachineChooser({
+  options,
+  basePath = '/overview',
+}: {
+  options: ChooserOption[];
+  basePath?: string;
+}) {
   const [query, setQuery] = useState('');
   const showSearch = options.length > SEARCH_THRESHOLD;
   const filtered = useMemo(
@@ -46,7 +52,7 @@ export function MachineChooser({ options }: { options: ChooserOption[] }) {
             filtered.map((m) => (
               <li key={m.machineId}>
                 <a
-                  href={`/overview?machine=${encodeURIComponent(m.machineId)}`}
+                  href={`${basePath}?machine=${encodeURIComponent(m.machineId)}`}
                   className="stak-mcard"
                   style={{
                     textDecoration: 'none',
