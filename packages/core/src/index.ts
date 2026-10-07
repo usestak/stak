@@ -125,3 +125,14 @@ export { applyPublish, preparePublish } from './cloud-publish.js';
 export type { PublishClient, PublishPlan } from './cloud-publish.js';
 export { preserveRemoteTrialStack, resolveRemoteTrialStack } from './trial.js';
 export type { RemoteTrialResolution } from './trial.js';
+export {
+  buildReviewArtifactFiles,
+  materializeExactRevision,
+  DEFAULT_REVIEW_BOUNDS,
+} from './skill-check.js';
+export type {
+  ReviewArtifactFileRecord,
+  ReviewArtifactFilesResult,
+  ReviewBounds,
+  ReviewFileSide,
+} from './skill-check.js';
