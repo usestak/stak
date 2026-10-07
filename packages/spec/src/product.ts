@@ -291,6 +291,8 @@ export type SkillDetail = z.infer<typeof skillDetailSchema>;
 export type SkillVersionHistoryEntry = z.infer<
   typeof skillVersionHistoryEntrySchema
 >;
+export type SkillFile = z.infer<typeof skillFileSchema>;
+export type SkillDiffFile = z.infer<typeof skillDiffFileSchema>;
 export type MachineStatus = z.infer<typeof machineStatusSchema>;
 export type MachineSummary = z.infer<typeof machineSummarySchema>;
 export type MachinesReadModel = z.infer<typeof machinesReadModelSchema>;
