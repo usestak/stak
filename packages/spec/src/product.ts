@@ -59,7 +59,15 @@ export const skillInstallSchema = z.object({
   installedVersion: contentHashSchema.nullable(),
 });
 
-/** One changed file inside a review artifact (P5a §5a/§7/§8). Unchanged files never appear. */
+/**
+ * One changed file inside a review artifact (P5a §5a/§7/§8). Unchanged files never appear.
+ *
+ * Cross-field invariants (enforced below via `.superRefine()`, not just doc comments):
+ * - A binary file (`binary: true`) never carries `beforeText`/`afterText`.
+ * - `kind: 'added'` has `after` present and `before` absent.
+ * - `kind: 'removed'` has `before` present and `after` absent.
+ * - `kind: 'modified'` has BOTH `before` and `after` present.
+ */
 export const reviewArtifactFileSchema = z
   .object({
     relativePath: z.string().min(1),
@@ -75,7 +83,63 @@ export const reviewArtifactFileSchema = z
     beforeText: z.string().optional(),
     afterText: z.string().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((file, ctx) => {
+    if (file.binary && (file.beforeText !== undefined || file.afterText !== undefined)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'A binary file must not carry beforeText/afterText.',
+      });
+    }
+    if (file.kind === 'added') {
+      if (file.after === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message: "kind 'added' requires 'after' to be present.",
+          path: ['after'],
+        });
+      }
+      if (file.before !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message: "kind 'added' must not include 'before'.",
+          path: ['before'],
+        });
+      }
+    }
+    if (file.kind === 'removed') {
+      if (file.before === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message: "kind 'removed' requires 'before' to be present.",
+          path: ['before'],
+        });
+      }
+      if (file.after !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message: "kind 'removed' must not include 'after'.",
+          path: ['after'],
+        });
+      }
+    }
+    if (file.kind === 'modified') {
+      if (file.before === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message: "kind 'modified' requires 'before' to be present.",
+          path: ['before'],
+        });
+      }
+      if (file.after === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message: "kind 'modified' requires 'after' to be present.",
+          path: ['after'],
+        });
+      }
+    }
+  });
 export type ReviewArtifactFile = z.infer<typeof reviewArtifactFileSchema>;
 
 /**
@@ -98,18 +162,17 @@ export const skillReviewArtifactSchema = z
   .strict();
 export type SkillReviewArtifact = z.infer<typeof skillReviewArtifactSchema>;
 
-/** CLI → Cloud upload for an update-available result (P5a §13/§16 bounds). */
-export const uploadSkillReviewArtifactRequestSchema = z
-  .object({
-    skillId: entryIdSchema,
-    approvedContentHash: contentHashSchema,
-    candidateRevision: z.string().min(1),
-    candidateContentHash: contentHashSchema,
-    artifactPayloadHash: z.string().min(1),
-    checkedAt: timestamp,
-    files: z.array(reviewArtifactFileSchema).max(200),
-  })
-  .strict();
+/**
+ * CLI → Cloud upload for an update-available result (P5a §13/§16 bounds). Identical to
+ * `skillReviewArtifactSchema` minus the server-assigned `reviewArtifactId`, expressed via
+ * `.omit()` so the two can never drift out of sync. (`skillReviewArtifactSchema` itself
+ * carries no `.superRefine()` of its own — only its nested `reviewArtifactFileSchema` items
+ * do — so `.omit()` works cleanly here; Zod refuses `.omit()` only on a schema that has a
+ * refinement directly attached to itself.)
+ */
+export const uploadSkillReviewArtifactRequestSchema = skillReviewArtifactSchema.omit({
+  reviewArtifactId: true,
+});
 export type UploadSkillReviewArtifactRequest = z.infer<
   typeof uploadSkillReviewArtifactRequestSchema
 >;
@@ -131,25 +194,58 @@ export type ReportSkillSourceCheckRequest = z.infer<
   typeof reportSkillSourceCheckRequestSchema
 >;
 
-export const skillSummarySchema = z.object({
-  skillId: entryIdSchema,
-  name: z.string().min(1),
-  description: z.string().optional(),
-  approvedVersion: contentHashSchema,
-  paused: z.boolean(),
-  source: skillSourceSummarySchema,
-  capability: capabilityStateSchema,
-  sourceCheckState: sourceCheckStateSchema,
-  checkedAt: timestamp.nullable(),
-  // Present only when sourceCheckState === 'update-available'.
-  candidateRevision: z.string().optional(),
-  reviewArtifactId: z.uuid().optional(),
-  // Present only when sourceCheckState === 'cannot-check'.
-  cannotCheckReason: cannotCheckReasonSchema.optional(),
-  // Present only when sourceCheckState === 'check-failed'.
-  checkFailedReason: z.string().optional(),
-  installs: z.array(skillInstallSchema),
-});
+export const skillSummarySchema = z
+  .object({
+    skillId: entryIdSchema,
+    name: z.string().min(1),
+    description: z.string().optional(),
+    approvedVersion: contentHashSchema,
+    paused: z.boolean(),
+    source: skillSourceSummarySchema,
+    capability: capabilityStateSchema,
+    sourceCheckState: sourceCheckStateSchema,
+    checkedAt: timestamp.nullable(),
+    // Present only when sourceCheckState === 'update-available'.
+    candidateRevision: z.string().optional(),
+    reviewArtifactId: z.uuid().optional(),
+    // Present only when sourceCheckState === 'cannot-check'.
+    cannotCheckReason: cannotCheckReasonSchema.optional(),
+    // Present only when sourceCheckState === 'check-failed'.
+    checkFailedReason: z.string().optional(),
+    installs: z.array(skillInstallSchema),
+  })
+  .superRefine((summary, ctx) => {
+    if (summary.sourceCheckState !== 'update-available') {
+      if (summary.candidateRevision !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message: "candidateRevision is only valid when sourceCheckState is 'update-available'.",
+          path: ['candidateRevision'],
+        });
+      }
+      if (summary.reviewArtifactId !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message: "reviewArtifactId is only valid when sourceCheckState is 'update-available'.",
+          path: ['reviewArtifactId'],
+        });
+      }
+    }
+    if (summary.sourceCheckState !== 'cannot-check' && summary.cannotCheckReason !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: "cannotCheckReason is only valid when sourceCheckState is 'cannot-check'.",
+        path: ['cannotCheckReason'],
+      });
+    }
+    if (summary.sourceCheckState !== 'check-failed' && summary.checkFailedReason !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: "checkFailedReason is only valid when sourceCheckState is 'check-failed'.",
+        path: ['checkFailedReason'],
+      });
+    }
+  });
 
 export const skillsReadModelSchema = z.object({
   environmentExists: z.boolean(),
