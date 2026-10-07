@@ -1,0 +1,97 @@
+'use client';
+
+import Link from 'next/link';
+import { useMemo, useState } from 'react';
+
+import { STATUS_FILTERS, filterRows, type SkillRow, type StatusFilter } from '../skills-data';
+
+const FILTER_LABEL: Record<StatusFilter, string> = {
+  all: 'All',
+  ready: 'Ready',
+  'update-available': 'Updates',
+  paused: 'Paused',
+};
+
+const DOT: Record<string, string> = {
+  ready: '#84cb8e',
+  attention: '#ee7a3b',
+  neutral: '#a19d94',
+};
+
+export function SkillsTable({ rows }: { rows: SkillRow[] }) {
+  const [status, setStatus] = useState<StatusFilter>('all');
+  const [query, setQuery] = useState('');
+  const filtered = useMemo(() => filterRows(rows, status, query), [rows, status, query]);
+
+  const counts = useMemo(() => {
+    const c: Record<StatusFilter, number> = { all: rows.length, ready: 0, 'update-available': 0, paused: 0 };
+    for (const r of rows) {
+      if (r.statusText === 'Ready') c.ready += 1;
+      if (r.primaryStatus === 'update-available') c['update-available'] += 1;
+      if (r.primaryStatus === 'paused') c.paused += 1;
+    }
+    return c;
+  }, [rows]);
+
+  return (
+    <div className="stak-skills">
+      <div className="stak-skills-toolbar" role="group" aria-label="Filter Skills">
+        <div className="stak-skills-filters" role="radiogroup" aria-label="Status">
+          {STATUS_FILTERS.map((f) => (
+            <button
+              key={f}
+              type="button"
+              role="radio"
+              aria-checked={status === f}
+              className={`stak-skills-chip${status === f ? ' active' : ''}`}
+              onClick={() => setStatus(f)}
+            >
+              {FILTER_LABEL[f]} {counts[f]}
+            </button>
+          ))}
+        </div>
+        <input
+          type="search"
+          className="stak-skills-search"
+          placeholder="Search Skills"
+          aria-label="Search Skills by name"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+
+      <div className="stak-skills-head" role="row">
+        <span>SKILL</span>
+        <span>SOURCE</span>
+        <span>INSTALLED HERE</span>
+        <span>STATUS</span>
+      </div>
+
+      {rows.length === 0 ? (
+        <p className="stak-skills-empty">
+          No Skills in STAK. Run <code>stak scan</code> on a machine to find the ones you already have.
+        </p>
+      ) : filtered.length === 0 ? (
+        <p className="stak-skills-empty">No Skills match this filter.</p>
+      ) : (
+        filtered.map((r) => (
+          <Link key={r.skillId} href={`/skills/${r.skillId}`} className="stak-skills-row">
+            <span className="stak-skills-name">
+              <span className="n">{r.name}</span>
+              {r.description ? <span className="d">{r.description}</span> : null}
+            </span>
+            <span className="stak-skills-source">
+              {r.sourceLabel}
+              {r.cannotCheckNote ? <span className="note"> · can't check updates</span> : null}
+            </span>
+            <span className="stak-skills-installed">{r.installedLabel}</span>
+            <span className="stak-status" style={{ color: '#c9c5bc' }}>
+              <span className="stak-dot" style={{ background: DOT[r.dot] }} aria-hidden />
+              {r.statusText}
+            </span>
+          </Link>
+        ))
+      )}
+    </div>
+  );
+}

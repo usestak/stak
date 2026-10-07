@@ -1,0 +1,105 @@
+/* apps/web/app/skills/skills.css — extends shell.css tokens, Skills-specific only. */
+.stak-skills {
+  display: flex;
+  flex-direction: column;
+}
+.stak-skills-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 0 28px 12px;
+}
+.stak-skills-filters {
+  display: flex;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.stak-skills-chip {
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--faint);
+  background: none;
+  border: none;
+  border-left: 1px solid var(--line-2);
+  cursor: pointer;
+  font-family: var(--sans);
+}
+.stak-skills-chip:first-child {
+  border-left: none;
+}
+.stak-skills-chip.active {
+  background: #1e1d1b;
+  color: var(--ink);
+}
+.stak-skills-search {
+  margin-left: auto;
+  width: 220px;
+  padding: 6px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: none;
+  color: var(--ink);
+  font: 13px var(--sans);
+}
+.stak-skills-head,
+.stak-skills-row {
+  display: grid;
+  grid-template-columns: 2.4fr 1.6fr 1.2fr 1.1fr;
+  gap: 14px;
+  padding: 9px 28px;
+  align-items: center;
+}
+.stak-skills-head {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  font: 500 10.5px var(--mono);
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+.stak-skills-row {
+  border-bottom: 1px solid #1c1b19;
+  text-decoration: none;
+  color: inherit;
+}
+.stak-skills-row:hover {
+  background: #171615;
+}
+.stak-skills-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.stak-skills-name .n {
+  font: 500 13px var(--mono);
+}
+.stak-skills-name .d {
+  font-size: 12px;
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stak-skills-source,
+.stak-skills-installed {
+  font: 11.5px var(--mono);
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stak-skills-source .note {
+  color: var(--dim);
+}
+.stak-skills-empty {
+  padding: 24px 28px;
+  color: var(--dim);
+  font-size: 13.5px;
+}
+.stak-skills-chip:focus-visible,
+.stak-skills-search:focus-visible,
+.stak-skills-row:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+}
