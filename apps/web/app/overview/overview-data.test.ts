@@ -7,7 +7,11 @@ import type {
   ProjectsReadModel,
 } from '@stack/spec';
 
-import { loadOverview, type OverviewService } from './overview-data.js';
+import {
+  displayPlatform,
+  loadOverview,
+  type OverviewService,
+} from './overview-data.js';
 
 const USER = { id: 'user-1' };
 const A1 = '00000000-0000-4000-8000-0000000000a1';
@@ -305,6 +309,106 @@ describe('loadOverview — Memory + projects copy (P4 §7/§15)', () => {
     expect(prot.summaries.memory.detail).not.toMatch(/\bfiles?\b/);
     const std = ready(await loadOverview(service({}), USER, A1));
     expect(std.summaries.memory.detail.toLowerCase()).not.toContain('only you');
+  });
+});
+
+describe('loadOverview — Memory account-vs-machine truth gap (P4 final cleanup §1)', () => {
+  // The DELL case: checked in, skills all fine (status 'checked-in'), but this machine's
+  // own memory_backed_up is false even though an account-level Cloud backup exists.
+  const dellLike = machine({
+    name: 'DELL',
+    platform: 'win32',
+    arch: 'x64',
+    status: 'checked-in',
+    memoryBackedUp: false,
+    updatesWaiting: [],
+  });
+
+  it('headline stays the frozen account-level phrase; detail surfaces the machine gap', async () => {
+    const v = ready(
+      await loadOverview(service({ machines: [dellLike] }), USER, A1),
+    );
+    expect(v.headline).toBe('Your STAK is backed up.'); // account-level, frozen, true
+    expect(v.detail).toContain(
+      "DELL has Memory changes that aren't backed up yet.",
+    );
+  });
+
+  it('MEMORY summary keeps "Backed up" but the detail distinguishes Cloud vs machine state', async () => {
+    const v = ready(
+      await loadOverview(service({ machines: [dellLike] }), USER, A1),
+    );
+    expect(v.summaries.memory.value).toBe('Backed up'); // frozen term, account-level
+    expect(v.summaries.memory.detail).toContain('Latest Cloud backup');
+    expect(v.summaries.memory.detail).toContain(
+      "DELL's current Memory isn't backed up yet.",
+    );
+    // Never implies a direct Cloud-payload comparison that hasn't occurred.
+    expect(v.summaries.memory.detail).not.toMatch(
+      /isn't in it|does not match generation/i,
+    );
+  });
+
+  it('the counterpart (memory_backed_up=true) never shows the gap wording', async () => {
+    const v = ready(
+      await loadOverview(
+        service({
+          machines: [
+            machine({
+              name: 'DELL',
+              status: 'up-to-date',
+              memoryBackedUp: true,
+            }),
+          ],
+        }),
+        USER,
+        A1,
+      ),
+    );
+    expect(v.detail).not.toContain("aren't backed up yet");
+    expect(v.summaries.memory.detail).not.toContain("isn't backed up yet");
+  });
+
+  it('does not create a new Needs-attention kind for the memory gap', async () => {
+    const v = ready(
+      await loadOverview(service({ machines: [dellLike] }), USER, A1),
+    );
+    const kinds = new Set(v.needsAttention.map((n) => n.kind));
+    for (const k of kinds)
+      expect([
+        'update-available',
+        'project-not-on-machine',
+        'machine-stale',
+        'protected-no-recovery',
+      ]).toContain(k);
+  });
+});
+
+describe('displayPlatform (P4 final cleanup §2)', () => {
+  it('maps known platform identifiers to human-facing labels', () => {
+    expect(displayPlatform('win32')).toBe('Windows');
+    expect(displayPlatform('darwin')).toBe('macOS');
+    expect(displayPlatform('linux')).toBe('Linux');
+  });
+
+  it('passes through an unknown platform unchanged and returns undefined for none', () => {
+    expect(displayPlatform('freebsd')).toBe('freebsd');
+    expect(displayPlatform(undefined)).toBeUndefined();
+  });
+
+  it('renders "Windows · x64" on machine cards and the selector, not "win32"', async () => {
+    const v = ready(
+      await loadOverview(
+        service({
+          machines: [machine({ name: 'DELL', platform: 'win32', arch: 'x64' })],
+        }),
+        USER,
+        A1,
+      ),
+    );
+    expect(v.machineCards[0]?.meta).toBe('Windows · x64');
+    expect(v.machineCards[0]?.meta).not.toContain('win32');
+    expect(v.machines[0]?.secondary).toContain('Windows · x64');
   });
 });
 

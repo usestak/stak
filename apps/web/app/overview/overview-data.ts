@@ -116,8 +116,26 @@ const displayName = (m: MachineSummary): string => m.name ?? 'Unnamed machine';
 const shortId = (id: string) => id.slice(0, 8);
 const checkedIn = (m: MachineSummary): boolean => m.lastCheckinAt !== null;
 
+/** Human-facing platform label (P4 §2). Display only — the raw value (`win32`, etc.) is never
+ *  changed in storage/the data model; unmapped values pass through unchanged. */
+export const displayPlatform = (
+  platform: string | undefined,
+): string | undefined => {
+  if (!platform) return undefined;
+  switch (platform) {
+    case 'win32':
+      return 'Windows';
+    case 'darwin':
+      return 'macOS';
+    case 'linux':
+      return 'Linux';
+    default:
+      return platform;
+  }
+};
+
 const metaLine = (m: MachineSummary): string => {
-  const hw = [m.platform, m.arch].filter(Boolean).join(' · ');
+  const hw = [displayPlatform(m.platform), m.arch].filter(Boolean).join(' · ');
   // Platform/arch arrive at first check-in; before that the short id is the only safe context.
   return hw || `ID ${shortId(m.machineId)}`;
 };
@@ -220,15 +238,32 @@ const activityView = (item: ActivityItem): ActivityView => ({
   when: relative(item.at),
 });
 
+/**
+ * MEMORY summary (P4 §Memory truth). The primary value "Backed up" stays account-level —
+ * that's the frozen Memory term's own definition ("STAK has a backup of this Memory"), and a
+ * Cloud backup genuinely existing is true regardless of the selected machine. But when the
+ * SELECTED machine has checked in and its own memory_backed_up is false, the detail must say
+ * so immediately rather than silently defaulting to the generic mode sentence. The wording
+ * stays faithful to the actual P1 fact — current native Memory vs. the LOCAL backup manifest —
+ * never implying a direct Cloud-payload comparison that hasn't occurred.
+ */
 const memorySummary = (
   overview: OverviewReadModel,
   projectCount: number,
+  viewingName: string,
+  machineHasGap: boolean,
 ): OverviewSummary => {
   if (!overview.lastBackupAt)
     return {
       label: 'MEMORY',
       value: 'Not backed up yet',
       detail: 'STAK has no backup of your agent Memory yet.',
+    };
+  if (machineHasGap)
+    return {
+      label: 'MEMORY',
+      value: 'Backed up',
+      detail: `Latest Cloud backup ${relative(overview.lastBackupAt)}. ${viewingName}'s current Memory isn't backed up yet.`,
     };
   if (overview.memory.mode === 'protected')
     return {
@@ -346,13 +381,20 @@ export const loadOverview = async (
   const backupClause = overview.lastBackupAt
     ? `Latest Memory backup ${relative(overview.lastBackupAt)}.`
     : 'No Memory backup yet.';
+  // Memory truth gap: checked in, skills fine, but THIS machine's current Memory isn't
+  // represented in its local backup manifest. Surfaced here so the account-level headline
+  // ("Your STAK is backed up.") is never left standing alone without the machine-level
+  // caveat — never implying a Cloud-payload comparison that hasn't occurred.
+  const machineHasMemoryGap = isCheckedIn && !viewing.memoryBackedUp;
   const machineClause = !isCheckedIn
     ? `${viewingName} hasn't checked in yet.`
     : viewing.status === 'updates-waiting'
       ? `${viewingName} has updates waiting.`
       : viewing.status === 'up-to-date'
         ? `${viewingName} is up to date.`
-        : `${viewingName} last checked in ${relative(viewing.lastCheckinAt)}.`;
+        : machineHasMemoryGap
+          ? `${viewingName} has Memory changes that aren't backed up yet.`
+          : `${viewingName} last checked in ${relative(viewing.lastCheckinAt)}.`;
   const fleetClause = allCurrent
     ? ' All machines are current.'
     : updatesWaitingMachines > 0
@@ -403,7 +445,12 @@ export const loadOverview = async (
             value: `${skillTotal} skill${skillTotal === 1 ? '' : 's'} in STAK`,
             detail: "This machine hasn't reported which are installed yet.",
           },
-      memory: memorySummary(overview, projectTotal),
+      memory: memorySummary(
+        overview,
+        projectTotal,
+        viewingName,
+        machineHasMemoryGap,
+      ),
       projects:
         projectTotal === 0
           ? {
