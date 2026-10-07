@@ -17,7 +17,13 @@ const HASH2 = 'sha256:' + 'b'.repeat(64);
 
 describe('sourceCheckStateSchema', () => {
   it('accepts exactly the five frozen states', () => {
-    for (const s of ['no-update', 'update-available', 'not-checked', 'cannot-check', 'check-failed'])
+    for (const s of [
+      'no-update',
+      'update-available',
+      'not-checked',
+      'cannot-check',
+      'check-failed',
+    ])
       expect(sourceCheckStateSchema.parse(s)).toBe(s);
   });
   it('rejects an invented state', () => {
@@ -242,7 +248,12 @@ describe('skillSummarySchema', () => {
   });
 
   it("rejects reviewUnavailableReason on any state other than 'update-available'", () => {
-    for (const sourceCheckState of ['no-update', 'not-checked', 'cannot-check', 'check-failed']) {
+    for (const sourceCheckState of [
+      'no-update',
+      'not-checked',
+      'cannot-check',
+      'check-failed',
+    ]) {
       const result = skillSummarySchema.safeParse({
         ...baseSummary,
         sourceCheckState,
@@ -283,7 +294,9 @@ describe('cannotCheckReasonSchema', () => {
       expect(cannotCheckReasonSchema.parse(r)).toBe(r);
   });
   it("rejects 'unreachable' (a transient network failure is check-failed, not cannot-check)", () => {
-    expect(cannotCheckReasonSchema.safeParse('unreachable').success).toBe(false);
+    expect(cannotCheckReasonSchema.safeParse('unreachable').success).toBe(
+      false,
+    );
   });
 });
 
@@ -364,8 +377,10 @@ describe('reportSkillSourceCheckRequestSchema', () => {
       }).success,
     ).toBe(true);
     expect(
-      reportSkillSourceCheckRequestSchema.safeParse({ ...base, sourceCheckState: 'check-failed' })
-        .success,
+      reportSkillSourceCheckRequestSchema.safeParse({
+        ...base,
+        sourceCheckState: 'check-failed',
+      }).success,
     ).toBe(true);
   });
 

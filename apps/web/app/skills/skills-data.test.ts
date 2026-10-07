@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import type { MachineSummary, MachinesReadModel, SkillSummary, SkillsReadModel } from '@stack/spec';
+import type {
+  MachineSummary,
+  MachinesReadModel,
+  SkillSummary,
+  SkillsReadModel,
+} from '@stack/spec';
 
-import { loadSkillsList, deriveRow, filterRows, type SkillsService } from './skills-data.js';
+import {
+  loadSkillsList,
+  deriveRow,
+  filterRows,
+  type SkillsService,
+} from './skills-data.js';
 
 const USER = { id: 'user-1' };
 const A1 = '00000000-0000-4000-8000-0000000000a1';
@@ -40,9 +50,9 @@ const service = (
   skills: SkillSummary[],
   machines: MachineSummary[] = [machine()],
 ): SkillsService => ({
-  getMachinesReadModel: async () => ({ machines } as MachinesReadModel),
+  getMachinesReadModel: async () => ({ machines }) as MachinesReadModel,
   getSkillsReadModel: async () =>
-    ({ environmentExists: true, skills } as SkillsReadModel),
+    ({ environmentExists: true, skills }) as SkillsReadModel,
 });
 
 describe('deriveRow', () => {
@@ -54,7 +64,11 @@ describe('deriveRow', () => {
   });
   it('is paused regardless of update availability', () => {
     const row = deriveRow(
-      skill({ paused: true, sourceCheckState: 'update-available', candidateRevision: 'rev1' }),
+      skill({
+        paused: true,
+        sourceCheckState: 'update-available',
+        candidateRevision: 'rev1',
+      }),
       A1,
       true,
     );
@@ -62,7 +76,10 @@ describe('deriveRow', () => {
   });
   it('is update-available when not paused and source differs', () => {
     const row = deriveRow(
-      skill({ sourceCheckState: 'update-available', candidateRevision: 'rev1' }),
+      skill({
+        sourceCheckState: 'update-available',
+        candidateRevision: 'rev1',
+      }),
       A1,
       true,
     );
@@ -76,7 +93,11 @@ describe('deriveRow', () => {
   });
   it('never claims Ready when installed differs from approved', () => {
     const row = deriveRow(
-      skill({ installs: [{ machineId: A1, installedVersion: 'sha256:' + 'b'.repeat(64) }] }),
+      skill({
+        installs: [
+          { machineId: A1, installedVersion: 'sha256:' + 'b'.repeat(64) },
+        ],
+      }),
       A1,
       true,
     );
@@ -84,7 +105,11 @@ describe('deriveRow', () => {
   });
   it('distinguishes a different installed version from no install record at all', () => {
     const differentVersion = deriveRow(
-      skill({ installs: [{ machineId: A1, installedVersion: 'sha256:' + 'b'.repeat(64) }] }),
+      skill({
+        installs: [
+          { machineId: A1, installedVersion: 'sha256:' + 'b'.repeat(64) },
+        ],
+      }),
       A1,
       true,
     );
@@ -100,12 +125,17 @@ describe('deriveRow', () => {
   });
   it('shows a cannot-check note without changing primary status', () => {
     const row = deriveRow(
-      skill({ source: { kind: 'local', checkable: false }, sourceCheckState: 'cannot-check' }),
+      skill({
+        source: { kind: 'local', checkable: false },
+        sourceCheckState: 'cannot-check',
+      }),
       A1,
       true,
     );
     expect(row.statusText).toBe('Ready');
-    expect(row.sourceCheckNote).toBe("Can't check for updates from this source.");
+    expect(row.sourceCheckNote).toBe(
+      "Can't check for updates from this source.",
+    );
   });
   it('keeps the Update available badge and adds a secondary note when the review is oversized', () => {
     const row = deriveRow(
@@ -130,7 +160,11 @@ describe('deriveRow', () => {
     expect(row.sourceCheckNote).toBe("Updates haven't been checked yet.");
   });
   it('shows a distinct check-failed note', () => {
-    const row = deriveRow(skill({ sourceCheckState: 'check-failed' }), A1, true);
+    const row = deriveRow(
+      skill({ sourceCheckState: 'check-failed' }),
+      A1,
+      true,
+    );
     expect(row.statusText).toBe('Ready');
     expect(row.sourceCheckNote).toBe('Check failed.');
   });
@@ -145,7 +179,12 @@ describe('filterRows', () => {
     deriveRow(skill({ skillId: 'skill_a', name: 'a' }), A1, true),
     deriveRow(skill({ skillId: 'skill_b', name: 'b', paused: true }), A1, true),
     deriveRow(
-      skill({ skillId: 'skill_c', name: 'c', sourceCheckState: 'update-available', candidateRevision: 'rev1' }),
+      skill({
+        skillId: 'skill_c',
+        name: 'c',
+        sourceCheckState: 'update-available',
+        candidateRevision: 'rev1',
+      }),
       A1,
       true,
     ),
@@ -154,11 +193,17 @@ describe('filterRows', () => {
     expect(filterRows(rows, 'all', '')).toHaveLength(3);
   });
   it('filters by status', () => {
-    expect(filterRows(rows, 'paused', '').map((r) => r.skillId)).toEqual(['skill_b']);
-    expect(filterRows(rows, 'update-available', '').map((r) => r.skillId)).toEqual(['skill_c']);
+    expect(filterRows(rows, 'paused', '').map((r) => r.skillId)).toEqual([
+      'skill_b',
+    ]);
+    expect(
+      filterRows(rows, 'update-available', '').map((r) => r.skillId),
+    ).toEqual(['skill_c']);
   });
   it('searches by name, case-insensitive', () => {
-    expect(filterRows(rows, 'all', 'A').map((r) => r.skillId)).toEqual(['skill_a']);
+    expect(filterRows(rows, 'all', 'A').map((r) => r.skillId)).toEqual([
+      'skill_a',
+    ]);
   });
 });
 
@@ -169,7 +214,10 @@ describe('loadSkillsList', () => {
   });
   it('excludes revoked machines from selection and counts', async () => {
     const view = await loadSkillsList(
-      service([skill()], [machine(), machine({ machineId: B2, revoked: true })]),
+      service(
+        [skill()],
+        [machine(), machine({ machineId: B2, revoked: true })],
+      ),
       USER,
       undefined,
     );
@@ -177,7 +225,10 @@ describe('loadSkillsList', () => {
   });
   it('requires a choice with two active machines and no ?machine=', async () => {
     const view = await loadSkillsList(
-      service([skill()], [machine(), machine({ machineId: B2, name: 'Studio' })]),
+      service(
+        [skill()],
+        [machine(), machine({ machineId: B2, name: 'Studio' })],
+      ),
       USER,
       undefined,
     );
@@ -193,7 +244,10 @@ describe('loadSkillsList', () => {
       undefined,
     );
     if (view.kind !== 'ready') throw new Error('expected ready');
-    expect(view.rows.map((r) => r.skillId)).toEqual(['skill_dup0001', 'skill_dup0002']);
+    expect(view.rows.map((r) => r.skillId)).toEqual([
+      'skill_dup0001',
+      'skill_dup0002',
+    ]);
   });
   it('reports a truthful no-skills state distinct from a filtered empty state', async () => {
     const view = await loadSkillsList(service([]), USER, undefined);

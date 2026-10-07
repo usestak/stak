@@ -116,7 +116,8 @@ export type SkillReviewCheckRecord = {
   userId: string;
   skillId: string;
   approvedContentHash: string;
-  sourceCheckState: 'no-update' | 'update-available' | 'cannot-check' | 'check-failed';
+  sourceCheckState:
+    'no-update' | 'update-available' | 'cannot-check' | 'check-failed';
   checkedAt: string;
   // Reserved for intrinsic, zero-network-I/O facts about the Skill's own restoration record.
   // A failed NETWORK operation (DNS/timeout/host-down/auth) is `check-failed`, never this.

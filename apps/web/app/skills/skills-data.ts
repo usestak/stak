@@ -49,7 +49,9 @@ const reviewNote = (
 /** Maps a non-actionable sourceCheckState to the explanatory note shown alongside the source
  *  label (contract §2/§3). 'no-update' and 'update-available' need no note — the primary status
  *  already communicates them. */
-const sourceCheckNote = (state: SkillSummary['sourceCheckState']): string | undefined => {
+const sourceCheckNote = (
+  state: SkillSummary['sourceCheckState'],
+): string | undefined => {
   switch (state) {
     case 'not-checked':
       return "Updates haven't been checked yet.";
@@ -62,7 +64,12 @@ const sourceCheckNote = (state: SkillSummary['sourceCheckState']): string | unde
   }
 };
 
-export const STATUS_FILTERS = ['all', 'ready', 'update-available', 'paused'] as const;
+export const STATUS_FILTERS = [
+  'all',
+  'ready',
+  'update-available',
+  'paused',
+] as const;
 export type StatusFilter = (typeof STATUS_FILTERS)[number];
 
 /**
@@ -119,7 +126,8 @@ export const deriveRow = (
     name: skill.name,
     ...(skill.description ? { description: skill.description } : {}),
     sourceLabel:
-      skill.source.label ?? (skill.source.kind === 'local' ? 'Local' : skill.source.kind),
+      skill.source.label ??
+      (skill.source.kind === 'local' ? 'Local' : skill.source.kind),
     ...(sourceCheckNote(skill.sourceCheckState)
       ? { sourceCheckNote: sourceCheckNote(skill.sourceCheckState) }
       : {}),
@@ -133,7 +141,9 @@ export const deriveRow = (
       : 'Not reported here',
     primaryStatus,
     pendingInstall:
-      !skill.paused && skill.sourceCheckState !== 'update-available' && statusText !== 'Ready',
+      !skill.paused &&
+      skill.sourceCheckState !== 'update-available' &&
+      statusText !== 'Ready',
     dot,
     statusText,
   };
@@ -151,7 +161,8 @@ export const filterRows = (
   return rows.filter((r) => {
     if (q && !r.name.toLowerCase().includes(q)) return false;
     if (status === 'all') return true;
-    if (status === 'ready') return r.primaryStatus === 'ready' && r.statusText === 'Ready';
+    if (status === 'ready')
+      return r.primaryStatus === 'ready' && r.statusText === 'Ready';
     return r.primaryStatus === status;
   });
 };
@@ -162,7 +173,12 @@ export type SkillsListView =
   | { kind: 'choose-machine'; machines: MachineOption[]; anyCheckedIn: boolean }
   | {
       kind: 'ready';
-      viewing: { machineId: string; name: string; statusLabel: string; dot: string };
+      viewing: {
+        machineId: string;
+        name: string;
+        statusLabel: string;
+        dot: string;
+      };
       machines: MachineOption[];
       sidebar: SidebarCounts;
       statusSentence: string;
@@ -195,7 +211,8 @@ export const loadSkillsList = async (
   const anyCheckedIn = active.some(checkedIn);
 
   const viewingId = resolveViewingMachineId(active, requestedMachine);
-  if (!viewingId) return { kind: 'choose-machine', machines: options, anyCheckedIn };
+  if (!viewingId)
+    return { kind: 'choose-machine', machines: options, anyCheckedIn };
 
   const viewing = active.find((m) => m.machineId === viewingId)!;
   const viewingName = displayName(viewing);
@@ -206,7 +223,9 @@ export const loadSkillsList = async (
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const readyCount = rows.filter((r) => r.statusText === 'Ready').length;
-  const updateCount = rows.filter((r) => r.primaryStatus === 'update-available').length;
+  const updateCount = rows.filter(
+    (r) => r.primaryStatus === 'update-available',
+  ).length;
 
   const statusSentence = !viewingCheckedIn
     ? `${viewingName} hasn't reported installed Skill state yet.`

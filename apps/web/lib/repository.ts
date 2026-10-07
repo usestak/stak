@@ -121,15 +121,27 @@ const mapSkillReviewCheck = (row: any): SkillReviewCheckRecord => ({
   approvedContentHash: row.approved_content_hash,
   sourceCheckState: row.source_check_state,
   checkedAt: row.checked_at,
-  ...(row.cannot_check_reason ? { cannotCheckReason: row.cannot_check_reason } : {}),
-  ...(row.check_failed_reason ? { checkFailedReason: row.check_failed_reason } : {}),
+  ...(row.cannot_check_reason
+    ? { cannotCheckReason: row.cannot_check_reason }
+    : {}),
+  ...(row.check_failed_reason
+    ? { checkFailedReason: row.check_failed_reason }
+    : {}),
   ...(row.review_unavailable_reason
     ? { reviewUnavailableReason: row.review_unavailable_reason }
     : {}),
-  ...(row.candidate_revision ? { candidateRevision: row.candidate_revision } : {}),
-  ...(row.candidate_content_hash ? { candidateContentHash: row.candidate_content_hash } : {}),
-  ...(row.review_artifact_id ? { reviewArtifactId: row.review_artifact_id } : {}),
-  ...(row.artifact_payload_hash ? { artifactPayloadHash: row.artifact_payload_hash } : {}),
+  ...(row.candidate_revision
+    ? { candidateRevision: row.candidate_revision }
+    : {}),
+  ...(row.candidate_content_hash
+    ? { candidateContentHash: row.candidate_content_hash }
+    : {}),
+  ...(row.review_artifact_id
+    ? { reviewArtifactId: row.review_artifact_id }
+    : {}),
+  ...(row.artifact_payload_hash
+    ? { artifactPayloadHash: row.artifact_payload_hash }
+    : {}),
   ...(row.diff_files ? { diffFiles: row.diff_files } : {}),
 });
 
@@ -316,21 +328,23 @@ export const supabaseRepository = (): CloudRepository &
       return data ? mapSkillReviewCheck(data) : null;
     },
     putSkillReviewCheck: async (record) => {
-      await db().from('skill_review_checks').upsert({
-        user_id: record.userId,
-        skill_id: record.skillId,
-        approved_content_hash: record.approvedContentHash,
-        source_check_state: record.sourceCheckState,
-        checked_at: record.checkedAt,
-        cannot_check_reason: record.cannotCheckReason ?? null,
-        check_failed_reason: record.checkFailedReason ?? null,
-        review_unavailable_reason: record.reviewUnavailableReason ?? null,
-        candidate_revision: record.candidateRevision ?? null,
-        candidate_content_hash: record.candidateContentHash ?? null,
-        review_artifact_id: record.reviewArtifactId ?? null,
-        artifact_payload_hash: record.artifactPayloadHash ?? null,
-        diff_files: record.diffFiles ?? null,
-      });
+      await db()
+        .from('skill_review_checks')
+        .upsert({
+          user_id: record.userId,
+          skill_id: record.skillId,
+          approved_content_hash: record.approvedContentHash,
+          source_check_state: record.sourceCheckState,
+          checked_at: record.checkedAt,
+          cannot_check_reason: record.cannotCheckReason ?? null,
+          check_failed_reason: record.checkFailedReason ?? null,
+          review_unavailable_reason: record.reviewUnavailableReason ?? null,
+          candidate_revision: record.candidateRevision ?? null,
+          candidate_content_hash: record.candidateContentHash ?? null,
+          review_artifact_id: record.reviewArtifactId ?? null,
+          artifact_payload_hash: record.artifactPayloadHash ?? null,
+          diff_files: record.diffFiles ?? null,
+        });
     },
     deleteSkillReviewCheck: async (userId, skillId) => {
       await db()

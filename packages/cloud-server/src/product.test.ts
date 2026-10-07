@@ -1037,10 +1037,16 @@ describe('uploadSkillReviewArtifact', () => {
     // under its own artifact-id-keyed slot — never a shared/content-hash key, so cleanup of
     // one can never touch the other.
     expect(
-      await env.blobStore.getReviewPayload(seed.user.userId, first.reviewArtifactId),
+      await env.blobStore.getReviewPayload(
+        seed.user.userId,
+        first.reviewArtifactId,
+      ),
     ).toBeNull();
     expect(
-      await env.blobStore.getReviewPayload(seed.user.userId, second.reviewArtifactId),
+      await env.blobStore.getReviewPayload(
+        seed.user.userId,
+        second.reviewArtifactId,
+      ),
     ).toEqual(b.payload);
   });
 
@@ -1073,22 +1079,39 @@ describe('uploadSkillReviewArtifact', () => {
     );
     expect(second.reviewArtifactId).toBeDefined();
     expect(third.reviewArtifactId).toBeDefined();
-    expect(new Set([first.reviewArtifactId, second.reviewArtifactId, third.reviewArtifactId]).size).toBe(3);
+    expect(
+      new Set([
+        first.reviewArtifactId,
+        second.reviewArtifactId,
+        third.reviewArtifactId,
+      ]).size,
+    ).toBe(3);
     // Still exactly ONE current artifact (latest-only) — no double-create.
     const detail = await env.service.getSkillDetail(seed.user, seed.skillId);
-    expect(detail.reviewArtifact?.reviewArtifactId).toBe(third.reviewArtifactId);
+    expect(detail.reviewArtifact?.reviewArtifactId).toBe(
+      third.reviewArtifactId,
+    );
     expect(detail.reviewArtifact?.candidateRevision).toBe('b'.repeat(40));
     expect(detail.reviewArtifact?.files[0]?.afterText).toBe(a.afterText);
     // Only the LATEST (third) artifact's payload remains — each successive re-upload safely
     // cleaned up the one before it, and nothing was left orphaned mid-chain.
     expect(
-      await env.blobStore.getReviewPayload(seed.user.userId, first.reviewArtifactId),
+      await env.blobStore.getReviewPayload(
+        seed.user.userId,
+        first.reviewArtifactId,
+      ),
     ).toBeNull();
     expect(
-      await env.blobStore.getReviewPayload(seed.user.userId, second.reviewArtifactId),
+      await env.blobStore.getReviewPayload(
+        seed.user.userId,
+        second.reviewArtifactId,
+      ),
     ).toBeNull();
     expect(
-      await env.blobStore.getReviewPayload(seed.user.userId, third.reviewArtifactId),
+      await env.blobStore.getReviewPayload(
+        seed.user.userId,
+        third.reviewArtifactId,
+      ),
     ).toEqual(a.payload);
     // Approving by the LATEST id (not stale `first`/`second` ids) still succeeds.
     const approval = await env.service.approveSkillVersion(seed.user, {

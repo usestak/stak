@@ -31,7 +31,8 @@ export type SkillCheckReporter = Pick<
 
 // Reserved for intrinsic, zero-network-I/O facts about the Skill's own restoration record.
 // A failed NETWORK operation (unreachable/DNS/timeout/auth) is `check-failed`, never this.
-export type SkillCheckCannotCheckReason = 'local' | 'dirty' | 'ambiguous' | 'pinned';
+export type SkillCheckCannotCheckReason =
+  'local' | 'dirty' | 'ambiguous' | 'pinned';
 
 export type SkillCheckEntryResult = {
   entryId: string;

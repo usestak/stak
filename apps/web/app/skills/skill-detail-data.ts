@@ -53,7 +53,12 @@ export type SkillDetailView =
       skillId: string;
       name: string;
       description?: string;
-      viewing: { machineId: string; name: string; statusLabel: string; dot: string };
+      viewing: {
+        machineId: string;
+        name: string;
+        statusLabel: string;
+        dot: string;
+      };
       machines: MachineOption[];
       statusText: string;
       sourceCheckState: SkillDetail['sourceCheckState'];
@@ -70,7 +75,10 @@ export type SkillDetailView =
       installedHere: string;
       installedHereAt: string | null;
       capabilitiesText: string;
-      capabilityList: { label: string; value: 'declared-true' | 'declared-false' }[];
+      capabilityList: {
+        label: string;
+        value: 'declared-true' | 'declared-false';
+      }[];
       history: HistoryRow[];
       reviewArtifact: SkillDetailReviewArtifactView | null;
       exceedsReviewBounds: boolean;
@@ -79,7 +87,9 @@ export type SkillDetailView =
 
 /** Shared with skills-data.ts's deriveRow — same note text for the same non-actionable
  *  sourceCheckState values (contract §2/§3). */
-const sourceCheckNote = (state: SkillDetail['sourceCheckState']): string | undefined => {
+const sourceCheckNote = (
+  state: SkillDetail['sourceCheckState'],
+): string | undefined => {
   switch (state) {
     case 'not-checked':
       return "Updates haven't been checked yet.";
@@ -113,7 +123,10 @@ const capabilityList = (
   };
   return Object.entries(capability.capabilities)
     .filter(([, v]) => v !== undefined)
-    .map(([k, v]) => ({ label: labels[k] ?? k, value: v ? 'declared-true' : 'declared-false' }));
+    .map(([k, v]) => ({
+      label: labels[k] ?? k,
+      value: v ? 'declared-true' : 'declared-false',
+    }));
 };
 
 export const loadSkillDetail = async (
@@ -137,7 +150,8 @@ export const loadSkillDetail = async (
   const anyCheckedIn = active.some(checkedIn);
 
   const viewingId = resolveViewingMachineId(active, requestedMachine);
-  if (!viewingId) return { kind: 'choose-machine', machines: options, anyCheckedIn };
+  if (!viewingId)
+    return { kind: 'choose-machine', machines: options, anyCheckedIn };
 
   let skill: SkillDetail;
   try {
@@ -153,7 +167,9 @@ export const loadSkillDetail = async (
   const viewingCheckedIn = checkedIn(viewing);
   const install = skill.installs.find((i) => i.machineId === viewingId);
   const installedHereMatches =
-    viewingCheckedIn && !!install && install.installedVersion === skill.approvedVersion;
+    viewingCheckedIn &&
+    !!install &&
+    install.installedVersion === skill.approvedVersion;
 
   // Status derivation mirrors apps/web/app/skills/skills-data.ts's deriveRow exactly: paused
   // overrides everything, then update-available, then a three-way installed-state check on the
@@ -161,7 +177,8 @@ export const loadSkillDetail = async (
   // install) before falling through to Ready. None of the three neutral cases is ever "Ready".
   let statusText: string;
   if (skill.paused) statusText = 'Paused';
-  else if (skill.sourceCheckState === 'update-available') statusText = 'Update available';
+  else if (skill.sourceCheckState === 'update-available')
+    statusText = 'Update available';
   else if (!viewingCheckedIn) statusText = 'Not reported here yet';
   else if (!install) statusText = 'Not installed here';
   else if (!installedHereMatches) statusText = 'Different version here';
@@ -193,15 +210,21 @@ export const loadSkillDetail = async (
     statusText,
     sourceCheckState: skill.sourceCheckState,
     checkedAt: skill.checkedAt,
-    ...(skill.candidateRevision ? { candidateRevision: skill.candidateRevision } : {}),
-    ...(skill.reviewArtifactId ? { reviewArtifactId: skill.reviewArtifactId } : {}),
+    ...(skill.candidateRevision
+      ? { candidateRevision: skill.candidateRevision }
+      : {}),
+    ...(skill.reviewArtifactId
+      ? { reviewArtifactId: skill.reviewArtifactId }
+      : {}),
     ...(sourceCheckNote(skill.sourceCheckState)
       ? { sourceCheckNote: sourceCheckNote(skill.sourceCheckState) }
       : {}),
     ...(reviewNote(skill.reviewUnavailableReason)
       ? { reviewNote: reviewNote(skill.reviewUnavailableReason) }
       : {}),
-    sourceLabel: skill.source.label ?? (skill.source.kind === 'local' ? 'Local' : skill.source.kind),
+    sourceLabel:
+      skill.source.label ??
+      (skill.source.kind === 'local' ? 'Local' : skill.source.kind),
     ...(skill.source.trackedRef ? { trackedRef: skill.source.trackedRef } : {}),
     approvedVersionShort: shortHash(skill.approvedVersion),
     installedHere: install
@@ -210,7 +233,9 @@ export const loadSkillDetail = async (
         : 'Not installed here'
       : 'Not reported here',
     installedHereAt: viewingCheckedIn ? viewing.lastCheckinAt : null,
-    capabilitiesText: skill.capability.declared ? 'Declared' : 'Capabilities not declared',
+    capabilitiesText: skill.capability.declared
+      ? 'Declared'
+      : 'Capabilities not declared',
     capabilityList: capabilityList(skill.capability),
     history,
     reviewArtifact: skill.reviewArtifact
@@ -223,7 +248,9 @@ export const loadSkillDetail = async (
             binary: f.binary,
             ...(f.beforeText !== undefined ? { beforeText: f.beforeText } : {}),
             ...(f.afterText !== undefined ? { afterText: f.afterText } : {}),
-            ...(f.before !== undefined ? { beforeSize: f.before.byteSize } : {}),
+            ...(f.before !== undefined
+              ? { beforeSize: f.before.byteSize }
+              : {}),
             ...(f.after !== undefined ? { afterSize: f.after.byteSize } : {}),
           })),
         }
@@ -232,7 +259,8 @@ export const loadSkillDetail = async (
     // inference from artifact absence — a source check can be mid-flight/stale in ways that
     // also leave reviewArtifact null without meaning "exceeds bounds". Approve must stay
     // disabled rather than silently unavailable.
-    exceedsReviewBounds: skill.reviewUnavailableReason === 'exceeds-review-bounds',
+    exceedsReviewBounds:
+      skill.reviewUnavailableReason === 'exceeds-review-bounds',
     paused: skill.paused,
   };
 };

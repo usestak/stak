@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { CloudServiceError } from '@stack/cloud-server';
-import type { MachineSummary, MachinesReadModel, SkillDetail } from '@stack/spec';
+import type {
+  MachineSummary,
+  MachinesReadModel,
+  SkillDetail,
+} from '@stack/spec';
 
-import { loadSkillDetail, type SkillDetailService } from './skill-detail-data.js';
+import {
+  loadSkillDetail,
+  type SkillDetailService,
+} from './skill-detail-data.js';
 
 const USER = { id: 'user-1' };
 const A1 = '00000000-0000-4000-8000-0000000000a1';
@@ -30,12 +37,23 @@ const detail = (over: Partial<SkillDetail> = {}): SkillDetail => ({
   name: 'test-first',
   approvedVersion: HASH_A,
   paused: false,
-  source: { kind: 'git', checkable: true, label: 'github.com/oss/test-first', trackedRef: 'main' },
+  source: {
+    kind: 'git',
+    checkable: true,
+    label: 'github.com/oss/test-first',
+    trackedRef: 'main',
+  },
   capability: { declared: false },
   sourceCheckState: 'no-update',
   checkedAt: new Date().toISOString(),
   installs: [{ machineId: A1, installedVersion: HASH_A }],
-  history: [{ contentHash: HASH_A, environmentVersionNumber: 1, approvedAt: new Date().toISOString() }],
+  history: [
+    {
+      contentHash: HASH_A,
+      environmentVersionNumber: 1,
+      approvedAt: new Date().toISOString(),
+    },
+  ],
   reviewArtifact: null,
   ...over,
 });
@@ -46,7 +64,7 @@ const service = (
   skill: SkillDetail | null,
   machines: MachineSummary[] = [machine()],
 ): SkillDetailService => ({
-  getMachinesReadModel: async () => ({ machines } as MachinesReadModel),
+  getMachinesReadModel: async () => ({ machines }) as MachinesReadModel,
   getSkillDetail: async (_auth, skillId) => {
     if (!skill || skillId !== skill.skillId)
       throw new CloudServiceError('skill-not-found', 404, 'No such Skill.');
@@ -56,16 +74,31 @@ const service = (
 
 describe('loadSkillDetail', () => {
   it('fails safely on an invalid/not-owned skill id', async () => {
-    const view = await loadSkillDetail(service(detail()), USER, 'skill_other0001', undefined);
+    const view = await loadSkillDetail(
+      service(detail()),
+      USER,
+      'skill_other0001',
+      undefined,
+    );
     expect(view.kind).toBe('not-found');
   });
   it('renders Ready with matching install', async () => {
-    const view = await loadSkillDetail(service(detail()), USER, 'skill_test0001', undefined);
+    const view = await loadSkillDetail(
+      service(detail()),
+      USER,
+      'skill_test0001',
+      undefined,
+    );
     if (view.kind !== 'ready') throw new Error('expected ready');
     expect(view.statusText).toBe('Ready');
   });
   it('renders no reviewArtifact and does not exceed bounds when there is no update', async () => {
-    const view = await loadSkillDetail(service(detail()), USER, 'skill_test0001', undefined);
+    const view = await loadSkillDetail(
+      service(detail()),
+      USER,
+      'skill_test0001',
+      undefined,
+    );
     if (view.kind !== 'ready') throw new Error('expected ready');
     expect(view.reviewArtifact).toBeNull();
     expect(view.exceedsReviewBounds).toBe(false);
@@ -178,8 +211,16 @@ describe('loadSkillDetail', () => {
       service(
         detail({
           history: [
-            { contentHash: HASH_B, environmentVersionNumber: 2, approvedAt: new Date().toISOString() },
-            { contentHash: HASH_A, environmentVersionNumber: 1, approvedAt: new Date().toISOString() },
+            {
+              contentHash: HASH_B,
+              environmentVersionNumber: 2,
+              approvedAt: new Date().toISOString(),
+            },
+            {
+              contentHash: HASH_A,
+              environmentVersionNumber: 1,
+              approvedAt: new Date().toISOString(),
+            },
           ],
           approvedVersion: HASH_B,
         }),
@@ -193,16 +234,28 @@ describe('loadSkillDetail', () => {
     expect(view.history[1]?.current).toBe(false);
   });
   it('reports capabilities-not-declared distinctly from declared-false', async () => {
-    const notDeclared = await loadSkillDetail(service(detail({ capability: { declared: false } })), USER, 'skill_test0001', undefined);
-    const declaredFalse = await loadSkillDetail(
-      service(detail({ capability: { declared: true, capabilities: { network: false } } })),
+    const notDeclared = await loadSkillDetail(
+      service(detail({ capability: { declared: false } })),
       USER,
       'skill_test0001',
       undefined,
     );
-    if (notDeclared.kind !== 'ready' || declaredFalse.kind !== 'ready') throw new Error('expected ready');
+    const declaredFalse = await loadSkillDetail(
+      service(
+        detail({
+          capability: { declared: true, capabilities: { network: false } },
+        }),
+      ),
+      USER,
+      'skill_test0001',
+      undefined,
+    );
+    if (notDeclared.kind !== 'ready' || declaredFalse.kind !== 'ready')
+      throw new Error('expected ready');
     expect(notDeclared.capabilitiesText).toBe('Capabilities not declared');
-    expect(declaredFalse.capabilitiesText).not.toBe('Capabilities not declared');
+    expect(declaredFalse.capabilitiesText).not.toBe(
+      'Capabilities not declared',
+    );
   });
   it('never exposes an absolute or home-relative path in source label', async () => {
     const view = await loadSkillDetail(
@@ -217,7 +270,9 @@ describe('loadSkillDetail', () => {
   });
   it('reports "Not reported here yet" when the viewing machine never checked in', async () => {
     const view = await loadSkillDetail(
-      service(detail(), [machine({ lastCheckinAt: null, status: 'never-checked-in' })]),
+      service(detail(), [
+        machine({ lastCheckinAt: null, status: 'never-checked-in' }),
+      ]),
       USER,
       'skill_test0001',
       undefined,
@@ -237,7 +292,9 @@ describe('loadSkillDetail', () => {
   });
   it('reports "Different version here" when the viewing machine has a mismatched install', async () => {
     const view = await loadSkillDetail(
-      service(detail({ installs: [{ machineId: A1, installedVersion: HASH_B }] })),
+      service(
+        detail({ installs: [{ machineId: A1, installedVersion: HASH_B }] }),
+      ),
       USER,
       'skill_test0001',
       undefined,

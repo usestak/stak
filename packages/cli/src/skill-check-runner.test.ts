@@ -4,9 +4,16 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { spawnGit } from '@stack/core';
-import type { EnvironmentLock, LockedSkill, RestorationStrategy } from '@stack/spec';
+import type {
+  EnvironmentLock,
+  LockedSkill,
+  RestorationStrategy,
+} from '@stack/spec';
 
-import { runSkillCheck, type SkillCheckReporter } from './skill-check-runner.js';
+import {
+  runSkillCheck,
+  type SkillCheckReporter,
+} from './skill-check-runner.js';
 
 const reference = (
   revision: string,
@@ -59,7 +66,8 @@ const fakeReporter = (): SkillCheckReporter & {
     payloadBytes: Uint8Array;
   }>;
 } => {
-  const reportCalls: Array<{ skillId: string; body: Record<string, unknown> }> = [];
+  const reportCalls: Array<{ skillId: string; body: Record<string, unknown> }> =
+    [];
   const uploadCalls: Array<{
     skillId: string;
     metadata: Record<string, unknown>;
@@ -150,7 +158,10 @@ describe('runSkillCheck', () => {
     const lock = makeLock({
       skill_bbbbbbbb: lockedSkill(
         'My Skill',
-        reference(approvedRevision, { remote: repoDir, ref: 'refs/heads/main' }),
+        reference(approvedRevision, {
+          remote: repoDir,
+          ref: 'refs/heads/main',
+        }),
       ),
     });
     const reporter = fakeReporter();
@@ -218,11 +229,17 @@ describe('runSkillCheck', () => {
     // returns { status: 'uncheckable', reason: 'unreachable' } at the REF-RESOLUTION step,
     // distinct from the materialization-failure path the test above exercises. 'unreachable'
     // is a transient NETWORK fact, never a structural cannot-check judgment (contract §5a).
-    const nonexistentRemote = path.join(workRoot, 'no-such-remote-' + Date.now());
+    const nonexistentRemote = path.join(
+      workRoot,
+      'no-such-remote-' + Date.now(),
+    );
     const lock = makeLock({
       skill_jjjjjjjj: lockedSkill(
         'Unreachable Skill',
-        reference('0'.repeat(40), { remote: nonexistentRemote, ref: 'refs/heads/main' }),
+        reference('0'.repeat(40), {
+          remote: nonexistentRemote,
+          ref: 'refs/heads/main',
+        }),
       ),
     });
     const reporter = fakeReporter();
@@ -262,7 +279,10 @@ describe('runSkillCheck', () => {
     const lock = makeLock({
       skill_dddddddd: lockedSkill(
         'Broken Skill',
-        reference(bogusApprovedRevision, { remote: repoDir, ref: 'refs/heads/main' }),
+        reference(bogusApprovedRevision, {
+          remote: repoDir,
+          ref: 'refs/heads/main',
+        }),
       ),
     });
     const reporter = fakeReporter();
@@ -291,7 +311,10 @@ describe('runSkillCheck', () => {
     const lock = makeLock({
       skill_eeeeeeee: lockedSkill(
         'Big Skill',
-        reference(approvedRevision, { remote: repoDir, ref: 'refs/heads/main' }),
+        reference(approvedRevision, {
+          remote: repoDir,
+          ref: 'refs/heads/main',
+        }),
       ),
     });
     const reporter = fakeReporter();

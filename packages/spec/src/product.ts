@@ -85,10 +85,16 @@ export const reviewArtifactFileSchema = z
     kind: z.enum(['added', 'modified', 'removed']),
     binary: z.boolean(),
     before: z
-      .object({ byteSize: z.number().int().nonnegative(), hash: z.string().min(1) })
+      .object({
+        byteSize: z.number().int().nonnegative(),
+        hash: z.string().min(1),
+      })
       .optional(),
     after: z
-      .object({ byteSize: z.number().int().nonnegative(), hash: z.string().min(1) })
+      .object({
+        byteSize: z.number().int().nonnegative(),
+        hash: z.string().min(1),
+      })
       .optional(),
     // Present only when !binary; a binary file never carries a text preview.
     beforeText: z.string().optional(),
@@ -96,7 +102,10 @@ export const reviewArtifactFileSchema = z
   })
   .strict()
   .superRefine((file, ctx) => {
-    if (file.binary && (file.beforeText !== undefined || file.afterText !== undefined)) {
+    if (
+      file.binary &&
+      (file.beforeText !== undefined || file.afterText !== undefined)
+    ) {
       ctx.addIssue({
         code: 'custom',
         message: 'A binary file must not carry beforeText/afterText.',
@@ -181,9 +190,10 @@ export type SkillReviewArtifact = z.infer<typeof skillReviewArtifactSchema>;
  * do — so `.omit()` works cleanly here; Zod refuses `.omit()` only on a schema that has a
  * refinement directly attached to itself.)
  */
-export const uploadSkillReviewArtifactRequestSchema = skillReviewArtifactSchema.omit({
-  reviewArtifactId: true,
-});
+export const uploadSkillReviewArtifactRequestSchema =
+  skillReviewArtifactSchema.omit({
+    reviewArtifactId: true,
+  });
 export type UploadSkillReviewArtifactRequest = z.infer<
   typeof uploadSkillReviewArtifactRequestSchema
 >;
@@ -236,7 +246,8 @@ export const reportSkillSourceCheckRequestSchema = z
       if (request.candidateRevision !== undefined) {
         ctx.addIssue({
           code: 'custom',
-          message: "candidateRevision is only valid when sourceCheckState is 'update-available'.",
+          message:
+            "candidateRevision is only valid when sourceCheckState is 'update-available'.",
           path: ['candidateRevision'],
         });
       }
@@ -252,14 +263,16 @@ export const reportSkillSourceCheckRequestSchema = z
     if (state !== 'cannot-check' && request.cannotCheckReason !== undefined) {
       ctx.addIssue({
         code: 'custom',
-        message: "cannotCheckReason is only valid when sourceCheckState is 'cannot-check'.",
+        message:
+          "cannotCheckReason is only valid when sourceCheckState is 'cannot-check'.",
         path: ['cannotCheckReason'],
       });
     }
     if (state !== 'check-failed' && request.failureReason !== undefined) {
       ctx.addIssue({
         code: 'custom',
-        message: "failureReason is only valid when sourceCheckState is 'check-failed'.",
+        message:
+          "failureReason is only valid when sourceCheckState is 'check-failed'.",
         path: ['failureReason'],
       });
     }
@@ -296,14 +309,16 @@ export const skillSummarySchema = z
       if (summary.candidateRevision !== undefined) {
         ctx.addIssue({
           code: 'custom',
-          message: "candidateRevision is only valid when sourceCheckState is 'update-available'.",
+          message:
+            "candidateRevision is only valid when sourceCheckState is 'update-available'.",
           path: ['candidateRevision'],
         });
       }
       if (summary.reviewArtifactId !== undefined) {
         ctx.addIssue({
           code: 'custom',
-          message: "reviewArtifactId is only valid when sourceCheckState is 'update-available'.",
+          message:
+            "reviewArtifactId is only valid when sourceCheckState is 'update-available'.",
           path: ['reviewArtifactId'],
         });
       }
@@ -316,24 +331,36 @@ export const skillSummarySchema = z
         });
       }
     }
-    if (summary.reviewUnavailableReason !== undefined && summary.reviewArtifactId !== undefined) {
+    if (
+      summary.reviewUnavailableReason !== undefined &&
+      summary.reviewArtifactId !== undefined
+    ) {
       ctx.addIssue({
         code: 'custom',
-        message: 'reviewUnavailableReason and reviewArtifactId are mutually exclusive.',
+        message:
+          'reviewUnavailableReason and reviewArtifactId are mutually exclusive.',
         path: ['reviewUnavailableReason'],
       });
     }
-    if (summary.sourceCheckState !== 'cannot-check' && summary.cannotCheckReason !== undefined) {
+    if (
+      summary.sourceCheckState !== 'cannot-check' &&
+      summary.cannotCheckReason !== undefined
+    ) {
       ctx.addIssue({
         code: 'custom',
-        message: "cannotCheckReason is only valid when sourceCheckState is 'cannot-check'.",
+        message:
+          "cannotCheckReason is only valid when sourceCheckState is 'cannot-check'.",
         path: ['cannotCheckReason'],
       });
     }
-    if (summary.sourceCheckState !== 'check-failed' && summary.checkFailedReason !== undefined) {
+    if (
+      summary.sourceCheckState !== 'check-failed' &&
+      summary.checkFailedReason !== undefined
+    ) {
       ctx.addIssue({
         code: 'custom',
-        message: "checkFailedReason is only valid when sourceCheckState is 'check-failed'.",
+        message:
+          "checkFailedReason is only valid when sourceCheckState is 'check-failed'.",
         path: ['checkFailedReason'],
       });
     }
@@ -552,7 +579,9 @@ export const setSkillPausedRequestSchema = z
 /* -------------------------------- Types -------------------------------- */
 
 export type CannotCheckReason = z.infer<typeof cannotCheckReasonSchema>;
-export type ReviewUnavailableReason = z.infer<typeof reviewUnavailableReasonSchema>;
+export type ReviewUnavailableReason = z.infer<
+  typeof reviewUnavailableReasonSchema
+>;
 export type SourceCheckState = z.infer<typeof sourceCheckStateSchema>;
 export type SkillSourceSummary = z.infer<typeof skillSourceSummarySchema>;
 export type CapabilityState = z.infer<typeof capabilityStateSchema>;
