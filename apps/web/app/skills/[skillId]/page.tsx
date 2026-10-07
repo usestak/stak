@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { AppSidebar } from '../../_components/app-sidebar';
+import { CommandDock } from '../../_components/command-dock';
 import { MachineChooser } from '../../_components/machine-chooser';
 import { ShellNotice } from '../../_components/shell-notice';
 import { getCloudService } from '../../../lib/cloud-service';
@@ -77,6 +78,11 @@ export default async function SkillDetailPage({
     );
 
   const updateAvailable = view.sourceCheckState === 'update-available';
+  const dockHint = updateAvailable
+    ? view.exceedsReviewBounds
+      ? 'This update exceeds browser review limits; run after approving locally.'
+      : 'Approve the update above, then run this on this machine to install it.'
+    : 'Installs the approved version of this Skill on this machine.';
 
   return (
     <div className="stak-frame">
@@ -225,6 +231,11 @@ export default async function SkillDetailPage({
             </ul>
           </div>
         </section>
+        <CommandDock
+          machineName={view.viewing.name}
+          command={`stak skill update ${view.skillId}`}
+          hint={dockHint}
+        />
       </main>
     </div>
   );
