@@ -38,9 +38,13 @@ import type {
   ProjectLifecycle,
   PublishPublicStackVersionRequest,
   PublishPublicStackVersionResponse,
+  ReportSkillSourceCheckRequest,
+  ReviewArtifactFile,
   SetProjectLifecycleResponse,
   SyncProjectsRequest,
   SyncProjectsResponse,
+  UploadSkillReviewArtifactRequest,
+  UploadSkillReviewArtifactResponse,
 } from '@stack/spec';
 
 import {
@@ -60,6 +64,37 @@ export type DownloadedSnapshot = {
   archiveHash: string;
   byteSize: number;
   bytes: Uint8Array;
+};
+
+/**
+ * Result of approve-by-artifact (P5a §5a). No response schema for this shape exists in
+ * `@stack/spec` yet, so it is validated locally (see `approveSkillVersionResponseSchema`
+ * below) rather than reaching into `@stack/spec` out of this task's scope.
+ */
+export type ApproveSkillVersionResult = {
+  skillId: string;
+  approvedVersion: string;
+  createdNew: boolean;
+  environmentVersionNumber: number;
+};
+
+/**
+ * One changed file's metadata for a review-artifact upload, with `beforeText`/`afterText`
+ * dropped: those belong only in the hash-verified payload bytes (see
+ * `uploadSkillReviewArtifact`), never in the unverified metadata (P5a §5a).
+ */
+export type UploadSkillReviewArtifactFileMetadata = Omit<
+  ReviewArtifactFile,
+  'beforeText' | 'afterText'
+>;
+
+/** Caller-facing metadata for a review-artifact upload — `skillId` comes from the method's own
+ * parameter (and ends up in the URL), never duplicated in this object. */
+export type UploadSkillReviewArtifactMetadata = Omit<
+  UploadSkillReviewArtifactRequest,
+  'skillId' | 'files'
+> & {
+  files: UploadSkillReviewArtifactFileMetadata[];
 };
 
 export interface CloudClient {
@@ -89,6 +124,29 @@ export interface CloudClient {
     projectId: string,
     lifecycle: ProjectLifecycle,
   ): Promise<SetProjectLifecycleResponse>;
+  /**
+   * P5a: approve-by-artifact. The request names ONLY the stored review artifact to approve —
+   * Cloud reads everything else (the candidate revision/hash) from its own stored record.
+   */
+  approveSkillVersion(
+    skillId: string,
+    request: { reviewArtifactId: string },
+  ): Promise<ApproveSkillVersionResult>;
+  /** P5a: CLI-reported no-artifact source-check result (no-update / cannot-check / check-failed). */
+  reportSkillSourceCheck(
+    skillId: string,
+    request: Omit<ReportSkillSourceCheckRequest, 'skillId'>,
+  ): Promise<{ ok: true }>;
+  /**
+   * P5a: CLI → Cloud upload of an update-available result's bounded review artifact.
+   * `payloadBytes` are the exact bytes this method base64-encodes into `payloadBase64`; Cloud
+   * rehashes them and verifies them against `metadata.artifactPayloadHash`.
+   */
+  uploadSkillReviewArtifact(
+    skillId: string,
+    metadata: UploadSkillReviewArtifactMetadata,
+    payloadBytes: Uint8Array,
+  ): Promise<UploadSkillReviewArtifactResponse>;
 }
 
 export interface CloudAuthClient {
@@ -137,6 +195,32 @@ export type CreateCloudClientOptions = {
   fetchImpl?: FetchLike;
   timeoutMs?: number;
   allowInsecure?: boolean;
+};
+
+const BASE64_CHARS =
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/**
+ * RFC 4648 base64 encode, implemented locally rather than via Node's `Buffer` (this package has
+ * no ambient Node types) or the DOM-only `btoa`, so this file stays free of any
+ * environment-specific global and works in whatever runtime supplies `fetchImpl`.
+ */
+const base64Encode = (bytes: Uint8Array): string => {
+  let result = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i] ?? 0;
+    const b1 = bytes[i + 1] ?? 0;
+    const b2 = bytes[i + 2] ?? 0;
+    const hasB1 = i + 1 < bytes.length;
+    const hasB2 = i + 2 < bytes.length;
+    result += BASE64_CHARS.charAt(b0 >> 2);
+    result += BASE64_CHARS.charAt(((b0 & 0x03) << 4) | (b1 >> 4));
+    result += hasB1
+      ? BASE64_CHARS.charAt(((b1 & 0x0f) << 2) | (b2 >> 6))
+      : '=';
+    result += hasB2 ? BASE64_CHARS.charAt(b2 & 0x3f) : '=';
+  }
+  return result;
 };
 
 const isLocalhost = (url: URL) =>
@@ -255,6 +339,62 @@ export const createCloudClient = (
     return schema.parse(JSON.parse(payload.text));
   };
 
+  // No @stack/spec response schema exists for these three P5a shapes yet (out of this task's
+  // scope to add); validated locally instead, following the same `{ parse(value): T }` contract
+  // the `json()` helper expects from every other schema in this file.
+  const okResponseSchema: { parse(value: unknown): { ok: true } } = {
+    parse: (value) => {
+      if (
+        typeof value !== 'object' ||
+        value === null ||
+        (value as Record<string, unknown>).ok !== true
+      )
+        throw new StackCloudError(
+          'invalid-response',
+          'STAK Cloud returned an unexpected response.',
+        );
+      return { ok: true };
+    },
+  };
+  const approveSkillVersionResponseSchema: {
+    parse(value: unknown): ApproveSkillVersionResult;
+  } = {
+    parse: (value) => {
+      const record =
+        typeof value === 'object' && value !== null
+          ? (value as Record<string, unknown>)
+          : null;
+      if (
+        !record ||
+        typeof record.skillId !== 'string' ||
+        typeof record.approvedVersion !== 'string' ||
+        typeof record.createdNew !== 'boolean' ||
+        typeof record.environmentVersionNumber !== 'number'
+      )
+        throw new StackCloudError(
+          'invalid-response',
+          'STAK Cloud returned an unexpected approve-skill-version response.',
+        );
+      return record as unknown as ApproveSkillVersionResult;
+    },
+  };
+  const uploadSkillReviewArtifactResponseSchema: {
+    parse(value: unknown): UploadSkillReviewArtifactResponse;
+  } = {
+    parse: (value) => {
+      const record =
+        typeof value === 'object' && value !== null
+          ? (value as Record<string, unknown>)
+          : null;
+      if (!record || typeof record.reviewArtifactId !== 'string')
+        throw new StackCloudError(
+          'invalid-response',
+          'STAK Cloud returned an unexpected upload-review-artifact response.',
+        );
+      return record as unknown as UploadSkillReviewArtifactResponse;
+    },
+  };
+
   return {
     ...createMemoryClientMethods({ request, json }),
     authStart: async (body) =>
@@ -296,6 +436,39 @@ export const createCloudClient = (
           {
             auth: true,
             json: { lifecycle },
+          },
+        ),
+      ),
+    approveSkillVersion: async (skillId, body) =>
+      json(
+        approveSkillVersionResponseSchema,
+        await request(
+          'POST',
+          `skills/${encodeURIComponent(skillId)}/approve`,
+          { auth: true, json: body },
+        ),
+      ),
+    reportSkillSourceCheck: async (skillId, body) =>
+      json(
+        okResponseSchema,
+        await request(
+          'POST',
+          `skills/${encodeURIComponent(skillId)}/review-check`,
+          { auth: true, json: body },
+        ),
+      ),
+    uploadSkillReviewArtifact: async (skillId, metadata, payloadBytes) =>
+      json(
+        uploadSkillReviewArtifactResponseSchema,
+        await request(
+          'POST',
+          `skills/${encodeURIComponent(skillId)}/review-artifact`,
+          {
+            auth: true,
+            json: {
+              ...metadata,
+              payloadBase64: base64Encode(payloadBytes),
+            },
           },
         ),
       ),
