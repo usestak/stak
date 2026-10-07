@@ -1,7 +1,8 @@
 import Link from 'next/link';
 
 import { MachineSelector } from './machine-selector';
-import type { MachineOption, SidebarCounts } from '../overview/overview-data';
+import type { SidebarCounts } from '../overview/overview-data';
+import type { MachineOption } from '../../lib/machine-context';
 
 const DOT: Record<string, string> = {
   ready: '#84cb8e',

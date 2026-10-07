@@ -8,6 +8,19 @@ import type {
 } from '@stack/spec';
 
 import type { WebUser } from '../../lib/session';
+import {
+  relative,
+  displayPlatform,
+  displayName,
+  checkedIn,
+  metaLine,
+  statusLabel,
+  machineDot,
+  machineOption as option,
+  sortMachinesForSelection as sortForOverview,
+  resolveViewingMachineId,
+  type MachineOption,
+} from '../../lib/machine-context.js';
 
 /** The P3 read methods the Overview consumes; injectable so the view model is unit-testable. */
 export type OverviewService = Pick<
@@ -21,12 +34,9 @@ const webAuth = (userId: string) => ({ userId, tokenId: 'web-session' });
 const MAX_CARDS = 4;
 const MAX_ACTIVITY = 4;
 
-export type MachineOption = {
-  machineId: string;
-  name: string;
-  secondary: string;
-  statusLabel: string;
-};
+// Re-exported so existing imports (overview-data.test.ts, app-sidebar.tsx) keep working.
+export { displayPlatform };
+export type { MachineOption };
 
 export type OverviewSummary = { label: string; value: string; detail: string };
 
@@ -97,91 +107,6 @@ export type OverviewView =
       dockCommand: string;
     };
 
-const relative = (iso: string | null): string => {
-  if (!iso) return 'never';
-  const secs = Math.max(
-    0,
-    Math.round((Date.now() - new Date(iso).getTime()) / 1000),
-  );
-  if (secs < 90) return 'just now';
-  const mins = Math.round(secs / 60);
-  if (mins < 90) return `${mins} min ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 36) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
-  const days = Math.round(hours / 24);
-  return `${days} day${days === 1 ? '' : 's'} ago`;
-};
-
-const displayName = (m: MachineSummary): string => m.name ?? 'Unnamed machine';
-const shortId = (id: string) => id.slice(0, 8);
-const checkedIn = (m: MachineSummary): boolean => m.lastCheckinAt !== null;
-
-/** Human-facing platform label (P4 §2). Display only — the raw value (`win32`, etc.) is never
- *  changed in storage/the data model; unmapped values pass through unchanged. */
-export const displayPlatform = (
-  platform: string | undefined,
-): string | undefined => {
-  if (!platform) return undefined;
-  switch (platform) {
-    case 'win32':
-      return 'Windows';
-    case 'darwin':
-      return 'macOS';
-    case 'linux':
-      return 'Linux';
-    default:
-      return platform;
-  }
-};
-
-const metaLine = (m: MachineSummary): string => {
-  const hw = [displayPlatform(m.platform), m.arch].filter(Boolean).join(' · ');
-  // Platform/arch arrive at first check-in; before that the short id is the only safe context.
-  return hw || `ID ${shortId(m.machineId)}`;
-};
-
-const statusLabel = (m: MachineSummary): string => {
-  switch (m.status) {
-    case 'never-checked-in':
-      return 'No check-in yet';
-    case 'updates-waiting':
-      return 'Updates waiting';
-    case 'up-to-date':
-      return `Up to date · ${relative(m.lastCheckinAt)}`;
-    default:
-      return `Last seen ${relative(m.lastCheckinAt)}`;
-  }
-};
-const machineDot = (m: MachineSummary): 'ready' | 'attention' | 'neutral' =>
-  m.status === 'up-to-date'
-    ? 'ready'
-    : m.status === 'updates-waiting'
-      ? 'attention'
-      : 'neutral';
-
-const option = (m: MachineSummary): MachineOption => ({
-  machineId: m.machineId,
-  name: displayName(m),
-  secondary: `${metaLine(m)} · ${statusLabel(m)}`,
-  statusLabel: statusLabel(m),
-});
-
-/** Overview order (P4 §4): needs-attention (updates waiting) first, then checked-in machines
- *  by most recent check-in, then never-checked-in machines by newest first_seen_at. This is
- *  NOT online/offline ordering — it is purely "what does this machine most need from you". */
-const sortForOverview = (a: MachineSummary, b: MachineSummary): number => {
-  const rank = (m: MachineSummary) =>
-    m.status === 'updates-waiting'
-      ? 0
-      : m.status === 'never-checked-in'
-        ? 2
-        : 1;
-  const ra = rank(a);
-  const rb = rank(b);
-  if (ra !== rb) return ra - rb;
-  if (ra === 2) return b.firstSeenAt.localeCompare(a.firstSeenAt); // newest authorization first
-  return (b.lastCheckinAt ?? '').localeCompare(a.lastCheckinAt ?? '');
-};
 
 const attentionView = (item: NeedsAttention): NeedsAttentionView => {
   switch (item.kind) {
@@ -328,13 +253,7 @@ export const loadOverview = async (
   const options = ordered.map(option);
   const anyCheckedIn = active.some(checkedIn);
 
-  const requestedValid =
-    requestedMachine && active.some((m) => m.machineId === requestedMachine);
-  const viewingId = requestedValid
-    ? requestedMachine
-    : active.length === 1
-      ? active[0]?.machineId
-      : undefined;
+  const viewingId = resolveViewingMachineId(active, requestedMachine);
   if (!viewingId)
     return { kind: 'choose-machine', machines: options, anyCheckedIn };
 
