@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,6 +17,12 @@ const file = (relativePath: string, content: string): SkillTreeEntry => ({
   relativePath,
   type: 'file',
   content: Buffer.from(content),
+});
+
+const symlink = (relativePath: string, target: string): SkillTreeEntry => ({
+  relativePath,
+  type: 'symlink',
+  target,
 });
 
 describe('buildReviewArtifactFiles', () => {
@@ -96,6 +103,76 @@ describe('buildReviewArtifactFiles', () => {
       [],
       [file('one-big.md', big)],
       { ...DEFAULT_REVIEW_BOUNDS, maxTotalBytes: DEFAULT_REVIEW_BOUNDS.maxSingleFileBytes + 1024 },
+    );
+    expect(result.status).toBe('exceeds-bounds');
+  });
+
+  it('classifies a symlink target change as binary with before/after size+hash, no text', () => {
+    const result = buildReviewArtifactFiles(
+      [symlink('link', './old-target')],
+      [symlink('link', './new-target')],
+      DEFAULT_REVIEW_BOUNDS,
+    );
+    if (result.status !== 'ok') throw new Error('expected ok');
+    expect(result.files).toHaveLength(1);
+    const record = result.files[0];
+    expect(record).toMatchObject({ relativePath: 'link', kind: 'modified', binary: true });
+    expect(record?.beforeText).toBeUndefined();
+    expect(record?.afterText).toBeUndefined();
+    const oldTargetBytes = Buffer.from('./old-target', 'utf8');
+    const newTargetBytes = Buffer.from('./new-target', 'utf8');
+    expect(record?.before).toEqual({
+      byteSize: oldTargetBytes.length,
+      hash: `sha256:${createHash('sha256').update(oldTargetBytes).digest('hex')}`,
+    });
+    expect(record?.after).toEqual({
+      byteSize: newTargetBytes.length,
+      hash: `sha256:${createHash('sha256').update(newTargetBytes).digest('hex')}`,
+    });
+  });
+
+  it('classifies an added symlink as binary with after only', () => {
+    const result = buildReviewArtifactFiles(
+      [],
+      [symlink('new-link', './target')],
+      DEFAULT_REVIEW_BOUNDS,
+    );
+    if (result.status !== 'ok') throw new Error('expected ok');
+    expect(result.files[0]).toMatchObject({ kind: 'added', binary: true });
+    expect(result.files[0]?.before).toBeUndefined();
+    expect(result.files[0]?.after?.byteSize).toBe(Buffer.from('./target', 'utf8').length);
+  });
+
+  it('classifies a removed symlink as binary with before only', () => {
+    const result = buildReviewArtifactFiles(
+      [symlink('old-link', './target')],
+      [],
+      DEFAULT_REVIEW_BOUNDS,
+    );
+    if (result.status !== 'ok') throw new Error('expected ok');
+    expect(result.files[0]).toMatchObject({ kind: 'removed', binary: true });
+    expect(result.files[0]?.after).toBeUndefined();
+    expect(result.files[0]?.before?.byteSize).toBe(Buffer.from('./target', 'utf8').length);
+  });
+
+  it('classifies a file-to-symlink type change at the same path as binary', () => {
+    const result = buildReviewArtifactFiles(
+      [file('x', 'some text content')],
+      [symlink('x', './elsewhere')],
+      DEFAULT_REVIEW_BOUNDS,
+    );
+    if (result.status !== 'ok') throw new Error('expected ok');
+    expect(result.files[0]).toMatchObject({ kind: 'modified', binary: true });
+    expect(result.files[0]?.beforeText).toBeUndefined();
+    expect(result.files[0]?.afterText).toBeUndefined();
+  });
+
+  it('counts a symlink target string\'s bytes toward the per-file bound', () => {
+    const hugeTarget = 'x'.repeat(DEFAULT_REVIEW_BOUNDS.maxSingleFileBytes + 1);
+    const result = buildReviewArtifactFiles(
+      [],
+      [symlink('huge-link', hugeTarget)],
+      DEFAULT_REVIEW_BOUNDS,
     );
     expect(result.status).toBe('exceeds-bounds');
   });

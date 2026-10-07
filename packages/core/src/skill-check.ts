@@ -5,7 +5,6 @@ import path from 'node:path';
 
 import {
   enumerateSkillTree,
-  hashSkillTreeEntries,
   type SkillTreeEntry,
 } from '@stack/shared';
 
@@ -128,38 +127,47 @@ export const buildReviewArtifactFiles = (
   const diff: SkillTreeDiff = diffSkillTrees(approved, candidate);
   if (diff.files.length > bounds.maxFiles) return { status: 'exceeds-bounds' };
 
+  // Both files AND symlinks are included here — a symlink's "content" for review-artifact
+  // purposes is its target string's bytes. Excluding symlinks would leave a changed/added/
+  // removed symlink in `diff.files` (which diffs ALL entry types) with no before/after/content
+  // at all, a near-content-free record for what could be a meaningful change.
+  type EntryContent = { content: Buffer; isSymlink: boolean };
+  const entryContent = (e: SkillTreeEntry): EntryContent =>
+    e.type === 'file'
+      ? { content: e.content, isSymlink: false }
+      : { content: Buffer.from(e.target, 'utf8'), isSymlink: true };
   const approvedByPath = new Map(
-    approved
-      .filter((e): e is SkillTreeEntry & { type: 'file' } => e.type === 'file')
-      .map((e) => [e.relativePath, e.content]),
+    approved.map((e) => [e.relativePath, entryContent(e)]),
   );
   const candidateByPath = new Map(
-    candidate
-      .filter((e): e is SkillTreeEntry & { type: 'file' } => e.type === 'file')
-      .map((e) => [e.relativePath, e.content]),
+    candidate.map((e) => [e.relativePath, entryContent(e)]),
   );
 
   let totalBytes = 0;
   const files: ReviewArtifactFileRecord[] = [];
   for (const change of diff.files) {
-    const beforeContent = approvedByPath.get(change.relativePath);
-    const afterContent = candidateByPath.get(change.relativePath);
-    const relevantBytes = [beforeContent, afterContent].filter(Boolean) as Buffer[];
-    for (const b of relevantBytes)
-      if (b.length > bounds.maxSingleFileBytes) return { status: 'exceeds-bounds' };
-    totalBytes += relevantBytes.reduce((sum, b) => sum + b.length, 0);
+    const before = approvedByPath.get(change.relativePath);
+    const after = candidateByPath.get(change.relativePath);
+    const relevantSides = [before, after].filter((s): s is EntryContent => s !== undefined);
+    for (const s of relevantSides)
+      if (s.content.length > bounds.maxSingleFileBytes) return { status: 'exceeds-bounds' };
+    totalBytes += relevantSides.reduce((sum, s) => sum + s.content.length, 0);
     if (totalBytes > bounds.maxTotalBytes) return { status: 'exceeds-bounds' };
 
-    const binary = relevantBytes.some(isBinary);
+    // A symlink on either side forces a binary classification: a symlink's target string is
+    // not meaningful prose to diff as a text change, and this correctly suppresses any
+    // beforeText/afterText attempt (including for a file<->symlink type change at the same
+    // path, which is also a mixed-type change).
+    const binary = relevantSides.some((s) => s.isSymlink) || relevantSides.some((s) => isBinary(s.content));
     const record: ReviewArtifactFileRecord = {
       relativePath: change.relativePath,
       kind: change.kind,
       binary,
-      ...(beforeContent
-        ? { before: sideOf(beforeContent), ...(binary ? {} : { beforeText: beforeContent.toString('utf8') }) }
+      ...(before
+        ? { before: sideOf(before.content), ...(binary ? {} : { beforeText: before.content.toString('utf8') }) }
         : {}),
-      ...(afterContent
-        ? { after: sideOf(afterContent), ...(binary ? {} : { afterText: afterContent.toString('utf8') }) }
+      ...(after
+        ? { after: sideOf(after.content), ...(binary ? {} : { afterText: after.content.toString('utf8') }) }
         : {}),
     };
     files.push(record);
