@@ -11,7 +11,6 @@ import {
   loadOverview,
   type NeedsAttentionView,
   type OverviewMachineCard,
-  type SidebarCounts,
 } from './overview-data';
 
 export const dynamic = 'force-dynamic';
