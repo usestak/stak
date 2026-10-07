@@ -9,6 +9,11 @@ const finalKey = (userId: string, contentHash: string) =>
   `snapshots/${userId}/${contentHash.replace(':', '_')}.tar`;
 const pendingKey = (ticket: string) =>
   `pending/${createHash('sha256').update(ticket).digest('hex')}.tar`;
+// Structurally distinct top-level prefix from `snapshots/` — a review-artifact payload is
+// keyed by its own globally-unique artifact id, never a content hash, so it can never
+// collide with a Memory snapshot even if the underlying bytes happened to match.
+const reviewPayloadKey = (userId: string, reviewArtifactId: string) =>
+  `review-artifacts/${userId}/${reviewArtifactId}.json`;
 
 const toBytes = async (blob: Blob | null): Promise<Uint8Array | null> =>
   blob ? new Uint8Array(await blob.arrayBuffer()) : null;
@@ -52,6 +57,24 @@ export const supabaseBlobStore = (): CloudBlobStore => {
     has: async (userId, contentHash) => {
       const { data } = await storage().download(finalKey(userId, contentHash));
       return Boolean(data);
+    },
+    putReviewPayload: async (userId, reviewArtifactId, bytes) => {
+      const { error } = await storage().upload(
+        reviewPayloadKey(userId, reviewArtifactId),
+        Buffer.from(bytes),
+        { contentType: 'application/json', upsert: true },
+      );
+      if (error)
+        throw new Error(`Review payload store failed: ${error.message}`);
+    },
+    getReviewPayload: async (userId, reviewArtifactId) => {
+      const { data } = await storage().download(
+        reviewPayloadKey(userId, reviewArtifactId),
+      );
+      return toBytes(data);
+    },
+    deleteReviewPayload: async (userId, reviewArtifactId) => {
+      await storage().remove([reviewPayloadKey(userId, reviewArtifactId)]);
     },
   };
 };

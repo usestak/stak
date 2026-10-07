@@ -399,11 +399,18 @@ export const createInMemoryMemoryBackends = (): {
   };
 };
 
+// Structurally separate key namespace from `blobs` (content-hash-keyed snapshots) — a
+// review-artifact payload is keyed by its own globally-unique artifact id, so it can never
+// collide with a snapshot's content hash even if the bytes happened to match.
+const reviewPayloadKey = (userId: string, reviewArtifactId: string) =>
+  `review ${userId} ${reviewArtifactId}`;
+
 export const createInMemoryBlobStore = (): CloudBlobStore & {
   blobs: Map<string, Uint8Array>;
 } => {
   const pending = new Map<string, Uint8Array>();
   const blobs = new Map<string, Uint8Array>();
+  const reviewPayloads = new Map<string, Uint8Array>();
   return {
     blobs,
     putPending: async (ticket, bytes) => {
@@ -419,5 +426,13 @@ export const createInMemoryBlobStore = (): CloudBlobStore & {
     get: async (userId, contentHash) =>
       blobs.get(key(userId, contentHash)) ?? null,
     has: async (userId, contentHash) => blobs.has(key(userId, contentHash)),
+    putReviewPayload: async (userId, reviewArtifactId, bytes) => {
+      reviewPayloads.set(reviewPayloadKey(userId, reviewArtifactId), bytes);
+    },
+    getReviewPayload: async (userId, reviewArtifactId) =>
+      reviewPayloads.get(reviewPayloadKey(userId, reviewArtifactId)) ?? null,
+    deleteReviewPayload: async (userId, reviewArtifactId) => {
+      reviewPayloads.delete(reviewPayloadKey(userId, reviewArtifactId));
+    },
   };
 };

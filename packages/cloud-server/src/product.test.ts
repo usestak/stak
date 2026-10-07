@@ -771,9 +771,12 @@ describe('uploadSkillReviewArtifact', () => {
       files: [{ ...request.files[0], beforeText, afterText }],
     });
     expect(() => skillDetailSchema.parse(detail)).not.toThrow();
-    // The payload is held owner-scoped under its own verified hash.
+    // The payload is held owner-scoped under its own artifact-id-keyed slot.
     expect(
-      await env.blobStore.get(seed.user.userId, request.artifactPayloadHash),
+      await env.blobStore.getReviewPayload(
+        seed.user.userId,
+        result.reviewArtifactId,
+      ),
     ).toEqual(payload);
   });
 
@@ -1029,11 +1032,16 @@ describe('uploadSkillReviewArtifact', () => {
     expect(detail.reviewArtifact?.candidateRevision).toBe('c'.repeat(40));
     expect(detail.reviewArtifact?.files[0]?.afterText).toBe(b.afterText);
     expect(detail.reviewArtifactId).toBe(second.reviewArtifactId);
-    // V0 skips physical deletion of the superseded blob: it is never overwritten or
-    // truncated (content-addressed storage may be shared), merely unreferenced.
+    // Safe supersession cleanup: the OLD artifact's payload is gone (it's been superseded
+    // and is no longer referenced by anything), while the NEW one remains fully retrievable
+    // under its own artifact-id-keyed slot — never a shared/content-hash key, so cleanup of
+    // one can never touch the other.
     expect(
-      await env.blobStore.get(seed.user.userId, a.request.artifactPayloadHash),
-    ).toEqual(a.payload);
+      await env.blobStore.getReviewPayload(seed.user.userId, first.reviewArtifactId),
+    ).toBeNull();
+    expect(
+      await env.blobStore.getReviewPayload(seed.user.userId, second.reviewArtifactId),
+    ).toEqual(b.payload);
   });
 
   it('re-uploading the exact same artifact is idempotent: no error, no double-create', async () => {
@@ -1045,8 +1053,14 @@ describe('uploadSkillReviewArtifact', () => {
       candidateRevision: 'b'.repeat(40),
       candidateContentHash: h('b'),
     });
-    await env.service.uploadSkillReviewArtifact(seed.user, a.request, a.payload);
-    // Re-upload the identical request + payload a second (and third) time.
+    const first = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      a.request,
+      a.payload,
+    );
+    // Re-upload the identical request + payload a second (and third) time. Each call still
+    // mints its own fresh reviewArtifactId server-side, so each "duplicate" is its own
+    // supersession event even though the request/payload bytes are byte-identical.
     const second = await env.service.uploadSkillReviewArtifact(
       seed.user,
       a.request,
@@ -1059,14 +1073,22 @@ describe('uploadSkillReviewArtifact', () => {
     );
     expect(second.reviewArtifactId).toBeDefined();
     expect(third.reviewArtifactId).toBeDefined();
+    expect(new Set([first.reviewArtifactId, second.reviewArtifactId, third.reviewArtifactId]).size).toBe(3);
     // Still exactly ONE current artifact (latest-only) — no double-create.
     const detail = await env.service.getSkillDetail(seed.user, seed.skillId);
     expect(detail.reviewArtifact?.reviewArtifactId).toBe(third.reviewArtifactId);
     expect(detail.reviewArtifact?.candidateRevision).toBe('b'.repeat(40));
     expect(detail.reviewArtifact?.files[0]?.afterText).toBe(a.afterText);
-    // The identical payload bytes are still retrievable under their one content-addressed key.
+    // Only the LATEST (third) artifact's payload remains — each successive re-upload safely
+    // cleaned up the one before it, and nothing was left orphaned mid-chain.
     expect(
-      await env.blobStore.get(seed.user.userId, a.request.artifactPayloadHash),
+      await env.blobStore.getReviewPayload(seed.user.userId, first.reviewArtifactId),
+    ).toBeNull();
+    expect(
+      await env.blobStore.getReviewPayload(seed.user.userId, second.reviewArtifactId),
+    ).toBeNull();
+    expect(
+      await env.blobStore.getReviewPayload(seed.user.userId, third.reviewArtifactId),
     ).toEqual(a.payload);
     // Approving by the LATEST id (not stale `first`/`second` ids) still succeeds.
     const approval = await env.service.approveSkillVersion(seed.user, {

@@ -61,6 +61,9 @@ export type SkillDetailView =
       candidateRevision?: string;
       reviewArtifactId?: string;
       sourceCheckNote?: string;
+      // Present only when a real update was found but Cloud holds no reviewable artifact for
+      // it — a REVIEW CAPABILITY fact, distinct from statusText's SOURCE fact.
+      reviewNote?: string;
       sourceLabel: string;
       trackedRef?: string;
       approvedVersionShort: string;
@@ -88,6 +91,15 @@ const sourceCheckNote = (state: SkillDetail['sourceCheckState']): string | undef
       return undefined;
   }
 };
+
+/** Shared with skills-data.ts's reviewNote — secondary, non-badge explanation for a found
+ *  update that Cloud holds no reviewable artifact for. */
+const reviewNote = (
+  reason: SkillDetail['reviewUnavailableReason'],
+): string | undefined =>
+  reason === 'exceeds-review-bounds'
+    ? 'This update is too large to review in STAK Cloud.'
+    : undefined;
 
 const capabilityList = (
   capability: SkillDetail['capability'],
@@ -186,6 +198,9 @@ export const loadSkillDetail = async (
     ...(sourceCheckNote(skill.sourceCheckState)
       ? { sourceCheckNote: sourceCheckNote(skill.sourceCheckState) }
       : {}),
+    ...(reviewNote(skill.reviewUnavailableReason)
+      ? { reviewNote: reviewNote(skill.reviewUnavailableReason) }
+      : {}),
     sourceLabel: skill.source.label ?? (skill.source.kind === 'local' ? 'Local' : skill.source.kind),
     ...(skill.source.trackedRef ? { trackedRef: skill.source.trackedRef } : {}),
     approvedVersionShort: shortHash(skill.approvedVersion),
@@ -213,10 +228,11 @@ export const loadSkillDetail = async (
           })),
         }
       : null,
-    // Bounds-exceeded: sourceCheckState says an update exists but no artifact was ever
-    // produced (contract §5a). Distinct from "no update"/"not checked" — Approve must stay
+    // Bounds-exceeded: an EXPLICIT review-capability fact from Cloud (contract §5a), not an
+    // inference from artifact absence — a source check can be mid-flight/stale in ways that
+    // also leave reviewArtifact null without meaning "exceeds bounds". Approve must stay
     // disabled rather than silently unavailable.
-    exceedsReviewBounds: skill.sourceCheckState === 'update-available' && !skill.reviewArtifact,
+    exceedsReviewBounds: skill.reviewUnavailableReason === 'exceeds-review-bounds',
     paused: skill.paused,
   };
 };

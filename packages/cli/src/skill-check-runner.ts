@@ -29,12 +29,9 @@ export type SkillCheckReporter = Pick<
   'reportSkillSourceCheck' | 'uploadSkillReviewArtifact'
 >;
 
-export type SkillCheckCannotCheckReason =
-  | 'local'
-  | 'dirty'
-  | 'ambiguous'
-  | 'unreachable'
-  | 'pinned';
+// Reserved for intrinsic, zero-network-I/O facts about the Skill's own restoration record.
+// A failed NETWORK operation (unreachable/DNS/timeout/auth) is `check-failed`, never this.
+export type SkillCheckCannotCheckReason = 'local' | 'dirty' | 'ambiguous' | 'pinned';
 
 export type SkillCheckEntryResult = {
   entryId: string;
@@ -54,14 +51,14 @@ export type SkillCheckEntryResult = {
 export type SkillCheckResult = { checked: SkillCheckEntryResult[] };
 
 /** Never the raw Git stderr (which may embed a credential-bearing URL) — always this fixed
- *  phrase, whether the ref-resolution step or the exact-revision materialization step fails. */
+ *  phrase, whether the ref-resolution step or the exact-revision materialization step fails.
+ *  This is a TRANSIENT network-operation failure — always `check-failed`, never `cannot-check`
+ *  (which is reserved for intrinsic, zero-network-I/O facts: local/dirty/ambiguous/pinned). */
 const UNREACHABLE_REASON = 'Could not reach the source remote.';
-/** This is a deliberate, documented wire-shape decision (see Task 8's report): the V0
- *  `reportSkillSourceCheckRequestSchema` has no `update-available`-without-artifact variant, so
- *  an update that exceeds the V0 review bounds is reported through `check-failed` with this
- *  specific, distinguishable reason rather than silently becoming a generic failure. */
-const EXCEEDS_BOUNDS_REASON =
-  "Update exceeds STAK's V0 review limits and can't be reviewed here.";
+// A real, successfully-resolved update that Cloud cannot hold a reviewable artifact for
+// (exceeds V0 bounds) is reported as `sourceCheckState: 'update-available'` WITH
+// `reviewUnavailableReason: 'exceeds-review-bounds'` below — the source-resolution SUCCEEDED;
+// only the review *capability* is unavailable. Never collapsed into `check-failed`.
 
 /** Serialize ONLY the before/after text content of non-binary changed files into one canonical
  *  JSON payload — never the metadata sent to `uploadSkillReviewArtifact`, which must never carry
@@ -132,6 +129,24 @@ export const runSkillCheck = async (options: {
     }
 
     if (latest.status === 'uncheckable') {
+      // 'unreachable' means a NETWORK operation (ls-remote) didn't succeed — a transient
+      // condition, never a permanent structural judgment. The other 4 reasons are intrinsic
+      // facts about the Skill's own restoration record, computable with zero network I/O.
+      if (latest.reason === 'unreachable') {
+        await options.reporter.reportSkillSourceCheck(entryId, {
+          approvedContentHash: locked.contentHash,
+          sourceCheckState: 'check-failed',
+          checkedAt,
+          failureReason: UNREACHABLE_REASON,
+        });
+        checked.push({
+          entryId,
+          name,
+          outcome: 'check-failed',
+          checkFailedReason: UNREACHABLE_REASON,
+        });
+        continue;
+      }
       await options.reporter.reportSkillSourceCheck(entryId, {
         approvedContentHash: locked.contentHash,
         sourceCheckState: 'cannot-check',
@@ -194,9 +209,10 @@ export const runSkillCheck = async (options: {
       if (built.status === 'exceeds-bounds') {
         await options.reporter.reportSkillSourceCheck(entryId, {
           approvedContentHash: locked.contentHash,
-          sourceCheckState: 'check-failed',
+          sourceCheckState: 'update-available',
           checkedAt,
-          failureReason: EXCEEDS_BOUNDS_REASON,
+          candidateRevision: latest.sourceRevision,
+          reviewUnavailableReason: 'exceeds-review-bounds',
         });
         checked.push({
           entryId,

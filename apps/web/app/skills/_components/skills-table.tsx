@@ -88,6 +88,7 @@ export function SkillsTable({ rows }: { rows: SkillRow[] }) {
             <span className="stak-status" style={{ color: '#c9c5bc' }}>
               <span className="stak-dot" style={{ background: DOT[r.dot] }} aria-hidden />
               {r.statusText}
+              {r.reviewNote ? <span className="note"> · {r.reviewNote}</span> : null}
             </span>
           </Link>
         ))

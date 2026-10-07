@@ -107,6 +107,23 @@ describe('deriveRow', () => {
     expect(row.statusText).toBe('Ready');
     expect(row.sourceCheckNote).toBe("Can't check for updates from this source.");
   });
+  it('keeps the Update available badge and adds a secondary note when the review is oversized', () => {
+    const row = deriveRow(
+      skill({
+        sourceCheckState: 'update-available',
+        candidateRevision: 'rev123',
+        reviewUnavailableReason: 'exceeds-review-bounds',
+      }),
+      A1,
+      true,
+    );
+    expect(row.primaryStatus).toBe('update-available');
+    expect(row.statusText).toBe('Update available');
+    expect(row.dot).toBe('attention');
+    expect(row.reviewNote).toBe(
+      'This update is too large to review in STAK Cloud.',
+    );
+  });
   it('shows a not-checked note without blocking Ready', () => {
     const row = deriveRow(skill({ sourceCheckState: 'not-checked' }), A1, true);
     expect(row.statusText).toBe('Ready');

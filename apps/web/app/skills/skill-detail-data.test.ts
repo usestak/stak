@@ -137,6 +137,7 @@ describe('loadSkillDetail', () => {
         detail({
           sourceCheckState: 'update-available',
           candidateRevision: 'rev123',
+          reviewUnavailableReason: 'exceeds-review-bounds',
           reviewArtifact: null,
         }),
       ),
@@ -146,6 +147,9 @@ describe('loadSkillDetail', () => {
     );
     if (view.kind !== 'ready') throw new Error('expected ready');
     expect(view.exceedsReviewBounds).toBe(true);
+    expect(view.reviewNote).toBe(
+      'This update is too large to review in STAK Cloud.',
+    );
     expect(view.reviewArtifact).toBeNull();
     expect(view.reviewArtifactId).toBeUndefined();
     expect(view.statusText).toBe('Update available');

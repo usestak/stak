@@ -213,6 +213,43 @@ describe('runSkillCheck', () => {
     expect(reporter.uploadCalls).toHaveLength(0);
   });
 
+  it('reports an unreachable remote as check-failed, never cannot-check', async () => {
+    // A nonexistent remote path makes gitLsRemoteRef itself fail — resolveSkillSourceLatest
+    // returns { status: 'uncheckable', reason: 'unreachable' } at the REF-RESOLUTION step,
+    // distinct from the materialization-failure path the test above exercises. 'unreachable'
+    // is a transient NETWORK fact, never a structural cannot-check judgment (contract §5a).
+    const nonexistentRemote = path.join(workRoot, 'no-such-remote-' + Date.now());
+    const lock = makeLock({
+      skill_jjjjjjjj: lockedSkill(
+        'Unreachable Skill',
+        reference('0'.repeat(40), { remote: nonexistentRemote, ref: 'refs/heads/main' }),
+      ),
+    });
+    const reporter = fakeReporter();
+    const result = await runSkillCheck({ lock, workRoot, reporter });
+
+    expect(result.checked).toEqual([
+      {
+        entryId: 'skill_jjjjjjjj',
+        name: 'Unreachable Skill',
+        outcome: 'check-failed',
+        checkFailedReason: 'Could not reach the source remote.',
+      },
+    ]);
+    expect(reporter.reportCalls).toEqual([
+      {
+        skillId: 'skill_jjjjjjjj',
+        body: expect.objectContaining({
+          sourceCheckState: 'check-failed',
+          failureReason: 'Could not reach the source remote.',
+        }),
+      },
+    ]);
+    // Never the structural cannot-check judgment.
+    expect(result.checked[0]).not.toHaveProperty('cannotCheckReason');
+    expect(reporter.uploadCalls).toHaveLength(0);
+  });
+
   it('reports check-failed, with a sanitized reason, when materializing the source fails', async () => {
     // The approved revision is bogus — it was never committed to this repo — so the ref
     // resolution reports 'different' against the real HEAD, but materializing the approved
@@ -271,8 +308,12 @@ describe('runSkillCheck', () => {
     ]);
     expect(reporter.uploadCalls).toHaveLength(0);
     expect(reporter.reportCalls).toHaveLength(1);
+    // The source check SUCCEEDED and found a real update — this is a REVIEW CAPABILITY
+    // fact (Cloud can't hold an artifact this big), never a check failure.
     expect(reporter.reportCalls[0]?.body).toMatchObject({
-      sourceCheckState: 'check-failed',
+      sourceCheckState: 'update-available',
+      candidateRevision,
+      reviewUnavailableReason: 'exceeds-review-bounds',
     });
   });
 

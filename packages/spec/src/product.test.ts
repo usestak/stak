@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   approveSkillVersionRequestSchema,
+  cannotCheckReasonSchema,
+  reportSkillSourceCheckRequestSchema,
   reviewArtifactFileSchema,
+  skillDetailSchema,
   skillReviewArtifactSchema,
   skillSummarySchema,
   sourceCheckStateSchema,
@@ -212,6 +215,165 @@ describe('skillSummarySchema', () => {
       reviewArtifactId: '00000000-0000-4000-8000-000000000001',
       checkFailedReason: 'network timeout',
       installs: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  const baseSummary = {
+    skillId: 'skill_test0001',
+    name: 'test',
+    approvedVersion: HASH,
+    paused: false,
+    source: { kind: 'git', checkable: true },
+    capability: { declared: false },
+    checkedAt: new Date().toISOString(),
+    installs: [],
+  };
+
+  it("accepts an 'update-available' summary with reviewUnavailableReason and no reviewArtifactId", () => {
+    const parsed = skillSummarySchema.parse({
+      ...baseSummary,
+      sourceCheckState: 'update-available',
+      candidateRevision: 'abc123',
+      reviewUnavailableReason: 'exceeds-review-bounds',
+    });
+    expect(parsed.reviewUnavailableReason).toBe('exceeds-review-bounds');
+    expect(parsed.reviewArtifactId).toBeUndefined();
+  });
+
+  it("rejects reviewUnavailableReason on any state other than 'update-available'", () => {
+    for (const sourceCheckState of ['no-update', 'not-checked', 'cannot-check', 'check-failed']) {
+      const result = skillSummarySchema.safeParse({
+        ...baseSummary,
+        sourceCheckState,
+        reviewUnavailableReason: 'exceeds-review-bounds',
+      });
+      expect(result.success, sourceCheckState).toBe(false);
+    }
+  });
+
+  it('rejects reviewUnavailableReason together with reviewArtifactId', () => {
+    const result = skillSummarySchema.safeParse({
+      ...baseSummary,
+      sourceCheckState: 'update-available',
+      candidateRevision: 'abc123',
+      reviewArtifactId: '00000000-0000-4000-8000-000000000001',
+      reviewUnavailableReason: 'exceeds-review-bounds',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('skillDetailSchema inherits the reviewUnavailableReason/reviewArtifactId exclusion', () => {
+    const result = skillDetailSchema.safeParse({
+      ...baseSummary,
+      sourceCheckState: 'update-available',
+      candidateRevision: 'abc123',
+      reviewArtifactId: '00000000-0000-4000-8000-000000000001',
+      reviewUnavailableReason: 'exceeds-review-bounds',
+      history: [],
+      reviewArtifact: null,
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('cannotCheckReasonSchema', () => {
+  it('accepts exactly the four intrinsic, no-network reasons', () => {
+    for (const r of ['local', 'dirty', 'ambiguous', 'pinned'])
+      expect(cannotCheckReasonSchema.parse(r)).toBe(r);
+  });
+  it("rejects 'unreachable' (a transient network failure is check-failed, not cannot-check)", () => {
+    expect(cannotCheckReasonSchema.safeParse('unreachable').success).toBe(false);
+  });
+});
+
+describe('reportSkillSourceCheckRequestSchema', () => {
+  const base = {
+    skillId: 'skill_test0001',
+    approvedContentHash: HASH,
+    checkedAt: new Date().toISOString(),
+  };
+
+  it("accepts 'update-available' with candidateRevision and reviewUnavailableReason", () => {
+    const parsed = reportSkillSourceCheckRequestSchema.parse({
+      ...base,
+      sourceCheckState: 'update-available',
+      candidateRevision: 'abc123',
+      reviewUnavailableReason: 'exceeds-review-bounds',
+    });
+    expect(parsed.sourceCheckState).toBe('update-available');
+  });
+
+  it("rejects 'update-available' missing candidateRevision", () => {
+    const result = reportSkillSourceCheckRequestSchema.safeParse({
+      ...base,
+      sourceCheckState: 'update-available',
+      reviewUnavailableReason: 'exceeds-review-bounds',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects 'update-available' missing reviewUnavailableReason", () => {
+    const result = reportSkillSourceCheckRequestSchema.safeParse({
+      ...base,
+      sourceCheckState: 'update-available',
+      candidateRevision: 'abc123',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects 'no-update' carrying any state-specific field", () => {
+    for (const extra of [
+      { candidateRevision: 'abc123' },
+      { reviewUnavailableReason: 'exceeds-review-bounds' },
+      { cannotCheckReason: 'local' },
+      { failureReason: 'x' },
+    ]) {
+      const result = reportSkillSourceCheckRequestSchema.safeParse({
+        ...base,
+        sourceCheckState: 'no-update',
+        ...extra,
+      });
+      expect(result.success, JSON.stringify(extra)).toBe(false);
+    }
+  });
+
+  it("rejects reviewUnavailableReason on 'check-failed'", () => {
+    const result = reportSkillSourceCheckRequestSchema.safeParse({
+      ...base,
+      sourceCheckState: 'check-failed',
+      failureReason: 'x',
+      reviewUnavailableReason: 'exceeds-review-bounds',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("still accepts 'cannot-check' with a reason and 'check-failed' with/without a failureReason", () => {
+    expect(
+      reportSkillSourceCheckRequestSchema.safeParse({
+        ...base,
+        sourceCheckState: 'cannot-check',
+        cannotCheckReason: 'pinned',
+      }).success,
+    ).toBe(true);
+    expect(
+      reportSkillSourceCheckRequestSchema.safeParse({
+        ...base,
+        sourceCheckState: 'check-failed',
+        failureReason: 'Could not reach the source remote.',
+      }).success,
+    ).toBe(true);
+    expect(
+      reportSkillSourceCheckRequestSchema.safeParse({ ...base, sourceCheckState: 'check-failed' })
+        .success,
+    ).toBe(true);
+  });
+
+  it("rejects cannotCheckReason 'unreachable'", () => {
+    const result = reportSkillSourceCheckRequestSchema.safeParse({
+      ...base,
+      sourceCheckState: 'cannot-check',
+      cannotCheckReason: 'unreachable',
     });
     expect(result.success).toBe(false);
   });

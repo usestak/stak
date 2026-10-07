@@ -14,21 +14,32 @@ const timestamp = z.iso.datetime({ offset: true });
 
 /* ------------------------------- Skills ------------------------------- */
 
-/** Structural inability to check vs. a transient failure vs. simply not yet checked (P5a §5a). */
+/**
+ * Structural inability to check (P5a §5a). Reserved for EXACTLY the intrinsic properties of a
+ * Skill's own restoration record that are computable with zero network I/O. A network operation
+ * that did not succeed (DNS, timeout, host down, auth required/denied, transient public-stack
+ * failure) is NEVER a cannot-check reason — it is `check-failed`.
+ */
 export const cannotCheckReasonSchema = z.enum([
   'local',
   'dirty',
   'ambiguous',
-  'unreachable',
   'pinned',
 ]);
+
+/**
+ * Why Cloud holds no reviewable artifact for a real, found update (P5a §5a). This is a REVIEW
+ * CAPABILITY fact, separate from the SOURCE fact (`sourceCheckState: 'update-available'`).
+ */
+export const reviewUnavailableReasonSchema = z.enum(['exceeds-review-bounds']);
 
 /**
  * The latest CLI-reported source-check result for one Skill (P5a §5a). `not-checked` and
  * `cannot-check` are DISTINCT: the former means a checkable source simply has no current
  * CLI-reported result; the latter means the source is structurally uncheckable (Local,
- * dirty/ambiguous, pinned, resolution failure). `check-failed` is a transient network/auth
- * failure during an explicit check — never collapsed into `cannot-check`.
+ * dirty, ambiguous, pinned — computable without network access). `check-failed` is any
+ * network/auth operation that did not succeed during an explicit check — never collapsed
+ * into `cannot-check`.
  */
 export const sourceCheckStateSchema = z.enum([
   'no-update',
@@ -178,18 +189,81 @@ export type UploadSkillReviewArtifactRequest = z.infer<
 >;
 export type UploadSkillReviewArtifactResponse = { reviewArtifactId: string };
 
-/** CLI → Cloud report for a no-artifact result: no-update, cannot-check, or check-failed. */
+/**
+ * CLI → Cloud report for a NO-ARTIFACT result: no-update, cannot-check, check-failed, or an
+ * update-available result for which no reviewable artifact can be produced (e.g. it exceeds
+ * the V0 review bounds). An update-available result WITH an artifact goes through
+ * `uploadSkillReviewArtifactRequestSchema` instead, so on this path `update-available` always
+ * requires BOTH `candidateRevision` and `reviewUnavailableReason`.
+ */
 export const reportSkillSourceCheckRequestSchema = z
   .object({
     skillId: entryIdSchema,
     approvedContentHash: contentHashSchema,
-    sourceCheckState: z.enum(['no-update', 'cannot-check', 'check-failed']),
+    sourceCheckState: z.enum([
+      'no-update',
+      'update-available',
+      'cannot-check',
+      'check-failed',
+    ]),
     checkedAt: timestamp,
+    candidateRevision: z.string().min(1).optional(),
+    reviewUnavailableReason: reviewUnavailableReasonSchema.optional(),
     cannotCheckReason: cannotCheckReasonSchema.optional(),
     // Sanitized only — never raw Git stderr, which may contain credentials/URLs.
     failureReason: z.string().max(500).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((request, ctx) => {
+    const state = request.sourceCheckState;
+    if (state === 'update-available') {
+      if (request.candidateRevision === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message: "An 'update-available' report requires candidateRevision.",
+          path: ['candidateRevision'],
+        });
+      }
+      if (request.reviewUnavailableReason === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            "An 'update-available' report requires reviewUnavailableReason (an update with a reviewable artifact is uploaded via uploadSkillReviewArtifact instead).",
+          path: ['reviewUnavailableReason'],
+        });
+      }
+    } else {
+      if (request.candidateRevision !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message: "candidateRevision is only valid when sourceCheckState is 'update-available'.",
+          path: ['candidateRevision'],
+        });
+      }
+      if (request.reviewUnavailableReason !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            "reviewUnavailableReason is only valid when sourceCheckState is 'update-available'.",
+          path: ['reviewUnavailableReason'],
+        });
+      }
+    }
+    if (state !== 'cannot-check' && request.cannotCheckReason !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: "cannotCheckReason is only valid when sourceCheckState is 'cannot-check'.",
+        path: ['cannotCheckReason'],
+      });
+    }
+    if (state !== 'check-failed' && request.failureReason !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: "failureReason is only valid when sourceCheckState is 'check-failed'.",
+        path: ['failureReason'],
+      });
+    }
+  });
 export type ReportSkillSourceCheckRequest = z.infer<
   typeof reportSkillSourceCheckRequestSchema
 >;
@@ -208,6 +282,9 @@ export const skillSummarySchema = z
     // Present only when sourceCheckState === 'update-available'.
     candidateRevision: z.string().optional(),
     reviewArtifactId: z.uuid().optional(),
+    // Present only when sourceCheckState === 'update-available' AND Cloud holds no reviewable
+    // artifact for it (mutually exclusive with reviewArtifactId).
+    reviewUnavailableReason: reviewUnavailableReasonSchema.optional(),
     // Present only when sourceCheckState === 'cannot-check'.
     cannotCheckReason: cannotCheckReasonSchema.optional(),
     // Present only when sourceCheckState === 'check-failed'.
@@ -230,6 +307,21 @@ export const skillSummarySchema = z
           path: ['reviewArtifactId'],
         });
       }
+      if (summary.reviewUnavailableReason !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            "reviewUnavailableReason is only valid when sourceCheckState is 'update-available'.",
+          path: ['reviewUnavailableReason'],
+        });
+      }
+    }
+    if (summary.reviewUnavailableReason !== undefined && summary.reviewArtifactId !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'reviewUnavailableReason and reviewArtifactId are mutually exclusive.',
+        path: ['reviewUnavailableReason'],
+      });
     }
     if (summary.sourceCheckState !== 'cannot-check' && summary.cannotCheckReason !== undefined) {
       ctx.addIssue({
@@ -460,6 +552,7 @@ export const setSkillPausedRequestSchema = z
 /* -------------------------------- Types -------------------------------- */
 
 export type CannotCheckReason = z.infer<typeof cannotCheckReasonSchema>;
+export type ReviewUnavailableReason = z.infer<typeof reviewUnavailableReasonSchema>;
 export type SourceCheckState = z.infer<typeof sourceCheckStateSchema>;
 export type SkillSourceSummary = z.infer<typeof skillSourceSummarySchema>;
 export type CapabilityState = z.infer<typeof capabilityStateSchema>;

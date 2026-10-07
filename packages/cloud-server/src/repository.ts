@@ -118,10 +118,17 @@ export type SkillReviewCheckRecord = {
   approvedContentHash: string;
   sourceCheckState: 'no-update' | 'update-available' | 'cannot-check' | 'check-failed';
   checkedAt: string;
-  cannotCheckReason?: 'local' | 'dirty' | 'ambiguous' | 'unreachable' | 'pinned';
+  // Reserved for intrinsic, zero-network-I/O facts about the Skill's own restoration record.
+  // A failed NETWORK operation (DNS/timeout/host-down/auth) is `check-failed`, never this.
+  cannotCheckReason?: 'local' | 'dirty' | 'ambiguous' | 'pinned';
   checkFailedReason?: string;
   candidateRevision?: string;
   candidateContentHash?: string;
+  // A real update was found but Cloud holds no reviewable artifact for it (e.g. it exceeds
+  // V0 review bounds) — a REVIEW CAPABILITY fact, distinct from the SOURCE fact above. Only
+  // valid alongside sourceCheckState 'update-available', and mutually exclusive with
+  // reviewArtifactId (never both at once).
+  reviewUnavailableReason?: 'exceeds-review-bounds';
   reviewArtifactId?: string;
   artifactPayloadHash?: string;
   diffFiles?: ReviewArtifactFileRecord[];
@@ -387,4 +394,23 @@ export interface CloudBlobStore {
   put(userId: string, contentHash: string, bytes: Uint8Array): Promise<void>;
   get(userId: string, contentHash: string): Promise<Uint8Array | null>;
   has(userId: string, contentHash: string): Promise<boolean>;
+  /**
+   * Review-artifact payload storage, keyed by the artifact's own id — deliberately NOT the
+   * same content-hash-keyed namespace `put`/`get` use for Memory snapshots. A freshly-minted
+   * reviewArtifactId is globally unique, so this key can never collide with a snapshot or
+   * with another artifact, which makes deletion on supersession unambiguous by construction.
+   * Cloud still verifies the bytes against `artifactPayloadHash` at upload/read time — this
+   * key is for storage addressing only, never for integrity.
+   */
+  putReviewPayload(
+    userId: string,
+    reviewArtifactId: string,
+    bytes: Uint8Array,
+  ): Promise<void>;
+  getReviewPayload(
+    userId: string,
+    reviewArtifactId: string,
+  ): Promise<Uint8Array | null>;
+  /** Idempotent: deleting an already-deleted/never-existed artifact id never throws. */
+  deleteReviewPayload(userId: string, reviewArtifactId: string): Promise<void>;
 }

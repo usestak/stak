@@ -123,6 +123,9 @@ const mapSkillReviewCheck = (row: any): SkillReviewCheckRecord => ({
   checkedAt: row.checked_at,
   ...(row.cannot_check_reason ? { cannotCheckReason: row.cannot_check_reason } : {}),
   ...(row.check_failed_reason ? { checkFailedReason: row.check_failed_reason } : {}),
+  ...(row.review_unavailable_reason
+    ? { reviewUnavailableReason: row.review_unavailable_reason }
+    : {}),
   ...(row.candidate_revision ? { candidateRevision: row.candidate_revision } : {}),
   ...(row.candidate_content_hash ? { candidateContentHash: row.candidate_content_hash } : {}),
   ...(row.review_artifact_id ? { reviewArtifactId: row.review_artifact_id } : {}),
@@ -321,6 +324,7 @@ export const supabaseRepository = (): CloudRepository &
         checked_at: record.checkedAt,
         cannot_check_reason: record.cannotCheckReason ?? null,
         check_failed_reason: record.checkFailedReason ?? null,
+        review_unavailable_reason: record.reviewUnavailableReason ?? null,
         candidate_revision: record.candidateRevision ?? null,
         candidate_content_hash: record.candidateContentHash ?? null,
         review_artifact_id: record.reviewArtifactId ?? null,

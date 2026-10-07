@@ -278,9 +278,13 @@ export const createProductMethods = (config: ProductServiceConfig) => {
               ...(check.candidateRevision
                 ? { candidateRevision: check.candidateRevision }
                 : {}),
+              // Mutually exclusive by construction (schema-enforced): a real update is either
+              // reviewable (reviewArtifactId) or not (reviewUnavailableReason), never both.
               ...(check.reviewArtifactId
                 ? { reviewArtifactId: check.reviewArtifactId }
-                : {}),
+                : check.reviewUnavailableReason
+                  ? { reviewUnavailableReason: check.reviewUnavailableReason }
+                  : {}),
             }
           : {}),
         ...(check?.sourceCheckState === 'cannot-check' &&
@@ -336,9 +340,9 @@ export const createProductMethods = (config: ProductServiceConfig) => {
     )
       return null;
     const diffFiles = stored.diffFiles ?? [];
-    const bytes = await config.blobStore.get(
+    const bytes = await config.blobStore.getReviewPayload(
       userId,
-      stored.artifactPayloadHash,
+      stored.reviewArtifactId,
     );
     const textByPath =
       bytes && sha256Of(bytes) === stored.artifactPayloadHash
@@ -464,13 +468,19 @@ export const createProductMethods = (config: ProductServiceConfig) => {
           'A candidate identical to the approved version is not an update.',
         );
       const reviewArtifactId = config.newId();
-      // Safe replacement order (P5a §5a): the new payload is stored first under its own
-      // content-addressed key (never touching the old one), then the new metadata row
-      // replaces the old one in a single write. If either step fails, the previous artifact
-      // is still fully intact and remains the current one.
-      await config.blobStore.put(
+      // Capture whatever artifact is current BEFORE we overwrite it, so it can be safely
+      // cleaned up only AFTER the new one is fully committed (never before).
+      const previous = await config.repository.getSkillReviewCheck(
         user.userId,
-        request.artifactPayloadHash,
+        request.skillId,
+      );
+      // Safe replacement order (P5a §5a): the new payload is stored first, under its OWN
+      // artifact-id-keyed slot (never the prior artifact's key — collision-proof by
+      // construction), then the new metadata row replaces the old one in a single write. If
+      // either step fails, the previous artifact is still fully intact and remains current.
+      await config.blobStore.putReviewPayload(
+        user.userId,
+        reviewArtifactId,
         payloadBytes,
       );
       await config.repository.putSkillReviewCheck({
@@ -485,10 +495,14 @@ export const createProductMethods = (config: ProductServiceConfig) => {
         artifactPayloadHash: request.artifactPayloadHash,
         diffFiles,
       });
-      // The superseded payload blob is deliberately NOT physically deleted in V0: blobs are
-      // owner-scoped and content-addressed (identical bytes share one key, so deleting or
-      // overwriting by hash could destroy data something else references), and once the
-      // metadata row above no longer names it, no read path ever serves it.
+      // Only now that the new artifact is safely current do we clean up the one it replaced.
+      // Best-effort: a cleanup failure leaves a harmless orphan (owner-scoped, unreferenced,
+      // artifact-id-keyed — never confusable with anything else) and must never undo or fail
+      // an otherwise-successful upload.
+      if (previous?.reviewArtifactId)
+        await config.blobStore
+          .deleteReviewPayload(user.userId, previous.reviewArtifactId)
+          .catch(() => undefined);
       return { reviewArtifactId };
     },
 
@@ -511,11 +525,32 @@ export const createProductMethods = (config: ProductServiceConfig) => {
         throw invalidRequest(
           'failureReason is only valid for a check-failed result.',
         );
+      if (
+        request.reviewUnavailableReason !== undefined &&
+        request.sourceCheckState !== 'update-available'
+      )
+        throw invalidRequest(
+          'reviewUnavailableReason is only valid for an update-available result.',
+        );
+      if (
+        request.sourceCheckState === 'update-available' &&
+        request.reviewUnavailableReason === undefined
+      )
+        throw invalidRequest(
+          "An 'update-available' report requires reviewUnavailableReason (an update with a reviewable artifact is uploaded via uploadSkillReviewArtifact instead).",
+        );
       const skill = await requireSkill(user.userId, request.skillId);
       if (request.approvedContentHash !== skill.contentHash)
         throw remoteConflict(
           'The approved version changed since this check ran. Check again.',
         );
+      // Capture whatever artifact is current BEFORE we overwrite it (this result — including
+      // a reviewable-update's absence of one — supersedes it just as much as a new upload
+      // would), so it can be cleaned up only AFTER the new result is fully committed.
+      const previous = await config.repository.getSkillReviewCheck(
+        user.userId,
+        request.skillId,
+      );
       // Latest-only: this replaces any prior result for the Skill, including a previous
       // update-available artifact, which therefore stops being approvable.
       await config.repository.putSkillReviewCheck({
@@ -530,7 +565,21 @@ export const createProductMethods = (config: ProductServiceConfig) => {
         ...(request.failureReason
           ? { checkFailedReason: request.failureReason }
           : {}),
+        ...(request.sourceCheckState === 'update-available'
+          ? {
+              ...(request.candidateRevision
+                ? { candidateRevision: request.candidateRevision }
+                : {}),
+              ...(request.reviewUnavailableReason
+                ? { reviewUnavailableReason: request.reviewUnavailableReason }
+                : {}),
+            }
+          : {}),
       });
+      if (previous?.reviewArtifactId)
+        await config.blobStore
+          .deleteReviewPayload(user.userId, previous.reviewArtifactId)
+          .catch(() => undefined);
       return { ok: true };
     },
 
@@ -602,6 +651,12 @@ export const createProductMethods = (config: ProductServiceConfig) => {
         user.userId,
         request.skillId,
       );
+      // Best-effort payload cleanup: the DB row above is what makes the artifact unapprovable
+      // going forward — a failure here leaves a harmless, already-unreferenced orphan, never
+      // a correctness or security issue, and must never fail an otherwise-successful approval.
+      await config.blobStore
+        .deleteReviewPayload(user.userId, request.reviewArtifactId)
+        .catch(() => undefined);
       return {
         skillId: request.skillId,
         approvedVersion: candidateContentHash,

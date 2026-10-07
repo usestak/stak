@@ -27,12 +27,24 @@ export type SkillRow = {
   description?: string;
   sourceLabel: string;
   sourceCheckNote?: string;
+  // Present only when a real update was found but Cloud holds no reviewable artifact for it
+  // (a REVIEW CAPABILITY fact, distinct from the SOURCE fact `statusText === 'Update available'`
+  // already communicates). Never changes the primary status/badge.
+  reviewNote?: string;
   installedLabel: string;
   primaryStatus: 'ready' | 'update-available' | 'paused';
   pendingInstall: boolean;
   dot: 'ready' | 'attention' | 'neutral';
   statusText: string;
 };
+
+/** Secondary, non-badge explanation for why a found update has no reviewable artifact. */
+const reviewNote = (
+  reason: SkillSummary['reviewUnavailableReason'],
+): string | undefined =>
+  reason === 'exceeds-review-bounds'
+    ? 'This update is too large to review in STAK Cloud.'
+    : undefined;
 
 /** Maps a non-actionable sourceCheckState to the explanatory note shown alongside the source
  *  label (contract §2/§3). 'no-update' and 'update-available' need no note — the primary status
@@ -110,6 +122,9 @@ export const deriveRow = (
       skill.source.label ?? (skill.source.kind === 'local' ? 'Local' : skill.source.kind),
     ...(sourceCheckNote(skill.sourceCheckState)
       ? { sourceCheckNote: sourceCheckNote(skill.sourceCheckState) }
+      : {}),
+    ...(reviewNote(skill.reviewUnavailableReason)
+      ? { reviewNote: reviewNote(skill.reviewUnavailableReason) }
       : {}),
     installedLabel: install
       ? install.installedVersion
