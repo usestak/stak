@@ -27,6 +27,7 @@ import {
   type PublicStackRecord,
   type PublicStackRepository,
   type PublicStackVersionRecord,
+  type SkillReviewCheckRecord,
 } from './repository.js';
 
 const key = (userId: string, value: string) => `${userId} ${value}`;
@@ -50,10 +51,12 @@ export const createInMemoryRepository = (): CloudRepository &
   const handleOwners = new Map<string, string>();
   const publicStacks = new Map<string, PublicStackRecord>();
   const publicVersions = new Map<string, PublicStackVersionRecord>();
+  const skillReviewChecks = new Map<string, SkillReviewCheckRecord>();
 
   const envKey = (userId: string, name: string) => key(userId, name);
   const stackKey = (ownerUserId: string, slug: string) =>
     key(ownerUserId, slug);
+  const checkKey = (userId: string, skillId: string) => `${userId}:${skillId}`;
 
   return {
     snapshots,
@@ -365,6 +368,16 @@ export const createInMemoryRepository = (): CloudRepository &
       return [...publicStacks.values()]
         .filter((stack) => stack.ownerUserId === userId)
         .sort((a, b) => a.slug.localeCompare(b.slug));
+    },
+
+    /* ------------------------------ Phase P5a ------------------------------ */
+    getSkillReviewCheck: async (userId, skillId) =>
+      skillReviewChecks.get(checkKey(userId, skillId)) ?? null,
+    putSkillReviewCheck: async (record) => {
+      skillReviewChecks.set(checkKey(record.userId, record.skillId), record);
+    },
+    deleteSkillReviewCheck: async (userId, skillId) => {
+      skillReviewChecks.delete(checkKey(userId, skillId));
     },
   };
 };

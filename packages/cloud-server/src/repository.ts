@@ -104,6 +104,29 @@ export type MachineProjectPresenceRecord = {
   present: boolean;
 };
 
+export type ReviewArtifactFileRecord = {
+  relativePath: string;
+  kind: 'added' | 'modified' | 'removed';
+  binary: boolean;
+  before?: { byteSize: number; hash: string };
+  after?: { byteSize: number; hash: string };
+};
+
+export type SkillReviewCheckRecord = {
+  userId: string;
+  skillId: string;
+  approvedContentHash: string;
+  sourceCheckState: 'no-update' | 'update-available' | 'cannot-check' | 'check-failed';
+  checkedAt: string;
+  cannotCheckReason?: 'local' | 'dirty' | 'ambiguous' | 'unreachable' | 'pinned';
+  checkFailedReason?: string;
+  candidateRevision?: string;
+  candidateContentHash?: string;
+  reviewArtifactId?: string;
+  artifactPayloadHash?: string;
+  diffFiles?: ReviewArtifactFileRecord[];
+};
+
 /** Phase P1: the full check-in a machine reports. Carries no paths and no Memory content. */
 export type RecordCheckinInput = {
   userId: string;
@@ -241,6 +264,17 @@ export interface CloudRepository {
     lifecycle: 'active' | 'archived',
     now: string,
   ): Promise<CloudProjectRecord | null>;
+
+  /* ----------------------------- Phase P5a ----------------------------- */
+
+  /** Latest-only Skill source-check result (P5a §5a). Null when never checked. */
+  getSkillReviewCheck(
+    userId: string,
+    skillId: string,
+  ): Promise<SkillReviewCheckRecord | null>;
+  /** Upsert, replacing any existing row for this (userId, skillId) — latest-only. */
+  putSkillReviewCheck(record: SkillReviewCheckRecord): Promise<void>;
+  deleteSkillReviewCheck(userId: string, skillId: string): Promise<void>;
 }
 
 /** Thrown by {@link CloudRepository.commitEnvironmentVersion} on a stale base. */
