@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { AppSidebar } from '@/app/_components/app-sidebar';
 import { CommandDock } from '@/app/_components/command-dock';
 import { MachineChooser } from '@/app/_components/machine-chooser';
+import { ShellNotice } from '@/app/_components/shell-notice';
 import { getCloudService } from '@/lib/cloud-service';
 import { displayNameOf, getSessionUser } from '@/lib/session';
 
@@ -14,15 +15,6 @@ import {
 } from './overview-data';
 
 export const dynamic = 'force-dynamic';
-
-const PLACEHOLDER_COUNTS: SidebarCounts = {
-  overview: { n: '', tone: 'neutral' },
-  skills: '',
-  memory: { n: '', tone: 'neutral' },
-  projects: '',
-  machines: '',
-  stacks: '',
-};
 
 const DOT: Record<string, string> = {
   ready: '#84cb8e',
@@ -110,34 +102,6 @@ const MachineCard = ({ card }: { card: OverviewMachineCard }) => (
   </div>
 );
 
-function Notice({
-  handle,
-  title,
-  children,
-}: {
-  handle: string;
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="stak-frame">
-      <AppSidebar
-        active="overview"
-        handle={handle}
-        counts={PLACEHOLDER_COUNTS}
-        viewing={null}
-        machines={[]}
-      />
-      <main className="stak-main">
-        <div className="stak-notice">
-          <h1>{title}</h1>
-          {children}
-        </div>
-      </main>
-    </div>
-  );
-}
-
 export default async function OverviewPage({
   searchParams,
 }: {
@@ -151,27 +115,27 @@ export default async function OverviewPage({
 
   if (view.kind === 'error')
     return (
-      <Notice handle={handle} title="Couldn't load your Overview">
+      <ShellNotice active="overview" handle={handle} title="Couldn't load your Overview">
         <p>
           STAK Cloud didn&apos;t respond. This is a temporary problem, not a
           change to your data. Reload to try again.
         </p>
-      </Notice>
+      </ShellNotice>
     );
   if (view.kind === 'no-machines')
     return (
-      <Notice handle={handle} title="No machines yet">
+      <ShellNotice active="overview" handle={handle} title="No machines yet">
         <p>
           Connect this computer to your account to see your STAK here. In your
           terminal, run{' '}
           <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>, then{' '}
           <code style={{ fontFamily: 'var(--mono)' }}>stak memory backup</code>.
         </p>
-      </Notice>
+      </ShellNotice>
     );
   if (view.kind === 'choose-machine')
     return (
-      <Notice handle={handle} title="Choose a machine">
+      <ShellNotice active="overview" handle={handle} title="Choose a machine">
         <p>
           STAK shows machine-specific state from that machine&apos;s last CLI
           check-in. Pick the machine you want to view — or run{' '}
@@ -186,7 +150,7 @@ export default async function OverviewPage({
           </p>
         ) : null}
         <MachineChooser options={view.machines} />
-      </Notice>
+      </ShellNotice>
     );
 
   return (
