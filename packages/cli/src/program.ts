@@ -61,7 +61,8 @@ import {
   type RemoteMemoryBackend,
   type RestorePlan,
 } from '@stack/memory';
-import { createCloudClient } from '@stack/cloud-client';
+import { createCloudClient, NotAuthenticatedError } from '@stack/cloud-client';
+import { runSkillCheck, type SkillCheckResult } from './skill-check-runner.js';
 import {
   CHECKIN_COMMANDS,
   gatherCheckinInputs,
@@ -280,6 +281,7 @@ export type ProgramDependencies = {
   skillUpdate(options: { selector?: string }): Promise<SkillUpdateResult>;
   skillPause(options: { selector: string }): Promise<SetSkillPausedResult>;
   skillResume(options: { selector: string }): Promise<SetSkillPausedResult>;
+  skillCheck(options: { selector?: string }): Promise<SkillCheckResult>;
   machineId(): Promise<string>;
   openUrl(machineId: string): string;
   openBrowser(url: string): Promise<void>;
@@ -720,6 +722,38 @@ const defaultDependencies: ProgramDependencies = {
     setSkillPaused({ stackHome, selector, paused: true }),
   skillResume: ({ selector }) =>
     setSkillPaused({ stackHome, selector, paused: false }),
+  // `stak skill check` contacts each checkable Skill's source remote and reports the result to
+  // Cloud (P5a §5a). It never approves, installs, pauses, or resumes anything — it only
+  // resolves SOURCE and, when different from APPROVED within V0's review bounds, uploads a
+  // bounded review artifact for a human to review later on the web. Reporting requires an
+  // authenticated Cloud client, so (like `push`/`pull`/`whoami`) a signed-out machine fails
+  // closed with `NotAuthenticatedError` rather than silently skipping the report.
+  skillCheck: async ({ selector }) => {
+    let state;
+    try {
+      state = await loadMainEnvironment({ stackHome });
+    } catch (error) {
+      if (
+        error instanceof StackStateError &&
+        error.code === 'environment-not-found'
+      )
+        return { checked: [] };
+      throw error;
+    }
+    const credential = await cloudDeps.credentials.read();
+    if (!credential) throw new NotAuthenticatedError();
+    const baseUrl = resolveCloudBaseUrl({
+      env: process.env,
+      ...(credential.apiUrl ? { storedApiUrl: credential.apiUrl } : {}),
+    });
+    const client = createCloudClient({ baseUrl, token: credential.token });
+    return runSkillCheck({
+      lock: state.lock,
+      ...(selector ? { selector } : {}),
+      workRoot: path.join(stackHome, 'runtime', 'skill-check'),
+      reporter: client,
+    });
+  },
   // `stak open` — this machine's stable id → the web Overview URL (machine id only). Reading
   // the identity fails clearly on corrupt/ambiguous state; no network call, no mutation.
   machineId: async () =>

@@ -2,6 +2,7 @@ import type { Command } from 'commander';
 
 import type { AgentId } from '@stack/spec';
 import type { SetSkillPausedResult } from '@stack/core';
+import type { SkillCheckResult } from '../skill-check-runner.js';
 
 /**
  * `stak skill` — the Skill lifecycle on this machine (P2).
@@ -9,10 +10,13 @@ import type { SetSkillPausedResult } from '@stack/core';
  *   stak skill update [<skill>]   install/reconcile APPROVED desired versions onto THIS machine
  *   stak skill pause  <skill>     stop projecting a Skill to agents (keeps version/provenance)
  *   stak skill resume <skill>     project it again
+ *   stak skill check  [<skill>]   check Skill sources for updates (P5a §5a)
  *
  * `update` changes installed machine state → it checks in on success. `pause`/`resume` change
  * only machine-local DESIRED state (the lock's `paused` flag); the projection effect is realised
- * on the next `run`/`skill update`, so they do NOT check in (desired ≠ installed).
+ * on the next `run`/`skill update`, so they do NOT check in (desired ≠ installed). `check`
+ * contacts each checkable Skill's source remote and reports the result to Cloud — it never
+ * approves, installs, pauses, or resumes anything, so it does NOT check in either.
  */
 export type SkillUpdateAgentResult = {
   agent: AgentId;
@@ -35,6 +39,7 @@ export type SkillCommandDependencies = {
   skillUpdate(options: { selector?: string }): Promise<SkillUpdateResult>;
   skillPause(options: { selector: string }): Promise<SetSkillPausedResult>;
   skillResume(options: { selector: string }): Promise<SetSkillPausedResult>;
+  skillCheck(options: { selector?: string }): Promise<SkillCheckResult>;
   writeOut(value: string): void;
 };
 
@@ -91,6 +96,35 @@ const renderPaused = (
   }
 };
 
+const renderCheck = (result: SkillCheckResult): string => {
+  if (result.checked.length === 0) return 'No Skills to check.\n';
+  const lines: string[] = [];
+  for (const entry of result.checked) {
+    switch (entry.outcome) {
+      case 'no-update':
+        lines.push(`${entry.name}: No update.`);
+        break;
+      case 'update-available':
+        lines.push(
+          entry.exceedsBounds
+            ? `${entry.name}: Update available, but it exceeds STAK's review limits and can't be reviewed here.`
+            : `${entry.name}: Update available.`,
+        );
+        break;
+      case 'cannot-check':
+        lines.push(`${entry.name}: Can't check for updates from this source.`);
+        break;
+      case 'check-failed':
+        lines.push(
+          `${entry.name}: Check failed: ${entry.checkFailedReason ?? 'unknown error'}`,
+        );
+        break;
+    }
+  }
+  lines.push('');
+  return lines.join('\n');
+};
+
 export const registerSkillCommand = (
   program: Command,
   dependencies: SkillCommandDependencies,
@@ -143,4 +177,23 @@ export const registerSkillCommand = (
           : renderPaused(result, 'active'),
       );
     });
+
+  skill
+    .command('check [skill]')
+    .description(
+      'Check Skill sources for updates (contacts remotes; never approves/installs)',
+    )
+    .option('--json', 'emit structured JSON only')
+    .action(
+      async (selector: string | undefined, options: { json?: boolean }) => {
+        const result = await dependencies.skillCheck(
+          selector ? { selector } : {},
+        );
+        dependencies.writeOut(
+          options.json
+            ? `${JSON.stringify(result, null, 2)}\n`
+            : renderCheck(result),
+        );
+      },
+    );
 };

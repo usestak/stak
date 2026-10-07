@@ -318,6 +318,7 @@ const runProgram = async (
     skillUpdate: async () => ({ status: 'ok', agents: [] }),
     skillPause: async () => ({ status: 'not-found' }),
     skillResume: async () => ({ status: 'not-found' }),
+    skillCheck: async () => ({ checked: [] }),
     machineId: async () => '00000000-0000-4000-8000-000000000001',
     openUrl: (machineId) =>
       `http://localhost:3000/overview?machine=${encodeURIComponent(machineId)}`,
