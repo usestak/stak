@@ -79,10 +79,10 @@ export function AppSidebar({
 
       <div className="stak-nav">
         {items.map((item) =>
-          item.key === 'overview' ? (
+          item.key === 'overview' || item.key === 'skills' ? (
             <Link
               key={item.key}
-              href="/overview"
+              href={item.key === 'overview' ? '/overview' : '/skills'}
               className="stak-nav-item"
               aria-current={active === item.key ? 'page' : undefined}
             >
