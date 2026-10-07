@@ -9,13 +9,13 @@ export function SkillActions({
   skillId,
   paused,
   updateAvailable,
-  candidateVersion,
+  reviewArtifactId,
   approvedVersionShort,
 }: {
   skillId: string;
   paused: boolean;
   updateAvailable: boolean;
-  candidateVersion?: string;
+  reviewArtifactId?: string;
   approvedVersionShort: string;
 }) {
   const router = useRouter();
@@ -24,14 +24,13 @@ export function SkillActions({
   const [stale, setStale] = useState(false);
 
   const approve = async () => {
-    if (!candidateVersion || pending) return;
+    if (!reviewArtifactId || pending) return;
     setPending('approve');
     setError(null);
     setStale(false);
     const result = await approveSkillVersionAction({
       skillId,
-      candidateContentHash: candidateVersion,
-      candidateRevision: candidateVersion,
+      reviewArtifactId,
     });
     setPending(null);
     if (!result.ok) {
@@ -66,13 +65,23 @@ export function SkillActions({
             type="button"
             className="stak-approve"
             onClick={approve}
-            disabled={pending !== null || !candidateVersion}
-            aria-label={`Approve candidate version ${candidateVersion ?? ''}`}
+            disabled={pending !== null || !reviewArtifactId}
+            aria-label="Approve this update"
+            title={
+              !reviewArtifactId
+                ? "This update exceeds STAK's V0 review limits and can't be approved from the browser yet"
+                : undefined
+            }
           >
             {pending === 'approve' ? 'Approving…' : `Approve ${approvedVersionShort}→new`}
           </button>
         ) : null}
       </div>
+      {updateAvailable && !reviewArtifactId ? (
+        <span style={{ fontSize: 12.5, color: 'var(--dim)' }}>
+          This update exceeds STAK&apos;s V0 review limits and can&apos;t be approved from the browser yet.
+        </span>
+      ) : null}
       <span role="status" aria-live="polite" style={{ fontSize: 12.5, color: error ? '#e5776a' : 'transparent' }}>
         {error ? (stale ? `${error} Reload to review the latest candidate.` : error) : ''}
       </span>

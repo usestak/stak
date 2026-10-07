@@ -32,13 +32,15 @@ const detail = (over: Partial<SkillDetail> = {}): SkillDetail => ({
   paused: false,
   source: { kind: 'git', checkable: true, label: 'github.com/oss/test-first', trackedRef: 'main' },
   capability: { declared: false },
-  updateStatus: 'no-update',
+  sourceCheckState: 'no-update',
+  checkedAt: new Date().toISOString(),
   installs: [{ machineId: A1, installedVersion: HASH_A }],
   history: [{ contentHash: HASH_A, environmentVersionNumber: 1, approvedAt: new Date().toISOString() }],
-  files: null,
-  diff: null,
+  reviewArtifact: null,
   ...over,
 });
+
+const REVIEW_ARTIFACT_ID = '00000000-0000-4000-8000-0000000000c3';
 
 const service = (
   skill: SkillDetail | null,
@@ -62,32 +64,108 @@ describe('loadSkillDetail', () => {
     if (view.kind !== 'ready') throw new Error('expected ready');
     expect(view.statusText).toBe('Ready');
   });
-  it('shows an honest unavailable state when files is null', async () => {
-    const view = await loadSkillDetail(service(detail({ files: null })), USER, 'skill_test0001', undefined);
+  it('renders no reviewArtifact and does not exceed bounds when there is no update', async () => {
+    const view = await loadSkillDetail(service(detail()), USER, 'skill_test0001', undefined);
     if (view.kind !== 'ready') throw new Error('expected ready');
-    expect(view.filesAvailable).toBe(false);
+    expect(view.reviewArtifact).toBeNull();
+    expect(view.exceedsReviewBounds).toBe(false);
   });
-  it('shows an honest unavailable state when diff is null even with an update available', async () => {
+  it('renders the review artifact files when an update is available and an artifact exists', async () => {
     const view = await loadSkillDetail(
-      service(detail({ updateStatus: 'update-available', candidateVersion: 'rev123', diff: null })),
+      service(
+        detail({
+          sourceCheckState: 'update-available',
+          candidateRevision: 'rev123',
+          reviewArtifactId: REVIEW_ARTIFACT_ID,
+          reviewArtifact: {
+            reviewArtifactId: REVIEW_ARTIFACT_ID,
+            skillId: 'skill_test0001',
+            approvedContentHash: HASH_A,
+            candidateRevision: 'rev123',
+            candidateContentHash: HASH_B,
+            artifactPayloadHash: 'payload-hash',
+            checkedAt: new Date().toISOString(),
+            files: [
+              {
+                relativePath: 'SKILL.md',
+                kind: 'modified',
+                binary: false,
+                before: { byteSize: 10, hash: 'h1' },
+                after: { byteSize: 12, hash: 'h2' },
+                beforeText: 'old',
+                afterText: 'new',
+              },
+              {
+                relativePath: 'logo.png',
+                kind: 'added',
+                binary: true,
+                after: { byteSize: 2048, hash: 'h3' },
+              },
+            ],
+          },
+        }),
+      ),
       USER,
       'skill_test0001',
       undefined,
     );
     if (view.kind !== 'ready') throw new Error('expected ready');
-    expect(view.diffAvailable).toBe(false);
+    expect(view.exceedsReviewBounds).toBe(false);
+    expect(view.reviewArtifactId).toBe(REVIEW_ARTIFACT_ID);
+    expect(view.reviewArtifact?.files).toHaveLength(2);
+    expect(view.reviewArtifact?.files[0]).toMatchObject({
+      relativePath: 'SKILL.md',
+      kind: 'modified',
+      binary: false,
+      beforeText: 'old',
+      afterText: 'new',
+      beforeSize: 10,
+      afterSize: 12,
+    });
+    expect(view.reviewArtifact?.files[1]).toMatchObject({
+      relativePath: 'logo.png',
+      kind: 'added',
+      binary: true,
+      afterSize: 2048,
+    });
+    expect(view.reviewArtifact?.files[1]?.beforeText).toBeUndefined();
+    expect(view.reviewArtifact?.files[1]?.afterText).toBeUndefined();
+  });
+  it('reports exceedsReviewBounds when an update is available but no artifact exists', async () => {
+    const view = await loadSkillDetail(
+      service(
+        detail({
+          sourceCheckState: 'update-available',
+          candidateRevision: 'rev123',
+          reviewArtifact: null,
+        }),
+      ),
+      USER,
+      'skill_test0001',
+      undefined,
+    );
+    if (view.kind !== 'ready') throw new Error('expected ready');
+    expect(view.exceedsReviewBounds).toBe(true);
+    expect(view.reviewArtifact).toBeNull();
+    expect(view.reviewArtifactId).toBeUndefined();
     expect(view.statusText).toBe('Update available');
   });
   it('keeps provenance/history/capabilities visible while paused (§17)', async () => {
     const view = await loadSkillDetail(
-      service(detail({ paused: true, updateStatus: 'update-available', candidateVersion: 'rev123' })),
+      service(
+        detail({
+          paused: true,
+          sourceCheckState: 'update-available',
+          candidateRevision: 'rev123',
+        }),
+      ),
       USER,
       'skill_test0001',
       undefined,
     );
     if (view.kind !== 'ready') throw new Error('expected ready');
     expect(view.statusText).toBe('Paused');
-    expect(view.updateAvailable).toBe(true);
+    expect(view.sourceCheckState).toBe('update-available');
     expect(view.sourceLabel).toBe('github.com/oss/test-first');
     expect(view.history).toHaveLength(1);
   });

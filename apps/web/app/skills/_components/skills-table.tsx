@@ -82,7 +82,7 @@ export function SkillsTable({ rows }: { rows: SkillRow[] }) {
             </span>
             <span className="stak-skills-source">
               {r.sourceLabel}
-              {r.cannotCheckNote ? <span className="note"> · can't check updates</span> : null}
+              {r.sourceCheckNote ? <span className="note"> · {r.sourceCheckNote}</span> : null}
             </span>
             <span className="stak-skills-installed">{r.installedLabel}</span>
             <span className="stak-status" style={{ color: '#c9c5bc' }}>

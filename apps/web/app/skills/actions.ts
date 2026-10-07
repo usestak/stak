@@ -9,8 +9,7 @@ const notSignedIn = { ok: false as const, error: 'You must sign in first.' };
 
 export async function approveSkillVersionAction(input: {
   skillId: string;
-  candidateContentHash: string;
-  candidateRevision: string;
+  reviewArtifactId: string;
 }): Promise<{ ok: true; changed: boolean } | { ok: false; error: string; stale?: boolean }> {
   const user = await getSessionUser();
   if (!user) return notSignedIn;
@@ -21,8 +20,12 @@ export async function approveSkillVersionAction(input: {
     );
     return { ok: true, changed: result.createdNew };
   } catch (error) {
-    if (error instanceof CloudServiceError && error.code === 'skill-not-found')
-      return { ok: false, error: 'This Skill or candidate is no longer current.', stale: true };
+    if (error instanceof CloudServiceError && error.code === 'remote-environment-conflict')
+      return {
+        ok: false,
+        error: error.message,
+        stale: true,
+      };
     return {
       ok: false,
       error: error instanceof Error ? error.message : 'Could not approve this update.',

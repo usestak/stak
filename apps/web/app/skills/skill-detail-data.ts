@@ -1,5 +1,5 @@
 import { CloudServiceError, type CloudService } from '@stack/cloud-server';
-import type { SkillDetail, SkillDiffFile, SkillFile, SkillVersionHistoryEntry } from '@stack/spec';
+import type { SkillDetail, SkillVersionHistoryEntry } from '@stack/spec';
 
 import {
   machineOption,
@@ -29,6 +29,20 @@ export type HistoryRow = {
   current: boolean;
 };
 
+export type SkillDetailReviewArtifactView = {
+  reviewArtifactId: string;
+  candidateRevision: string;
+  files: {
+    relativePath: string;
+    kind: 'added' | 'modified' | 'removed';
+    binary: boolean;
+    beforeText?: string;
+    afterText?: string;
+    beforeSize?: number;
+    afterSize?: number;
+  }[];
+};
+
 export type SkillDetailView =
   | { kind: 'error' }
   | { kind: 'no-machines' }
@@ -42,9 +56,11 @@ export type SkillDetailView =
       viewing: { machineId: string; name: string; statusLabel: string; dot: string };
       machines: MachineOption[];
       statusText: string;
-      updateAvailable: boolean;
-      candidateVersion?: string;
-      cannotCheckNote: boolean;
+      sourceCheckState: SkillDetail['sourceCheckState'];
+      checkedAt: string | null;
+      candidateRevision?: string;
+      reviewArtifactId?: string;
+      sourceCheckNote?: string;
       sourceLabel: string;
       trackedRef?: string;
       approvedVersionShort: string;
@@ -53,12 +69,25 @@ export type SkillDetailView =
       capabilitiesText: string;
       capabilityList: { label: string; value: 'declared-true' | 'declared-false' }[];
       history: HistoryRow[];
-      filesAvailable: boolean;
-      files: SkillFile[];
-      diffAvailable: boolean;
-      diffFiles: SkillDiffFile[];
+      reviewArtifact: SkillDetailReviewArtifactView | null;
+      exceedsReviewBounds: boolean;
       paused: boolean;
     };
+
+/** Shared with skills-data.ts's deriveRow — same note text for the same non-actionable
+ *  sourceCheckState values (contract §2/§3). */
+const sourceCheckNote = (state: SkillDetail['sourceCheckState']): string | undefined => {
+  switch (state) {
+    case 'not-checked':
+      return "Updates haven't been checked yet.";
+    case 'cannot-check':
+      return "Can't check for updates from this source.";
+    case 'check-failed':
+      return 'Check failed.';
+    default:
+      return undefined;
+  }
+};
 
 const capabilityList = (
   capability: SkillDetail['capability'],
@@ -120,7 +149,7 @@ export const loadSkillDetail = async (
   // install) before falling through to Ready. None of the three neutral cases is ever "Ready".
   let statusText: string;
   if (skill.paused) statusText = 'Paused';
-  else if (skill.updateStatus === 'update-available') statusText = 'Update available';
+  else if (skill.sourceCheckState === 'update-available') statusText = 'Update available';
   else if (!viewingCheckedIn) statusText = 'Not reported here yet';
   else if (!install) statusText = 'Not installed here';
   else if (!installedHereMatches) statusText = 'Different version here';
@@ -150,9 +179,13 @@ export const loadSkillDetail = async (
     },
     machines: options,
     statusText,
-    updateAvailable: skill.updateStatus === 'update-available',
-    ...(skill.candidateVersion ? { candidateVersion: skill.candidateVersion } : {}),
-    cannotCheckNote: skill.updateStatus === 'cannot-check',
+    sourceCheckState: skill.sourceCheckState,
+    checkedAt: skill.checkedAt,
+    ...(skill.candidateRevision ? { candidateRevision: skill.candidateRevision } : {}),
+    ...(skill.reviewArtifactId ? { reviewArtifactId: skill.reviewArtifactId } : {}),
+    ...(sourceCheckNote(skill.sourceCheckState)
+      ? { sourceCheckNote: sourceCheckNote(skill.sourceCheckState) }
+      : {}),
     sourceLabel: skill.source.label ?? (skill.source.kind === 'local' ? 'Local' : skill.source.kind),
     ...(skill.source.trackedRef ? { trackedRef: skill.source.trackedRef } : {}),
     approvedVersionShort: shortHash(skill.approvedVersion),
@@ -165,10 +198,25 @@ export const loadSkillDetail = async (
     capabilitiesText: skill.capability.declared ? 'Declared' : 'Capabilities not declared',
     capabilityList: capabilityList(skill.capability),
     history,
-    filesAvailable: skill.files !== null,
-    files: skill.files ?? [],
-    diffAvailable: skill.diff !== null,
-    diffFiles: skill.diff?.files ?? [],
+    reviewArtifact: skill.reviewArtifact
+      ? {
+          reviewArtifactId: skill.reviewArtifact.reviewArtifactId,
+          candidateRevision: skill.reviewArtifact.candidateRevision,
+          files: skill.reviewArtifact.files.map((f) => ({
+            relativePath: f.relativePath,
+            kind: f.kind,
+            binary: f.binary,
+            ...(f.beforeText !== undefined ? { beforeText: f.beforeText } : {}),
+            ...(f.afterText !== undefined ? { afterText: f.afterText } : {}),
+            ...(f.before !== undefined ? { beforeSize: f.before.byteSize } : {}),
+            ...(f.after !== undefined ? { afterSize: f.after.byteSize } : {}),
+          })),
+        }
+      : null,
+    // Bounds-exceeded: sourceCheckState says an update exists but no artifact was ever
+    // produced (contract §5a). Distinct from "no update"/"not checked" — Approve must stay
+    // disabled rather than silently unavailable.
+    exceedsReviewBounds: skill.sourceCheckState === 'update-available' && !skill.reviewArtifact,
     paused: skill.paused,
   };
 };

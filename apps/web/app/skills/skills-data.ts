@@ -26,12 +26,28 @@ export type SkillRow = {
   name: string;
   description?: string;
   sourceLabel: string;
-  cannotCheckNote: boolean;
+  sourceCheckNote?: string;
   installedLabel: string;
   primaryStatus: 'ready' | 'update-available' | 'paused';
   pendingInstall: boolean;
   dot: 'ready' | 'attention' | 'neutral';
   statusText: string;
+};
+
+/** Maps a non-actionable sourceCheckState to the explanatory note shown alongside the source
+ *  label (contract §2/§3). 'no-update' and 'update-available' need no note — the primary status
+ *  already communicates them. */
+const sourceCheckNote = (state: SkillSummary['sourceCheckState']): string | undefined => {
+  switch (state) {
+    case 'not-checked':
+      return "Updates haven't been checked yet.";
+    case 'cannot-check':
+      return "Can't check for updates from this source.";
+    case 'check-failed':
+      return 'Check failed.';
+    default:
+      return undefined;
+  }
 };
 
 export const STATUS_FILTERS = ['all', 'ready', 'update-available', 'paused'] as const;
@@ -56,7 +72,6 @@ export const deriveRow = (
     viewingMachineCheckedIn && install
       ? install.installedVersion === skill.approvedVersion
       : false;
-  const cannotCheckNote = skill.updateStatus === 'cannot-check';
 
   let primaryStatus: SkillRow['primaryStatus'];
   let dot: SkillRow['dot'];
@@ -65,7 +80,7 @@ export const deriveRow = (
     primaryStatus = 'paused';
     dot = 'neutral';
     statusText = 'Paused';
-  } else if (skill.updateStatus === 'update-available') {
+  } else if (skill.sourceCheckState === 'update-available') {
     primaryStatus = 'update-available';
     dot = 'attention';
     statusText = 'Update available';
@@ -93,7 +108,9 @@ export const deriveRow = (
     ...(skill.description ? { description: skill.description } : {}),
     sourceLabel:
       skill.source.label ?? (skill.source.kind === 'local' ? 'Local' : skill.source.kind),
-    cannotCheckNote,
+    ...(sourceCheckNote(skill.sourceCheckState)
+      ? { sourceCheckNote: sourceCheckNote(skill.sourceCheckState) }
+      : {}),
     installedLabel: install
       ? install.installedVersion
         ? install.installedVersion.slice(7, 15)
@@ -101,7 +118,7 @@ export const deriveRow = (
       : 'Not reported here',
     primaryStatus,
     pendingInstall:
-      !skill.paused && skill.updateStatus !== 'update-available' && statusText !== 'Ready',
+      !skill.paused && skill.sourceCheckState !== 'update-available' && statusText !== 'Ready',
     dot,
     statusText,
   };

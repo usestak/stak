@@ -30,7 +30,8 @@ const skill = (over: Partial<SkillSummary> = {}): SkillSummary => ({
   paused: false,
   source: { kind: 'git', checkable: true, label: 'github.com/oss/test-first' },
   capability: { declared: false },
-  updateStatus: 'no-update',
+  sourceCheckState: 'no-update',
+  checkedAt: new Date().toISOString(),
   installs: [{ machineId: A1, installedVersion: 'sha256:' + 'a'.repeat(64) }],
   ...over,
 });
@@ -52,11 +53,19 @@ describe('deriveRow', () => {
     expect(row.statusText).toBe('Ready');
   });
   it('is paused regardless of update availability', () => {
-    const row = deriveRow(skill({ paused: true, updateStatus: 'update-available' }), A1, true);
+    const row = deriveRow(
+      skill({ paused: true, sourceCheckState: 'update-available', candidateRevision: 'rev1' }),
+      A1,
+      true,
+    );
     expect(row.statusText).toBe('Paused');
   });
   it('is update-available when not paused and source differs', () => {
-    const row = deriveRow(skill({ updateStatus: 'update-available' }), A1, true);
+    const row = deriveRow(
+      skill({ sourceCheckState: 'update-available', candidateRevision: 'rev1' }),
+      A1,
+      true,
+    );
     expect(row.statusText).toBe('Update available');
   });
   it('never claims Ready when the viewing machine has not reported', () => {
@@ -91,12 +100,26 @@ describe('deriveRow', () => {
   });
   it('shows a cannot-check note without changing primary status', () => {
     const row = deriveRow(
-      skill({ source: { kind: 'local', checkable: false }, updateStatus: 'cannot-check' }),
+      skill({ source: { kind: 'local', checkable: false }, sourceCheckState: 'cannot-check' }),
       A1,
       true,
     );
     expect(row.statusText).toBe('Ready');
-    expect(row.cannotCheckNote).toBe(true);
+    expect(row.sourceCheckNote).toBe("Can't check for updates from this source.");
+  });
+  it('shows a not-checked note without blocking Ready', () => {
+    const row = deriveRow(skill({ sourceCheckState: 'not-checked' }), A1, true);
+    expect(row.statusText).toBe('Ready');
+    expect(row.sourceCheckNote).toBe("Updates haven't been checked yet.");
+  });
+  it('shows a distinct check-failed note', () => {
+    const row = deriveRow(skill({ sourceCheckState: 'check-failed' }), A1, true);
+    expect(row.statusText).toBe('Ready');
+    expect(row.sourceCheckNote).toBe('Check failed.');
+  });
+  it('has no note when there is no update and the check succeeded', () => {
+    const row = deriveRow(skill({ sourceCheckState: 'no-update' }), A1, true);
+    expect(row.sourceCheckNote).toBeUndefined();
   });
 });
 
@@ -104,7 +127,11 @@ describe('filterRows', () => {
   const rows = [
     deriveRow(skill({ skillId: 'skill_a', name: 'a' }), A1, true),
     deriveRow(skill({ skillId: 'skill_b', name: 'b', paused: true }), A1, true),
-    deriveRow(skill({ skillId: 'skill_c', name: 'c', updateStatus: 'update-available' }), A1, true),
+    deriveRow(
+      skill({ skillId: 'skill_c', name: 'c', sourceCheckState: 'update-available', candidateRevision: 'rev1' }),
+      A1,
+      true,
+    ),
   ];
   it('all returns every row', () => {
     expect(filterRows(rows, 'all', '')).toHaveLength(3);
