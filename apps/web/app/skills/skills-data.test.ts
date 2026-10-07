@@ -73,6 +73,22 @@ describe('deriveRow', () => {
     );
     expect(row.statusText).not.toBe('Ready');
   });
+  it('distinguishes a different installed version from no install record at all', () => {
+    const differentVersion = deriveRow(
+      skill({ installs: [{ machineId: A1, installedVersion: 'sha256:' + 'b'.repeat(64) }] }),
+      A1,
+      true,
+    );
+    const neverInstalled = deriveRow(skill({ installs: [] }), A1, true);
+
+    expect(differentVersion.statusText).toBe('Different version here');
+    expect(neverInstalled.statusText).toBe('Not installed here');
+    expect(differentVersion.statusText).not.toBe(neverInstalled.statusText);
+    expect(differentVersion.statusText).not.toBe('Ready');
+    expect(neverInstalled.statusText).not.toBe('Ready');
+    expect(differentVersion.dot).toBe('neutral');
+    expect(neverInstalled.dot).toBe('neutral');
+  });
   it('shows a cannot-check note without changing primary status', () => {
     const row = deriveRow(
       skill({ source: { kind: 'local', checkable: false }, updateStatus: 'cannot-check' }),

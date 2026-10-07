@@ -30,7 +30,7 @@ export type SkillRow = {
   installedLabel: string;
   primaryStatus: 'ready' | 'update-available' | 'paused';
   pendingInstall: boolean;
-  dot: 'ready' | 'attention' | 'neutral' | 'none';
+  dot: 'ready' | 'attention' | 'neutral';
   statusText: string;
 };
 
@@ -73,10 +73,14 @@ export const deriveRow = (
     primaryStatus = 'ready'; // bucketed with Ready-eligible for filtering; NOT labeled Ready
     dot = 'neutral';
     statusText = 'Not reported here yet';
+  } else if (!install) {
+    primaryStatus = 'ready';
+    dot = 'neutral';
+    statusText = 'Not installed here';
   } else if (!installedHere) {
     primaryStatus = 'ready';
     dot = 'neutral';
-    statusText = 'Not yet reconciled here';
+    statusText = 'Different version here';
   } else {
     primaryStatus = 'ready';
     dot = 'ready';
