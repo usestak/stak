@@ -1045,11 +1045,7 @@ describe('uploadSkillReviewArtifact', () => {
       candidateRevision: 'b'.repeat(40),
       candidateContentHash: h('b'),
     });
-    const first = await env.service.uploadSkillReviewArtifact(
-      seed.user,
-      a.request,
-      a.payload,
-    );
+    await env.service.uploadSkillReviewArtifact(seed.user, a.request, a.payload);
     // Re-upload the identical request + payload a second (and third) time.
     const second = await env.service.uploadSkillReviewArtifact(
       seed.user,
