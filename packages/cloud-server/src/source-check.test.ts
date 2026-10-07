@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createCachedSourceChecker } from './source-check.js';
-import type { SkillSourceChecker } from './product-service.js';
+import {
+  createCachedSourceChecker,
+  type SkillSourceChecker,
+} from './source-check.js';
 
 const ref = (revision: string) =>
   ({

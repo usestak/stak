@@ -1,6 +1,20 @@
 import { canonicalJson } from '@stack/shared';
+import type { PortableLockedSkill } from '@stack/spec';
 
-import type { SkillSourceChecker, SourceLatest } from './product-service.js';
+/**
+ * Source-latest result for one Skill. P5a note: the Skills read model no longer consumes a
+ * Cloud-side checker at all (it reads only the persisted, CLI-reported check), so nothing in
+ * the product service produces or calls these today; the types live here, with their only
+ * remaining user, rather than in product-service.ts.
+ */
+export type SourceLatest =
+  | { status: 'same' }
+  | { status: 'different'; sourceRevision: string }
+  | { status: 'uncheckable' };
+export type SkillSourceChecker = (input: {
+  skillId: string;
+  restoration: PortableLockedSkill['restoration'];
+}) => Promise<SourceLatest>;
 
 /**
  * Bounded request-time cache for source-latest checks (P3 §5). Source resolution (git

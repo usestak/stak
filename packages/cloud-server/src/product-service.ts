@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { computeEnvironmentBundleDigest } from '@stack/shared';
 import type {
   ActivityItem,
@@ -11,16 +13,18 @@ import type {
   OverviewReadModel,
   PortableLockedSkill,
   ProjectsReadModel,
+  ReportSkillSourceCheckRequest,
   RevokeMachineResponse,
   SetSkillPausedRequest,
   SkillDetail,
   SkillInstall,
   SkillSourceSummary,
   SkillSummary,
-  SkillUpdateStatus,
   SkillsReadModel,
   StacksReadModel,
   SyncProjectsRequest,
+  UploadSkillReviewArtifactRequest,
+  UploadSkillReviewArtifactResponse,
 } from '@stack/spec';
 import {
   standardProjectCountsFromBundle,
@@ -31,23 +35,77 @@ import { invalidRequest, notFound, remoteConflict } from './errors.js';
 import { deriveMachineState } from './machine-state.js';
 import { RemoteConflict } from './repository.js';
 import type {
+  CloudBlobStore,
   CloudRepository,
   CloudEnvironmentVersionRecord,
   MachineStateRecord,
+  ReviewArtifactFileRecord,
+  SkillReviewCheckRecord,
 } from './repository.js';
 import type { AuthenticatedUser } from './service.js';
 
-const STALE_MACHINE_MS = 30 * 24 * 60 * 60 * 1000;
+/**
+ * Upper bound on one review-artifact text payload Cloud will accept and hold (P5a §16). The CLI
+ * already refuses to build an artifact over 2 MiB of file content; this is a defensive cap on
+ * the serialized payload (JSON escaping can expand text), not a second product bound.
+ */
+export const MAX_REVIEW_PAYLOAD_BYTES = 8 * 1024 * 1024;
 
-/** Source-latest result for one Skill (the P3 cloud layer injects a real resolver). */
-export type SourceLatest =
-  | { status: 'same' }
-  | { status: 'different'; sourceRevision: string }
-  | { status: 'uncheckable' };
-export type SkillSourceChecker = (input: {
-  skillId: string;
-  restoration: PortableLockedSkill['restoration'];
-}) => Promise<SourceLatest>;
+const sha256Of = (bytes: Uint8Array): string =>
+  `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+
+type ReviewPayloadText = { beforeText?: string; afterText?: string };
+
+/**
+ * Parse a review payload (`{ files: [{ relativePath, beforeText?, afterText? }] }`) and check it
+ * against the declared metadata: every entry must name a declared, non-binary file, appear at
+ * most once, and carry text only for a side the metadata says exists. Returns the text by path,
+ * or null when the payload is malformed or inconsistent. Never throws.
+ */
+const parseReviewPayload = (
+  bytes: Uint8Array,
+  files: readonly ReviewArtifactFileRecord[],
+): Map<string, ReviewPayloadText> | null => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(bytes).toString('utf8'));
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const entries = (parsed as { files?: unknown }).files;
+  if (!Array.isArray(entries)) return null;
+  const declared = new Map(files.map((file) => [file.relativePath, file]));
+  const textByPath = new Map<string, ReviewPayloadText>();
+  for (const entry of entries) {
+    if (typeof entry !== 'object' || entry === null) return null;
+    const { relativePath, beforeText, afterText, ...extra } = entry as Record<
+      string,
+      unknown
+    >;
+    if (Object.keys(extra).length > 0) return null;
+    if (typeof relativePath !== 'string') return null;
+    const file = declared.get(relativePath);
+    if (!file || file.binary || textByPath.has(relativePath)) return null;
+    if (
+      beforeText !== undefined &&
+      (typeof beforeText !== 'string' || !file.before)
+    )
+      return null;
+    if (
+      afterText !== undefined &&
+      (typeof afterText !== 'string' || !file.after)
+    )
+      return null;
+    textByPath.set(relativePath, {
+      ...(beforeText !== undefined ? { beforeText: beforeText as string } : {}),
+      ...(afterText !== undefined ? { afterText: afterText as string } : {}),
+    });
+  }
+  return textByPath;
+};
+
+const STALE_MACHINE_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Optional per-project file-count deriver (Standard Memory only; never decrypts Protected). */
 export type MemoryProjectCounts = (
@@ -85,8 +143,8 @@ export type ProductServiceConfig = {
   now: () => Date;
   newId: () => string;
   memoryBackendFor?: (userId: string) => RemoteMemoryBackend;
-  /** Injected source-latest check; absent ⇒ every Skill is `cannot-check` (fail closed). */
-  checkSkillSource?: SkillSourceChecker;
+  /** Owner-scoped, content-addressed blob store holding review-artifact text payloads (P5a). */
+  blobStore: CloudBlobStore;
   /** Injected Standard per-project counts; absent ⇒ null (unavailable). */
   memoryProjectCounts?: MemoryProjectCounts;
 };
@@ -106,6 +164,17 @@ const sourceSummaryOf = (skill: PortableLockedSkill): SkillSourceSummary => {
     checkable: false,
   };
 };
+
+/**
+ * Base-bound read (P5a §5a "base-bound results"): a stored check counts ONLY while it was
+ * computed against the Skill's CURRENT approved content hash. A check against any other base
+ * is stale and reads as no check at all (`not-checked`) — never as a diff against the wrong base.
+ */
+const currentCheckOf = (
+  stored: SkillReviewCheckRecord | null,
+  skill: PortableLockedSkill,
+): SkillReviewCheckRecord | null =>
+  stored && stored.approvedContentHash === skill.contentHash ? stored : null;
 
 const capabilityStateOf = (skill: PortableLockedSkill) => {
   const declared = skill.metadata?.capabilities;
@@ -186,19 +255,12 @@ export const createProductMethods = (config: ProductServiceConfig) => {
     for (const [skillId, skill] of Object.entries(
       current.bundle.resolved.skills,
     )) {
-      let updateStatus: SkillUpdateStatus = 'cannot-check';
-      let candidateVersion: string | undefined;
-      if (config.checkSkillSource) {
-        const latest = await config.checkSkillSource({
-          skillId,
-          restoration: skill.restoration,
-        });
-        if (latest.status === 'same') updateStatus = 'no-update';
-        else if (latest.status === 'different') {
-          updateStatus = 'update-available';
-          candidateVersion = latest.sourceRevision;
-        } else updateStatus = 'cannot-check';
-      }
+      // The read model only ever reads the latest CLI-reported, persisted check — Cloud never
+      // resolves sources itself (P5a §5a).
+      const check = currentCheckOf(
+        await config.repository.getSkillReviewCheck(userId, skillId),
+        skill,
+      );
       result.push({
         skillId,
         name: skill.name,
@@ -207,12 +269,94 @@ export const createProductMethods = (config: ProductServiceConfig) => {
         paused: skill.paused === true,
         source: sourceSummaryOf(skill),
         capability: capabilityStateOf(skill),
-        updateStatus,
-        ...(candidateVersion ? { candidateVersion } : {}),
+        sourceCheckState: check?.sourceCheckState ?? 'not-checked',
+        checkedAt: check?.checkedAt ?? null,
+        // State-specific fields are emitted ONLY for their own state, so a summary can never
+        // violate skillSummarySchema's cross-field invariants even if a stored row is odd.
+        ...(check?.sourceCheckState === 'update-available'
+          ? {
+              ...(check.candidateRevision
+                ? { candidateRevision: check.candidateRevision }
+                : {}),
+              ...(check.reviewArtifactId
+                ? { reviewArtifactId: check.reviewArtifactId }
+                : {}),
+            }
+          : {}),
+        ...(check?.sourceCheckState === 'cannot-check' &&
+        check.cannotCheckReason
+          ? { cannotCheckReason: check.cannotCheckReason }
+          : {}),
+        ...(check?.sourceCheckState === 'check-failed' &&
+        check.checkFailedReason
+          ? { checkFailedReason: check.checkFailedReason }
+          : {}),
         installs: installsBySkill.get(skillId) ?? [],
       });
     }
     return result.sort((a, b) => a.name.localeCompare(b.name));
+  };
+
+  /** The Skill as currently approved in the user's latest bundle, or a not-found error. */
+  const requireSkill = async (
+    userId: string,
+    skillId: string,
+  ): Promise<PortableLockedSkill> => {
+    const current = await latestBundle(userId);
+    const skill = current?.bundle.resolved.skills[skillId];
+    if (!skill) throw notFound('skill-not-found', 'No such Skill.');
+    return skill;
+  };
+
+  /**
+   * The full current review artifact for a Skill summary, or null. Only an update-available
+   * check that is still bound to the summary's approved version yields one. File text is merged
+   * in only from a payload whose bytes still hash to `artifactPayloadHash`; if the payload is
+   * missing or fails that check, the artifact is returned with metadata only — never with
+   * unverified text.
+   */
+  const reviewArtifactOf = async (
+    userId: string,
+    summary: SkillSummary,
+  ): Promise<SkillDetail['reviewArtifact']> => {
+    if (summary.sourceCheckState !== 'update-available') return null;
+    const stored = await config.repository.getSkillReviewCheck(
+      userId,
+      summary.skillId,
+    );
+    if (
+      !stored ||
+      stored.sourceCheckState !== 'update-available' ||
+      stored.approvedContentHash !== summary.approvedVersion ||
+      stored.reviewArtifactId !== summary.reviewArtifactId ||
+      !stored.reviewArtifactId ||
+      !stored.candidateRevision ||
+      !stored.candidateContentHash ||
+      !stored.artifactPayloadHash
+    )
+      return null;
+    const diffFiles = stored.diffFiles ?? [];
+    const bytes = await config.blobStore.get(
+      userId,
+      stored.artifactPayloadHash,
+    );
+    const textByPath =
+      bytes && sha256Of(bytes) === stored.artifactPayloadHash
+        ? (parseReviewPayload(bytes, diffFiles) ?? new Map())
+        : new Map<string, ReviewPayloadText>();
+    return {
+      reviewArtifactId: stored.reviewArtifactId,
+      skillId: summary.skillId,
+      approvedContentHash: stored.approvedContentHash,
+      candidateRevision: stored.candidateRevision,
+      candidateContentHash: stored.candidateContentHash,
+      artifactPayloadHash: stored.artifactPayloadHash,
+      checkedAt: stored.checkedAt,
+      files: diffFiles.map((file) => ({
+        ...file,
+        ...textByPath.get(file.relativePath),
+      })),
+    };
   };
 
   return {
@@ -254,7 +398,140 @@ export const createProductMethods = (config: ProductServiceConfig) => {
           seen.add(entry.contentHash);
           return true;
         });
-      return { ...summary, history, files: null, diff: null };
+      return {
+        ...summary,
+        history,
+        reviewArtifact: await reviewArtifactOf(user.userId, summary),
+      };
+    },
+
+    /**
+     * CLI → Cloud: store an update-available result and its bounded review payload (P5a §5a).
+     * Cloud verifies ONLY `artifactPayloadHash` — by rehashing the exact payload bytes it is
+     * about to hold. It never recomputes or vouches for `candidateContentHash` (the full
+     * candidate tree hash, which Cloud never materializes); that value is the CLI's report and
+     * is what an approval later records.
+     */
+    uploadSkillReviewArtifact: async (
+      user: AuthenticatedUser,
+      request: UploadSkillReviewArtifactRequest,
+      payloadBytes: Uint8Array,
+    ): Promise<UploadSkillReviewArtifactResponse> => {
+      if (payloadBytes.byteLength > MAX_REVIEW_PAYLOAD_BYTES)
+        throw invalidRequest('Review payload exceeds the size bound.');
+      if (sha256Of(payloadBytes) !== request.artifactPayloadHash)
+        throw invalidRequest(
+          'Uploaded review payload does not match its declared hash.',
+        );
+      // File text is served only from the hash-verified payload, so the (unverified)
+      // metadata must not carry any text of its own.
+      if (
+        request.files.some(
+          (file) =>
+            file.beforeText !== undefined || file.afterText !== undefined,
+        )
+      )
+        throw invalidRequest(
+          'Review file metadata must not carry text; text belongs in the payload.',
+        );
+      const paths = new Set(request.files.map((file) => file.relativePath));
+      if (paths.size !== request.files.length)
+        throw invalidRequest('Review file metadata lists a path twice.');
+      const diffFiles: ReviewArtifactFileRecord[] = request.files.map(
+        (file) => ({
+          relativePath: file.relativePath,
+          kind: file.kind,
+          binary: file.binary,
+          ...(file.before ? { before: file.before } : {}),
+          ...(file.after ? { after: file.after } : {}),
+        }),
+      );
+      if (!parseReviewPayload(payloadBytes, diffFiles))
+        throw invalidRequest(
+          'Review payload does not describe the declared changed files.',
+        );
+      const skill = await requireSkill(user.userId, request.skillId);
+      if (skill.restoration.strategy !== 'reference')
+        throw invalidRequest('This Skill has no checkable source to review.');
+      // Base-bound: a review computed against anything but the CURRENT approved version
+      // describes the wrong delta; refuse it rather than replace a current result.
+      if (request.approvedContentHash !== skill.contentHash)
+        throw remoteConflict(
+          'The approved version changed since this check ran. Check again.',
+        );
+      if (request.candidateContentHash === request.approvedContentHash)
+        throw invalidRequest(
+          'A candidate identical to the approved version is not an update.',
+        );
+      const reviewArtifactId = config.newId();
+      // Safe replacement order (P5a §5a): the new payload is stored first under its own
+      // content-addressed key (never touching the old one), then the new metadata row
+      // replaces the old one in a single write. If either step fails, the previous artifact
+      // is still fully intact and remains the current one.
+      await config.blobStore.put(
+        user.userId,
+        request.artifactPayloadHash,
+        payloadBytes,
+      );
+      await config.repository.putSkillReviewCheck({
+        userId: user.userId,
+        skillId: request.skillId,
+        approvedContentHash: request.approvedContentHash,
+        sourceCheckState: 'update-available',
+        checkedAt: request.checkedAt,
+        candidateRevision: request.candidateRevision,
+        candidateContentHash: request.candidateContentHash,
+        reviewArtifactId,
+        artifactPayloadHash: request.artifactPayloadHash,
+        diffFiles,
+      });
+      // The superseded payload blob is deliberately NOT physically deleted in V0: blobs are
+      // owner-scoped and content-addressed (identical bytes share one key, so deleting or
+      // overwriting by hash could destroy data something else references), and once the
+      // metadata row above no longer names it, no read path ever serves it.
+      return { reviewArtifactId };
+    },
+
+    /** CLI → Cloud: store a no-artifact check result (no-update / cannot-check / check-failed). */
+    reportSkillSourceCheck: async (
+      user: AuthenticatedUser,
+      request: ReportSkillSourceCheckRequest,
+    ): Promise<{ ok: true }> => {
+      if (
+        request.cannotCheckReason !== undefined &&
+        request.sourceCheckState !== 'cannot-check'
+      )
+        throw invalidRequest(
+          'cannotCheckReason is only valid for a cannot-check result.',
+        );
+      if (
+        request.failureReason !== undefined &&
+        request.sourceCheckState !== 'check-failed'
+      )
+        throw invalidRequest(
+          'failureReason is only valid for a check-failed result.',
+        );
+      const skill = await requireSkill(user.userId, request.skillId);
+      if (request.approvedContentHash !== skill.contentHash)
+        throw remoteConflict(
+          'The approved version changed since this check ran. Check again.',
+        );
+      // Latest-only: this replaces any prior result for the Skill, including a previous
+      // update-available artifact, which therefore stops being approvable.
+      await config.repository.putSkillReviewCheck({
+        userId: user.userId,
+        skillId: request.skillId,
+        approvedContentHash: request.approvedContentHash,
+        sourceCheckState: request.sourceCheckState,
+        checkedAt: request.checkedAt,
+        ...(request.cannotCheckReason
+          ? { cannotCheckReason: request.cannotCheckReason }
+          : {}),
+        ...(request.failureReason
+          ? { checkFailedReason: request.failureReason }
+          : {}),
+      });
+      return { ok: true };
     },
 
     approveSkillVersion: async (
@@ -266,37 +543,68 @@ export const createProductMethods = (config: ProductServiceConfig) => {
         throw notFound('remote-environment-not-found', 'No cloud Environment.');
       const skill = current.bundle.resolved.skills[request.skillId];
       if (!skill) throw notFound('skill-not-found', 'No such Skill.');
+      // Approve-by-artifact (P5a §5a): the request names ONLY an artifact id. Everything that
+      // gets approved is read from Cloud's own stored record for THIS user + THIS Skill —
+      // never from the client, and never by re-resolving the source (Cloud has no resolver).
+      // The lookup is keyed by (userId, skillId), so another account's or another Skill's
+      // artifact can never be found here; it simply fails the id match below.
+      const stored = await config.repository.getSkillReviewCheck(
+        user.userId,
+        request.skillId,
+      );
+      if (
+        !stored ||
+        stored.skillId !== request.skillId ||
+        stored.reviewArtifactId !== request.reviewArtifactId ||
+        stored.sourceCheckState !== 'update-available'
+      )
+        // Unknown, superseded by a newer check (CASE B), or replaced by a no-artifact result.
+        throw remoteConflict(
+          'This review is no longer current. A newer check has superseded it — review again.',
+        );
+      // Base-bound (CASE C): the artifact describes a delta from the approved version it was
+      // computed against; if the Skill's approved version has since changed, that delta no
+      // longer applies.
+      if (stored.approvedContentHash !== skill.contentHash)
+        throw remoteConflict(
+          'The approved version changed since this review was created. Review again.',
+        );
+      const { candidateRevision, candidateContentHash } = stored;
+      if (!candidateRevision || !candidateContentHash)
+        throw remoteConflict(
+          'This review is incomplete and cannot be approved. Check again.',
+        );
       if (skill.restoration.strategy !== 'reference')
         throw invalidRequest(
           'This Skill has no checkable source to approve a version from.',
         );
-      // Already at the reviewed candidate ⇒ idempotent no-op (not a stale error).
-      if (skill.contentHash === request.candidateContentHash)
-        return {
-          skillId: request.skillId,
-          approvedVersion: skill.contentHash,
-          createdNew: false,
-        };
-      // Stale-review guard: the write must name the exact immutable candidate the user
-      // reviewed. We apply THAT candidate, never silently a different current source.
+      // Record exactly the candidate the artifact was built from (its revision + the CLI's
+      // reported tree hash), keeping every other reference field as it was.
       const nextSkill: PortableLockedSkill = {
         ...skill,
-        contentHash: request.candidateContentHash,
+        contentHash: candidateContentHash,
         restoration: {
           strategy: 'reference',
           reference: {
             ...skill.restoration.reference,
-            revision: request.candidateRevision,
-            expectedContentHash: request.candidateContentHash,
+            revision: candidateRevision,
+            expectedContentHash: candidateContentHash,
           },
         },
       };
       const approvedVersion = await commitBundleMutation(user.userId, current, {
         [request.skillId]: nextSkill,
       });
+      // Consumed: the artifact described a delta from a base that is no longer approved.
+      // (Were this delete to fail, the row would still be inert: its base no longer matches,
+      // so it reads as not-checked and can never be approved again.)
+      await config.repository.deleteSkillReviewCheck(
+        user.userId,
+        request.skillId,
+      );
       return {
         skillId: request.skillId,
-        approvedVersion: request.candidateContentHash,
+        approvedVersion: candidateContentHash,
         createdNew: true,
         environmentVersionNumber: approvedVersion.versionNumber,
       };
@@ -598,7 +906,7 @@ export const createProductMethods = (config: ProductServiceConfig) => {
       }));
       const needsAttention: NeedsAttention[] = [];
       for (const skill of skills)
-        if (skill.updateStatus === 'update-available')
+        if (skill.sourceCheckState === 'update-available')
           needsAttention.push({
             kind: 'update-available',
             label: `Update available for ${skill.name}`,
@@ -661,7 +969,7 @@ export const createProductMethods = (config: ProductServiceConfig) => {
           total: skills.length,
           paused: skills.filter((s) => s.paused).length,
           updatesAvailable: skills.filter(
-            (s) => s.updateStatus === 'update-available',
+            (s) => s.sourceCheckState === 'update-available',
           ).length,
         },
         memory: { mode: memory.mode, hasRecoveryMethod: memory.hasRecovery },

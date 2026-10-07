@@ -13,12 +13,15 @@ import {
   memorySubmitEnvelopeRequestSchema,
   prepareSnapshotRequestSchema,
   publishPublicStackVersionRequestSchema,
+  reportSkillSourceCheckRequestSchema,
   setProjectLifecycleRequestSchema,
   setSkillPausedRequestSchema,
   syncProjectsRequestSchema,
+  uploadSkillReviewArtifactRequestSchema,
 } from '@stack/spec';
 
-import { CloudServiceError } from './errors.js';
+import { CloudServiceError, invalidRequest } from './errors.js';
+import { MAX_REVIEW_PAYLOAD_BYTES } from './product-service.js';
 import type { AuthenticatedUser, CloudService } from './service.js';
 
 export type CloudRequest = {
@@ -123,13 +126,61 @@ export const handleCloudRequest = async (
       segments[2] === 'approve'
     ) {
       const user = await authenticate();
-      const body = approveSkillVersionRequestSchema.parse({
-        skillId: segments[1],
-        ...(typeof request.jsonBody === 'object' && request.jsonBody
-          ? request.jsonBody
-          : {}),
-      });
+      // Strict schema: the body may carry ONLY { reviewArtifactId } — the candidate being
+      // approved is read from Cloud's stored artifact, never from the client.
+      const body = approveSkillVersionRequestSchema.parse(
+        withRouteSkillId(segments[1], request.jsonBody),
+      );
       return json(200, await service.approveSkillVersion(user, body));
+    }
+    // P5a: CLI-reported source-check results (Cloud never resolves sources itself).
+    if (
+      method === 'POST' &&
+      segments.length === 3 &&
+      segments[0] === 'skills' &&
+      segments[2] === 'review-check'
+    ) {
+      const user = await authenticate();
+      const body = reportSkillSourceCheckRequestSchema.parse(
+        withRouteSkillId(segments[1], request.jsonBody),
+      );
+      return json(200, await service.reportSkillSourceCheck(user, body));
+    }
+    if (
+      method === 'POST' &&
+      segments.length === 3 &&
+      segments[0] === 'skills' &&
+      segments[2] === 'review-artifact'
+    ) {
+      const user = await authenticate();
+      // Wire shape: one JSON body = the upload metadata plus `payloadBase64`, the exact bytes
+      // of the bounded text payload (the transport adapter delivers POST bodies as JSON only).
+      // The service rehashes those decoded bytes against `artifactPayloadHash`.
+      const { payloadBase64, ...metadata } = withRouteSkillId(
+        segments[1],
+        request.jsonBody,
+      );
+      if (typeof payloadBase64 !== 'string')
+        return errorResponse(
+          400,
+          'invalid-request',
+          'Missing review payload (payloadBase64).',
+        );
+      if (payloadBase64.length > MAX_REVIEW_PAYLOAD_BASE64_LENGTH)
+        return errorResponse(
+          400,
+          'invalid-request',
+          'Review payload exceeds the size bound.',
+        );
+      const body = uploadSkillReviewArtifactRequestSchema.parse(metadata);
+      return json(
+        200,
+        await service.uploadSkillReviewArtifact(
+          user,
+          body,
+          new Uint8Array(Buffer.from(payloadBase64, 'base64')),
+        ),
+      );
     }
     if (
       method === 'POST' &&
@@ -503,6 +554,29 @@ export const handleCloudRequest = async (
       error instanceof Error ? error.message : 'Internal error.',
     );
   }
+};
+
+/** Base64 length of the largest review payload the service accepts (4 chars per 3 bytes). */
+const MAX_REVIEW_PAYLOAD_BASE64_LENGTH =
+  Math.ceil(MAX_REVIEW_PAYLOAD_BYTES / 3) * 4;
+
+/**
+ * Merge the route's Skill id into a JSON body. The route is authoritative: a body that names a
+ * DIFFERENT skillId is rejected rather than silently overriding (or being overridden by) it.
+ */
+const withRouteSkillId = (
+  skillId: string | undefined,
+  jsonBody: unknown,
+): Record<string, unknown> => {
+  const body =
+    typeof jsonBody === 'object' &&
+    jsonBody !== null &&
+    !Array.isArray(jsonBody)
+      ? (jsonBody as Record<string, unknown>)
+      : {};
+  if (body.skillId !== undefined && body.skillId !== skillId)
+    throw invalidRequest('Request skillId does not match the route.');
+  return { ...body, skillId };
 };
 
 const matches = (segments: string[], expected: string[]): boolean =>

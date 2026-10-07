@@ -31,12 +31,12 @@ export {
   createProductMethods,
   createStandardMemoryProjectCounts,
   type ProductServiceConfig,
-  type SkillSourceChecker,
-  type SourceLatest,
   type MemoryProjectCounts,
 } from './product-service.js';
 export {
   createCachedSourceChecker,
   type CachedSourceCheckerConfig,
+  type SkillSourceChecker,
+  type SourceLatest,
 } from './source-check.js';
 export { deriveMachineState } from './machine-state.js';

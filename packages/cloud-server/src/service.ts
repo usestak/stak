@@ -46,7 +46,6 @@ import {
   createProductMethods,
   createStandardMemoryProjectCounts,
   type MemoryProjectCounts,
-  type SkillSourceChecker,
 } from './product-service.js';
 
 const USER_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -94,8 +93,6 @@ export type CloudServiceConfig = {
   maxSnapshotBytes?: number;
   /** Per-user remote Memory backend factory. Absent = Memory API returns 501. */
   memoryBackendFor?: (userId: string) => RemoteMemoryBackend;
-  /** P3: injected source-latest checker for the Skills read model (absent ⇒ cannot-check). */
-  checkSkillSource?: SkillSourceChecker;
   /** P3: injected Standard per-project Memory counts (absent ⇒ unavailable/null). */
   memoryProjectCounts?: MemoryProjectCounts;
 };
@@ -176,13 +173,11 @@ export const createCloudService = (config: CloudServiceConfig) => {
 
   const productMethods = createProductMethods({
     repository: config.repository,
+    blobStore: config.blobStore,
     now,
     newId,
     ...(config.memoryBackendFor
       ? { memoryBackendFor: config.memoryBackendFor }
-      : {}),
-    ...(config.checkSkillSource
-      ? { checkSkillSource: config.checkSkillSource }
       : {}),
     // Default to the real Standard deriver when a Memory backend is present; an explicit
     // override still wins (e.g. tests). Protected stays null inside the deriver.

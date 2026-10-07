@@ -1,7 +1,16 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 
 import { computeEnvironmentBundleDigest } from '@stack/shared';
-import type { CloudEnvironmentBundle, PortableLockedSkill } from '@stack/spec';
+import {
+  skillDetailSchema,
+  skillsReadModelSchema,
+  uploadSkillReviewArtifactRequestSchema,
+  type CloudEnvironmentBundle,
+  type PortableLockedSkill,
+  type UploadSkillReviewArtifactRequest,
+} from '@stack/spec';
 
 import type { CloudRequest } from './handler.js';
 import {
@@ -11,7 +20,6 @@ import {
   createInMemoryRepository,
   handleCloudRequest,
 } from './index.js';
-import type { SkillSourceChecker } from './product-service.js';
 
 const h = (c: string) => `sha256:${c.repeat(64)}`;
 const MACHINE_A = '00000000-0000-4000-8000-0000000000a1';
@@ -94,14 +102,15 @@ const buildBundle = (
   };
 };
 
-const setup = (options: { checkSkillSource?: SkillSourceChecker } = {}) => {
+const setup = () => {
   const repository = createInMemoryRepository();
   const memory = createInMemoryMemoryBackends();
+  const blobStore = createInMemoryBlobStore();
   let clock = new Date('2026-10-05T00:00:00.000Z');
   let counter = 0;
   const service = createCloudService({
     repository,
-    blobStore: createInMemoryBlobStore(),
+    blobStore,
     appUrl: 'http://localhost:3000',
     ticketSecret: 'test-secret',
     now: () => clock,
@@ -109,9 +118,6 @@ const setup = (options: { checkSkillSource?: SkillSourceChecker } = {}) => {
       `00000000-0000-4000-8000-${(counter++).toString().padStart(12, '0')}`,
     randomSecret: () => `secret-${counter++}`,
     memoryBackendFor: memory.memoryBackendFor,
-    ...(options.checkSkillSource
-      ? { checkSkillSource: options.checkSkillSource }
-      : {}),
   });
   const call = (
     method: string,
@@ -153,7 +159,101 @@ const setup = (options: { checkSkillSource?: SkillSourceChecker } = {}) => {
   const setClock = (iso: string) => {
     clock = new Date(iso);
   };
-  return { service, repository, memory, call, signIn, pushBundle, setClock };
+  return {
+    service,
+    repository,
+    blobStore,
+    memory,
+    call,
+    signIn,
+    pushBundle,
+    setClock,
+  };
+};
+
+const REVIEW_SKILL = 'skill_review001';
+
+/**
+ * Seed one approved, checkable (git reference, tracked ref) Skill for `userId` and return the
+ * authenticated user plus the Skill's id and CURRENT approved content hash. Uses the real
+ * sign-in + push path (no repository back doors).
+ */
+const seedSkill = async (
+  env: ReturnType<typeof setup>,
+  userId = 'alice',
+  skills: Record<string, PortableLockedSkill> = {
+    [REVIEW_SKILL]: gitSkill('reviewed', h('a'), { ref: 'refs/heads/main' }),
+  },
+) => {
+  const token = await env.signIn(userId);
+  await env.pushBundle(token, buildBundle(skills));
+  const user = await env.service.authenticate(`Bearer ${token}`);
+  const [skillId, skill] = Object.entries(skills)[0] ?? [];
+  if (!skillId || !skill) throw new Error('seedSkill needs at least one Skill');
+  return { token, user, skillId, approvedContentHash: skill.contentHash };
+};
+
+/** The upload request as the review-artifact ROUTE body carries it (skillId is in the URL). */
+const routeMetadataOf = (
+  request: UploadSkillReviewArtifactRequest,
+): Record<string, unknown> => {
+  const metadata: Record<string, unknown> = { ...request };
+  delete metadata.skillId;
+  return metadata;
+};
+
+const sha256Of = (bytes: Uint8Array) =>
+  `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+
+/**
+ * A complete, internally-consistent upload request + its bounded text payload for one
+ * modified SKILL.md. Metadata (`files`) carries no text; text travels only in the hashed
+ * payload, and `artifactPayloadHash` is the real sha256 of those exact payload bytes.
+ */
+const reviewUpload = (input: {
+  skillId: string;
+  approvedContentHash: string;
+  candidateRevision: string;
+  candidateContentHash: string;
+  afterText?: string;
+  checkedAt?: string;
+}) => {
+  const beforeText = 'old body\n';
+  const afterText =
+    input.afterText ?? `new body for ${input.candidateRevision}\n`;
+  const payload = new Uint8Array(
+    Buffer.from(
+      JSON.stringify({
+        files: [{ relativePath: 'SKILL.md', beforeText, afterText }],
+      }),
+      'utf8',
+    ),
+  );
+  const file: UploadSkillReviewArtifactRequest['files'][number] = {
+    relativePath: 'SKILL.md',
+    kind: 'modified',
+    binary: false,
+    before: {
+      byteSize: Buffer.byteLength(beforeText),
+      hash: sha256Of(Buffer.from(beforeText)),
+    },
+    after: {
+      byteSize: Buffer.byteLength(afterText),
+      hash: sha256Of(Buffer.from(afterText)),
+    },
+  };
+  const request: UploadSkillReviewArtifactRequest = {
+    skillId: input.skillId,
+    approvedContentHash: input.approvedContentHash,
+    candidateRevision: input.candidateRevision,
+    candidateContentHash: input.candidateContentHash,
+    artifactPayloadHash: sha256Of(payload),
+    checkedAt: input.checkedAt ?? '2026-10-05T00:00:00.000Z',
+    files: [file],
+  };
+  // Sanity: the request is valid against the real wire schema (not just the TS type).
+  uploadSkillReviewArtifactRequestSchema.parse(request);
+  return { request, file, payload, beforeText, afterText };
 };
 
 /* ------------------------------ AUTHORIZATION ------------------------------ */
@@ -287,14 +387,8 @@ describe('P3 skills read model', () => {
     expect(second?.installs).toHaveLength(0); // approved but not installed
   });
 
-  it('distinguishes update-available, no-update, and cannot-check', async () => {
-    const checkSkillSource: SkillSourceChecker = async ({ skillId }) => {
-      if (skillId === 'skill_update001')
-        return { status: 'different', sourceRevision: 'f'.repeat(40) };
-      if (skillId === 'skill_current01') return { status: 'same' };
-      return { status: 'uncheckable' };
-    };
-    const env = setup({ checkSkillSource });
+  it('distinguishes update-available, no-update, cannot-check, and not-checked (persisted CLI checks)', async () => {
+    const env = setup();
     const alice = await env.signIn('alice');
     await env.pushBundle(
       alice,
@@ -306,21 +400,60 @@ describe('P3 skills read model', () => {
           ref: 'refs/heads/main',
         }),
         skill_local0001: localSkill('local-one', h('c')),
+        skill_unseen001: gitSkill('unseen', h('d'), {
+          ref: 'refs/heads/main',
+        }),
       }),
     );
+    const at = '2026-10-05T00:00:00.000Z';
+    await env.repository.putSkillReviewCheck({
+      userId: 'alice',
+      skillId: 'skill_update001',
+      approvedContentHash: h('a'),
+      sourceCheckState: 'update-available',
+      checkedAt: at,
+      candidateRevision: 'f'.repeat(40),
+      candidateContentHash: h('e'),
+      reviewArtifactId: '00000000-0000-4000-8000-00000000aaaa',
+      artifactPayloadHash: h('9'),
+      diffFiles: [],
+    });
+    await env.repository.putSkillReviewCheck({
+      userId: 'alice',
+      skillId: 'skill_current01',
+      approvedContentHash: h('b'),
+      sourceCheckState: 'no-update',
+      checkedAt: at,
+    });
+    await env.repository.putSkillReviewCheck({
+      userId: 'alice',
+      skillId: 'skill_local0001',
+      approvedContentHash: h('c'),
+      sourceCheckState: 'cannot-check',
+      cannotCheckReason: 'local',
+      checkedAt: at,
+    });
     const res = await env.call('GET', 'skills', { token: alice });
     const body = res.jsonBody as {
       skills: Array<{
         skillId: string;
-        updateStatus: string;
-        candidateVersion?: string;
+        sourceCheckState: string;
+        candidateRevision?: string;
+        reviewArtifactId?: string;
+        cannotCheckReason?: string;
       }>;
     };
     const byId = (id: string) => body.skills.find((s) => s.skillId === id);
-    expect(byId('skill_update001')?.updateStatus).toBe('update-available');
-    expect(byId('skill_update001')?.candidateVersion).toBe('f'.repeat(40));
-    expect(byId('skill_current01')?.updateStatus).toBe('no-update');
-    expect(byId('skill_local0001')?.updateStatus).toBe('cannot-check');
+    expect(byId('skill_update001')?.sourceCheckState).toBe('update-available');
+    expect(byId('skill_update001')?.candidateRevision).toBe('f'.repeat(40));
+    expect(byId('skill_update001')?.reviewArtifactId).toBe(
+      '00000000-0000-4000-8000-00000000aaaa',
+    );
+    expect(byId('skill_current01')?.sourceCheckState).toBe('no-update');
+    expect(byId('skill_local0001')?.sourceCheckState).toBe('cannot-check');
+    expect(byId('skill_local0001')?.cannotCheckReason).toBe('local');
+    expect(byId('skill_unseen001')?.sourceCheckState).toBe('not-checked');
+    expect(() => skillsReadModelSchema.parse(res.jsonBody)).not.toThrow();
   });
 
   it('exposes declared capabilities and "not declared" truthfully', async () => {
@@ -380,35 +513,80 @@ describe('P3 skills read model', () => {
     expect(resumed.jsonBody).toMatchObject({ changed: true, paused: false });
   });
 
-  it('approve advances desired version; a stale/no-op candidate is idempotent', async () => {
+  it('approve (by review artifact, over HTTP) advances desired version; re-approving the consumed artifact creates nothing new', async () => {
     const env = setup();
-    const alice = await env.signIn('alice');
-    await env.pushBundle(
-      alice,
-      buildBundle({
-        skill_approve01: gitSkill('ap', h('a'), { ref: 'refs/heads/main' }),
-      }),
+    const seed = await seedSkill(env, 'alice', {
+      skill_approve01: gitSkill('ap', h('a'), { ref: 'refs/heads/main' }),
+    });
+    const a = reviewUpload({
+      skillId: 'skill_approve01',
+      approvedContentHash: h('a'),
+      candidateRevision: 'f'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    const { reviewArtifactId } = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      a.request,
+      a.payload,
     );
     const approve = await env.call('POST', 'skills/skill_approve01/approve', {
-      token: alice,
-      body: { candidateContentHash: h('b'), candidateRevision: 'f'.repeat(40) },
+      token: seed.token,
+      body: { reviewArtifactId },
     });
     expect(approve.jsonBody).toMatchObject({
       createdNew: true,
       approvedVersion: h('b'),
+      environmentVersionNumber: 2,
     });
-    // Desired version advanced.
-    const skills = (await env.call('GET', 'skills', { token: alice }))
+    // Desired version advanced to exactly the reviewed candidate.
+    const skills = (await env.call('GET', 'skills', { token: seed.token }))
       .jsonBody as {
-      skills: Array<{ approvedVersion: string }>;
+      skills: Array<{ approvedVersion: string; sourceCheckState: string }>;
     };
     expect(skills.skills[0]?.approvedVersion).toBe(h('b'));
-    // Re-approving the SAME candidate is an idempotent no-op (not a new version).
+    // The consumed artifact no longer describes a pending delta.
+    expect(skills.skills[0]?.sourceCheckState).toBe('not-checked');
+    // Re-approving the SAME (now consumed) artifact is refused and commits no new version.
     const again = await env.call('POST', 'skills/skill_approve01/approve', {
-      token: alice,
+      token: seed.token,
+      body: { reviewArtifactId },
+    });
+    expect(again.status).toBe(409);
+    const stacks = (
+      await env.call('GET', 'stacks-owned', { token: seed.token })
+    ).jsonBody as { owned: Array<{ latestVersionNumber: number }> };
+    expect(stacks.owned[0]?.latestVersionNumber).toBe(2);
+  });
+
+  it('the approve route accepts ONLY { reviewArtifactId } — a client-supplied candidate is rejected', async () => {
+    const env = setup();
+    const seed = await seedSkill(env, 'alice', {
+      skill_approve01: gitSkill('ap', h('a'), { ref: 'refs/heads/main' }),
+    });
+    const legacy = await env.call('POST', 'skills/skill_approve01/approve', {
+      token: seed.token,
       body: { candidateContentHash: h('b'), candidateRevision: 'f'.repeat(40) },
     });
-    expect(again.jsonBody).toMatchObject({ createdNew: false });
+    expect(legacy.status).toBe(400);
+    const a = reviewUpload({
+      skillId: 'skill_approve01',
+      approvedContentHash: h('a'),
+      candidateRevision: 'f'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    const { reviewArtifactId } = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      a.request,
+      a.payload,
+    );
+    const smuggled = await env.call('POST', 'skills/skill_approve01/approve', {
+      token: seed.token,
+      body: { reviewArtifactId, candidateContentHash: h('c') },
+    });
+    expect(smuggled.status).toBe(400);
+    const skills = (await env.call('GET', 'skills', { token: seed.token }))
+      .jsonBody as { skills: Array<{ approvedVersion: string }> };
+    expect(skills.skills[0]?.approvedVersion).toBe(h('a'));
   });
 
   it('approval does not mutate any machine’s installed state', async () => {
@@ -429,10 +607,23 @@ describe('P3 skills read model', () => {
         projects: [],
       },
     });
-    await env.call('POST', 'skills/skill_approve01/approve', {
-      token: alice,
-      body: { candidateContentHash: h('b'), candidateRevision: 'f'.repeat(40) },
+    const user = await env.service.authenticate(`Bearer ${alice}`);
+    const a = reviewUpload({
+      skillId: 'skill_approve01',
+      approvedContentHash: h('a'),
+      candidateRevision: 'f'.repeat(40),
+      candidateContentHash: h('b'),
     });
+    const { reviewArtifactId } = await env.service.uploadSkillReviewArtifact(
+      user,
+      a.request,
+      a.payload,
+    );
+    const approved = await env.call('POST', 'skills/skill_approve01/approve', {
+      token: alice,
+      body: { reviewArtifactId },
+    });
+    expect(approved.status).toBe(200);
     // The machine still reports the OLD installed version → Updates waiting.
     const machines = (await env.call('GET', 'machines/view', { token: alice }))
       .jsonBody as {
@@ -440,6 +631,1072 @@ describe('P3 skills read model', () => {
     };
     expect(machines.machines[0]?.status).toBe('updates-waiting');
     expect(machines.machines[0]?.updatesWaiting).toEqual(['skill_approve01']);
+  });
+});
+
+/* --------------------- P5a: PERSISTED SOURCE-CHECK READ MODEL --------------------- */
+
+describe('Skills read model — P5a source-check states', () => {
+  it('reports not-checked when no check has ever been stored', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const result = await env.service.getSkillsReadModel(seed.user);
+    expect(result.skills[0]?.sourceCheckState).toBe('not-checked');
+    expect(result.skills[0]?.checkedAt).toBeNull();
+  });
+
+  it('reports no-update from a stored report', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    await env.repository.putSkillReviewCheck({
+      userId: seed.user.userId,
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      sourceCheckState: 'no-update',
+      checkedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const result = await env.service.getSkillsReadModel(seed.user);
+    expect(result.skills[0]?.sourceCheckState).toBe('no-update');
+    expect(result.skills[0]?.checkedAt).toBe('2026-01-01T00:00:00.000Z');
+  });
+
+  it('a stored check against a STALE approved base is ignored — reports not-checked', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    await env.repository.putSkillReviewCheck({
+      userId: seed.user.userId,
+      skillId: seed.skillId,
+      approvedContentHash: h('f'), // not the current approved hash
+      sourceCheckState: 'update-available',
+      checkedAt: '2026-01-01T00:00:00.000Z',
+      candidateRevision: 'c'.repeat(40),
+      candidateContentHash: h('c'),
+      reviewArtifactId: '00000000-0000-4000-8000-00000000ffff',
+      artifactPayloadHash: h('9'),
+      diffFiles: [],
+    });
+    const result = await env.service.getSkillsReadModel(seed.user);
+    const skill = result.skills[0];
+    expect(skill?.sourceCheckState).toBe('not-checked');
+    expect(skill?.checkedAt).toBeNull();
+    expect(skill?.candidateRevision).toBeUndefined();
+    expect(skill?.reviewArtifactId).toBeUndefined();
+    const detail = await env.service.getSkillDetail(seed.user, seed.skillId);
+    expect(detail.reviewArtifact).toBeNull();
+  });
+
+  it('cannot-check reports its reason, distinct from not-checked', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    await env.repository.putSkillReviewCheck({
+      userId: seed.user.userId,
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      sourceCheckState: 'cannot-check',
+      cannotCheckReason: 'local',
+      checkedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const result = await env.service.getSkillsReadModel(seed.user);
+    expect(result.skills[0]?.sourceCheckState).toBe('cannot-check');
+    expect(result.skills[0]?.cannotCheckReason).toBe('local');
+  });
+
+  it('check-failed reports a sanitized reason', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    await env.repository.putSkillReviewCheck({
+      userId: seed.user.userId,
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      sourceCheckState: 'check-failed',
+      checkFailedReason: 'Network unreachable',
+      checkedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const result = await env.service.getSkillsReadModel(seed.user);
+    expect(result.skills[0]?.sourceCheckState).toBe('check-failed');
+    expect(result.skills[0]?.checkFailedReason).toBe('Network unreachable');
+  });
+
+  it('every read-model summary satisfies the real skillSummarySchema', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    await env.repository.putSkillReviewCheck({
+      userId: seed.user.userId,
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      sourceCheckState: 'cannot-check',
+      cannotCheckReason: 'dirty',
+      checkedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const result = await env.service.getSkillsReadModel(seed.user);
+    expect(() => skillsReadModelSchema.parse(result)).not.toThrow();
+  });
+});
+
+/* ----------------------- P5a: CLI-REPORTED CHECK UPLOADS ----------------------- */
+
+describe('uploadSkillReviewArtifact', () => {
+  it('stores the artifact metadata + blob and the Skill reads back update-available', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const { request, payload, beforeText, afterText } = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    const result = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      request,
+      payload,
+    );
+    expect(result.reviewArtifactId).toMatch(/^[0-9a-f-]{36}$/);
+
+    const summary = (await env.service.getSkillsReadModel(seed.user)).skills[0];
+    expect(summary?.sourceCheckState).toBe('update-available');
+    expect(summary?.candidateRevision).toBe('b'.repeat(40));
+    expect(summary?.reviewArtifactId).toBe(result.reviewArtifactId);
+    expect(summary?.checkedAt).toBe(request.checkedAt);
+
+    const detail = await env.service.getSkillDetail(seed.user, seed.skillId);
+    expect(detail.sourceCheckState).toBe('update-available');
+    expect(detail.reviewArtifact).toEqual({
+      reviewArtifactId: result.reviewArtifactId,
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+      artifactPayloadHash: request.artifactPayloadHash,
+      checkedAt: request.checkedAt,
+      files: [{ ...request.files[0], beforeText, afterText }],
+    });
+    expect(() => skillDetailSchema.parse(detail)).not.toThrow();
+    // The payload is held owner-scoped under its own verified hash.
+    expect(
+      await env.blobStore.get(seed.user.userId, request.artifactPayloadHash),
+    ).toEqual(payload);
+  });
+
+  it('rejects a payload whose hash does not match the declared artifactPayloadHash, storing nothing', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const { request } = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    await expect(
+      env.service.uploadSkillReviewArtifact(
+        seed.user,
+        request,
+        new Uint8Array(Buffer.from('not matching')),
+      ),
+    ).rejects.toMatchObject({ code: 'invalid-request' });
+    expect(
+      await env.repository.getSkillReviewCheck(seed.user.userId, seed.skillId),
+    ).toBeNull();
+    expect(env.blobStore.blobs.size).toBe(0);
+  });
+
+  it('rejects text carried in the unverified metadata — text travels only in the hashed payload', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const { request, file, payload } = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    const smuggled = {
+      ...request,
+      files: [{ ...file, afterText: 'unverified text' }],
+    };
+    await expect(
+      env.service.uploadSkillReviewArtifact(seed.user, smuggled, payload),
+    ).rejects.toMatchObject({ code: 'invalid-request' });
+  });
+
+  it('rejects a well-hashed payload that does not describe the declared files', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const { request, file } = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    const bad = (body: unknown) => {
+      const bytes = new Uint8Array(Buffer.from(JSON.stringify(body)));
+      return env.service.uploadSkillReviewArtifact(
+        seed.user,
+        { ...request, artifactPayloadHash: sha256Of(bytes) },
+        bytes,
+      );
+    };
+    // Not JSON at all.
+    const notJson = new Uint8Array(Buffer.from('\u0000\u0001binary'));
+    await expect(
+      env.service.uploadSkillReviewArtifact(
+        seed.user,
+        { ...request, artifactPayloadHash: sha256Of(notJson) },
+        notJson,
+      ),
+    ).rejects.toMatchObject({ code: 'invalid-request' });
+    // Text for a path the metadata does not declare.
+    await expect(
+      bad({ files: [{ relativePath: 'OTHER.md', afterText: 'x' }] }),
+    ).rejects.toMatchObject({ code: 'invalid-request' });
+    // A side the metadata says does not exist (modified has both; use a removed-only file).
+    const removedOnly = {
+      ...request,
+      files: [
+        {
+          relativePath: 'GONE.md',
+          kind: 'removed' as const,
+          binary: false,
+          before: { byteSize: 1, hash: h('1') },
+        },
+      ],
+    };
+    const removedBytes = new Uint8Array(
+      Buffer.from(
+        JSON.stringify({
+          files: [{ relativePath: 'GONE.md', beforeText: 'x', afterText: 'y' }],
+        }),
+      ),
+    );
+    await expect(
+      env.service.uploadSkillReviewArtifact(
+        seed.user,
+        { ...removedOnly, artifactPayloadHash: sha256Of(removedBytes) },
+        removedBytes,
+      ),
+    ).rejects.toMatchObject({ code: 'invalid-request' });
+    // Text for a binary file.
+    const binaryFile = {
+      ...request,
+      files: [{ ...file, binary: true }],
+    };
+    const binaryBytes = new Uint8Array(
+      Buffer.from(
+        JSON.stringify({
+          files: [{ relativePath: 'SKILL.md', afterText: 'y' }],
+        }),
+      ),
+    );
+    await expect(
+      env.service.uploadSkillReviewArtifact(
+        seed.user,
+        { ...binaryFile, artifactPayloadHash: sha256Of(binaryBytes) },
+        binaryBytes,
+      ),
+    ).rejects.toMatchObject({ code: 'invalid-request' });
+    expect(
+      await env.repository.getSkillReviewCheck(seed.user.userId, seed.skillId),
+    ).toBeNull();
+  });
+
+  it('rejects an absurd payload: candidate identical to the approved base, or an oversized payload', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const same = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: seed.approvedContentHash, // "update" to the same content
+    });
+    await expect(
+      env.service.uploadSkillReviewArtifact(
+        seed.user,
+        same.request,
+        same.payload,
+      ),
+    ).rejects.toMatchObject({ code: 'invalid-request' });
+
+    const huge = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+      afterText: 'x'.repeat(9 * 1024 * 1024),
+    });
+    await expect(
+      env.service.uploadSkillReviewArtifact(
+        seed.user,
+        huge.request,
+        huge.payload,
+      ),
+    ).rejects.toMatchObject({ code: 'invalid-request' });
+    expect(env.blobStore.blobs.size).toBe(0);
+  });
+
+  it('rejects an upload computed against a stale approved base and leaves the current check intact', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const current = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    const kept = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      current.request,
+      current.payload,
+    );
+    const stale = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: h('f'), // not the Skill's current approved hash
+      candidateRevision: 'c'.repeat(40),
+      candidateContentHash: h('c'),
+    });
+    await expect(
+      env.service.uploadSkillReviewArtifact(
+        seed.user,
+        stale.request,
+        stale.payload,
+      ),
+    ).rejects.toMatchObject({ code: 'remote-environment-conflict' });
+    const detail = await env.service.getSkillDetail(seed.user, seed.skillId);
+    expect(detail.reviewArtifact?.reviewArtifactId).toBe(kept.reviewArtifactId);
+  });
+
+  it('rejects an unknown Skill and a Skill with no checkable reference source', async () => {
+    const env = setup();
+    const seed = await seedSkill(env, 'alice', {
+      skill_local0001: localSkill('local-one', h('c')),
+    });
+    const unknown = reviewUpload({
+      skillId: 'skill_missing01',
+      approvedContentHash: h('a'),
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    await expect(
+      env.service.uploadSkillReviewArtifact(
+        seed.user,
+        unknown.request,
+        unknown.payload,
+      ),
+    ).rejects.toMatchObject({ code: 'skill-not-found' });
+    const local = reviewUpload({
+      skillId: 'skill_local0001',
+      approvedContentHash: h('c'),
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    await expect(
+      env.service.uploadSkillReviewArtifact(
+        seed.user,
+        local.request,
+        local.payload,
+      ),
+    ).rejects.toMatchObject({ code: 'invalid-request' });
+  });
+
+  it('a NEW upload replaces the prior artifact — metadata shows only the new one (latest-only)', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const a = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    const b = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'c'.repeat(40),
+      candidateContentHash: h('c'),
+      checkedAt: '2026-10-06T00:00:00.000Z',
+    });
+    const first = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      a.request,
+      a.payload,
+    );
+    const second = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      b.request,
+      b.payload,
+    );
+    expect(second.reviewArtifactId).not.toBe(first.reviewArtifactId);
+    const detail = await env.service.getSkillDetail(seed.user, seed.skillId);
+    expect(detail.reviewArtifact?.reviewArtifactId).toBe(
+      second.reviewArtifactId,
+    );
+    expect(detail.reviewArtifact?.candidateRevision).toBe('c'.repeat(40));
+    expect(detail.reviewArtifact?.files[0]?.afterText).toBe(b.afterText);
+    expect(detail.reviewArtifactId).toBe(second.reviewArtifactId);
+    // V0 skips physical deletion of the superseded blob: it is never overwritten or
+    // truncated (content-addressed storage may be shared), merely unreferenced.
+    expect(
+      await env.blobStore.get(seed.user.userId, a.request.artifactPayloadHash),
+    ).toEqual(a.payload);
+  });
+
+  it('safe replacement: if the new metadata fails to commit, the old artifact stays fully intact', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const a = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    const first = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      a.request,
+      a.payload,
+    );
+    const realPut = env.repository.putSkillReviewCheck;
+    env.repository.putSkillReviewCheck = async () => {
+      throw new Error('metadata write failed');
+    };
+    const b = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'c'.repeat(40),
+      candidateContentHash: h('c'),
+    });
+    await expect(
+      env.service.uploadSkillReviewArtifact(seed.user, b.request, b.payload),
+    ).rejects.toThrow('metadata write failed');
+    env.repository.putSkillReviewCheck = realPut;
+    const detail = await env.service.getSkillDetail(seed.user, seed.skillId);
+    expect(detail.reviewArtifact?.reviewArtifactId).toBe(
+      first.reviewArtifactId,
+    );
+    expect(detail.reviewArtifact?.files[0]?.afterText).toBe(a.afterText);
+  });
+
+  it('an artifact is invisible to another account', async () => {
+    const env = setup();
+    const alice = await seedSkill(env, 'alice');
+    const bob = await seedSkill(env, 'bob');
+    const a = reviewUpload({
+      skillId: alice.skillId,
+      approvedContentHash: alice.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    await env.service.uploadSkillReviewArtifact(
+      alice.user,
+      a.request,
+      a.payload,
+    );
+    const bobDetail = await env.service.getSkillDetail(bob.user, bob.skillId);
+    expect(bobDetail.sourceCheckState).toBe('not-checked');
+    expect(bobDetail.reviewArtifact).toBeNull();
+  });
+});
+
+describe('reportSkillSourceCheck', () => {
+  it('stores a no-update report with no artifact', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    await env.service.reportSkillSourceCheck(seed.user, {
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      sourceCheckState: 'no-update',
+      checkedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const detail = await env.service.getSkillDetail(seed.user, seed.skillId);
+    expect(detail.sourceCheckState).toBe('no-update');
+    expect(detail.checkedAt).toBe('2026-01-01T00:00:00.000Z');
+    expect(detail.reviewArtifact).toBeNull();
+  });
+
+  it('stores cannot-check with its reason and check-failed with its sanitized reason', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    await env.service.reportSkillSourceCheck(seed.user, {
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      sourceCheckState: 'cannot-check',
+      cannotCheckReason: 'dirty',
+      checkedAt: '2026-01-01T00:00:00.000Z',
+    });
+    let detail = await env.service.getSkillDetail(seed.user, seed.skillId);
+    expect(detail.sourceCheckState).toBe('cannot-check');
+    expect(detail.cannotCheckReason).toBe('dirty');
+    await env.service.reportSkillSourceCheck(seed.user, {
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      sourceCheckState: 'check-failed',
+      failureReason: 'Network unreachable',
+      checkedAt: '2026-01-02T00:00:00.000Z',
+    });
+    detail = await env.service.getSkillDetail(seed.user, seed.skillId);
+    expect(detail.sourceCheckState).toBe('check-failed');
+    expect(detail.checkFailedReason).toBe('Network unreachable');
+    expect(detail.cannotCheckReason).toBeUndefined();
+  });
+
+  it('a later report supersedes a prior artifact (latest-only), making it unapprovable', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const a = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    const { reviewArtifactId } = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      a.request,
+      a.payload,
+    );
+    await env.service.reportSkillSourceCheck(seed.user, {
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      sourceCheckState: 'no-update',
+      checkedAt: '2026-10-06T00:00:00.000Z',
+    });
+    const detail = await env.service.getSkillDetail(seed.user, seed.skillId);
+    expect(detail.sourceCheckState).toBe('no-update');
+    expect(detail.reviewArtifact).toBeNull();
+    await expect(
+      env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId,
+      }),
+    ).rejects.toMatchObject({ code: 'remote-environment-conflict' });
+  });
+
+  it('rejects a report against a stale base, an unknown Skill, or a reason for the wrong state', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    await expect(
+      env.service.reportSkillSourceCheck(seed.user, {
+        skillId: seed.skillId,
+        approvedContentHash: h('f'),
+        sourceCheckState: 'no-update',
+        checkedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ).rejects.toMatchObject({ code: 'remote-environment-conflict' });
+    await expect(
+      env.service.reportSkillSourceCheck(seed.user, {
+        skillId: 'skill_missing01',
+        approvedContentHash: seed.approvedContentHash,
+        sourceCheckState: 'no-update',
+        checkedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ).rejects.toMatchObject({ code: 'skill-not-found' });
+    await expect(
+      env.service.reportSkillSourceCheck(seed.user, {
+        skillId: seed.skillId,
+        approvedContentHash: seed.approvedContentHash,
+        sourceCheckState: 'no-update',
+        cannotCheckReason: 'dirty',
+        checkedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ).rejects.toMatchObject({ code: 'invalid-request' });
+    await expect(
+      env.service.reportSkillSourceCheck(seed.user, {
+        skillId: seed.skillId,
+        approvedContentHash: seed.approvedContentHash,
+        sourceCheckState: 'cannot-check',
+        failureReason: 'not a cannot-check field',
+        checkedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ).rejects.toMatchObject({ code: 'invalid-request' });
+    expect(
+      await env.repository.getSkillReviewCheck(seed.user.userId, seed.skillId),
+    ).toBeNull();
+  });
+});
+
+/* ----------------------- P5a: APPROVE BY REVIEW ARTIFACT ----------------------- */
+
+describe('approveSkillVersion — by artifact (P5a)', () => {
+  const upload = async (
+    env: ReturnType<typeof setup>,
+    seed: Awaited<ReturnType<typeof seedSkill>>,
+    candidate: { revision: string; contentHash: string },
+  ) => {
+    const { request, payload } = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: candidate.revision,
+      candidateContentHash: candidate.contentHash,
+    });
+    return env.service.uploadSkillReviewArtifact(seed.user, request, payload);
+  };
+  const approvedReference = async (
+    env: ReturnType<typeof setup>,
+    token: string,
+    skillId: string,
+  ) => {
+    const res = await env.call('GET', 'environments/main', { token });
+    const body = res.jsonBody as {
+      latest: { bundle: CloudEnvironmentBundle };
+    };
+    const skill = body.latest.bundle.resolved.skills[skillId];
+    return {
+      contentHash: skill?.contentHash,
+      reference:
+        skill?.restoration.strategy === 'reference'
+          ? skill.restoration.reference
+          : undefined,
+    };
+  };
+
+  it('approves the exact candidate recorded in the current artifact and consumes it', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const { reviewArtifactId } = await upload(env, seed, {
+      revision: 'b'.repeat(40),
+      contentHash: h('b'),
+    });
+    const result = await env.service.approveSkillVersion(seed.user, {
+      skillId: seed.skillId,
+      reviewArtifactId,
+    });
+    expect(result).toEqual({
+      skillId: seed.skillId,
+      approvedVersion: h('b'),
+      createdNew: true,
+      environmentVersionNumber: 2,
+    });
+    const approved = await approvedReference(env, seed.token, seed.skillId);
+    expect(approved.contentHash).toBe(h('b'));
+    expect(approved.reference?.revision).toBe('b'.repeat(40));
+    expect(approved.reference?.expectedContentHash).toBe(h('b'));
+    // Untouched reference fields are preserved.
+    expect(approved.reference?.remote).toBe(
+      'https://github.com/acme/skills.git',
+    );
+    expect(approved.reference?.ref).toBe('refs/heads/main');
+    // Approval success deletes the consumed check row.
+    expect(
+      await env.repository.getSkillReviewCheck(seed.user.userId, seed.skillId),
+    ).toBeNull();
+  });
+
+  it('rejects an artifact that belongs to a different account', async () => {
+    const env = setup();
+    const alice = await seedSkill(env, 'alice');
+    const bob = await seedSkill(env, 'bob'); // same Skill id, separate account
+    const { reviewArtifactId } = await upload(env, alice, {
+      revision: 'b'.repeat(40),
+      contentHash: h('b'),
+    });
+    await expect(
+      env.service.approveSkillVersion(bob.user, {
+        skillId: bob.skillId,
+        reviewArtifactId,
+      }),
+    ).rejects.toMatchObject({ code: 'remote-environment-conflict' });
+    // Bob's Skill is unchanged; Alice's artifact is still current and approvable by Alice.
+    expect(
+      (await approvedReference(env, bob.token, bob.skillId)).contentHash,
+    ).toBe(h('a'));
+    const result = await env.service.approveSkillVersion(alice.user, {
+      skillId: alice.skillId,
+      reviewArtifactId,
+    });
+    expect(result.createdNew).toBe(true);
+  });
+
+  it('rejects an artifact id for the wrong Skill', async () => {
+    const env = setup();
+    const seed = await seedSkill(env, 'alice', {
+      skill_skilla001: gitSkill('a-skill', h('a'), { ref: 'refs/heads/main' }),
+      skill_skillb001: gitSkill('b-skill', h('1'), { ref: 'refs/heads/main' }),
+    });
+    const { reviewArtifactId } = await upload(env, seed, {
+      revision: 'b'.repeat(40),
+      contentHash: h('b'),
+    });
+    expect(seed.skillId).toBe('skill_skilla001');
+    await expect(
+      env.service.approveSkillVersion(seed.user, {
+        skillId: 'skill_skillb001',
+        reviewArtifactId,
+      }),
+    ).rejects.toMatchObject({ code: 'remote-environment-conflict' });
+    expect(
+      (await approvedReference(env, seed.token, 'skill_skillb001')).contentHash,
+    ).toBe(h('1'));
+  });
+
+  it('rejects an unknown artifact id and an unknown Skill', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    await expect(
+      env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId: '00000000-0000-4000-8000-00000000dead',
+      }),
+    ).rejects.toMatchObject({ code: 'remote-environment-conflict' });
+    await expect(
+      env.service.approveSkillVersion(seed.user, {
+        skillId: 'skill_missing01',
+        reviewArtifactId: '00000000-0000-4000-8000-00000000dead',
+      }),
+    ).rejects.toMatchObject({ code: 'skill-not-found' });
+  });
+
+  it('CASE B: a newer artifact supersedes an older one — approving the old id is rejected', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const a = await upload(env, seed, {
+      revision: 'b'.repeat(40),
+      contentHash: h('b'),
+    });
+    const b = await upload(env, seed, {
+      revision: 'c'.repeat(40),
+      contentHash: h('c'),
+    });
+    await expect(
+      env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId: a.reviewArtifactId,
+      }),
+    ).rejects.toMatchObject({ code: 'remote-environment-conflict' });
+    // The rejected attempt changed nothing; the newer artifact approves ITS candidate.
+    expect(
+      (await approvedReference(env, seed.token, seed.skillId)).contentHash,
+    ).toBe(h('a'));
+    const result = await env.service.approveSkillVersion(seed.user, {
+      skillId: seed.skillId,
+      reviewArtifactId: b.reviewArtifactId,
+    });
+    expect(result).toMatchObject({ createdNew: true, approvedVersion: h('c') });
+    expect(
+      (await approvedReference(env, seed.token, seed.skillId)).reference
+        ?.revision,
+    ).toBe('c'.repeat(40));
+  });
+
+  it('CASE C: the approved base changes before the artifact is approved — the artifact is rejected', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const a = await upload(env, seed, {
+      revision: 'b'.repeat(40),
+      contentHash: h('b'),
+    });
+    // A machine pushes a new Environment version that moves this Skill's approved base to a
+    // different version (not via this artifact).
+    const envRes = await env.call('GET', 'environments/main', {
+      token: seed.token,
+    });
+    const latestVersionId = (
+      envRes.jsonBody as { latest: { version: { versionId: string } } }
+    ).latest.version.versionId;
+    const pushed = await env.call('POST', 'environments/main/versions', {
+      token: seed.token,
+      body: {
+        bundle: buildBundle({
+          [seed.skillId]: gitSkill('reviewed', h('d'), {
+            ref: 'refs/heads/main',
+          }),
+        }),
+        expectedLatestVersionId: latestVersionId,
+      },
+    });
+    expect(pushed.status).toBe(200);
+    await expect(
+      env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId: a.reviewArtifactId,
+      }),
+    ).rejects.toMatchObject({ code: 'remote-environment-conflict' });
+    // The new base is untouched, and the stale artifact reads back as not-checked.
+    expect(
+      (await approvedReference(env, seed.token, seed.skillId)).contentHash,
+    ).toBe(h('d'));
+    const detail = await env.service.getSkillDetail(seed.user, seed.skillId);
+    expect(detail.sourceCheckState).toBe('not-checked');
+    expect(detail.reviewArtifact).toBeNull();
+  });
+
+  it('CASE C (isolated): a stored check whose base differs from the current approved hash is never approved', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const reviewArtifactId = '00000000-0000-4000-8000-0000000000cc';
+    // Matching skill, matching id, update-available — ONLY the base differs.
+    await env.repository.putSkillReviewCheck({
+      userId: seed.user.userId,
+      skillId: seed.skillId,
+      approvedContentHash: h('f'),
+      sourceCheckState: 'update-available',
+      checkedAt: '2026-10-05T00:00:00.000Z',
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+      reviewArtifactId,
+      artifactPayloadHash: h('9'),
+      diffFiles: [],
+    });
+    await expect(
+      env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId,
+      }),
+    ).rejects.toMatchObject({ code: 'remote-environment-conflict' });
+    expect(
+      (await approvedReference(env, seed.token, seed.skillId)).contentHash,
+    ).toBe(h('a'));
+  });
+
+  it('a stored row with the matching id but a non-update-available state is never approved', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const reviewArtifactId = '00000000-0000-4000-8000-0000000000dd';
+    await env.repository.putSkillReviewCheck({
+      userId: seed.user.userId,
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      sourceCheckState: 'no-update',
+      checkedAt: '2026-10-05T00:00:00.000Z',
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+      reviewArtifactId,
+    });
+    await expect(
+      env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId,
+      }),
+    ).rejects.toMatchObject({ code: 'remote-environment-conflict' });
+  });
+
+  it('UPSTREAM-MOVED-WITHOUT-RECHECK: artifact A remains approvable — Cloud never re-resolves upstream at approval time', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const a = await upload(env, seed, {
+      revision: 'b'.repeat(40),
+      contentHash: h('b'),
+    });
+    // Time passes and (hypothetically) upstream moves on, but no new `stak skill check` ran.
+    // Cloud has no source resolver at all (none is configurable), so there is nothing that
+    // could observe upstream: approval uses only A's own stored, already-committed data.
+    env.setClock('2026-12-01T00:00:00.000Z');
+    const result = await env.service.approveSkillVersion(seed.user, {
+      skillId: seed.skillId,
+      reviewArtifactId: a.reviewArtifactId,
+    });
+    expect(result).toMatchObject({ createdNew: true, approvedVersion: h('b') });
+    const approved = await approvedReference(env, seed.token, seed.skillId);
+    expect(approved.reference?.revision).toBe('b'.repeat(40));
+    expect(approved.reference?.expectedContentHash).toBe(h('b'));
+  });
+
+  it('approving the same artifact twice never commits twice', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const a = await upload(env, seed, {
+      revision: 'b'.repeat(40),
+      contentHash: h('b'),
+    });
+    const first = await env.service.approveSkillVersion(seed.user, {
+      skillId: seed.skillId,
+      reviewArtifactId: a.reviewArtifactId,
+    });
+    expect(first.createdNew).toBe(true);
+    await expect(
+      env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId: a.reviewArtifactId,
+      }),
+    ).rejects.toMatchObject({ code: 'remote-environment-conflict' });
+    const stacks = (
+      await env.call('GET', 'stacks-owned', { token: seed.token })
+    ).jsonBody as { owned: Array<{ latestVersionNumber: number }> };
+    expect(stacks.owned[0]?.latestVersionNumber).toBe(2);
+  });
+
+  it('a failed commit leaves the artifact in place (not consumed) so it can be retried', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const a = await upload(env, seed, {
+      revision: 'b'.repeat(40),
+      contentHash: h('b'),
+    });
+    const realCommit = env.repository.commitEnvironmentVersion;
+    env.repository.commitEnvironmentVersion = async () => {
+      throw new Error('commit failed');
+    };
+    await expect(
+      env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId: a.reviewArtifactId,
+      }),
+    ).rejects.toThrow('commit failed');
+    env.repository.commitEnvironmentVersion = realCommit;
+    expect(
+      (await env.repository.getSkillReviewCheck(seed.user.userId, seed.skillId))
+        ?.reviewArtifactId,
+    ).toBe(a.reviewArtifactId);
+    const retry = await env.service.approveSkillVersion(seed.user, {
+      skillId: seed.skillId,
+      reviewArtifactId: a.reviewArtifactId,
+    });
+    expect(retry.createdNew).toBe(true);
+  });
+});
+
+/* ------------------------- P5a: HTTP ROUTES (CLI wire) ------------------------- */
+
+describe('P5a review-check / review-artifact HTTP routes', () => {
+  it('uploads an artifact as JSON metadata + base64 payload, serves it on the detail route, and approves it', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const { request, payload, afterText } = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    const metadata = routeMetadataOf(request);
+    const uploaded = await env.call(
+      'POST',
+      `skills/${seed.skillId}/review-artifact`,
+      {
+        token: seed.token,
+        body: {
+          ...metadata,
+          payloadBase64: Buffer.from(payload).toString('base64'),
+        },
+      },
+    );
+    expect(uploaded.status).toBe(200);
+    const { reviewArtifactId } = uploaded.jsonBody as {
+      reviewArtifactId: string;
+    };
+    const detail = await env.call('GET', `skills/${seed.skillId}`, {
+      token: seed.token,
+    });
+    const body = skillDetailSchema.parse(detail.jsonBody);
+    expect(body.reviewArtifact?.reviewArtifactId).toBe(reviewArtifactId);
+    expect(body.reviewArtifact?.files[0]?.afterText).toBe(afterText);
+    const approved = await env.call('POST', `skills/${seed.skillId}/approve`, {
+      token: seed.token,
+      body: { reviewArtifactId },
+    });
+    expect(approved.status).toBe(200);
+    expect(approved.jsonBody).toMatchObject({ approvedVersion: h('b') });
+  });
+
+  it('rejects an upload with no payload, a corrupted payload, or a body skillId that contradicts the route', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const { request, payload } = reviewUpload({
+      skillId: seed.skillId,
+      approvedContentHash: seed.approvedContentHash,
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    const metadata = routeMetadataOf(request);
+    const path = `skills/${seed.skillId}/review-artifact`;
+    const missing = await env.call('POST', path, {
+      token: seed.token,
+      body: metadata,
+    });
+    expect(missing.status).toBe(400);
+    const corrupted = await env.call('POST', path, {
+      token: seed.token,
+      body: {
+        ...metadata,
+        payloadBase64: Buffer.from('tampered').toString('base64'),
+      },
+    });
+    expect(corrupted.status).toBe(400);
+    const mismatched = await env.call('POST', path, {
+      token: seed.token,
+      body: {
+        ...metadata,
+        skillId: 'skill_other0001',
+        payloadBase64: Buffer.from(payload).toString('base64'),
+      },
+    });
+    expect(mismatched.status).toBe(400);
+    expect(
+      await env.repository.getSkillReviewCheck(seed.user.userId, seed.skillId),
+    ).toBeNull();
+  });
+
+  it('reports a no-artifact result on the review-check route', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    const res = await env.call('POST', `skills/${seed.skillId}/review-check`, {
+      token: seed.token,
+      body: {
+        approvedContentHash: seed.approvedContentHash,
+        sourceCheckState: 'cannot-check',
+        cannotCheckReason: 'ambiguous',
+        checkedAt: '2026-10-05T00:00:00.000Z',
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(res.jsonBody).toEqual({ ok: true });
+    const skills = (await env.call('GET', 'skills', { token: seed.token }))
+      .jsonBody as {
+      skills: Array<{ sourceCheckState: string; cannotCheckReason?: string }>;
+    };
+    expect(skills.skills[0]).toMatchObject({
+      sourceCheckState: 'cannot-check',
+      cannotCheckReason: 'ambiguous',
+    });
+    // 'update-available' is not reportable without an artifact.
+    const bogus = await env.call(
+      'POST',
+      `skills/${seed.skillId}/review-check`,
+      {
+        token: seed.token,
+        body: {
+          approvedContentHash: seed.approvedContentHash,
+          sourceCheckState: 'update-available',
+          checkedAt: '2026-10-05T00:00:00.000Z',
+        },
+      },
+    );
+    expect(bogus.status).toBe(400);
+  });
+
+  it('both write routes require authentication', async () => {
+    const env = setup();
+    const seed = await seedSkill(env);
+    expect(
+      (
+        await env.call('POST', `skills/${seed.skillId}/review-check`, {
+          body: {},
+        })
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await env.call('POST', `skills/${seed.skillId}/review-artifact`, {
+          body: {},
+        })
+      ).status,
+    ).toBe(401);
+  });
+
+  it('the approve route rejects a body skillId that contradicts the route', async () => {
+    const env = setup();
+    const seed = await seedSkill(env, 'alice', {
+      skill_skilla001: gitSkill('a-skill', h('a'), { ref: 'refs/heads/main' }),
+      skill_skillb001: gitSkill('b-skill', h('1'), { ref: 'refs/heads/main' }),
+    });
+    const a = reviewUpload({
+      skillId: 'skill_skilla001',
+      approvedContentHash: h('a'),
+      candidateRevision: 'b'.repeat(40),
+      candidateContentHash: h('b'),
+    });
+    const { reviewArtifactId } = await env.service.uploadSkillReviewArtifact(
+      seed.user,
+      a.request,
+      a.payload,
+    );
+    const res = await env.call('POST', 'skills/skill_skillb001/approve', {
+      token: seed.token,
+      body: { skillId: 'skill_skilla001', reviewArtifactId },
+    });
+    expect(res.status).toBe(400);
   });
 });
 
@@ -628,7 +1885,7 @@ describe('P3 memory read model + delete', () => {
   });
 
   it('Protected read model exposes no plaintext and perProject is null (not decrypted)', async () => {
-    const env = setup({});
+    const env = setup();
     const alice = await env.signIn('alice');
     await seedMemory(env, 'alice', 'protected');
     const res = await env.call('GET', 'memory/view', { token: alice });
@@ -734,12 +1991,7 @@ describe('P3 stacks / activity / overview', () => {
   });
 
   it('overview needs-attention: Protected without recovery + viewing-machine project gap', async () => {
-    const env = setup({
-      checkSkillSource: async () => ({
-        status: 'different',
-        sourceRevision: 'f'.repeat(40),
-      }),
-    });
+    const env = setup();
     const alice = await env.signIn('alice', MACHINE_A);
     await env.pushBundle(
       alice,
@@ -747,6 +1999,19 @@ describe('P3 stacks / activity / overview', () => {
         skill_up000001: gitSkill('up', h('a'), { ref: 'refs/heads/main' }),
       }),
     );
+    // A persisted CLI-reported update-available check against the CURRENT approved base.
+    await env.repository.putSkillReviewCheck({
+      userId: 'alice',
+      skillId: 'skill_up000001',
+      approvedContentHash: h('a'),
+      sourceCheckState: 'update-available',
+      checkedAt: '2026-10-05T00:00:00.000Z',
+      candidateRevision: 'f'.repeat(40),
+      candidateContentHash: h('b'),
+      reviewArtifactId: '00000000-0000-4000-8000-00000000bbbb',
+      artifactPayloadHash: h('9'),
+      diffFiles: [],
+    });
     const backend = env.memory.memoryBackendFor('alice');
     await backend.ensureProfile('1');
     await backend.setPrivacyMode('protected');
