@@ -14,11 +14,28 @@ const timestamp = z.iso.datetime({ offset: true });
 
 /* ------------------------------- Skills ------------------------------- */
 
-/** Update-check outcome; `cannot-check` is NEVER collapsed into `no-update`. */
-export const skillUpdateStatusSchema = z.enum([
+/** Structural inability to check vs. a transient failure vs. simply not yet checked (P5a §5a). */
+export const cannotCheckReasonSchema = z.enum([
+  'local',
+  'dirty',
+  'ambiguous',
+  'unreachable',
+  'pinned',
+]);
+
+/**
+ * The latest CLI-reported source-check result for one Skill (P5a §5a). `not-checked` and
+ * `cannot-check` are DISTINCT: the former means a checkable source simply has no current
+ * CLI-reported result; the latter means the source is structurally uncheckable (Local,
+ * dirty/ambiguous, pinned, resolution failure). `check-failed` is a transient network/auth
+ * failure during an explicit check — never collapsed into `cannot-check`.
+ */
+export const sourceCheckStateSchema = z.enum([
   'no-update',
   'update-available',
+  'not-checked',
   'cannot-check',
+  'check-failed',
 ]);
 
 /** Source provenance summary — a safe classification, never a path or remote credential. */
@@ -42,6 +59,78 @@ export const skillInstallSchema = z.object({
   installedVersion: contentHashSchema.nullable(),
 });
 
+/** One changed file inside a review artifact (P5a §5a/§7/§8). Unchanged files never appear. */
+export const reviewArtifactFileSchema = z
+  .object({
+    relativePath: z.string().min(1),
+    kind: z.enum(['added', 'modified', 'removed']),
+    binary: z.boolean(),
+    before: z
+      .object({ byteSize: z.number().int().nonnegative(), hash: z.string().min(1) })
+      .optional(),
+    after: z
+      .object({ byteSize: z.number().int().nonnegative(), hash: z.string().min(1) })
+      .optional(),
+    // Present only when !binary; a binary file never carries a text preview.
+    beforeText: z.string().optional(),
+    afterText: z.string().optional(),
+  })
+  .strict();
+export type ReviewArtifactFile = z.infer<typeof reviewArtifactFileSchema>;
+
+/**
+ * One immutable, bounded review artifact (P5a §5a/§1/§2). Produced entirely by the CLI;
+ * Cloud stores and serves it, verifying only `artifactPayloadHash` (the bounded payload it
+ * actually holds) — never claiming to have independently recomputed `candidateContentHash`
+ * (the full candidate tree hash, which Cloud never materializes).
+ */
+export const skillReviewArtifactSchema = z
+  .object({
+    reviewArtifactId: z.uuid(),
+    skillId: entryIdSchema,
+    approvedContentHash: contentHashSchema,
+    candidateRevision: z.string().min(1),
+    candidateContentHash: contentHashSchema,
+    artifactPayloadHash: z.string().min(1),
+    checkedAt: timestamp,
+    files: z.array(reviewArtifactFileSchema).max(200),
+  })
+  .strict();
+export type SkillReviewArtifact = z.infer<typeof skillReviewArtifactSchema>;
+
+/** CLI → Cloud upload for an update-available result (P5a §13/§16 bounds). */
+export const uploadSkillReviewArtifactRequestSchema = z
+  .object({
+    skillId: entryIdSchema,
+    approvedContentHash: contentHashSchema,
+    candidateRevision: z.string().min(1),
+    candidateContentHash: contentHashSchema,
+    artifactPayloadHash: z.string().min(1),
+    checkedAt: timestamp,
+    files: z.array(reviewArtifactFileSchema).max(200),
+  })
+  .strict();
+export type UploadSkillReviewArtifactRequest = z.infer<
+  typeof uploadSkillReviewArtifactRequestSchema
+>;
+export type UploadSkillReviewArtifactResponse = { reviewArtifactId: string };
+
+/** CLI → Cloud report for a no-artifact result: no-update, cannot-check, or check-failed. */
+export const reportSkillSourceCheckRequestSchema = z
+  .object({
+    skillId: entryIdSchema,
+    approvedContentHash: contentHashSchema,
+    sourceCheckState: z.enum(['no-update', 'cannot-check', 'check-failed']),
+    checkedAt: timestamp,
+    cannotCheckReason: cannotCheckReasonSchema.optional(),
+    // Sanitized only — never raw Git stderr, which may contain credentials/URLs.
+    failureReason: z.string().max(500).optional(),
+  })
+  .strict();
+export type ReportSkillSourceCheckRequest = z.infer<
+  typeof reportSkillSourceCheckRequestSchema
+>;
+
 export const skillSummarySchema = z.object({
   skillId: entryIdSchema,
   name: z.string().min(1),
@@ -50,8 +139,15 @@ export const skillSummarySchema = z.object({
   paused: z.boolean(),
   source: skillSourceSummarySchema,
   capability: capabilityStateSchema,
-  updateStatus: skillUpdateStatusSchema,
-  candidateVersion: z.string().optional(),
+  sourceCheckState: sourceCheckStateSchema,
+  checkedAt: timestamp.nullable(),
+  // Present only when sourceCheckState === 'update-available'.
+  candidateRevision: z.string().optional(),
+  reviewArtifactId: z.uuid().optional(),
+  // Present only when sourceCheckState === 'cannot-check'.
+  cannotCheckReason: cannotCheckReasonSchema.optional(),
+  // Present only when sourceCheckState === 'check-failed'.
+  checkFailedReason: z.string().optional(),
   installs: z.array(skillInstallSchema),
 });
 
@@ -65,24 +161,12 @@ export const skillVersionHistoryEntrySchema = z.object({
   environmentVersionNumber: z.number().int().positive(),
   approvedAt: timestamp,
 });
-export const skillFileSchema = z.object({
-  relativePath: z.string().min(1),
-  byteSize: z.number().int().nonnegative(),
-});
-export const skillDiffFileSchema = z.object({
-  relativePath: z.string().min(1),
-  kind: z.enum(['added', 'modified', 'removed']),
-});
+
 export const skillDetailSchema = skillSummarySchema.extend({
   history: z.array(skillVersionHistoryEntrySchema),
-  files: z.array(skillFileSchema).nullable(),
-  diff: z
-    .object({
-      sourceRevision: z.string(),
-      candidateVersion: z.string(),
-      files: z.array(skillDiffFileSchema),
-    })
-    .nullable(),
+  // The full artifact, only when sourceCheckState === 'update-available'; null otherwise,
+  // including when bounds were exceeded (no artifact was ever produced — see contract §5a).
+  reviewArtifact: skillReviewArtifactSchema.nullable(),
 });
 
 /* ------------------------------ Machines ------------------------------ */
@@ -270,9 +354,7 @@ export const overviewReadModelSchema = z.object({
 export const approveSkillVersionRequestSchema = z
   .object({
     skillId: entryIdSchema,
-    // The exact immutable candidate the user reviewed; a stale candidate is rejected.
-    candidateContentHash: contentHashSchema,
-    candidateRevision: z.string().min(1),
+    reviewArtifactId: z.uuid(),
   })
   .strict();
 export const setSkillPausedRequestSchema = z
@@ -281,7 +363,8 @@ export const setSkillPausedRequestSchema = z
 
 /* -------------------------------- Types -------------------------------- */
 
-export type SkillUpdateStatus = z.infer<typeof skillUpdateStatusSchema>;
+export type CannotCheckReason = z.infer<typeof cannotCheckReasonSchema>;
+export type SourceCheckState = z.infer<typeof sourceCheckStateSchema>;
 export type SkillSourceSummary = z.infer<typeof skillSourceSummarySchema>;
 export type CapabilityState = z.infer<typeof capabilityStateSchema>;
 export type SkillInstall = z.infer<typeof skillInstallSchema>;
@@ -291,8 +374,6 @@ export type SkillDetail = z.infer<typeof skillDetailSchema>;
 export type SkillVersionHistoryEntry = z.infer<
   typeof skillVersionHistoryEntrySchema
 >;
-export type SkillFile = z.infer<typeof skillFileSchema>;
-export type SkillDiffFile = z.infer<typeof skillDiffFileSchema>;
 export type MachineStatus = z.infer<typeof machineStatusSchema>;
 export type MachineSummary = z.infer<typeof machineSummarySchema>;
 export type MachinesReadModel = z.infer<typeof machinesReadModelSchema>;
