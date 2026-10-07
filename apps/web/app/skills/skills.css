@@ -103,3 +103,19 @@
   outline: 2px solid var(--orange);
   outline-offset: 2px;
 }
+.stak-approve {
+  background: var(--ink);
+  color: var(--bg);
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  border: none;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+.stak-approve:disabled,
+.stak-pill:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
