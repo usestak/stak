@@ -1,10 +1,14 @@
 import { createHash } from 'node:crypto';
 
-import { computeEnvironmentBundleDigest } from '@stack/shared';
+import {
+  computeEnvironmentBundleDigest,
+  safeGitRemoteDisplay,
+} from '@stack/shared';
 import type {
   ActivityItem,
   ActivityReadModel,
   ApproveSkillVersionRequest,
+  CannotCheckReason,
   CloudEnvironmentBundle,
   DeleteCloudMemoryResponse,
   MachinesReadModel,
@@ -152,10 +156,18 @@ export type ProductServiceConfig = {
 const sourceSummaryOf = (skill: PortableLockedSkill): SkillSourceSummary => {
   if (skill.restoration.strategy === 'reference') {
     const ref = skill.restoration.reference;
+    // Never the raw remote (P5 visual-correction §4) — only the sanitized host/ownerRepo
+    // identity `safeGitRemoteDisplay` extracts. Absent entirely if it can't be safely parsed.
+    const safe = safeGitRemoteDisplay(ref.remote);
     return {
       kind: 'git',
       checkable: ref.ref !== undefined,
-      label: ref.remote,
+      ...(safe
+        ? {
+            host: safe.host,
+            ...(safe.ownerRepo ? { ownerRepo: safe.ownerRepo } : {}),
+          }
+        : {}),
       ...(ref.ref ? { trackedRef: ref.ref } : {}),
     };
   }
@@ -163,6 +175,52 @@ const sourceSummaryOf = (skill: PortableLockedSkill): SkillSourceSummary => {
     kind: skill.restoration.reason === 'local' ? 'local' : 'snapshot',
     checkable: false,
   };
+};
+
+/**
+ * The structural (zero-network) default for a Skill with no persisted CLI check — never a
+ * guess about network reachability, only the intrinsic shape of its own restoration record
+ * (contract §5a's "three data conditions" + "cannot-check vs check-failed" boundary). A
+ * checkable source with nothing persisted yet is condition C, `not-checked`; a structurally
+ * uncheckable source defaults to `cannot-check` instead — it was NEVER going to produce a
+ * check, so "haven't checked yet" would be false, not merely stale. This is the single place
+ * list and detail both derive from (`skillSummaries`), so they cannot disagree (bug found in
+ * live dogfood: Local rows rendered "Updates haven't been checked yet.").
+ */
+const defaultSourceCheckOf = (
+  skill: PortableLockedSkill,
+  source: SkillSourceSummary,
+):
+  | { sourceCheckState: 'not-checked' }
+  | {
+      sourceCheckState: 'cannot-check';
+      cannotCheckReason?: CannotCheckReason;
+    } => {
+  if (source.checkable) return { sourceCheckState: 'not-checked' };
+  if (skill.restoration.strategy === 'reference')
+    // checkable === false for a reference restoration means an exact-pinned revision with no
+    // tracked ref (§5a "Local/pinned sources").
+    return { sourceCheckState: 'cannot-check', cannotCheckReason: 'pinned' };
+  // Mirrors packages/core/src/skill-source.ts's `snapshotUncheckable` — the one authoritative
+  // mapping from a restoration reason to a check outcome. 'local'/'modified-source'/
+  // 'ambiguous-source' are genuine zero-network-I/O structural facts (cannot-check). Core
+  // deliberately maps 'unknown-source'/'non-portable-source' to the TRANSIENT 'unreachable'
+  // bucket instead — a real `stak skill check` would report those as `check-failed`, never a
+  // permanent cannot-check claim, so defaulting them to `not-checked` (not yet attempted) is
+  // the honest no-check-has-run state, matching what a real check would actually find.
+  switch (skill.restoration.reason) {
+    case 'local':
+      return { sourceCheckState: 'cannot-check', cannotCheckReason: 'local' };
+    case 'ambiguous-source':
+      return {
+        sourceCheckState: 'cannot-check',
+        cannotCheckReason: 'ambiguous',
+      };
+    case 'modified-source':
+      return { sourceCheckState: 'cannot-check', cannotCheckReason: 'dirty' };
+    default:
+      return { sourceCheckState: 'not-checked' };
+  }
 };
 
 /**
@@ -278,15 +336,30 @@ export const createProductMethods = (config: ProductServiceConfig) => {
         await config.repository.getSkillReviewCheck(userId, skillId),
         skill,
       );
+      const source = sourceSummaryOf(skill);
+      // Falls back to the structural zero-network default ONLY when no persisted check exists
+      // at all — never overrides a real stored result, including one whose base went stale
+      // (currentCheckOf already collapsed that to null, which correctly re-triggers this path).
+      const defaultCannotCheckReason: CannotCheckReason | undefined = check
+        ? undefined
+        : (() => {
+            const defaulted = defaultSourceCheckOf(skill, source);
+            return defaulted.sourceCheckState === 'cannot-check'
+              ? defaulted.cannotCheckReason
+              : undefined;
+          })();
+      const sourceCheckState =
+        check?.sourceCheckState ??
+        defaultSourceCheckOf(skill, source).sourceCheckState;
       result.push({
         skillId,
         name: skill.name,
         ...(skill.description ? { description: skill.description } : {}),
         approvedVersion: skill.contentHash,
         paused: skill.paused === true,
-        source: sourceSummaryOf(skill),
+        source,
         capability: capabilityStateOf(skill),
-        sourceCheckState: check?.sourceCheckState ?? 'not-checked',
+        sourceCheckState,
         checkedAt: check?.checkedAt ?? null,
         // State-specific fields are emitted ONLY for their own state, so a summary can never
         // violate skillSummarySchema's cross-field invariants even if a stored row is odd.
@@ -307,7 +380,9 @@ export const createProductMethods = (config: ProductServiceConfig) => {
         ...(check?.sourceCheckState === 'cannot-check' &&
         check.cannotCheckReason
           ? { cannotCheckReason: check.cannotCheckReason }
-          : {}),
+          : !check && defaultCannotCheckReason
+            ? { cannotCheckReason: defaultCannotCheckReason }
+            : {}),
         ...(check?.sourceCheckState === 'check-failed' &&
         check.checkFailedReason
           ? { checkFailedReason: check.checkFailedReason }

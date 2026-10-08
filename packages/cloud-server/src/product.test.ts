@@ -351,6 +351,24 @@ describe('P3 authorization', () => {
 /* --------------------------------- SKILLS --------------------------------- */
 
 describe('P3 skills read model', () => {
+  it('source identity is a sanitized host/ownerRepo — never the raw remote, never embedded credentials', async () => {
+    const env = setup();
+    const seed = await seedSkill(env, 'alice', {
+      skill_git00001: gitSkill('needs-sanitizing', h('a'), {
+        remote: 'https://oauth2:ghp_SECRETTOKEN@github.com/acme/skills.git',
+        ref: 'refs/heads/main',
+      }),
+    });
+    const result = await env.service.getSkillsReadModel(seed.user);
+    const source = result.skills[0]?.source;
+    expect(source?.host).toBe('github.com');
+    expect(source?.ownerRepo).toBe('acme/skills');
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('SECRETTOKEN');
+    expect(serialized).not.toContain('oauth2');
+    expect(serialized).not.toContain('.git');
+  });
+
   it('separates approved/installed and keeps same-named skills distinct by stable id', async () => {
     const env = setup();
     const alice = await env.signIn('alice', MACHINE_A);
@@ -644,6 +662,41 @@ describe('Skills read model — P5a source-check states', () => {
     const result = await env.service.getSkillsReadModel(seed.user);
     expect(result.skills[0]?.sourceCheckState).toBe('not-checked');
     expect(result.skills[0]?.checkedAt).toBeNull();
+  });
+
+  it('a Local source with no persisted check defaults to cannot-check/local, never not-checked — list and detail agree', async () => {
+    const env = setup();
+    const seed = await seedSkill(env, 'alice', {
+      [REVIEW_SKILL]: localSkill('local-one', h('a')),
+    });
+    const listResult = await env.service.getSkillsReadModel(seed.user);
+    expect(listResult.skills[0]?.sourceCheckState).toBe('cannot-check');
+    expect(listResult.skills[0]?.cannotCheckReason).toBe('local');
+    const detail = await env.service.getSkillDetail(seed.user, seed.skillId);
+    expect(detail.sourceCheckState).toBe('cannot-check');
+    expect(detail.cannotCheckReason).toBe('local');
+  });
+
+  it('an exact-pinned Git reference (no tracked ref) with no persisted check defaults to cannot-check/pinned', async () => {
+    const env = setup();
+    const seed = await seedSkill(env, 'alice', {
+      [REVIEW_SKILL]: gitSkill('pinned-one', h('a')), // no `ref` option => exact-pinned
+    });
+    const result = await env.service.getSkillsReadModel(seed.user);
+    expect(result.skills[0]?.sourceCheckState).toBe('cannot-check');
+    expect(result.skills[0]?.cannotCheckReason).toBe('pinned');
+  });
+
+  it('a checkable Git source with a tracked ref and no persisted check still reports not-checked (regression guard)', async () => {
+    const env = setup();
+    const seed = await seedSkill(env, 'alice', {
+      [REVIEW_SKILL]: gitSkill('trackable-one', h('a'), {
+        ref: 'refs/heads/main',
+      }),
+    });
+    const result = await env.service.getSkillsReadModel(seed.user);
+    expect(result.skills[0]?.sourceCheckState).toBe('not-checked');
+    expect(result.skills[0]?.cannotCheckReason).toBeUndefined();
   });
 
   it('reports no-update from a stored report', async () => {

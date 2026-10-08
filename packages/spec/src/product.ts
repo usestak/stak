@@ -49,12 +49,22 @@ export const sourceCheckStateSchema = z.enum([
   'check-failed',
 ]);
 
-/** Source provenance summary — a safe classification, never a path or remote credential. */
+/**
+ * Source provenance summary — a safe classification, never a raw remote, credential, or local
+ * path. For a Git-backed source, `host`/`ownerRepo` are the ONLY safe display identity
+ * (produced by `@stack/shared`'s `safeGitRemoteDisplay`, the one place allowed to parse a raw
+ * remote) — never the remote string itself, which may embed userinfo credentials, a query
+ * token, or an auth fragment. `host`/`ownerRepo` are absent when the remote could not be
+ * parsed into a safe identity; the web falls back to a generic "Git source" label, never to
+ * the raw string.
+ */
 export const skillSourceSummarySchema = z.object({
   kind: z.enum(['git', 'public-stack', 'local', 'snapshot']),
   checkable: z.boolean(),
-  // A human-safe label (e.g. a repo+ref or `@owner/slug`), never a local path.
+  // A human-safe label for a non-git source (e.g. "Local"), never a path or raw remote.
   label: z.string().optional(),
+  host: z.string().optional(),
+  ownerRepo: z.string().optional(),
   trackedRef: z.string().optional(),
 });
 
