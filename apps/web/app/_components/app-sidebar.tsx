@@ -15,9 +15,10 @@ type NavKey =
 
 /**
  * The signed-in application frame (STAK Final Contract): labelled sidebar of six places,
- * "Viewing as <machine>", account handle, Settings + Docs. P4 builds only Overview; the other
- * five are shell destinations rendered as placeholders (aria-disabled) until their phases —
- * their counts are still real P3 facts. Primary nav is labelled, never icon-only.
+ * "Viewing as <machine>", account handle, Settings + Docs. Overview, Skills, Memory, and
+ * Projects are real links; Machines and Stacks remain shell destinations rendered as
+ * placeholders (aria-disabled) until their phases — their counts are still real P3 facts.
+ * Primary nav is labelled, never icon-only.
  */
 export function AppSidebar({
   active,
@@ -79,10 +80,21 @@ export function AppSidebar({
 
       <div className="stak-nav">
         {items.map((item) =>
-          item.key === 'overview' || item.key === 'skills' ? (
+          item.key === 'overview' ||
+          item.key === 'skills' ||
+          item.key === 'memory' ||
+          item.key === 'projects' ? (
             <Link
               key={item.key}
-              href={item.key === 'overview' ? '/overview' : '/skills'}
+              href={
+                item.key === 'overview'
+                  ? '/overview'
+                  : item.key === 'skills'
+                    ? '/skills'
+                    : item.key === 'memory'
+                      ? '/memory'
+                      : '/projects'
+              }
               className="stak-nav-item"
               aria-current={active === item.key ? 'page' : undefined}
             >
