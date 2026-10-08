@@ -23,7 +23,13 @@ const DOT: Record<string, string> = {
   neutral: '#a19d94',
 };
 
-export function SkillsTable({ rows }: { rows: SkillRow[] }) {
+export function SkillsTable({
+  rows,
+  machineName,
+}: {
+  rows: SkillRow[];
+  machineName: string;
+}) {
   const [status, setStatus] = useState<StatusFilter>('all');
   const [query, setQuery] = useState('');
   const filtered = useMemo(
@@ -84,7 +90,7 @@ export function SkillsTable({ rows }: { rows: SkillRow[] }) {
       <div className="stak-skills-head" role="row">
         <span>SKILL</span>
         <span>SOURCE</span>
-        <span>INSTALLED HERE</span>
+        <span>ON {machineName.toUpperCase()}</span>
         <span>STATUS</span>
       </div>
 
@@ -109,12 +115,17 @@ export function SkillsTable({ rows }: { rows: SkillRow[] }) {
               ) : null}
             </span>
             <span className="stak-skills-source">
-              {r.sourceLabel}
-              {r.sourceCheckNote ? (
-                <span className="note"> · {r.sourceCheckNote}</span>
+              <span className="primary">{r.sourcePrimary}</span>
+              <span className="secondary">
+                {r.sourceCheckNote ?? r.sourceSecondary}
+              </span>
+            </span>
+            <span className="stak-skills-installed">
+              <span className="primary">{r.reconciliationLabel}</span>
+              {r.installedShortHash ? (
+                <span className="secondary">{r.installedShortHash}</span>
               ) : null}
             </span>
-            <span className="stak-skills-installed">{r.installedLabel}</span>
             <span className="stak-status" style={{ color: '#c9c5bc' }}>
               <span
                 className="stak-dot"

@@ -11,11 +11,18 @@ import {
   checkedIn,
   type MachineOption,
 } from '../../lib/machine-context.js';
+import {
+  cliSkillSelector,
+  machineReconciliation,
+  sourceCheckNote,
+  sourcePresentation,
+  type MachineReconciliationState,
+} from '../../lib/skill-presentation.js';
 import type { WebUser } from '../../lib/session.js';
 
 export type SkillDetailService = Pick<
   CloudService,
-  'getMachinesReadModel' | 'getSkillDetail'
+  'getMachinesReadModel' | 'getSkillsReadModel' | 'getSkillDetail'
 >;
 
 const webAuth = (userId: string) => ({ userId, tokenId: 'web-session' });
@@ -61,6 +68,7 @@ export type SkillDetailView =
       };
       machines: MachineOption[];
       statusText: string;
+      statusDot: 'ready' | 'attention' | 'neutral';
       sourceCheckState: SkillDetail['sourceCheckState'];
       checkedAt: string | null;
       candidateRevision?: string;
@@ -69,10 +77,16 @@ export type SkillDetailView =
       // Present only when a real update was found but Cloud holds no reviewable artifact for
       // it — a REVIEW CAPABILITY fact, distinct from statusText's SOURCE fact.
       reviewNote?: string;
-      sourceLabel: string;
-      trackedRef?: string;
+      sourcePrimary: string;
+      sourceSecondary?: string;
+      sourceCheckable: boolean;
       approvedVersionShort: string;
-      installedHere: string;
+      /** APPROVED IN STAK fact strip: a real STAK approval-history ordinal ("Version N"),
+       *  never a fabricated semver. */
+      approvedVersionOrdinal: number;
+      approvedAt: string | null;
+      reconciliationState: MachineReconciliationState;
+      reconciliationLabel: string;
       installedHereAt: string | null;
       capabilitiesText: string;
       capabilityList: {
@@ -83,33 +97,24 @@ export type SkillDetailView =
       reviewArtifact: SkillDetailReviewArtifactView | null;
       exceedsReviewBounds: boolean;
       paused: boolean;
+      /** The CLI selector a human should type — display name when unique, stable entryId when
+       *  ambiguous (§18); shared with the Skills list so the two can never disagree. */
+      cliSelector: string;
+      /** Whether the reconciliation CommandDock should render at all (§17): only when there is
+       *  a real local action to take. A Ready, matches-approved, already-checked Skill shows
+       *  no dock. */
+      commandDockVisible: boolean;
+      /** Present only when commandDockVisible — 'update' to reconcile installed state,
+       *  'check' when the source is checkable but has never been checked. */
+      commandDockKind?: 'update' | 'check';
+      technical: {
+        entryId: string;
+        approvedContentHash: string;
+        installedContentHash: string | null;
+        candidateRevision?: string;
+        trackedRef?: string;
+      };
     };
-
-/** Shared with skills-data.ts's deriveRow — same note text for the same non-actionable
- *  sourceCheckState values (contract §2/§3). */
-const sourceCheckNote = (
-  state: SkillDetail['sourceCheckState'],
-): string | undefined => {
-  switch (state) {
-    case 'not-checked':
-      return "Updates haven't been checked yet.";
-    case 'cannot-check':
-      return "Can't check for updates from this source.";
-    case 'check-failed':
-      return 'Check failed.';
-    default:
-      return undefined;
-  }
-};
-
-/** Shared with skills-data.ts's reviewNote — secondary, non-badge explanation for a found
- *  update that Cloud holds no reviewable artifact for. */
-const reviewNote = (
-  reason: SkillDetail['reviewUnavailableReason'],
-): string | undefined =>
-  reason === 'exceeds-review-bounds'
-    ? 'This update is too large to review in STAK Cloud.'
-    : undefined;
 
 const capabilityList = (
   capability: SkillDetail['capability'],
@@ -154,8 +159,17 @@ export const loadSkillDetail = async (
     return { kind: 'choose-machine', machines: options, anyCheckedIn };
 
   let skill: SkillDetail;
+  let allSkills: { skillId: string; name: string }[];
   try {
-    skill = await service.getSkillDetail(auth, skillId);
+    const [detail, skillsModel] = await Promise.all([
+      service.getSkillDetail(auth, skillId),
+      service.getSkillsReadModel(auth),
+    ]);
+    skill = detail;
+    allSkills = skillsModel.skills.map((s) => ({
+      skillId: s.skillId,
+      name: s.name,
+    }));
   } catch (error) {
     if (error instanceof CloudServiceError && error.code === 'skill-not-found')
       return { kind: 'not-found' };
@@ -166,23 +180,30 @@ export const loadSkillDetail = async (
   const viewingName = displayName(viewing);
   const viewingCheckedIn = checkedIn(viewing);
   const install = skill.installs.find((i) => i.machineId === viewingId);
-  const installedHereMatches =
-    viewingCheckedIn &&
-    !!install &&
-    install.installedVersion === skill.approvedVersion;
+  const reconciliation = machineReconciliation(
+    install,
+    skill.approvedVersion,
+    viewingCheckedIn,
+  );
 
   // Status derivation mirrors apps/web/app/skills/skills-data.ts's deriveRow exactly: paused
-  // overrides everything, then update-available, then a three-way installed-state check on the
-  // viewing machine (never checked in / checked in with no install / checked in with a mismatched
-  // install) before falling through to Ready. None of the three neutral cases is ever "Ready".
+  // overrides everything, then update-available, then machine reconciliation — none of the
+  // non-matching reconciliation states is ever "Ready".
   let statusText: string;
-  if (skill.paused) statusText = 'Paused';
-  else if (skill.sourceCheckState === 'update-available')
+  let statusDot: 'ready' | 'attention' | 'neutral';
+  if (skill.paused) {
+    statusText = 'Paused';
+    statusDot = 'neutral';
+  } else if (skill.sourceCheckState === 'update-available') {
     statusText = 'Update available';
-  else if (!viewingCheckedIn) statusText = 'Not reported here yet';
-  else if (!install) statusText = 'Not installed here';
-  else if (!installedHereMatches) statusText = 'Different version here';
-  else statusText = 'Ready';
+    statusDot = 'attention';
+  } else if (reconciliation.state !== 'matches-approved') {
+    statusText = 'Not ready';
+    statusDot = 'neutral';
+  } else {
+    statusText = 'Ready';
+    statusDot = 'ready';
+  }
 
   const history: HistoryRow[] = skill.history
     .slice()
@@ -194,6 +215,18 @@ export const loadSkillDetail = async (
       approvedAt: h.approvedAt,
       current: h.contentHash === skill.approvedVersion,
     }));
+  const currentHistory = history.find((h) => h.current) ?? null;
+
+  const source = sourcePresentation(skill.source);
+  const cliSelector = cliSkillSelector(skill.skillId, skill.name, allSkills);
+
+  const commandDockKind: 'update' | 'check' | undefined = skill.paused
+    ? undefined
+    : reconciliation.state !== 'matches-approved'
+      ? 'update'
+      : skill.source.checkable && skill.sourceCheckState === 'not-checked'
+        ? 'check'
+        : undefined;
 
   return {
     kind: 'ready',
@@ -208,6 +241,7 @@ export const loadSkillDetail = async (
     },
     machines: options,
     statusText,
+    statusDot,
     sourceCheckState: skill.sourceCheckState,
     checkedAt: skill.checkedAt,
     ...(skill.candidateRevision
@@ -219,19 +253,17 @@ export const loadSkillDetail = async (
     ...(sourceCheckNote(skill.sourceCheckState)
       ? { sourceCheckNote: sourceCheckNote(skill.sourceCheckState) }
       : {}),
-    ...(reviewNote(skill.reviewUnavailableReason)
-      ? { reviewNote: reviewNote(skill.reviewUnavailableReason) }
+    ...(skill.reviewUnavailableReason === 'exceeds-review-bounds'
+      ? { reviewNote: 'This update is too large to review in STAK Cloud.' }
       : {}),
-    sourceLabel:
-      skill.source.label ??
-      (skill.source.kind === 'local' ? 'Local' : skill.source.kind),
-    ...(skill.source.trackedRef ? { trackedRef: skill.source.trackedRef } : {}),
+    sourcePrimary: source.primary,
+    ...(source.secondary ? { sourceSecondary: source.secondary } : {}),
+    sourceCheckable: skill.source.checkable,
     approvedVersionShort: shortHash(skill.approvedVersion),
-    installedHere: install
-      ? install.installedVersion
-        ? shortHash(install.installedVersion)
-        : 'Not installed here'
-      : 'Not reported here',
+    approvedVersionOrdinal: currentHistory?.environmentVersionNumber ?? 1,
+    approvedAt: currentHistory?.approvedAt ?? null,
+    reconciliationState: reconciliation.state,
+    reconciliationLabel: reconciliation.label,
     installedHereAt: viewingCheckedIn ? viewing.lastCheckinAt : null,
     capabilitiesText: skill.capability.declared
       ? 'Declared'
@@ -262,5 +294,19 @@ export const loadSkillDetail = async (
     exceedsReviewBounds:
       skill.reviewUnavailableReason === 'exceeds-review-bounds',
     paused: skill.paused,
+    cliSelector,
+    commandDockVisible: commandDockKind !== undefined,
+    ...(commandDockKind ? { commandDockKind } : {}),
+    technical: {
+      entryId: skill.skillId,
+      approvedContentHash: skill.approvedVersion,
+      installedContentHash: install?.installedVersion ?? null,
+      ...(skill.candidateRevision
+        ? { candidateRevision: skill.candidateRevision }
+        : {}),
+      ...(skill.source.trackedRef
+        ? { trackedRef: skill.source.trackedRef }
+        : {}),
+    },
   };
 };

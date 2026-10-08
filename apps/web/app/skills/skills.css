@@ -28,19 +28,33 @@
 .stak-skills-chip:first-child {
   border-left: none;
 }
+.stak-skills-chip:hover:not(.active) {
+  background: #171615;
+  color: var(--ink);
+}
 .stak-skills-chip.active {
   background: #1e1d1b;
   color: var(--ink);
+  font-weight: 500;
 }
+/* A real, unmistakably interactive search field — not plain text (P5 visual-correction §6):
+   visible 1px border against a slightly lighter-than-page surface, warm placeholder, and the
+   same orange focus ring the rest of the shell uses. */
 .stak-skills-search {
   margin-left: auto;
-  width: 220px;
-  padding: 6px 12px;
-  border: 1px solid var(--line-2);
+  width: 260px;
+  padding: 7px 12px;
+  border: 1px solid var(--chip);
   border-radius: 6px;
-  background: none;
+  background: #151413;
   color: var(--ink);
   font: 13px var(--sans);
+}
+.stak-skills-search::placeholder {
+  color: var(--dim);
+}
+.stak-skills-search:hover {
+  border-color: var(--faint);
 }
 .stak-skills-head,
 .stak-skills-row {
@@ -59,8 +73,14 @@
 }
 .stak-skills-row {
   border-bottom: 1px solid #1c1b19;
-  text-decoration: none;
   color: inherit;
+}
+/* Never communicate row hover via text underline (P5 visual-correction §8) — the global
+   `a:hover { text-decoration: underline }` in globals.css would otherwise leak onto every
+   link-wrapped row. A subtle surface change is the only hover signal. */
+.stak-skills-row,
+.stak-skills-row:hover {
+  text-decoration: none;
 }
 .stak-skills-row:hover {
   background: #171615;
@@ -81,15 +101,34 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* SOURCE / ON <MACHINE> cells: a strong primary fact, a muted secondary one — never the same
+   long sentence repeated at equal weight on all 31 rows (P5 visual-correction §9). */
 .stak-skills-source,
 .stak-skills-installed {
-  font: 11.5px var(--mono);
-  color: var(--faint);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  overflow: hidden;
+}
+.stak-skills-source .primary,
+.stak-skills-installed .primary {
+  font: 500 12.5px var(--mono);
+  color: var(--muted);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.stak-skills-source .note {
+.stak-skills-source .secondary,
+.stak-skills-installed .secondary {
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stak-status .note {
   color: var(--dim);
 }
 .stak-skills-empty {
@@ -118,4 +157,15 @@
 .stak-pill:disabled {
   opacity: 0.6;
   cursor: default;
+}
+/* .stak-pill is also reused here as a REAL clickable Pause/Resume button (shell.css defines it
+   as an inert label for Overview's attention rows, hence its default cursor:default) — give the
+   enabled, clickable case a visible pointer + hover state so it reads as a button, not floating
+   text (P5 visual-correction §16). */
+.stak-pill:not(:disabled) {
+  cursor: pointer;
+}
+.stak-pill:not(:disabled):hover {
+  border-color: var(--faint);
+  background: #171615;
 }

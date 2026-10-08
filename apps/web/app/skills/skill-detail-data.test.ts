@@ -4,6 +4,7 @@ import type {
   MachineSummary,
   MachinesReadModel,
   SkillDetail,
+  SkillsReadModel,
 } from '@stack/spec';
 
 import {
@@ -40,7 +41,8 @@ const detail = (over: Partial<SkillDetail> = {}): SkillDetail => ({
   source: {
     kind: 'git',
     checkable: true,
-    label: 'github.com/oss/test-first',
+    host: 'github.com',
+    ownerRepo: 'oss/test-first',
     trackedRef: 'main',
   },
   capability: { declared: false },
@@ -65,6 +67,11 @@ const service = (
   machines: MachineSummary[] = [machine()],
 ): SkillDetailService => ({
   getMachinesReadModel: async () => ({ machines }) as MachinesReadModel,
+  getSkillsReadModel: async () =>
+    ({
+      environmentExists: true,
+      skills: skill ? [skill] : [],
+    }) as unknown as SkillsReadModel,
   getSkillDetail: async (_auth, skillId) => {
     if (!skill || skillId !== skill.skillId)
       throw new CloudServiceError('skill-not-found', 404, 'No such Skill.');
@@ -91,6 +98,7 @@ describe('loadSkillDetail', () => {
     );
     if (view.kind !== 'ready') throw new Error('expected ready');
     expect(view.statusText).toBe('Ready');
+    expect(view.statusDot).toBe('ready');
   });
   it('renders no reviewArtifact and does not exceed bounds when there is no update', async () => {
     const view = await loadSkillDetail(
@@ -203,8 +211,18 @@ describe('loadSkillDetail', () => {
     if (view.kind !== 'ready') throw new Error('expected ready');
     expect(view.statusText).toBe('Paused');
     expect(view.sourceCheckState).toBe('update-available');
-    expect(view.sourceLabel).toBe('github.com/oss/test-first');
+    expect(view.sourcePrimary).toBe('GitHub · oss/test-first');
     expect(view.history).toHaveLength(1);
+  });
+  it('a paused Skill shows no command dock — nothing local to reconcile', async () => {
+    const view = await loadSkillDetail(
+      service(detail({ paused: true })),
+      USER,
+      'skill_test0001',
+      undefined,
+    );
+    if (view.kind !== 'ready') throw new Error('expected ready');
+    expect(view.commandDockVisible).toBe(false);
   });
   it('distinguishes currently-approved from older history entries', async () => {
     const view = await loadSkillDetail(
@@ -232,6 +250,7 @@ describe('loadSkillDetail', () => {
     if (view.kind !== 'ready') throw new Error('expected ready');
     expect(view.history[0]?.current).toBe(true);
     expect(view.history[1]?.current).toBe(false);
+    expect(view.approvedVersionOrdinal).toBe(2);
   });
   it('reports capabilities-not-declared distinctly from declared-false', async () => {
     const notDeclared = await loadSkillDetail(
@@ -257,18 +276,27 @@ describe('loadSkillDetail', () => {
       'Capabilities not declared',
     );
   });
-  it('never exposes an absolute or home-relative path in source label', async () => {
+  it('never exposes an absolute or home-relative path in the source presentation, and Local never implies a checkable upstream', async () => {
     const view = await loadSkillDetail(
-      service(detail({ source: { kind: 'local', checkable: false } })),
+      service(
+        detail({
+          source: { kind: 'local', checkable: false },
+          sourceCheckState: 'cannot-check',
+          cannotCheckReason: 'local',
+        }),
+      ),
       USER,
       'skill_test0001',
       undefined,
     );
     if (view.kind !== 'ready') throw new Error('expected ready');
-    expect(view.sourceLabel).toBe('Local');
-    expect(view.sourceLabel).not.toMatch(/[\\/]Users[\\/]|^~|^\/home\//);
+    expect(view.sourcePrimary).toBe('Local source');
+    expect(view.sourceCheckNote).toBe(
+      "Can't check for updates from this source.",
+    );
+    expect(JSON.stringify(view)).not.toMatch(/[\\/]Users[\\/]|^~|^\/home\//);
   });
-  it('reports "Not reported here yet" when the viewing machine never checked in', async () => {
+  it('reports "Not reported" reconciliation when the viewing machine never checked in', async () => {
     const view = await loadSkillDetail(
       service(detail(), [
         machine({ lastCheckinAt: null, status: 'never-checked-in' }),
@@ -278,19 +306,25 @@ describe('loadSkillDetail', () => {
       undefined,
     );
     if (view.kind !== 'ready') throw new Error('expected ready');
-    expect(view.statusText).toBe('Not reported here yet');
+    expect(view.statusText).not.toBe('Ready');
+    expect(view.reconciliationState).toBe('not-reported');
+    expect(view.reconciliationLabel).toBe('Not reported');
   });
-  it('reports "Not installed here" when the viewing machine checked in but has no install record', async () => {
+  it('reports "Not installed" reconciliation when the viewing machine checked in but explicitly has no install', async () => {
     const view = await loadSkillDetail(
-      service(detail({ installs: [] })),
+      service(
+        detail({ installs: [{ machineId: A1, installedVersion: null }] }),
+      ),
       USER,
       'skill_test0001',
       undefined,
     );
     if (view.kind !== 'ready') throw new Error('expected ready');
-    expect(view.statusText).toBe('Not installed here');
+    expect(view.reconciliationState).toBe('not-installed');
+    expect(view.reconciliationLabel).toBe('Not installed');
+    expect(view.commandDockVisible).toBe(true);
   });
-  it('reports "Different version here" when the viewing machine has a mismatched install', async () => {
+  it('reports "Approved version not installed" when the viewing machine has a mismatched install, and shows the reconciliation dock', async () => {
     const view = await loadSkillDetail(
       service(
         detail({ installs: [{ machineId: A1, installedVersion: HASH_B }] }),
@@ -300,6 +334,55 @@ describe('loadSkillDetail', () => {
       undefined,
     );
     if (view.kind !== 'ready') throw new Error('expected ready');
-    expect(view.statusText).toBe('Different version here');
+    expect(view.reconciliationState).toBe('wrong-version');
+    expect(view.reconciliationLabel).toBe('Approved version not installed');
+    expect(view.commandDockVisible).toBe(true);
+    expect(view.commandDockKind).toBe('update');
+  });
+  it('shows no command dock when Ready and already checked — nothing local to do', async () => {
+    const view = await loadSkillDetail(
+      service(detail()),
+      USER,
+      'skill_test0001',
+      undefined,
+    );
+    if (view.kind !== 'ready') throw new Error('expected ready');
+    expect(view.commandDockVisible).toBe(false);
+  });
+  it('shows a `stak skill check` dock for a checkable source with no check yet — never for Local', async () => {
+    const view = await loadSkillDetail(
+      service(detail({ sourceCheckState: 'not-checked', checkedAt: null })),
+      USER,
+      'skill_test0001',
+      undefined,
+    );
+    if (view.kind !== 'ready') throw new Error('expected ready');
+    expect(view.commandDockVisible).toBe(true);
+    expect(view.commandDockKind).toBe('check');
+
+    const localView = await loadSkillDetail(
+      service(
+        detail({
+          source: { kind: 'local', checkable: false },
+          sourceCheckState: 'cannot-check',
+          cannotCheckReason: 'local',
+        }),
+      ),
+      USER,
+      'skill_test0001',
+      undefined,
+    );
+    if (localView.kind !== 'ready') throw new Error('expected ready');
+    expect(localView.commandDockVisible).toBe(false);
+  });
+  it('prefers the unique display name for the CLI selector (ambiguous-fallback is covered in skill-presentation.test.ts)', async () => {
+    const uniqueView = await loadSkillDetail(
+      service(detail({ name: 'unique-name' })),
+      USER,
+      'skill_test0001',
+      undefined,
+    );
+    if (uniqueView.kind !== 'ready') throw new Error('expected ready');
+    expect(uniqueView.cliSelector).toBe('unique-name');
   });
 });

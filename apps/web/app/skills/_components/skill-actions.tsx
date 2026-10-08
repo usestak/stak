@@ -60,10 +60,10 @@ export function SkillActions({
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
-        alignItems: 'flex-end',
+        alignItems: 'flex-start',
       }}
     >
-      <div style={{ display: 'flex', gap: 10 }}>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <button
           type="button"
           className="stak-pill"

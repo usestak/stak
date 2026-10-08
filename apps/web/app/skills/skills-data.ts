@@ -11,6 +11,13 @@ import {
   checkedIn,
   type MachineOption,
 } from '../../lib/machine-context.js';
+import {
+  cliSkillSelector,
+  machineReconciliation,
+  sourceCheckNote,
+  sourcePresentation,
+  type MachineReconciliationState,
+} from '../../lib/skill-presentation.js';
 import type { SidebarCounts } from '../overview/overview-data.js';
 import type { WebUser } from '../../lib/session.js';
 
@@ -20,22 +27,28 @@ export type SkillsService = Pick<
 >;
 
 const webAuth = (userId: string) => ({ userId, tokenId: 'web-session' });
+const shortHash = (hash: string) => hash.slice(7, 15);
 
 export type SkillRow = {
   skillId: string;
   name: string;
   description?: string;
-  sourceLabel: string;
+  sourcePrimary: string;
+  sourceSecondary?: string;
   sourceCheckNote?: string;
   // Present only when a real update was found but Cloud holds no reviewable artifact for it
   // (a REVIEW CAPABILITY fact, distinct from the SOURCE fact `statusText === 'Update available'`
   // already communicates). Never changes the primary status/badge.
   reviewNote?: string;
-  installedLabel: string;
+  reconciliationState: MachineReconciliationState;
+  reconciliationLabel: string;
+  /** Short content hash, technical/secondary only — never the primary machine-state value. */
+  installedShortHash?: string;
   primaryStatus: 'ready' | 'update-available' | 'paused';
   pendingInstall: boolean;
   dot: 'ready' | 'attention' | 'neutral';
   statusText: string;
+  cliSelector: string;
 };
 
 /** Secondary, non-badge explanation for why a found update has no reviewable artifact. */
@@ -45,24 +58,6 @@ const reviewNote = (
   reason === 'exceeds-review-bounds'
     ? 'This update is too large to review in STAK Cloud.'
     : undefined;
-
-/** Maps a non-actionable sourceCheckState to the explanatory note shown alongside the source
- *  label (contract §2/§3). 'no-update' and 'update-available' need no note — the primary status
- *  already communicates them. */
-const sourceCheckNote = (
-  state: SkillSummary['sourceCheckState'],
-): string | undefined => {
-  switch (state) {
-    case 'not-checked':
-      return "Updates haven't been checked yet.";
-    case 'cannot-check':
-      return "Can't check for updates from this source.";
-    case 'check-failed':
-      return 'Check failed.';
-    default:
-      return undefined;
-  }
-};
 
 export const STATUS_FILTERS = [
   'all',
@@ -85,12 +80,15 @@ export const deriveRow = (
   skill: SkillSummary,
   viewingMachineId: string,
   viewingMachineCheckedIn: boolean,
+  allSkills: readonly { skillId: string; name: string }[],
 ): SkillRow => {
   const install = skill.installs.find((i) => i.machineId === viewingMachineId);
-  const installedHere =
-    viewingMachineCheckedIn && install
-      ? install.installedVersion === skill.approvedVersion
-      : false;
+  const reconciliation = machineReconciliation(
+    install,
+    skill.approvedVersion,
+    viewingMachineCheckedIn,
+  );
+  const installedHere = reconciliation.state === 'matches-approved';
 
   let primaryStatus: SkillRow['primaryStatus'];
   let dot: SkillRow['dot'];
@@ -103,49 +101,46 @@ export const deriveRow = (
     primaryStatus = 'update-available';
     dot = 'attention';
     statusText = 'Update available';
-  } else if (!viewingMachineCheckedIn) {
-    primaryStatus = 'ready'; // bucketed with Ready-eligible for filtering; NOT labeled Ready
-    dot = 'neutral';
-    statusText = 'Not reported here yet';
-  } else if (!install) {
-    primaryStatus = 'ready';
-    dot = 'neutral';
-    statusText = 'Not installed here';
   } else if (!installedHere) {
+    // Bucketed with Ready-eligible for filtering (§19); NOT labeled Ready. The reconciliation
+    // column already carries the precise reason (Not reported / Not installed / Approved
+    // version not installed) — the status column doesn't repeat it.
     primaryStatus = 'ready';
     dot = 'neutral';
-    statusText = 'Different version here';
+    statusText = 'Not ready';
   } else {
     primaryStatus = 'ready';
     dot = 'ready';
     statusText = 'Ready';
   }
 
+  const source = sourcePresentation(skill.source);
+
   return {
     skillId: skill.skillId,
     name: skill.name,
     ...(skill.description ? { description: skill.description } : {}),
-    sourceLabel:
-      skill.source.label ??
-      (skill.source.kind === 'local' ? 'Local' : skill.source.kind),
+    sourcePrimary: source.primary,
+    ...(source.secondary ? { sourceSecondary: source.secondary } : {}),
     ...(sourceCheckNote(skill.sourceCheckState)
       ? { sourceCheckNote: sourceCheckNote(skill.sourceCheckState) }
       : {}),
     ...(reviewNote(skill.reviewUnavailableReason)
       ? { reviewNote: reviewNote(skill.reviewUnavailableReason) }
       : {}),
-    installedLabel: install
-      ? install.installedVersion
-        ? install.installedVersion.slice(7, 15)
-        : 'Not installed here'
-      : 'Not reported here',
+    reconciliationState: reconciliation.state,
+    reconciliationLabel: reconciliation.label,
+    ...(install?.installedVersion
+      ? { installedShortHash: shortHash(install.installedVersion) }
+      : {}),
     primaryStatus,
     pendingInstall:
       !skill.paused &&
       skill.sourceCheckState !== 'update-available' &&
-      statusText !== 'Ready',
+      !installedHere,
     dot,
     statusText,
+    cliSelector: cliSkillSelector(skill.skillId, skill.name, allSkills),
   };
 };
 
@@ -182,6 +177,15 @@ export type SkillsListView =
       machines: MachineOption[];
       sidebar: SidebarCounts;
       statusSentence: string;
+      /** The page-level status dot — matches the sentence it sits next to (§5): green only
+       *  when every Skill is genuinely Ready, amber when any has an update to review, neutral
+       *  otherwise (mixed/unknown/not-yet-reported states). Never an unexplained neutral dot
+       *  on a page that just said everything is Ready. */
+      statusDot: 'ready' | 'attention' | 'neutral';
+      /** Secondary, source-health sentence — only when it adds real information beyond the
+       *  primary machine-reconciliation sentence (§5). Derived from real counts; omitted when
+       *  there is nothing truthful and useful to add. */
+      sourceHealthSentence?: string;
       rows: SkillRow[];
       dockCommand: string;
     };
@@ -218,13 +222,23 @@ export const loadSkillsList = async (
   const viewingName = displayName(viewing);
   const viewingCheckedIn = checkedIn(viewing);
 
+  const allSkills = skillsModel.skills.map((s) => ({
+    skillId: s.skillId,
+    name: s.name,
+  }));
   const rows = skillsModel.skills
-    .map((s) => deriveRow(s, viewingId, viewingCheckedIn))
+    .map((s) => deriveRow(s, viewingId, viewingCheckedIn, allSkills))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const readyCount = rows.filter((r) => r.statusText === 'Ready').length;
   const updateCount = rows.filter(
     (r) => r.primaryStatus === 'update-available',
+  ).length;
+  const cannotCheckCount = rows.filter(
+    (r) => r.sourceCheckNote === "Can't check for updates from this source.",
+  ).length;
+  const notCheckedCount = rows.filter(
+    (r) => r.sourceCheckNote === "Updates haven't been checked yet.",
   ).length;
 
   const statusSentence = !viewingCheckedIn
@@ -234,6 +248,24 @@ export const loadSkillsList = async (
       : updateCount > 0
         ? `${updateCount} Skill${updateCount === 1 ? '' : 's'} ${updateCount === 1 ? 'has' : 'have'} updates to review.`
         : `${readyCount} Skill${readyCount === 1 ? '' : 's'} ${readyCount === 1 ? 'is' : 'are'} ready on ${viewingName}.`;
+
+  const statusDot: 'ready' | 'attention' | 'neutral' =
+    updateCount > 0
+      ? 'attention'
+      : viewingCheckedIn && rows.length > 0 && readyCount === rows.length
+        ? 'ready'
+        : 'neutral';
+
+  const sourceHealthSentence =
+    updateCount === 0 && rows.length > 0
+      ? cannotCheckCount === rows.length
+        ? `${cannotCheckCount} Skill${cannotCheckCount === 1 ? '' : 's'} can't be checked for upstream updates.`
+        : cannotCheckCount > 0
+          ? `${cannotCheckCount} of ${rows.length} Skills can't be checked for upstream updates.`
+          : notCheckedCount > 0
+            ? `${notCheckedCount} Skill${notCheckedCount === 1 ? '' : 's'} ${notCheckedCount === 1 ? 'hasn’t' : 'haven’t'} been checked for updates yet.`
+            : undefined
+      : undefined;
 
   return {
     kind: 'ready',
@@ -253,6 +285,8 @@ export const loadSkillsList = async (
       stacks: '',
     },
     statusSentence,
+    statusDot,
+    ...(sourceHealthSentence ? { sourceHealthSentence } : {}),
     rows,
     dockCommand: 'stak skill update',
   };

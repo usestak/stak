@@ -9,10 +9,15 @@ import { displayNameOf, getSessionUser } from '../../lib/session';
 
 import { loadSkillsList } from './skills-data';
 import { SkillsTable } from './_components/skills-table';
-import '../overview/shell.css';
 import './skills.css';
 
 export const dynamic = 'force-dynamic';
+
+const DOT: Record<'ready' | 'attention' | 'neutral', string> = {
+  ready: '#84cb8e',
+  attention: '#ee7a3b',
+  neutral: '#a19d94',
+};
 
 export default async function SkillsPage({
   searchParams,
@@ -80,14 +85,16 @@ export default async function SkillsPage({
           <div className="stak-sentence">
             <span
               className="stak-dot"
-              style={{ width: 10, height: 10, background: '#a19d94' }}
+              style={{ width: 10, height: 10, background: DOT[view.statusDot] }}
               aria-hidden
             />
-            <span>Skills</span>
+            <span>{view.statusSentence}</span>
           </div>
-          <span className="stak-sub">{view.statusSentence}</span>
+          {view.sourceHealthSentence ? (
+            <span className="stak-sub">{view.sourceHealthSentence}</span>
+          ) : null}
         </div>
-        <SkillsTable rows={view.rows} />
+        <SkillsTable rows={view.rows} machineName={view.viewing.name} />
         <CommandDock
           machineName={view.viewing.name}
           command={view.dockCommand}
