@@ -106,7 +106,8 @@ describe('cloud client', () => {
 
   it('reports a no-artifact skill source-check result', async () => {
     let capturedUrl = '';
-    let capturedInit: { method: string; body?: string | Uint8Array } | undefined;
+    let capturedInit:
+      { method: string; body?: string | Uint8Array } | undefined;
     const fetchImpl: FetchLike = async (url, init) => {
       capturedUrl = url;
       capturedInit = init;
@@ -136,7 +137,8 @@ describe('cloud client', () => {
 
   it('approves a skill version by review artifact id only', async () => {
     let capturedUrl = '';
-    let capturedInit: { method: string; body?: string | Uint8Array } | undefined;
+    let capturedInit:
+      { method: string; body?: string | Uint8Array } | undefined;
     const fetchImpl: FetchLike = async (url, init) => {
       capturedUrl = url;
       capturedInit = init;
@@ -172,7 +174,8 @@ describe('cloud client', () => {
 
   it('uploads a review artifact, base64-encoding the payload bytes inside the client', async () => {
     let capturedUrl = '';
-    let capturedInit: { method: string; body?: string | Uint8Array } | undefined;
+    let capturedInit:
+      { method: string; body?: string | Uint8Array } | undefined;
     const fetchImpl: FetchLike = async (url, init) => {
       capturedUrl = url;
       capturedInit = init;

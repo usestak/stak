@@ -40,8 +40,15 @@ export default async function SkillDetailPage({
 
   if (view.kind === 'error')
     return (
-      <ShellNotice active="skills" handle={handle} title="Couldn't load this Skill">
-        <p>STAK Cloud didn&apos;t respond. This is a temporary problem, not a change to your data. Reload to try again.</p>
+      <ShellNotice
+        active="skills"
+        handle={handle}
+        title="Couldn't load this Skill"
+      >
+        <p>
+          STAK Cloud didn&apos;t respond. This is a temporary problem, not a
+          change to your data. Reload to try again.
+        </p>
       </ShellNotice>
     );
   if (view.kind === 'not-found')
@@ -66,14 +73,21 @@ export default async function SkillDetailPage({
   if (view.kind === 'choose-machine')
     return (
       <ShellNotice active="skills" handle={handle} title="Choose a machine">
-        <p>This Skill&apos;s installed state is shown from that machine&apos;s last check-in. Pick the machine you want to view.</p>
+        <p>
+          This Skill&apos;s installed state is shown from that machine&apos;s
+          last check-in. Pick the machine you want to view.
+        </p>
         {!view.anyCheckedIn ? (
           <p>
             None of your machines has checked in yet. Run{' '}
-            <code style={{ fontFamily: 'var(--mono)' }}>stak status</code> on the machine you want, then pick it here.
+            <code style={{ fontFamily: 'var(--mono)' }}>stak status</code> on
+            the machine you want, then pick it here.
           </p>
         ) : null}
-        <MachineChooser options={view.machines} basePath={`/skills/${skillId}`} />
+        <MachineChooser
+          options={view.machines}
+          basePath={`/skills/${skillId}`}
+        />
       </ShellNotice>
     );
 
@@ -111,20 +125,54 @@ export default async function SkillDetailPage({
           <span className="stak-sub">{view.statusText}</span>
         </div>
 
-        <section style={{ padding: '0 28px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
+        <section
+          style={{
+            padding: '0 28px 20px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 16,
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              gap: 16,
+            }}
+          >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <span style={{ fontSize: 16, fontWeight: 600 }}>{view.name}</span>
               {view.description ? (
-                <span style={{ fontSize: 13, color: 'var(--faint)' }}>{view.description}</span>
+                <span style={{ fontSize: 13, color: 'var(--faint)' }}>
+                  {view.description}
+                </span>
               ) : null}
-              <span style={{ fontSize: 12.5, font: '12.5px var(--mono)', color: 'var(--faint)' }}>
+              <span
+                style={{
+                  fontSize: 12.5,
+                  font: '12.5px var(--mono)',
+                  color: 'var(--faint)',
+                }}
+              >
                 Source: {view.sourceLabel}
                 {view.trackedRef ? ` (${view.trackedRef})` : ''}
-                {view.sourceCheckNote ? <span style={{ color: 'var(--dim)' }}> · {view.sourceCheckNote}</span> : null}
+                {view.sourceCheckNote ? (
+                  <span style={{ color: 'var(--dim)' }}>
+                    {' '}
+                    · {view.sourceCheckNote}
+                  </span>
+                ) : null}
               </span>
-              <span style={{ fontSize: 12.5, font: '12.5px var(--mono)', color: 'var(--faint)' }}>
-                Approved: {view.approvedVersionShort} · Installed here: {view.installedHere}
+              <span
+                style={{
+                  fontSize: 12.5,
+                  font: '12.5px var(--mono)',
+                  color: 'var(--faint)',
+                }}
+              >
+                Approved: {view.approvedVersionShort} · Installed here:{' '}
+                {view.installedHere}
               </span>
               {view.checkedAt ? (
                 <span style={{ fontSize: 12, color: 'var(--dim)' }}>
@@ -142,12 +190,28 @@ export default async function SkillDetailPage({
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--faint)' }}>CAPABILITIES</span>
+            <span
+              style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--faint)' }}
+            >
+              CAPABILITIES
+            </span>
             <span style={{ fontSize: 13 }}>{view.capabilitiesText}</span>
             {view.capabilityList.length > 0 ? (
-              <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <ul
+                style={{
+                  margin: 0,
+                  padding: 0,
+                  listStyle: 'none',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                }}
+              >
                 {view.capabilityList.map((c) => (
-                  <li key={c.label} style={{ fontSize: 12.5, color: 'var(--faint)' }}>
+                  <li
+                    key={c.label}
+                    style={{ fontSize: 12.5, color: 'var(--faint)' }}
+                  >
                     {c.label}: {c.value === 'declared-true' ? 'Yes' : 'No'}
                   </li>
                 ))}
@@ -157,14 +221,25 @@ export default async function SkillDetailPage({
 
           {updateAvailable ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--faint)' }}>UPDATE REVIEW</span>
+              <span
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: 'var(--faint)',
+                }}
+              >
+                UPDATE REVIEW
+              </span>
               {view.exceedsReviewBounds ? (
                 <p style={{ fontSize: 13, color: 'var(--dim)' }}>
-                  This update exceeds STAK&apos;s V0 review limits and can&apos;t be reviewed here. Approve
-                  isn&apos;t available for this update from the browser.
+                  This update exceeds STAK&apos;s V0 review limits and
+                  can&apos;t be reviewed here. Approve isn&apos;t available for
+                  this update from the browser.
                 </p>
               ) : view.reviewArtifact ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div
+                  style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+                >
                   {view.reviewArtifact.files.map((f) => (
                     <div
                       key={f.relativePath}
@@ -175,17 +250,33 @@ export default async function SkillDetailPage({
                         background: '#111110',
                       }}
                     >
-                      <div style={{ font: '12.5px var(--mono)', color: 'var(--faint)', marginBottom: 8 }}>
+                      <div
+                        style={{
+                          font: '12.5px var(--mono)',
+                          color: 'var(--faint)',
+                          marginBottom: 8,
+                        }}
+                      >
                         {f.relativePath} ({f.kind})
                       </div>
                       {f.binary ? (
                         <div style={{ fontSize: 12.5, color: 'var(--dim)' }}>
                           {f.relativePath} changed (binary file)
-                          {f.beforeSize !== undefined ? ` · before ${f.beforeSize} bytes` : ''}
-                          {f.afterSize !== undefined ? ` · after ${f.afterSize} bytes` : ''}
+                          {f.beforeSize !== undefined
+                            ? ` · before ${f.beforeSize} bytes`
+                            : ''}
+                          {f.afterSize !== undefined
+                            ? ` · after ${f.afterSize} bytes`
+                            : ''}
                         </div>
                       ) : (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1fr',
+                            gap: 10,
+                          }}
+                        >
                           <pre
                             style={{
                               margin: 0,
@@ -220,11 +311,32 @@ export default async function SkillDetailPage({
           ) : null}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--faint)' }}>HISTORY</span>
-            <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span
+              style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--faint)' }}
+            >
+              HISTORY
+            </span>
+            <ul
+              style={{
+                margin: 0,
+                padding: 0,
+                listStyle: 'none',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 2,
+              }}
+            >
               {view.history.map((h) => (
-                <li key={h.contentHash} style={{ fontSize: 12.5, font: '12.5px var(--mono)', color: 'var(--faint)' }}>
-                  {h.shortHash} · v{h.environmentVersionNumber} · {new Date(h.approvedAt).toLocaleString()}
+                <li
+                  key={h.contentHash}
+                  style={{
+                    fontSize: 12.5,
+                    font: '12.5px var(--mono)',
+                    color: 'var(--faint)',
+                  }}
+                >
+                  {h.shortHash} · v{h.environmentVersionNumber} ·{' '}
+                  {new Date(h.approvedAt).toLocaleString()}
                   {h.current ? ' · current' : ''}
                 </li>
               ))}

@@ -51,7 +51,7 @@ applied), existing CLI (`commander`)/cloud-server/cloud-client packages.
   order is safety-critical: new metadata commits successfully **before** the old blob is deleted — a
   failed/interrupted re-upload must never lose the previously-valid artifact.
 - **Stale/superseded semantics (frozen, do not reinterpret):** an artifact remains approvable even if
-  upstream has since moved past it, as long as no *newer* `stak skill check` has superseded it and the
+  upstream has since moved past it, as long as no _newer_ `stak skill check` has superseded it and the
   Skill's approved base hasn't changed under it. A newer check for the same Skill supersedes the old
   one. An approved-base change invalidates the old one. These are the only two invalidation triggers.
 - **Three source-check states, distinct from the structural cannot-check note (frozen):** "no update" /
@@ -76,15 +76,17 @@ applied), existing CLI (`commander`)/cloud-server/cloud-client packages.
 ## File Structure
 
 New:
+
 - `packages/core/src/skill-check.ts` — candidate+approved materialization, diff, bounds, binary
   classification (pure where possible; network/filesystem at the edges).
 - `packages/core/src/skill-check.test.ts`
 - `supabase/migrations/0006_skill_review_checks.sql` — **not applied**.
-- `packages/cli/src/commands/skill-check.ts` *or* an addition to `packages/cli/src/commands/skill.ts`
+- `packages/cli/src/commands/skill-check.ts` _or_ an addition to `packages/cli/src/commands/skill.ts`
   (decided in Task 8 based on the existing file's size) — the `stak skill check [<skill>]` command.
 - `packages/adapters/src/skill-update-integrity.test.ts` — the Task 9 "proof" test.
 
 Modified:
+
 - `packages/spec/src/product.ts` — new `sourceCheckStateSchema`, `cannotCheckReasonSchema`,
   `reviewArtifactFileSchema`, `skillReviewArtifactSchema`, `uploadSkillReviewArtifactRequestSchema`,
   `reportSkillSourceCheckRequestSchema`; `skillSummarySchema`/`skillDetailSchema` reshaped;
@@ -114,15 +116,17 @@ Modified:
 ### Task 1: Spec types
 
 **Files:**
+
 - Modify: `packages/spec/src/product.ts`
 - Modify/create: `packages/spec/src/product.test.ts` (add if absent; check first — the plan's earlier
   investigation did not confirm one exists, so create it if `packages/spec/src/` has no test for this
   file; otherwise add to the existing one)
 
 **Interfaces:**
+
 - Produces: `sourceCheckStateSchema` (`'no-update' | 'update-available' | 'not-checked' |
-  'cannot-check' | 'check-failed'`), `cannotCheckReasonSchema` (`'local' | 'dirty' | 'ambiguous' |
-  'unreachable' | 'pinned'`), `reviewArtifactFileSchema`, `skillReviewArtifactSchema`,
+'cannot-check' | 'check-failed'`), `cannotCheckReasonSchema` (`'local' | 'dirty' | 'ambiguous' |
+'unreachable' | 'pinned'`), `reviewArtifactFileSchema`, `skillReviewArtifactSchema`,
   `uploadSkillReviewArtifactRequestSchema`, `reportSkillSourceCheckRequestSchema`, and their inferred
   types (`SourceCheckState`, `CannotCheckReason`, `ReviewArtifactFile`, `SkillReviewArtifact`,
   `UploadSkillReviewArtifactRequest`, `ReportSkillSourceCheckRequest`). Reshaped
@@ -154,7 +158,13 @@ const HASH2 = 'sha256:' + 'b'.repeat(64);
 
 describe('sourceCheckStateSchema', () => {
   it('accepts exactly the five frozen states', () => {
-    for (const s of ['no-update', 'update-available', 'not-checked', 'cannot-check', 'check-failed'])
+    for (const s of [
+      'no-update',
+      'update-available',
+      'not-checked',
+      'cannot-check',
+      'check-failed',
+    ])
       expect(sourceCheckStateSchema.parse(s)).toBe(s);
   });
   it('rejects an invented state', () => {
@@ -329,10 +339,16 @@ export const reviewArtifactFileSchema = z
     kind: z.enum(['added', 'modified', 'removed']),
     binary: z.boolean(),
     before: z
-      .object({ byteSize: z.number().int().nonnegative(), hash: z.string().min(1) })
+      .object({
+        byteSize: z.number().int().nonnegative(),
+        hash: z.string().min(1),
+      })
       .optional(),
     after: z
-      .object({ byteSize: z.number().int().nonnegative(), hash: z.string().min(1) })
+      .object({
+        byteSize: z.number().int().nonnegative(),
+        hash: z.string().min(1),
+      })
       .optional(),
     // Present only when !binary; a binary file never carries a text preview.
     beforeText: z.string().optional(),
@@ -483,6 +499,7 @@ git commit -m "feat(p5a): spec types for Skill review artifacts and approve-by-a
 ### Task 2: Migration (not applied)
 
 **Files:**
+
 - Create: `supabase/migrations/0006_skill_review_checks.sql`
 
 **Interfaces:** none (SQL only; no application code depends on this file directly — Task 3/4 write
@@ -560,6 +577,7 @@ git commit -m "feat(p5a): add skill_review_checks migration (not applied)"
 ### Task 3: `CloudRepository` interface + in-memory fixture
 
 **Files:**
+
 - Modify: `packages/cloud-server/src/repository.ts`
 - Modify: `packages/cloud-server/src/memory.ts`
 - Create: `packages/cloud-server/src/repository.test.ts` if no such file exists for the in-memory
@@ -568,11 +586,12 @@ git commit -m "feat(p5a): add skill_review_checks migration (not applied)"
   new top-level `describe` block, to match the existing convention).
 
 **Interfaces:**
+
 - Produces: `SkillReviewCheckRecord` type (mirrors `skill_review_checks` columns in camelCase);
   `CloudRepository.getSkillReviewCheck(userId, skillId): Promise<SkillReviewCheckRecord | null>`,
   `CloudRepository.putSkillReviewCheck(record: SkillReviewCheckRecord): Promise<void>` (upsert —
   replaces any existing row for that `(userId, skillId)`), `CloudRepository.deleteSkillReviewCheck(
-  userId, skillId): Promise<void>`.
+userId, skillId): Promise<void>`.
 - Consumes: nothing new.
 
 - [ ] **Step 1: Write the failing test**
@@ -661,9 +680,11 @@ export type SkillReviewCheckRecord = {
   userId: string;
   skillId: string;
   approvedContentHash: string;
-  sourceCheckState: 'no-update' | 'update-available' | 'cannot-check' | 'check-failed';
+  sourceCheckState:
+    'no-update' | 'update-available' | 'cannot-check' | 'check-failed';
   checkedAt: string;
-  cannotCheckReason?: 'local' | 'dirty' | 'ambiguous' | 'unreachable' | 'pinned';
+  cannotCheckReason?:
+    'local' | 'dirty' | 'ambiguous' | 'unreachable' | 'pinned';
   checkFailedReason?: string;
   candidateRevision?: string;
   candidateContentHash?: string;
@@ -725,15 +746,17 @@ git commit -m "feat(p5a): CloudRepository skill-review-check storage (in-memory)
 ### Task 4: Supabase-backed repository implementation
 
 **Files:**
+
 - Modify: `apps/web/lib/repository.ts`
 
 **Interfaces:**
+
 - Consumes: `SkillReviewCheckRecord`, `ReviewArtifactFileRecord` from `@stack/cloud-server` (Task 3).
 - Produces: the same 3 methods, backed by `public.skill_review_checks` (Task 2's table).
 
 - [ ] **Step 1: Implement, following the existing `hasSnapshot`/`getSnapshot`/`putSnapshot` pattern
-  exactly** (snake_case columns, `mapX`-style row mapper, `db()` client accessor already used
-  throughout this file)
+      exactly** (snake_case columns, `mapX`-style row mapper, `db()` client accessor already used
+      throughout this file)
 
 ```typescript
 const mapSkillReviewCheck = (row: any): SkillReviewCheckRecord => ({
@@ -807,10 +830,12 @@ git commit -m "feat(p5a): Supabase-backed skill review check storage"
 ### Task 5: Candidate + approved tree materialization (`packages/core`)
 
 **Files:**
+
 - Create: `packages/core/src/skill-check.ts`
 - Create: `packages/core/src/skill-check.test.ts`
 
 **Interfaces:**
+
 - Consumes: `resolveSkillSourceLatest`, `SourceLatestResult`, `resolvePublicStackSourceLatest`,
   `diffSkillTrees`, `SkillTreeDiff` (`packages/core/src/skill-source.ts`); `enumerateSkillTree`,
   `hashSkillTreeEntries`, `validateTreePath`, `SkillTreeEntry` (`@stack/shared`); `spawnGit`,
@@ -818,9 +843,9 @@ git commit -m "feat(p5a): Supabase-backed skill review check storage"
 - Produces: `materializeExactRevision(options): Promise<SkillTreeEntry[]>` (shallow-fetch one exact
   Git revision's Skill subtree into a temp dir, enumerate it, clean up — no Store ingestion, this is
   ephemeral, used for both the approved and candidate sides); `buildReviewArtifactFiles(approved:
-  SkillTreeEntry[], candidate: SkillTreeEntry[], bounds): ReviewArtifactFilesResult` (pure — the diff +
+SkillTreeEntry[], candidate: SkillTreeEntry[], bounds): ReviewArtifactFilesResult` (pure — the diff +
   bounds + binary-classification + before/after-text logic); `type ReviewArtifactFilesResult = {
-  status: 'ok'; files: ReviewArtifactFileRecord[] } | { status: 'exceeds-bounds' }`.
+status: 'ok'; files: ReviewArtifactFileRecord[] } | { status: 'exceeds-bounds' }`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -871,7 +896,10 @@ describe('buildReviewArtifactFiles', () => {
       DEFAULT_REVIEW_BOUNDS,
     );
     if (result.status !== 'ok') throw new Error('expected ok');
-    expect(result.files[0]).toMatchObject({ kind: 'removed', beforeText: 'bye' });
+    expect(result.files[0]).toMatchObject({
+      kind: 'removed',
+      beforeText: 'bye',
+    });
     expect(result.files[0]?.afterText).toBeUndefined();
   });
   it('classifies a modified text file with both before and after', () => {
@@ -891,7 +919,13 @@ describe('buildReviewArtifactFiles', () => {
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02]);
     const result = buildReviewArtifactFiles(
       [{ relativePath: 'a.png', type: 'file', content: png }],
-      [{ relativePath: 'a.png', type: 'file', content: Buffer.concat([png, Buffer.from([1])]) }],
+      [
+        {
+          relativePath: 'a.png',
+          type: 'file',
+          content: Buffer.concat([png, Buffer.from([1])]),
+        },
+      ],
       DEFAULT_REVIEW_BOUNDS,
     );
     if (result.status !== 'ok') throw new Error('expected ok');
@@ -902,29 +936,37 @@ describe('buildReviewArtifactFiles', () => {
   });
   it('returns unchanged files omitted entirely', () => {
     const same = file('x.md', 'same');
-    const result = buildReviewArtifactFiles([same], [same], DEFAULT_REVIEW_BOUNDS);
+    const result = buildReviewArtifactFiles(
+      [same],
+      [same],
+      DEFAULT_REVIEW_BOUNDS,
+    );
     if (result.status !== 'ok') throw new Error('expected ok');
     expect(result.files).toHaveLength(0);
   });
   it('exceeds-bounds when total bytes exceed the cap', () => {
     const huge = 'x'.repeat(DEFAULT_REVIEW_BOUNDS.maxTotalBytes + 1);
-    const result = buildReviewArtifactFiles([], [file('big.md', huge)], DEFAULT_REVIEW_BOUNDS);
+    const result = buildReviewArtifactFiles(
+      [],
+      [file('big.md', huge)],
+      DEFAULT_REVIEW_BOUNDS,
+    );
     expect(result.status).toBe('exceeds-bounds');
   });
   it('exceeds-bounds when file count exceeds the cap', () => {
-    const many = Array.from({ length: DEFAULT_REVIEW_BOUNDS.maxFiles + 1 }, (_, i) =>
-      file(`f${i}.md`, 'x'),
+    const many = Array.from(
+      { length: DEFAULT_REVIEW_BOUNDS.maxFiles + 1 },
+      (_, i) => file(`f${i}.md`, 'x'),
     );
     const result = buildReviewArtifactFiles([], many, DEFAULT_REVIEW_BOUNDS);
     expect(result.status).toBe('exceeds-bounds');
   });
   it('exceeds-bounds when one file exceeds the per-file cap, even if total is small', () => {
     const big = 'x'.repeat(DEFAULT_REVIEW_BOUNDS.maxSingleFileBytes + 1);
-    const result = buildReviewArtifactFiles(
-      [],
-      [file('one-big.md', big)],
-      { ...DEFAULT_REVIEW_BOUNDS, maxTotalBytes: DEFAULT_REVIEW_BOUNDS.maxSingleFileBytes + 1024 },
-    );
+    const result = buildReviewArtifactFiles([], [file('one-big.md', big)], {
+      ...DEFAULT_REVIEW_BOUNDS,
+      maxTotalBytes: DEFAULT_REVIEW_BOUNDS.maxSingleFileBytes + 1024,
+    });
     expect(result.status).toBe('exceeds-bounds');
   });
 });
@@ -934,8 +976,12 @@ describe('materializeExactRevision (real git fixture, local only)', () => {
   let workRoot: string;
 
   const run = async (cwd: string, args: string[]) => {
-    const result = await spawnGit(args, { cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
-    if (result.exitCode !== 0) throw new Error(`git ${args[0]} failed: ${result.stderr}`);
+    const result = await spawnGit(args, {
+      cwd,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    });
+    if (result.exitCode !== 0)
+      throw new Error(`git ${args[0]} failed: ${result.stderr}`);
     return result;
   };
 
@@ -972,7 +1018,9 @@ describe('materializeExactRevision (real git fixture, local only)', () => {
     });
     const skillFile = entries.find((e) => e.relativePath === 'SKILL.md');
     expect(skillFile?.type).toBe('file');
-    expect((skillFile as { content: Buffer }).content.toString()).toBe('# v1\n');
+    expect((skillFile as { content: Buffer }).content.toString()).toBe(
+      '# v1\n',
+    );
   });
 
   it('rejects a skill path that escapes the repository root', async () => {
@@ -1073,11 +1121,15 @@ export const materializeExactRevision = async (options: {
     const skillDir = path.resolve(workDir, normalizedSkillPath);
     const prefix = `${workDir}${path.sep}`;
     if (skillDir !== workDir && !skillDir.startsWith(prefix))
-      throw new Error(`Skill path escapes the repository root: ${options.skillPath}`);
+      throw new Error(
+        `Skill path escapes the repository root: ${options.skillPath}`,
+      );
     try {
       await access(skillDir);
     } catch {
-      throw new Error(`Skill path ${options.skillPath} is missing at this revision.`);
+      throw new Error(
+        `Skill path ${options.skillPath} is missing at this revision.`,
+      );
     }
     return await enumerateSkillTree(skillDir);
   } finally {
@@ -1155,9 +1207,12 @@ export const buildReviewArtifactFiles = (
   for (const change of diff.files) {
     const beforeContent = approvedByPath.get(change.relativePath);
     const afterContent = candidateByPath.get(change.relativePath);
-    const relevantBytes = [beforeContent, afterContent].filter(Boolean) as Buffer[];
+    const relevantBytes = [beforeContent, afterContent].filter(
+      Boolean,
+    ) as Buffer[];
     for (const b of relevantBytes)
-      if (b.length > bounds.maxSingleFileBytes) return { status: 'exceeds-bounds' };
+      if (b.length > bounds.maxSingleFileBytes)
+        return { status: 'exceeds-bounds' };
     totalBytes += relevantBytes.reduce((sum, b) => sum + b.length, 0);
     if (totalBytes > bounds.maxTotalBytes) return { status: 'exceeds-bounds' };
 
@@ -1167,10 +1222,16 @@ export const buildReviewArtifactFiles = (
       kind: change.kind,
       binary,
       ...(beforeContent
-        ? { before: sideOf(beforeContent), ...(binary ? {} : { beforeText: beforeContent.toString('utf8') }) }
+        ? {
+            before: sideOf(beforeContent),
+            ...(binary ? {} : { beforeText: beforeContent.toString('utf8') }),
+          }
         : {}),
       ...(afterContent
-        ? { after: sideOf(afterContent), ...(binary ? {} : { afterText: afterContent.toString('utf8') }) }
+        ? {
+            after: sideOf(afterContent),
+            ...(binary ? {} : { afterText: afterContent.toString('utf8') }),
+          }
         : {}),
     };
     files.push(record);
@@ -1202,6 +1263,7 @@ git commit -m "feat(p5a): local exact-revision materialization + bounded review 
 ### Task 6: Cloud-server product-service rewrite (read model + upload + approve-by-artifact)
 
 **Files:**
+
 - Modify: `packages/cloud-server/src/product-service.ts`
 - Modify: `packages/cloud-server/src/service.ts` (remove the dead `checkSkillSource` config option)
 - Modify: `packages/cloud-server/src/handler.ts` (new route; approve route's body shape)
@@ -1212,6 +1274,7 @@ git commit -m "feat(p5a): local exact-revision materialization + bounded review 
   adding a new helper.
 
 **Interfaces:**
+
 - Consumes: `SkillReviewCheckRecord` (Task 3); `UploadSkillReviewArtifactRequest`,
   `ReportSkillSourceCheckRequest`, `ApproveSkillVersionRequest`, `SkillSummary`, `SkillDetail`,
   `SkillReviewArtifact` (Task 1); `config.blobStore` (existing `CloudBlobStore`).
@@ -1301,54 +1364,67 @@ seeding logic).
 Run: `cd packages/cloud-server && npx vitest run src/product.test.ts` → FAIL (old shape).
 
 In `product-service.ts`:
+
 1. Remove `checkSkillSource` entirely: the `SourceLatest`/`SkillSourceChecker` type exports, the
    `checkSkillSource?:` config field, and the `if (config.checkSkillSource) { ... }` branch inside
    `skillSummaries()`.
 2. Replace that branch with:
 
 ```typescript
-  const skillSummaries = async (userId: string): Promise<SkillSummary[]> => {
-    const current = await latestBundle(userId);
-    if (!current) return [];
-    const machines = await config.repository.listMachineStates(userId);
-    const installsBySkill = new Map<string, SkillInstall[]>();
-    for (const machine of machines)
-      for (const skill of machine.skills) {
-        const list = installsBySkill.get(skill.skillId) ?? [];
-        list.push({
-          machineId: machine.machineId,
-          ...(machine.name !== undefined ? { name: machine.name } : {}),
-          installedVersion: skill.installedVersion,
-        });
-        installsBySkill.set(skill.skillId, list);
-      }
-    const result: SkillSummary[] = [];
-    for (const [skillId, skill] of Object.entries(current.bundle.resolved.skills)) {
-      const stored = await config.repository.getSkillReviewCheck(userId, skillId);
-      // A stored check only counts while it's computed against the CURRENT approved base
-      // (contract §5a "base-bound results") — a stale one reads as not-checked, never as a
-      // diff against the wrong base.
-      const current_ =
-        stored && stored.approvedContentHash === skill.contentHash ? stored : null;
-      result.push({
-        skillId,
-        name: skill.name,
-        ...(skill.description ? { description: skill.description } : {}),
-        approvedVersion: skill.contentHash,
-        paused: skill.paused === true,
-        source: sourceSummaryOf(skill),
-        capability: capabilityStateOf(skill),
-        sourceCheckState: current_?.sourceCheckState ?? 'not-checked',
-        checkedAt: current_?.checkedAt ?? null,
-        ...(current_?.candidateRevision ? { candidateRevision: current_.candidateRevision } : {}),
-        ...(current_?.reviewArtifactId ? { reviewArtifactId: current_.reviewArtifactId } : {}),
-        ...(current_?.cannotCheckReason ? { cannotCheckReason: current_.cannotCheckReason } : {}),
-        ...(current_?.checkFailedReason ? { checkFailedReason: current_.checkFailedReason } : {}),
-        installs: installsBySkill.get(skillId) ?? [],
+const skillSummaries = async (userId: string): Promise<SkillSummary[]> => {
+  const current = await latestBundle(userId);
+  if (!current) return [];
+  const machines = await config.repository.listMachineStates(userId);
+  const installsBySkill = new Map<string, SkillInstall[]>();
+  for (const machine of machines)
+    for (const skill of machine.skills) {
+      const list = installsBySkill.get(skill.skillId) ?? [];
+      list.push({
+        machineId: machine.machineId,
+        ...(machine.name !== undefined ? { name: machine.name } : {}),
+        installedVersion: skill.installedVersion,
       });
+      installsBySkill.set(skill.skillId, list);
     }
-    return result.sort((a, b) => a.name.localeCompare(b.name));
-  };
+  const result: SkillSummary[] = [];
+  for (const [skillId, skill] of Object.entries(
+    current.bundle.resolved.skills,
+  )) {
+    const stored = await config.repository.getSkillReviewCheck(userId, skillId);
+    // A stored check only counts while it's computed against the CURRENT approved base
+    // (contract §5a "base-bound results") — a stale one reads as not-checked, never as a
+    // diff against the wrong base.
+    const current_ =
+      stored && stored.approvedContentHash === skill.contentHash
+        ? stored
+        : null;
+    result.push({
+      skillId,
+      name: skill.name,
+      ...(skill.description ? { description: skill.description } : {}),
+      approvedVersion: skill.contentHash,
+      paused: skill.paused === true,
+      source: sourceSummaryOf(skill),
+      capability: capabilityStateOf(skill),
+      sourceCheckState: current_?.sourceCheckState ?? 'not-checked',
+      checkedAt: current_?.checkedAt ?? null,
+      ...(current_?.candidateRevision
+        ? { candidateRevision: current_.candidateRevision }
+        : {}),
+      ...(current_?.reviewArtifactId
+        ? { reviewArtifactId: current_.reviewArtifactId }
+        : {}),
+      ...(current_?.cannotCheckReason
+        ? { cannotCheckReason: current_.cannotCheckReason }
+        : {}),
+      ...(current_?.checkFailedReason
+        ? { checkFailedReason: current_.checkFailedReason }
+        : {}),
+      installs: installsBySkill.get(skillId) ?? [],
+    });
+  }
+  return result.sort((a, b) => a.name.localeCompare(b.name));
+};
 ```
 
 Remove the `ProductServiceConfig.checkSkillSource` field. Remove the `SourceLatest`/`SkillSourceChecker`
@@ -1372,21 +1448,31 @@ describe('uploadSkillReviewArtifact', () => {
     const files = [
       { relativePath: 'SKILL.md', kind: 'modified' as const, binary: false },
     ];
-    const payload = Buffer.from(JSON.stringify({ files: [{ relativePath: 'SKILL.md', afterText: 'x' }] }));
-    const artifactPayloadHash = 'sha256:' + require('node:crypto').createHash('sha256').update(payload).digest('hex');
-    const result = await env.service.uploadSkillReviewArtifact(env.user, {
-      skillId: env.skillId,
-      approvedContentHash: env.approvedContentHash,
-      candidateRevision: 'abc123',
-      candidateContentHash: 'sha256:' + 'b'.repeat(64),
-      artifactPayloadHash,
-      checkedAt: '2026-01-01T00:00:00.000Z',
-      files,
-    }, payload);
+    const payload = Buffer.from(
+      JSON.stringify({ files: [{ relativePath: 'SKILL.md', afterText: 'x' }] }),
+    );
+    const artifactPayloadHash =
+      'sha256:' +
+      require('node:crypto').createHash('sha256').update(payload).digest('hex');
+    const result = await env.service.uploadSkillReviewArtifact(
+      env.user,
+      {
+        skillId: env.skillId,
+        approvedContentHash: env.approvedContentHash,
+        candidateRevision: 'abc123',
+        candidateContentHash: 'sha256:' + 'b'.repeat(64),
+        artifactPayloadHash,
+        checkedAt: '2026-01-01T00:00:00.000Z',
+        files,
+      },
+      payload,
+    );
     expect(result.reviewArtifactId).toBeDefined();
     const detail = await env.service.getSkillDetail(env.user, env.skillId);
     expect(detail.sourceCheckState).toBe('update-available');
-    expect(detail.reviewArtifact?.reviewArtifactId).toBe(result.reviewArtifactId);
+    expect(detail.reviewArtifact?.reviewArtifactId).toBe(
+      result.reviewArtifactId,
+    );
   });
   it('rejects a payload whose hash does not match the declared artifactPayloadHash', async () => {
     const env = setup();
@@ -1413,11 +1499,23 @@ describe('uploadSkillReviewArtifact', () => {
   });
   it('a NEW upload replaces the prior artifact — old blob becomes unreachable, metadata shows only the new one', async () => {
     const env = setup();
-    const first = await env.service.uploadSkillReviewArtifact(env.user, { /* ...A... */ }, Buffer.from('a'));
-    const second = await env.service.uploadSkillReviewArtifact(env.user, { /* ...B... */ }, Buffer.from('b'));
+    const first = await env.service.uploadSkillReviewArtifact(
+      env.user,
+      {/* ...A... */},
+      Buffer.from('a'),
+    );
+    const second = await env.service.uploadSkillReviewArtifact(
+      env.user,
+      {/* ...B... */},
+      Buffer.from('b'),
+    );
     const detail = await env.service.getSkillDetail(env.user, env.skillId);
-    expect(detail.reviewArtifact?.reviewArtifactId).toBe(second.reviewArtifactId);
-    expect(detail.reviewArtifact?.reviewArtifactId).not.toBe(first.reviewArtifactId);
+    expect(detail.reviewArtifact?.reviewArtifactId).toBe(
+      second.reviewArtifactId,
+    );
+    expect(detail.reviewArtifact?.reviewArtifactId).not.toBe(
+      first.reviewArtifactId,
+    );
   });
 });
 
@@ -1578,13 +1676,17 @@ Run: `cd packages/cloud-server && npx vitest run src/product.test.ts`
 Expected: PASS
 
 - [ ] **Step 7: Write the failing tests for approve-by-artifact + stale/superseded + the frozen
-  "upstream moved without recheck remains approvable" case**
+      "upstream moved without recheck remains approvable" case**
 
 ```typescript
 describe('approveSkillVersion — by artifact (P5a)', () => {
   it('approves the exact candidate recorded in the current artifact', async () => {
     const env = setup();
-    const { reviewArtifactId } = await env.service.uploadSkillReviewArtifact(env.user, { /* A */ }, Buffer.from('a'));
+    const { reviewArtifactId } = await env.service.uploadSkillReviewArtifact(
+      env.user,
+      {/* A */},
+      Buffer.from('a'),
+    );
     const result = await env.service.approveSkillVersion(env.user, {
       skillId: env.skillId,
       reviewArtifactId,
@@ -1594,33 +1696,68 @@ describe('approveSkillVersion — by artifact (P5a)', () => {
   it('rejects an artifact that belongs to a different account', async () => {
     const env = setup();
     const other = await setupSecondUser(); // follow whatever helper the test file already uses for a 2nd user
-    const { reviewArtifactId } = await env.service.uploadSkillReviewArtifact(env.user, { /* A */ }, Buffer.from('a'));
+    const { reviewArtifactId } = await env.service.uploadSkillReviewArtifact(
+      env.user,
+      {/* A */},
+      Buffer.from('a'),
+    );
     await expect(
-      other.service.approveSkillVersion(other.user, { skillId: env.skillId, reviewArtifactId }),
+      other.service.approveSkillVersion(other.user, {
+        skillId: env.skillId,
+        reviewArtifactId,
+      }),
     ).rejects.toThrow();
   });
   it('rejects an artifact id for the wrong Skill', async () => {
     const env = setupWithTwoSkills(); // or construct inline if no such helper exists yet
-    const { reviewArtifactId } = await env.service.uploadSkillReviewArtifact(env.user, { skillId: env.skillIdA, /* ... */ }, Buffer.from('a'));
+    const { reviewArtifactId } = await env.service.uploadSkillReviewArtifact(
+      env.user,
+      { skillId: env.skillIdA /* ... */ },
+      Buffer.from('a'),
+    );
     await expect(
-      env.service.approveSkillVersion(env.user, { skillId: env.skillIdB, reviewArtifactId }),
+      env.service.approveSkillVersion(env.user, {
+        skillId: env.skillIdB,
+        reviewArtifactId,
+      }),
     ).rejects.toThrow();
   });
   it('CASE B: a newer artifact supersedes an older one — approving the old id is rejected', async () => {
     const env = setup();
-    const a = await env.service.uploadSkillReviewArtifact(env.user, { /* revision A */ }, Buffer.from('a'));
-    const b = await env.service.uploadSkillReviewArtifact(env.user, { /* revision B, same skill */ }, Buffer.from('b'));
+    const a = await env.service.uploadSkillReviewArtifact(
+      env.user,
+      {/* revision A */},
+      Buffer.from('a'),
+    );
+    const b = await env.service.uploadSkillReviewArtifact(
+      env.user,
+      {/* revision B, same skill */},
+      Buffer.from('b'),
+    );
     await expect(
-      env.service.approveSkillVersion(env.user, { skillId: env.skillId, reviewArtifactId: a.reviewArtifactId }),
+      env.service.approveSkillVersion(env.user, {
+        skillId: env.skillId,
+        reviewArtifactId: a.reviewArtifactId,
+      }),
     ).rejects.toThrow();
-    const result = await env.service.approveSkillVersion(env.user, { skillId: env.skillId, reviewArtifactId: b.reviewArtifactId });
+    const result = await env.service.approveSkillVersion(env.user, {
+      skillId: env.skillId,
+      reviewArtifactId: b.reviewArtifactId,
+    });
     expect(result.changed).toBe(true);
   });
   it('CASE C: approved base changes before the artifact is approved — the old artifact is rejected', async () => {
     const env = setup();
-    const a = await env.service.uploadSkillReviewArtifact(env.user, { /* ... */ }, Buffer.from('a'));
+    const a = await env.service.uploadSkillReviewArtifact(
+      env.user,
+      {/* ... */},
+      Buffer.from('a'),
+    );
     // Simulate an unrelated approval of a DIFFERENT candidate that changes the approved base.
-    await env.service.approveSkillVersion(env.user, { skillId: env.skillId, reviewArtifactId: a.reviewArtifactId });
+    await env.service.approveSkillVersion(env.user, {
+      skillId: env.skillId,
+      reviewArtifactId: a.reviewArtifactId,
+    });
     // a's own approval already consumed it; craft a second artifact A2 against the ORIGINAL base,
     // then approve something else that moves the base again, then assert A2 is now rejected.
     // (Implementer: construct this precisely against whatever `setup()` exposes — the key
@@ -1628,7 +1765,11 @@ describe('approveSkillVersion — by artifact (P5a)', () => {
   });
   it('UPSTREAM-MOVED-WITHOUT-RECHECK: artifact A remains approvable even after a (mocked/no-op) \u201cupstream moved to B\u201d — Cloud never re-resolves upstream at approval time', async () => {
     const env = setup();
-    const a = await env.service.uploadSkillReviewArtifact(env.user, { /* revision A */ }, Buffer.from('a'));
+    const a = await env.service.uploadSkillReviewArtifact(
+      env.user,
+      {/* revision A */},
+      Buffer.from('a'),
+    );
     // No new stak skill check ran — nothing in this test simulates upstream moving, because
     // Cloud has no mechanism to observe it. The assertion IS the absence of any re-resolution:
     // approving A succeeds using only A's own stored, already-committed data.
@@ -1640,8 +1781,15 @@ describe('approveSkillVersion — by artifact (P5a)', () => {
   });
   it('approval is idempotent for the same artifact', async () => {
     const env = setup();
-    const a = await env.service.uploadSkillReviewArtifact(env.user, { /* ... */ }, Buffer.from('a'));
-    const first = await env.service.approveSkillVersion(env.user, { skillId: env.skillId, reviewArtifactId: a.reviewArtifactId });
+    const a = await env.service.uploadSkillReviewArtifact(
+      env.user,
+      {/* ... */},
+      Buffer.from('a'),
+    );
+    const first = await env.service.approveSkillVersion(env.user, {
+      skillId: env.skillId,
+      reviewArtifactId: a.reviewArtifactId,
+    });
     expect(first.changed).toBe(true);
   });
 });
@@ -1725,38 +1873,46 @@ Expected: PASS
 In `handler.ts`, add near the existing `skills/:id/approve` route:
 
 ```typescript
-    if (
-      method === 'POST' &&
-      segments.length === 3 &&
-      segments[0] === 'skills' &&
-      segments[2] === 'review-check'
-    ) {
-      const user = await authenticate();
-      const body = reportSkillSourceCheckRequestSchema.parse({
-        skillId: segments[1],
-        ...(typeof request.jsonBody === 'object' && request.jsonBody ? request.jsonBody : {}),
-      });
-      return json(200, await service.reportSkillSourceCheck(user, body));
-    }
-    if (
-      method === 'POST' &&
-      segments.length === 3 &&
-      segments[0] === 'skills' &&
-      segments[2] === 'review-artifact'
-    ) {
-      const user = await authenticate();
-      const body = uploadSkillReviewArtifactRequestSchema.parse({
-        skillId: segments[1],
-        ...(typeof request.jsonBody === 'object' && request.jsonBody ? request.jsonBody : {}),
-      });
-      // The artifact's bounded text payload travels as `request.binaryBody` — the CloudRequest
-      // type already supports this (used by the existing snapshot-upload route; follow that
-      // route's exact pattern for extracting binaryBody here).
-      return json(
-        200,
-        await service.uploadSkillReviewArtifact(user, body, request.binaryBody ?? new Uint8Array()),
-      );
-    }
+if (
+  method === 'POST' &&
+  segments.length === 3 &&
+  segments[0] === 'skills' &&
+  segments[2] === 'review-check'
+) {
+  const user = await authenticate();
+  const body = reportSkillSourceCheckRequestSchema.parse({
+    skillId: segments[1],
+    ...(typeof request.jsonBody === 'object' && request.jsonBody
+      ? request.jsonBody
+      : {}),
+  });
+  return json(200, await service.reportSkillSourceCheck(user, body));
+}
+if (
+  method === 'POST' &&
+  segments.length === 3 &&
+  segments[0] === 'skills' &&
+  segments[2] === 'review-artifact'
+) {
+  const user = await authenticate();
+  const body = uploadSkillReviewArtifactRequestSchema.parse({
+    skillId: segments[1],
+    ...(typeof request.jsonBody === 'object' && request.jsonBody
+      ? request.jsonBody
+      : {}),
+  });
+  // The artifact's bounded text payload travels as `request.binaryBody` — the CloudRequest
+  // type already supports this (used by the existing snapshot-upload route; follow that
+  // route's exact pattern for extracting binaryBody here).
+  return json(
+    200,
+    await service.uploadSkillReviewArtifact(
+      user,
+      body,
+      request.binaryBody ?? new Uint8Array(),
+    ),
+  );
+}
 ```
 
 Update the existing `skills/:id/approve` route's body parse to use the new
@@ -1783,27 +1939,29 @@ git commit -m "feat(p5a): persisted source-check read model + approve-by-artifac
 ### Task 7: `cloud-client` methods
 
 **Files:**
+
 - Modify: `packages/cloud-client/src/client.ts`
 - Modify: its corresponding test file (find the existing one — likely
   `packages/cloud-client/src/client.test.ts`)
 
 **Interfaces:**
+
 - Produces: `reportSkillSourceCheck(request)`, `uploadSkillReviewArtifact(request, payloadBytes)`
   client methods calling the two new routes from Task 6; the existing `approveSkillVersion` client
   call updated to send `{ skillId, reviewArtifactId }`.
 
 - [ ] **Step 1: Find and read the existing approve-skill client call + one existing binary-upload
-  client call (e.g. the snapshot upload) to match the file's exact fetch/auth-header/error-handling
-  conventions** before writing anything — this file was not fully read during planning; do not guess
-  its HTTP client shape.
+      client call (e.g. the snapshot upload) to match the file's exact fetch/auth-header/error-handling
+      conventions** before writing anything — this file was not fully read during planning; do not guess
+      its HTTP client shape.
 
 - [ ] **Step 2: Write failing tests** mirroring whatever pattern the existing client test file uses for
-  a POST-with-JSON-body call and a POST-with-binary-body call (follow its fixture/mock-fetch
-  conventions exactly — this plan cannot specify the exact test code without having read that file
-  first; the implementer must read it as this step).
+      a POST-with-JSON-body call and a POST-with-binary-body call (follow its fixture/mock-fetch
+      conventions exactly — this plan cannot specify the exact test code without having read that file
+      first; the implementer must read it as this step).
 
 - [ ] **Step 3: Implement the two new methods + update the approve call**, following the file's
-  existing method shapes exactly (same error-wrapping, same base-URL/auth-header construction).
+      existing method shapes exactly (same error-wrapping, same base-URL/auth-header construction).
 
 - [ ] **Step 4: Run the package's tests + typecheck**
 
@@ -1822,6 +1980,7 @@ git commit -m "feat(p5a): cloud-client methods for review-check report/upload + 
 ### Task 8: CLI `stak skill check [<skill>]`
 
 **Files:**
+
 - Modify: `packages/cli/src/commands/skill.ts` (add the `check` subcommand to the existing `registerSkillCommand`)
 - Create: `packages/cli/src/skill-check-runner.ts` (the orchestration: resolve → materialize both
   sides → diff → bound → upload/report; kept out of `commands/skill.ts` so the command file stays a
@@ -1832,19 +1991,20 @@ git commit -m "feat(p5a): cloud-client methods for review-check report/upload + 
   `skillUpdate`/`skillPause`/`skillResume` already use at the lines read during planning)
 
 **Interfaces:**
+
 - Consumes: `resolveSkillSourceLatest`, `resolvePublicStackSourceLatest` (`packages/core/src/skill-source.ts`);
   `materializeExactRevision`, `buildReviewArtifactFiles`, `DEFAULT_REVIEW_BOUNDS`
   (`packages/core/src/skill-check.ts`, Task 5); `reportSkillSourceCheck`/`uploadSkillReviewArtifact`
   (`packages/cloud-client`, Task 7); `resolveSkillSelector` (existing, from `composition.js`).
 - Produces: `runSkillCheck(options): Promise<SkillCheckResult>` where
   `SkillCheckResult = { checked: { entryId: string; name: string; outcome: 'no-update' |
-  'update-available' | 'cannot-check' | 'check-failed' }[] }`; the registered `stak skill check
-  [<skill>]` command.
+'update-available' | 'cannot-check' | 'check-failed' }[] }`; the registered `stak skill check
+[<skill>]` command.
 
 - [ ] **Step 1: Write the failing tests** for `runSkillCheck`, using a local synthetic Git fixture
-  repository (same `mkdtemp`/`git init` pattern as Task 5's tests) and a fake cloud-client (an object
-  matching the two methods' signatures, recording calls instead of making network requests — this
-  satisfies the Global Constraint against real uploads during tests):
+      repository (same `mkdtemp`/`git init` pattern as Task 5's tests) and a fake cloud-client (an object
+      matching the two methods' signatures, recording calls instead of making network requests — this
+      satisfies the Global Constraint against real uploads during tests):
 
 ```typescript
 // packages/cli/src/skill-check-runner.test.ts
@@ -1894,8 +2054,12 @@ describe('runSkillCheck', () => {
     //         service methods; if Task 6's schema doesn't yet support this exact case, that is
     //         a real gap to flag back to the controller, not to paper over.)
   });
-  it('a selector checks only the named Skill', async () => { /* two-skill lock, selector narrows to one */ });
-  it('with no selector, checks every checkable Skill', async () => { /* two-skill lock, no selector */ });
+  it('a selector checks only the named Skill', async () => {
+    /* two-skill lock, selector narrows to one */
+  });
+  it('with no selector, checks every checkable Skill', async () => {
+    /* two-skill lock, no selector */
+  });
   it('never approves, installs, pauses, or resumes anything', async () => {
     // Assert the fake cloud-client exposes no approve/pause/install call at all (don't even
     // give the fake those methods, so a call would be a TypeError, not a silent no-op).
@@ -1937,30 +2101,41 @@ import type { EnvironmentLock } from '@stack/spec';
 
 export type SkillCheckOutcome =
   | { outcome: 'no-update' }
-  | { outcome: 'cannot-check'; reason: 'local' | 'dirty' | 'ambiguous' | 'unreachable' | 'pinned' }
+  | {
+      outcome: 'cannot-check';
+      reason: 'local' | 'dirty' | 'ambiguous' | 'unreachable' | 'pinned';
+    }
   | { outcome: 'check-failed'; reason: string }
   | { outcome: 'update-available'; exceedsBounds: true }
-  | { outcome: 'update-available'; exceedsBounds: false; reviewArtifactId: string };
+  | {
+      outcome: 'update-available';
+      exceedsBounds: false;
+      reviewArtifactId: string;
+    };
 
 export type SkillCheckReporter = {
   reportSkillSourceCheck(input: {
     skillId: string;
     approvedContentHash: string;
-    sourceCheckState: 'no-update' | 'cannot-check' | 'check-failed' | 'update-available';
+    sourceCheckState:
+      'no-update' | 'cannot-check' | 'check-failed' | 'update-available';
     checkedAt: string;
     cannotCheckReason?: string;
     failureReason?: string;
     candidateRevision?: string;
   }): Promise<void>;
-  uploadSkillReviewArtifact(input: {
-    skillId: string;
-    approvedContentHash: string;
-    candidateRevision: string;
-    candidateContentHash: string;
-    artifactPayloadHash: string;
-    checkedAt: string;
-    files: unknown[];
-  }, payloadBytes: Uint8Array): Promise<{ reviewArtifactId: string }>;
+  uploadSkillReviewArtifact(
+    input: {
+      skillId: string;
+      approvedContentHash: string;
+      candidateRevision: string;
+      candidateContentHash: string;
+      artifactPayloadHash: string;
+      checkedAt: string;
+      files: unknown[];
+    },
+    payloadBytes: Uint8Array,
+  ): Promise<{ reviewArtifactId: string }>;
 };
 
 export const runSkillCheck = async (options: {
@@ -1969,7 +2144,9 @@ export const runSkillCheck = async (options: {
   workRoot: string;
   reporter: SkillCheckReporter;
   now?: () => Date;
-}): Promise<{ checked: { entryId: string; name: string; outcome: SkillCheckOutcome }[] }> => {
+}): Promise<{
+  checked: { entryId: string; name: string; outcome: SkillCheckOutcome }[];
+}> => {
   // 1. Resolve the set of entryIds to check (one via resolveSkillSelector, or all).
   // 2. For each: call resolveSkillSourceLatest. 'same' -> no-update. 'uncheckable' -> cannot-check
   //    (map the reason; 'pinned' maps to 'pinned'). On a resolution throw -> check-failed with a
@@ -2002,16 +2179,20 @@ Expected: PASS
 In `packages/cli/src/commands/skill.ts`, add inside `registerSkillCommand`:
 
 ```typescript
-  skill
-    .command('check [skill]')
-    .description('Check Skill sources for updates (contacts remotes; never approves/installs)')
-    .option('--json', 'emit structured JSON only')
-    .action(async (selector: string | undefined, options: { json?: boolean }) => {
-      const result = await dependencies.skillCheck(selector ? { selector } : {});
-      dependencies.writeOut(
-        options.json ? `${JSON.stringify(result, null, 2)}\n` : renderCheck(result),
-      );
-    });
+skill
+  .command('check [skill]')
+  .description(
+    'Check Skill sources for updates (contacts remotes; never approves/installs)',
+  )
+  .option('--json', 'emit structured JSON only')
+  .action(async (selector: string | undefined, options: { json?: boolean }) => {
+    const result = await dependencies.skillCheck(selector ? { selector } : {});
+    dependencies.writeOut(
+      options.json
+        ? `${JSON.stringify(result, null, 2)}\n`
+        : renderCheck(result),
+    );
+  });
 ```
 
 Add a `renderCheck(result)` function mirroring `renderUpdate`/`renderPaused`'s style (per-Skill lines:
@@ -2056,9 +2237,11 @@ git commit -m "feat(p5a): stak skill check — local source resolution + review-
 ### Task 9: Local-apply hash-verification proof
 
 **Files:**
+
 - Create: `packages/adapters/src/skill-update-integrity.test.ts`
 
 **Interfaces:**
+
 - Consumes: whatever `applyBindings` entry point `codex.ts` (or the shared adapter logic) exposes,
   `materializeStoredSkill`/`ingestSkill` from `@stack/store`.
 
@@ -2134,6 +2317,7 @@ git commit -m "test(p5a): prove local apply fails closed on content-hash mismatc
 ### Task 10: Web integration — fixes the P5 Task 9 Critical finding
 
 **Files:**
+
 - Modify: `apps/web/app/skills/skills-data.ts` + `skills-data.test.ts`
 - Modify: `apps/web/app/skills/skill-detail-data.ts` + `skill-detail-data.test.ts`
 - Modify: `apps/web/app/skills/actions.ts`
@@ -2142,6 +2326,7 @@ git commit -m "test(p5a): prove local apply fails closed on content-hash mismatc
 - Modify: `apps/web/app/skills/_components/skill-actions.tsx`
 
 **Interfaces:**
+
 - Consumes: the new `SkillSummary`/`SkillDetail`/`SkillReviewArtifact` shapes (Task 1); the new
   `approveSkillVersionAction`/`setSkillPausedAction` contract (approve now takes `reviewArtifactId`,
   not `candidateContentHash`/`candidateRevision`).
@@ -2152,12 +2337,25 @@ Replace every reference to `skill.updateStatus`/`skill.candidateVersion` with
 `skill.sourceCheckState`/`skill.candidateRevision`. The priority chain becomes:
 
 ```typescript
-  if (skill.paused) { primaryStatus = 'paused'; dot = 'neutral'; statusText = 'Paused'; }
-  else if (skill.sourceCheckState === 'update-available') { primaryStatus = 'update-available'; dot = 'attention'; statusText = 'Update available'; }
-  else if (!viewingMachineCheckedIn) { /* existing 'Not reported here yet' branch, unchanged */ }
-  else if (!install) { /* existing 'Not installed here' branch, unchanged */ }
-  else if (!installedHere) { /* existing 'Different version here' branch, unchanged */ }
-  else { primaryStatus = 'ready'; dot = 'ready'; statusText = 'Ready'; }
+if (skill.paused) {
+  primaryStatus = 'paused';
+  dot = 'neutral';
+  statusText = 'Paused';
+} else if (skill.sourceCheckState === 'update-available') {
+  primaryStatus = 'update-available';
+  dot = 'attention';
+  statusText = 'Update available';
+} else if (!viewingMachineCheckedIn) {
+  /* existing 'Not reported here yet' branch, unchanged */
+} else if (!install) {
+  /* existing 'Not installed here' branch, unchanged */
+} else if (!installedHere) {
+  /* existing 'Different version here' branch, unchanged */
+} else {
+  primaryStatus = 'ready';
+  dot = 'ready';
+  statusText = 'Ready';
+}
 ```
 
 Add a new row field: `sourceCheckNote: string | undefined` — `'not-checked'` ⇒
@@ -2260,6 +2458,7 @@ only add what's missing.
 
 **Checklist against the brief's test matrix (§25):** confirm each of the following has a passing test
 somewhere in the suite, and add the ones that don't:
+
 - Duplicate artifact upload is idempotent (same artifact re-uploaded doesn't error or double-create).
 - Path traversal in a Skill's materialized subtree is rejected (Task 5 covers the materialization
   side; confirm there's no second path where an untrusted relative path reaches the filesystem
@@ -2276,29 +2475,29 @@ somewhere in the suite, and add the ones that don't:
   arrived (defense in depth, matching the existing `UnsafeTreePathError` pattern).
 
 - [ ] **Step 1–N:** for each gap found, write the failing test, confirm it fails (if genuinely new
-  behavior) or passes immediately (if already covered — note which), implement if needed, confirm
-  pass, commit per gap or in one batched commit if all gaps are additive tests with no production
-  change: `test(p5a): close cross-cutting coverage gaps (idempotency, path/symlink safety, cross-account)`.
+      behavior) or passes immediately (if already covered — note which), implement if needed, confirm
+      pass, commit per gap or in one batched commit if all gaps are additive tests with no production
+      change: `test(p5a): close cross-cutting coverage gaps (idempotency, path/symlink safety, cross-account)`.
 
 ---
 
 ### Task 12: Full validation pass
 
 - [ ] **Step 1:** `cd "C:/Users/NT/Desktop/stack" && npx turbo run typecheck lint test 2>&1 | tail -100`
-  (or run per-package if `turbo` isn't configured for a filtered run — check `turbo.json` first) across
-  every touched package: `spec`, `shared` (untouched, but confirm), `core`, `store` (untouched,
-  confirm), `cloud-server`, `cloud-client`, `cli`, `adapters`, `apps/web`.
+      (or run per-package if `turbo` isn't configured for a filtered run — check `turbo.json` first) across
+      every touched package: `spec`, `shared` (untouched, but confirm), `core`, `store` (untouched,
+      confirm), `cloud-server`, `cloud-client`, `cli`, `adapters`, `apps/web`.
 - [ ] **Step 2:** `npx prettier --check` across every file touched in this plan.
 - [ ] **Step 3:** `git diff --check` for whitespace errors.
 - [ ] **Step 4:** Privacy grep sweep:
-  `grep -rniE "[A-Za-z]:\\\\Users|/home/|/Users/" packages/core/src/skill-check.ts packages/cli/src/skill-check-runner.ts apps/web/app/skills` → expect clean.
-  `grep -rniE "GIT_ASKPASS|credential|password|token" packages/core/src/skill-check.ts packages/cli/src/skill-check-runner.ts` → manually confirm every match is a safe identifier name, not a leaked value.
+      `grep -rniE "[A-Za-z]:\\\\Users|/home/|/Users/" packages/core/src/skill-check.ts packages/cli/src/skill-check-runner.ts apps/web/app/skills` → expect clean.
+      `grep -rniE "GIT_ASKPASS|credential|password|token" packages/core/src/skill-check.ts packages/cli/src/skill-check-runner.ts` → manually confirm every match is a safe identifier name, not a leaked value.
 - [ ] **Step 5:** Confirm `supabase/migrations/0006_skill_review_checks.sql` was never applied — `git
-  log`/`git status` show it as a committed file only; no `supabase db push`/equivalent was run this
-  session.
+log`/`git status` show it as a committed file only; no `supabase db push`/equivalent was run this
+      session.
 - [ ] **Step 6:** Confirm no real-account mutation — grep this session's test files for the real
-  account's identifiers (none should appear; all fixtures use synthetic `user-1`/`skill_test...`-style
-  ids).
+      account's identifiers (none should appear; all fixtures use synthetic `user-1`/`skill_test...`-style
+      ids).
 
 ---
 
@@ -2336,8 +2535,7 @@ rather than bundled here, since the original audit never located a ready-made "f
 version's file content" primitive to reuse — inventing one would be new infrastructure the user asked
 this plan to scope tightly around Git first. **This is called out explicitly in the Task 13 report as a
 known gap, not silently dropped.** §18 (local/pinned) ⇒ unchanged P2 semantics, exercised by Task 8's
-`cannot-check`/`pinned` test. §19 (P5 read model) ⇒ Task 6. §20 (approval write change) ⇒ Task 6/Task
-10. §21 (apply verification) ⇒ Task 9. §22 (migration not applied) ⇒ Task 2 Step 2's explicit
+`cannot-check`/`pinned` test. §19 (P5 read model) ⇒ Task 6. §20 (approval write change) ⇒ Task 6/Task 10. §21 (apply verification) ⇒ Task 9. §22 (migration not applied) ⇒ Task 2 Step 2's explicit
 non-application, Task 12 Step 5's confirmation. §23 (docs first) ⇒ already done and committed
 (`c61cfb7`) before this plan was written. §24 (implementation order) ⇒ Tasks 1→10 follow A→L exactly,
 with the public-stack sub-item of F/G knowingly deferred per §17's note above. §25 (test matrix) ⇒

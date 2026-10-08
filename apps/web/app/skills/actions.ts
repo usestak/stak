@@ -10,7 +10,9 @@ const notSignedIn = { ok: false as const, error: 'You must sign in first.' };
 export async function approveSkillVersionAction(input: {
   skillId: string;
   reviewArtifactId: string;
-}): Promise<{ ok: true; changed: boolean } | { ok: false; error: string; stale?: boolean }> {
+}): Promise<
+  { ok: true; changed: boolean } | { ok: false; error: string; stale?: boolean }
+> {
   const user = await getSessionUser();
   if (!user) return notSignedIn;
   try {
@@ -20,7 +22,10 @@ export async function approveSkillVersionAction(input: {
     );
     return { ok: true, changed: result.createdNew };
   } catch (error) {
-    if (error instanceof CloudServiceError && error.code === 'remote-environment-conflict')
+    if (
+      error instanceof CloudServiceError &&
+      error.code === 'remote-environment-conflict'
+    )
       return {
         ok: false,
         error: error.message,
@@ -28,7 +33,10 @@ export async function approveSkillVersionAction(input: {
       };
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Could not approve this update.',
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Could not approve this update.',
     };
   }
 }

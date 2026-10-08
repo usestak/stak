@@ -26,6 +26,7 @@
 ## File Structure
 
 New:
+
 - `apps/web/lib/machine-context.ts` — shared machine-view formatting + viewing-machine resolution (extracted from `overview-data.ts`).
 - `apps/web/lib/machine-context.test.ts`
 - `apps/web/app/_components/shell-notice.tsx` — shared `ShellNotice` wrapper (extracted from `overview/page.tsx`'s local `Notice`).
@@ -41,6 +42,7 @@ New:
 - `apps/web/app/skills/skills.css` — Skills-specific styles (imported once from `app/skills/page.tsx`'s nearest layout need — see Task 5).
 
 Modified:
+
 - `apps/web/app/overview/overview-data.ts` — delegates machine-view helpers to `lib/machine-context.ts`; re-exports `displayPlatform`/`MachineOption` for existing import sites.
 - `apps/web/app/overview/page.tsx` — uses `ShellNotice` instead of its local `Notice`.
 - `apps/web/app/_components/app-sidebar.tsx` — `skills` becomes a real `<Link href="/skills">`; `active` type gains no new values (already includes `'skills'`).
@@ -52,11 +54,13 @@ Modified:
 ### Task 1: Extract shared machine-context module
 
 **Files:**
+
 - Create: `apps/web/lib/machine-context.ts`
 - Create: `apps/web/lib/machine-context.test.ts`
 - Modify: `apps/web/app/overview/overview-data.ts`
 
 **Interfaces:**
+
 - Produces: `relative(iso: string | null): string`, `displayPlatform(platform?: string): string | undefined`, `shortId(id: string): string`, `checkedIn(m: MachineSummary): boolean`, `displayName(m: MachineSummary): string`, `metaLine(m: MachineSummary): string`, `statusLabel(m: MachineSummary): string`, `machineDot(m: MachineSummary): 'ready' | 'attention' | 'neutral'`, `sortMachinesForSelection(a: MachineSummary, b: MachineSummary): number`, `type MachineOption = { machineId: string; name: string; secondary: string; statusLabel: string }`, `machineOption(m: MachineSummary): MachineOption`, `resolveViewingMachineId(active: MachineSummary[], requested: string | undefined): string | undefined`.
 - Consumes: `MachineSummary` from `@stack/spec`.
 
@@ -236,7 +240,11 @@ export const sortMachinesForSelection = (
   b: MachineSummary,
 ): number => {
   const rank = (m: MachineSummary) =>
-    m.status === 'updates-waiting' ? 0 : m.status === 'never-checked-in' ? 2 : 1;
+    m.status === 'updates-waiting'
+      ? 0
+      : m.status === 'never-checked-in'
+        ? 2
+        : 1;
   const ra = rank(a);
   const rb = rank(b);
   if (ra !== rb) return ra - rb;
@@ -294,19 +302,19 @@ export type { MachineOption };
 Then in `loadOverview`, replace:
 
 ```typescript
-  const requestedValid =
-    requestedMachine && active.some((m) => m.machineId === requestedMachine);
-  const viewingId = requestedValid
-    ? requestedMachine
-    : active.length === 1
-      ? active[0]?.machineId
-      : undefined;
+const requestedValid =
+  requestedMachine && active.some((m) => m.machineId === requestedMachine);
+const viewingId = requestedValid
+  ? requestedMachine
+  : active.length === 1
+    ? active[0]?.machineId
+    : undefined;
 ```
 
 with:
 
 ```typescript
-  const viewingId = resolveViewingMachineId(active, requestedMachine);
+const viewingId = resolveViewingMachineId(active, requestedMachine);
 ```
 
 Delete the now-unused local `shortId` (no longer referenced outside `metaLine`, which moved).
@@ -343,10 +351,12 @@ git commit -m "refactor(p5): extract shared machine-context module from Overview
 ### Task 2: Extract shared `ShellNotice` component
 
 **Files:**
+
 - Create: `apps/web/app/_components/shell-notice.tsx`
 - Modify: `apps/web/app/overview/page.tsx`
 
 **Interfaces:**
+
 - Produces: `ShellNotice({ active, handle, title, children }): JSX.Element` where `active` is the same `NavKey` union `AppSidebar` already accepts.
 - Consumes: `AppSidebar` from `./app-sidebar.js`.
 
@@ -427,9 +437,11 @@ git commit -m "refactor(p5): extract ShellNotice for reuse by Skills"
 ### Task 3: Generalize `MachineChooser`'s redirect target
 
 **Files:**
+
 - Modify: `apps/web/app/_components/machine-chooser.tsx`
 
 **Interfaces:**
+
 - Produces: `MachineChooser({ options, basePath? }): JSX.Element` — `basePath` defaults to `'/overview'`.
 
 - [ ] **Step 1: Edit the component**
@@ -468,10 +480,12 @@ git commit -m "refactor(p5): parameterize MachineChooser's redirect target"
 ### Task 4: Skills list view-model
 
 **Files:**
+
 - Create: `apps/web/app/skills/skills-data.ts`
 - Create: `apps/web/app/skills/skills-data.test.ts`
 
 **Interfaces:**
+
 - Consumes: `SkillsService = Pick<CloudService, 'getMachinesReadModel' | 'getSkillsReadModel'>`; `machine-context.js` exports from Task 1; `WebUser` from `../../lib/session.js`.
 - Produces: `type SkillsListView = { kind: 'error' } | { kind: 'no-machines' } | { kind: 'choose-machine'; machines: MachineOption[]; anyCheckedIn: boolean } | { kind: 'ready'; viewing: {...}; machines: MachineOption[]; sidebar: SidebarCounts; statusSentence: string; rows: SkillRow[] }`; `type SkillRow = { skillId: string; name: string; description?: string; sourceLabel: string; cannotCheckNote: boolean; installedLabel: string; primaryStatus: 'ready' | 'update-available' | 'paused'; pendingInstall: boolean; dot: 'ready' | 'attention' | 'neutral' | 'none'; statusText: string }`; `loadSkillsList(service, user, requestedMachine): Promise<SkillsListView>`; exported pure helpers `deriveRow`, `filterRows`, `STATUS_FILTERS`.
 
@@ -480,9 +494,19 @@ git commit -m "refactor(p5): parameterize MachineChooser's redirect target"
 ```typescript
 // apps/web/app/skills/skills-data.test.ts
 import { describe, expect, it } from 'vitest';
-import type { MachineSummary, MachinesReadModel, SkillSummary, SkillsReadModel } from '@stack/spec';
+import type {
+  MachineSummary,
+  MachinesReadModel,
+  SkillSummary,
+  SkillsReadModel,
+} from '@stack/spec';
 
-import { loadSkillsList, deriveRow, filterRows, type SkillsService } from './skills-data.js';
+import {
+  loadSkillsList,
+  deriveRow,
+  filterRows,
+  type SkillsService,
+} from './skills-data.js';
 
 const USER = { id: 'user-1' };
 const A1 = '00000000-0000-4000-8000-0000000000a1';
@@ -520,9 +544,9 @@ const service = (
   skills: SkillSummary[],
   machines: MachineSummary[] = [machine()],
 ): SkillsService => ({
-  getMachinesReadModel: async () => ({ machines } as MachinesReadModel),
+  getMachinesReadModel: async () => ({ machines }) as MachinesReadModel,
   getSkillsReadModel: async () =>
-    ({ environmentExists: true, skills } as SkillsReadModel),
+    ({ environmentExists: true, skills }) as SkillsReadModel,
 });
 
 describe('deriveRow', () => {
@@ -533,11 +557,19 @@ describe('deriveRow', () => {
     expect(row.statusText).toBe('Ready');
   });
   it('is paused regardless of update availability', () => {
-    const row = deriveRow(skill({ paused: true, updateStatus: 'update-available' }), A1, true);
+    const row = deriveRow(
+      skill({ paused: true, updateStatus: 'update-available' }),
+      A1,
+      true,
+    );
     expect(row.statusText).toBe('Paused');
   });
   it('is update-available when not paused and source differs', () => {
-    const row = deriveRow(skill({ updateStatus: 'update-available' }), A1, true);
+    const row = deriveRow(
+      skill({ updateStatus: 'update-available' }),
+      A1,
+      true,
+    );
     expect(row.statusText).toBe('Update available');
   });
   it('never claims Ready when the viewing machine has not reported', () => {
@@ -548,7 +580,11 @@ describe('deriveRow', () => {
   });
   it('never claims Ready when installed differs from approved', () => {
     const row = deriveRow(
-      skill({ installs: [{ machineId: A1, installedVersion: 'sha256:' + 'b'.repeat(64) }] }),
+      skill({
+        installs: [
+          { machineId: A1, installedVersion: 'sha256:' + 'b'.repeat(64) },
+        ],
+      }),
       A1,
       true,
     );
@@ -556,7 +592,10 @@ describe('deriveRow', () => {
   });
   it('shows a cannot-check note without changing primary status', () => {
     const row = deriveRow(
-      skill({ source: { kind: 'local', checkable: false }, updateStatus: 'cannot-check' }),
+      skill({
+        source: { kind: 'local', checkable: false },
+        updateStatus: 'cannot-check',
+      }),
       A1,
       true,
     );
@@ -569,17 +608,31 @@ describe('filterRows', () => {
   const rows = [
     deriveRow(skill({ skillId: 'skill_a', name: 'a' }), A1, true),
     deriveRow(skill({ skillId: 'skill_b', name: 'b', paused: true }), A1, true),
-    deriveRow(skill({ skillId: 'skill_c', name: 'c', updateStatus: 'update-available' }), A1, true),
+    deriveRow(
+      skill({
+        skillId: 'skill_c',
+        name: 'c',
+        updateStatus: 'update-available',
+      }),
+      A1,
+      true,
+    ),
   ];
   it('all returns every row', () => {
     expect(filterRows(rows, 'all', '')).toHaveLength(3);
   });
   it('filters by status', () => {
-    expect(filterRows(rows, 'paused', '').map((r) => r.skillId)).toEqual(['skill_b']);
-    expect(filterRows(rows, 'update-available', '').map((r) => r.skillId)).toEqual(['skill_c']);
+    expect(filterRows(rows, 'paused', '').map((r) => r.skillId)).toEqual([
+      'skill_b',
+    ]);
+    expect(
+      filterRows(rows, 'update-available', '').map((r) => r.skillId),
+    ).toEqual(['skill_c']);
   });
   it('searches by name, case-insensitive', () => {
-    expect(filterRows(rows, 'all', 'A').map((r) => r.skillId)).toEqual(['skill_a']);
+    expect(filterRows(rows, 'all', 'A').map((r) => r.skillId)).toEqual([
+      'skill_a',
+    ]);
   });
 });
 
@@ -590,7 +643,10 @@ describe('loadSkillsList', () => {
   });
   it('excludes revoked machines from selection and counts', async () => {
     const view = await loadSkillsList(
-      service([skill()], [machine(), machine({ machineId: B2, revoked: true })]),
+      service(
+        [skill()],
+        [machine(), machine({ machineId: B2, revoked: true })],
+      ),
       USER,
       undefined,
     );
@@ -598,7 +654,10 @@ describe('loadSkillsList', () => {
   });
   it('requires a choice with two active machines and no ?machine=', async () => {
     const view = await loadSkillsList(
-      service([skill()], [machine(), machine({ machineId: B2, name: 'Studio' })]),
+      service(
+        [skill()],
+        [machine(), machine({ machineId: B2, name: 'Studio' })],
+      ),
       USER,
       undefined,
     );
@@ -614,7 +673,10 @@ describe('loadSkillsList', () => {
       undefined,
     );
     if (view.kind !== 'ready') throw new Error('expected ready');
-    expect(view.rows.map((r) => r.skillId)).toEqual(['skill_dup0001', 'skill_dup0002']);
+    expect(view.rows.map((r) => r.skillId)).toEqual([
+      'skill_dup0001',
+      'skill_dup0002',
+    ]);
   });
   it('reports a truthful no-skills state distinct from a filtered empty state', async () => {
     const view = await loadSkillsList(service([]), USER, undefined);
@@ -669,7 +731,12 @@ export type SkillRow = {
   statusText: string;
 };
 
-export const STATUS_FILTERS = ['all', 'ready', 'update-available', 'paused'] as const;
+export const STATUS_FILTERS = [
+  'all',
+  'ready',
+  'update-available',
+  'paused',
+] as const;
 export type StatusFilter = (typeof STATUS_FILTERS)[number];
 
 /**
@@ -687,9 +754,10 @@ export const deriveRow = (
   viewingMachineCheckedIn: boolean,
 ): SkillRow => {
   const install = skill.installs.find((i) => i.machineId === viewingMachineId);
-  const installedHere = viewingMachineCheckedIn && install
-    ? install.installedVersion === skill.approvedVersion
-    : false;
+  const installedHere =
+    viewingMachineCheckedIn && install
+      ? install.installedVersion === skill.approvedVersion
+      : false;
   const cannotCheckNote = skill.updateStatus === 'cannot-check';
 
   let primaryStatus: SkillRow['primaryStatus'];
@@ -706,7 +774,7 @@ export const deriveRow = (
   } else if (!viewingMachineCheckedIn) {
     primaryStatus = 'ready'; // bucketed with Ready-eligible for filtering; NOT labeled Ready
     dot = 'neutral';
-    statusText = "Not reported here yet";
+    statusText = 'Not reported here yet';
   } else if (!installedHere) {
     primaryStatus = 'ready';
     dot = 'neutral';
@@ -721,7 +789,9 @@ export const deriveRow = (
     skillId: skill.skillId,
     name: skill.name,
     ...(skill.description ? { description: skill.description } : {}),
-    sourceLabel: skill.source.label ?? (skill.source.kind === 'local' ? 'Local' : skill.source.kind),
+    sourceLabel:
+      skill.source.label ??
+      (skill.source.kind === 'local' ? 'Local' : skill.source.kind),
     cannotCheckNote,
     installedLabel: install
       ? install.installedVersion
@@ -729,7 +799,10 @@ export const deriveRow = (
         : 'Not installed here'
       : 'Not reported here',
     primaryStatus,
-    pendingInstall: !skill.paused && skill.updateStatus !== 'update-available' && statusText !== 'Ready',
+    pendingInstall:
+      !skill.paused &&
+      skill.updateStatus !== 'update-available' &&
+      statusText !== 'Ready',
     dot,
     statusText,
   };
@@ -747,7 +820,8 @@ export const filterRows = (
   return rows.filter((r) => {
     if (q && !r.name.toLowerCase().includes(q)) return false;
     if (status === 'all') return true;
-    if (status === 'ready') return r.primaryStatus === 'ready' && r.statusText === 'Ready';
+    if (status === 'ready')
+      return r.primaryStatus === 'ready' && r.statusText === 'Ready';
     return r.primaryStatus === status;
   });
 };
@@ -758,7 +832,12 @@ export type SkillsListView =
   | { kind: 'choose-machine'; machines: MachineOption[]; anyCheckedIn: boolean }
   | {
       kind: 'ready';
-      viewing: { machineId: string; name: string; statusLabel: string; dot: string };
+      viewing: {
+        machineId: string;
+        name: string;
+        statusLabel: string;
+        dot: string;
+      };
       machines: MachineOption[];
       sidebar: SidebarCounts;
       statusSentence: string;
@@ -791,7 +870,8 @@ export const loadSkillsList = async (
   const anyCheckedIn = active.some(checkedIn);
 
   const viewingId = resolveViewingMachineId(active, requestedMachine);
-  if (!viewingId) return { kind: 'choose-machine', machines: options, anyCheckedIn };
+  if (!viewingId)
+    return { kind: 'choose-machine', machines: options, anyCheckedIn };
 
   const viewing = active.find((m) => m.machineId === viewingId)!;
   const viewingName = displayName(viewing);
@@ -802,7 +882,9 @@ export const loadSkillsList = async (
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const readyCount = rows.filter((r) => r.statusText === 'Ready').length;
-  const updateCount = rows.filter((r) => r.primaryStatus === 'update-available').length;
+  const updateCount = rows.filter(
+    (r) => r.primaryStatus === 'update-available',
+  ).length;
   const pausedCount = rows.filter((r) => r.primaryStatus === 'paused').length;
 
   const statusSentence = !viewingCheckedIn
@@ -857,11 +939,13 @@ git commit -m "feat(p5): Skills list view-model with frozen-status derivation"
 ### Task 5: Skills list page + search/filter table + styles
 
 **Files:**
+
 - Create: `apps/web/app/skills/page.tsx`
 - Create: `apps/web/app/skills/_components/skills-table.tsx`
 - Create: `apps/web/app/skills/skills.css`
 
 **Interfaces:**
+
 - Consumes: `loadSkillsList`, `SkillRow`, `STATUS_FILTERS` from `./skills-data.js`; `ShellNotice`, `AppSidebar`, `MachineChooser`, `CommandDock` from `../_components/*`; `getCloudService` from `../../lib/cloud-service.js`; `getSessionUser`, `displayNameOf` from `../../lib/session.js`.
 - Produces: the `/skills` route; `SkillsTable({ rows, machineName }): JSX.Element` (client).
 
@@ -1189,6 +1273,7 @@ git commit -m "feat(p5): Skills list page with search/filter and command dock"
 ### Task 6: Wire the Skills sidebar nav to a real route
 
 **Files:**
+
 - Modify: `apps/web/app/_components/app-sidebar.tsx`
 
 - [ ] **Step 1: Edit the nav rendering**
@@ -1225,10 +1310,12 @@ git commit -m "feat(p5): Skills becomes a real sidebar route"
 ### Task 7: Skill detail view-model
 
 **Files:**
+
 - Create: `apps/web/app/skills/skill-detail-data.ts`
 - Create: `apps/web/app/skills/skill-detail-data.test.ts`
 
 **Interfaces:**
+
 - Consumes: `SkillDetailService = Pick<CloudService, 'getMachinesReadModel' | 'getSkillDetail'>`; `CloudServiceError` from `@stack/cloud-server`; `machine-context.js` exports.
 - Produces: `type SkillDetailView = { kind: 'error' } | { kind: 'no-machines' } | { kind: 'choose-machine'; ...} | { kind: 'not-found' } | { kind: 'ready'; ... }`; `loadSkillDetail(service, user, skillId, requestedMachine): Promise<SkillDetailView>`.
 
@@ -1238,9 +1325,16 @@ git commit -m "feat(p5): Skills becomes a real sidebar route"
 // apps/web/app/skills/skill-detail-data.test.ts
 import { describe, expect, it } from 'vitest';
 import { CloudServiceError } from '@stack/cloud-server';
-import type { MachineSummary, MachinesReadModel, SkillDetail } from '@stack/spec';
+import type {
+  MachineSummary,
+  MachinesReadModel,
+  SkillDetail,
+} from '@stack/spec';
 
-import { loadSkillDetail, type SkillDetailService } from './skill-detail-data.js';
+import {
+  loadSkillDetail,
+  type SkillDetailService,
+} from './skill-detail-data.js';
 
 const USER = { id: 'user-1' };
 const A1 = '00000000-0000-4000-8000-0000000000a1';
@@ -1268,11 +1362,22 @@ const detail = (over: Partial<SkillDetail> = {}): SkillDetail => ({
   name: 'test-first',
   approvedVersion: HASH_A,
   paused: false,
-  source: { kind: 'git', checkable: true, label: 'github.com/oss/test-first', trackedRef: 'main' },
+  source: {
+    kind: 'git',
+    checkable: true,
+    label: 'github.com/oss/test-first',
+    trackedRef: 'main',
+  },
   capability: { declared: false },
   updateStatus: 'no-update',
   installs: [{ machineId: A1, installedVersion: HASH_A }],
-  history: [{ contentHash: HASH_A, environmentVersionNumber: 1, approvedAt: new Date().toISOString() }],
+  history: [
+    {
+      contentHash: HASH_A,
+      environmentVersionNumber: 1,
+      approvedAt: new Date().toISOString(),
+    },
+  ],
   files: null,
   diff: null,
   ...over,
@@ -1282,7 +1387,7 @@ const service = (
   skill: SkillDetail | null,
   machines: MachineSummary[] = [machine()],
 ): SkillDetailService => ({
-  getMachinesReadModel: async () => ({ machines } as MachinesReadModel),
+  getMachinesReadModel: async () => ({ machines }) as MachinesReadModel,
   getSkillDetail: async (_auth, skillId) => {
     if (!skill || skillId !== skill.skillId)
       throw new CloudServiceError('skill-not-found', 'No such Skill.', 404);
@@ -1292,22 +1397,43 @@ const service = (
 
 describe('loadSkillDetail', () => {
   it('fails safely on an invalid/not-owned skill id', async () => {
-    const view = await loadSkillDetail(service(detail()), USER, 'skill_other0001', undefined);
+    const view = await loadSkillDetail(
+      service(detail()),
+      USER,
+      'skill_other0001',
+      undefined,
+    );
     expect(view.kind).toBe('not-found');
   });
   it('renders Ready with matching install', async () => {
-    const view = await loadSkillDetail(service(detail()), USER, 'skill_test0001', undefined);
+    const view = await loadSkillDetail(
+      service(detail()),
+      USER,
+      'skill_test0001',
+      undefined,
+    );
     if (view.kind !== 'ready') throw new Error('expected ready');
     expect(view.statusText).toBe('Ready');
   });
   it('shows an honest unavailable state when files is null', async () => {
-    const view = await loadSkillDetail(service(detail({ files: null })), USER, 'skill_test0001', undefined);
+    const view = await loadSkillDetail(
+      service(detail({ files: null })),
+      USER,
+      'skill_test0001',
+      undefined,
+    );
     if (view.kind !== 'ready') throw new Error('expected ready');
     expect(view.filesAvailable).toBe(false);
   });
   it('shows an honest unavailable state when diff is null even with an update available', async () => {
     const view = await loadSkillDetail(
-      service(detail({ updateStatus: 'update-available', candidateVersion: 'rev123', diff: null })),
+      service(
+        detail({
+          updateStatus: 'update-available',
+          candidateVersion: 'rev123',
+          diff: null,
+        }),
+      ),
       USER,
       'skill_test0001',
       undefined,
@@ -1318,7 +1444,13 @@ describe('loadSkillDetail', () => {
   });
   it('keeps provenance/history/capabilities visible while paused (§17)', async () => {
     const view = await loadSkillDetail(
-      service(detail({ paused: true, updateStatus: 'update-available', candidateVersion: 'rev123' })),
+      service(
+        detail({
+          paused: true,
+          updateStatus: 'update-available',
+          candidateVersion: 'rev123',
+        }),
+      ),
       USER,
       'skill_test0001',
       undefined,
@@ -1334,8 +1466,16 @@ describe('loadSkillDetail', () => {
       service(
         detail({
           history: [
-            { contentHash: HASH_B, environmentVersionNumber: 2, approvedAt: new Date().toISOString() },
-            { contentHash: HASH_A, environmentVersionNumber: 1, approvedAt: new Date().toISOString() },
+            {
+              contentHash: HASH_B,
+              environmentVersionNumber: 2,
+              approvedAt: new Date().toISOString(),
+            },
+            {
+              contentHash: HASH_A,
+              environmentVersionNumber: 1,
+              approvedAt: new Date().toISOString(),
+            },
           ],
           approvedVersion: HASH_B,
         }),
@@ -1349,16 +1489,28 @@ describe('loadSkillDetail', () => {
     expect(view.history[1]?.current).toBe(false);
   });
   it('reports capabilities-not-declared distinctly from declared-false', async () => {
-    const notDeclared = await loadSkillDetail(service(detail({ capability: { declared: false } })), USER, 'skill_test0001', undefined);
-    const declaredFalse = await loadSkillDetail(
-      service(detail({ capability: { declared: true, capabilities: { network: false } } })),
+    const notDeclared = await loadSkillDetail(
+      service(detail({ capability: { declared: false } })),
       USER,
       'skill_test0001',
       undefined,
     );
-    if (notDeclared.kind !== 'ready' || declaredFalse.kind !== 'ready') throw new Error('expected ready');
+    const declaredFalse = await loadSkillDetail(
+      service(
+        detail({
+          capability: { declared: true, capabilities: { network: false } },
+        }),
+      ),
+      USER,
+      'skill_test0001',
+      undefined,
+    );
+    if (notDeclared.kind !== 'ready' || declaredFalse.kind !== 'ready')
+      throw new Error('expected ready');
     expect(notDeclared.capabilitiesText).toBe('Capabilities not declared');
-    expect(declaredFalse.capabilitiesText).not.toBe('Capabilities not declared');
+    expect(declaredFalse.capabilitiesText).not.toBe(
+      'Capabilities not declared',
+    );
   });
   it('never exposes an absolute or home-relative path in source label', async () => {
     const view = await loadSkillDetail(
@@ -1384,7 +1536,12 @@ Expected: FAIL — module does not exist.
 ```typescript
 // apps/web/app/skills/skill-detail-data.ts
 import { CloudServiceError, type CloudService } from '@stack/cloud-server';
-import type { SkillDetail, SkillDiffFile, SkillFile, SkillVersionHistoryEntry } from '@stack/spec';
+import type {
+  SkillDetail,
+  SkillDiffFile,
+  SkillFile,
+  SkillVersionHistoryEntry,
+} from '@stack/spec';
 
 import {
   machineOption,
@@ -1424,7 +1581,12 @@ export type SkillDetailView =
       skillId: string;
       name: string;
       description?: string;
-      viewing: { machineId: string; name: string; statusLabel: string; dot: string };
+      viewing: {
+        machineId: string;
+        name: string;
+        statusLabel: string;
+        dot: string;
+      };
       machines: MachineOption[];
       statusText: string;
       updateAvailable: boolean;
@@ -1436,7 +1598,10 @@ export type SkillDetailView =
       installedHere: string;
       installedHereAt: string | null;
       capabilitiesText: string;
-      capabilityList: { label: string; value: 'declared-true' | 'declared-false' }[];
+      capabilityList: {
+        label: string;
+        value: 'declared-true' | 'declared-false';
+      }[];
       history: HistoryRow[];
       filesAvailable: boolean;
       files: SkillFile[];
@@ -1457,7 +1622,10 @@ const capabilityList = (
   };
   return Object.entries(capability.capabilities)
     .filter(([, v]) => v !== undefined)
-    .map(([k, v]) => ({ label: labels[k] ?? k, value: v ? 'declared-true' : 'declared-false' }));
+    .map(([k, v]) => ({
+      label: labels[k] ?? k,
+      value: v ? 'declared-true' : 'declared-false',
+    }));
 };
 
 export const loadSkillDetail = async (
@@ -1481,7 +1649,8 @@ export const loadSkillDetail = async (
   const anyCheckedIn = active.some(checkedIn);
 
   const viewingId = resolveViewingMachineId(active, requestedMachine);
-  if (!viewingId) return { kind: 'choose-machine', machines: options, anyCheckedIn };
+  if (!viewingId)
+    return { kind: 'choose-machine', machines: options, anyCheckedIn };
 
   let skill: SkillDetail;
   try {
@@ -1497,11 +1666,14 @@ export const loadSkillDetail = async (
   const viewingCheckedIn = checkedIn(viewing);
   const install = skill.installs.find((i) => i.machineId === viewingId);
   const installedHereMatches =
-    viewingCheckedIn && !!install && install.installedVersion === skill.approvedVersion;
+    viewingCheckedIn &&
+    !!install &&
+    install.installedVersion === skill.approvedVersion;
 
   let statusText: string;
   if (skill.paused) statusText = 'Paused';
-  else if (skill.updateStatus === 'update-available') statusText = 'Update available';
+  else if (skill.updateStatus === 'update-available')
+    statusText = 'Update available';
   else if (!viewingCheckedIn) statusText = 'Not reported here yet';
   else if (!installedHereMatches) statusText = 'Not yet reconciled here';
   else statusText = 'Ready';
@@ -1531,9 +1703,13 @@ export const loadSkillDetail = async (
     machines: options,
     statusText,
     updateAvailable: skill.updateStatus === 'update-available',
-    ...(skill.candidateVersion ? { candidateVersion: skill.candidateVersion } : {}),
+    ...(skill.candidateVersion
+      ? { candidateVersion: skill.candidateVersion }
+      : {}),
     cannotCheckNote: skill.updateStatus === 'cannot-check',
-    sourceLabel: skill.source.label ?? (skill.source.kind === 'local' ? 'Local' : skill.source.kind),
+    sourceLabel:
+      skill.source.label ??
+      (skill.source.kind === 'local' ? 'Local' : skill.source.kind),
     ...(skill.source.trackedRef ? { trackedRef: skill.source.trackedRef } : {}),
     approvedVersionShort: shortHash(skill.approvedVersion),
     installedHere: install
@@ -1542,7 +1718,9 @@ export const loadSkillDetail = async (
         : 'Not installed here'
       : 'Not reported here',
     installedHereAt: viewingCheckedIn ? viewing.lastCheckinAt : null,
-    capabilitiesText: skill.capability.declared ? 'Declared' : 'Capabilities not declared',
+    capabilitiesText: skill.capability.declared
+      ? 'Declared'
+      : 'Capabilities not declared',
     capabilityList: capabilityList(skill.capability),
     history,
     filesAvailable: skill.files !== null,
@@ -1571,9 +1749,11 @@ git commit -m "feat(p5): Skill detail view-model with honest files/diff states"
 ### Task 8: Server actions for approve / pause / resume
 
 **Files:**
+
 - Create: `apps/web/app/skills/actions.ts`
 
 **Interfaces:**
+
 - Consumes: `getCloudService`, `getSessionUser`.
 - Produces: `approveSkillVersionAction(input: { skillId: string; candidateContentHash: string; candidateRevision: string }): Promise<{ ok: true; changed: boolean } | { ok: false; error: string; stale?: boolean }>`; `setSkillPausedAction(input: { skillId: string; paused: boolean }): Promise<{ ok: true; changed: boolean } | { ok: false; error: string }>`.
 
@@ -1594,7 +1774,9 @@ export async function approveSkillVersionAction(input: {
   skillId: string;
   candidateContentHash: string;
   candidateRevision: string;
-}): Promise<{ ok: true; changed: boolean } | { ok: false; error: string; stale?: boolean }> {
+}): Promise<
+  { ok: true; changed: boolean } | { ok: false; error: string; stale?: boolean }
+> {
   const user = await getSessionUser();
   if (!user) return notSignedIn;
   try {
@@ -1605,10 +1787,17 @@ export async function approveSkillVersionAction(input: {
     return { ok: true, changed: result.changed };
   } catch (error) {
     if (error instanceof CloudServiceError && error.code === 'skill-not-found')
-      return { ok: false, error: 'This Skill or candidate is no longer current.', stale: true };
+      return {
+        ok: false,
+        error: 'This Skill or candidate is no longer current.',
+        stale: true,
+      };
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Could not approve this update.',
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Could not approve this update.',
     };
   }
 }
@@ -1654,9 +1843,11 @@ git commit -m "feat(p5): approve/pause/resume server actions"
 ### Task 9: Approve/Pause client component
 
 **Files:**
+
 - Create: `apps/web/app/skills/_components/skill-actions.tsx`
 
 **Interfaces:**
+
 - Consumes: `approveSkillVersionAction`, `setSkillPausedAction` from `../actions.js`.
 - Produces: `SkillActions({ skillId, paused, updateAvailable, candidateVersion, approvedVersionShort }): JSX.Element` (client; calls `router.refresh()` on success so the server component re-fetches `getSkillDetail`).
 
@@ -1785,9 +1976,11 @@ git commit -m "feat(p5): Approve/Pause/Resume action component with pending+stal
 ### Task 10: Skill detail page
 
 **Files:**
+
 - Create: `apps/web/app/skills/[skillId]/page.tsx`
 
 **Interfaces:**
+
 - Consumes: `loadSkillDetail` from `../skill-detail-data.js`; `SkillActions` from `../_components/skill-actions.js`; `ShellNotice`, `AppSidebar`, `MachineChooser`, `CommandDock`.
 
 - [ ] **Step 1: Write the page**
@@ -2072,17 +2265,21 @@ git commit -m "feat(p5): Skill detail page — source, versions, diff, capabilit
 - [ ] **Step 1: Grep the new Skills files for banned vocabulary**
 
 Run:
+
 ```bash
 cd apps/web/app/skills && grep -rniE "in sync|outdated|\bbroken\b|\bunsafe\b|\bonline\b|\boffline\b" . || echo "clean"
 ```
+
 Expected: `clean` (no matches). If any match appears in a comment-only context explaining what NOT to show, that's fine; a match inside a literal UI string is not.
 
 - [ ] **Step 2: Grep for path leakage**
 
 Run:
+
 ```bash
 cd apps/web/app/skills && grep -rniE "[A-Za-z]:\\\\Users|/home/|/Users/" . || echo "clean"
 ```
+
 Expected: `clean`.
 
 - [ ] **Step 3: Confirm `source.label` is rendered verbatim, never concatenated with a derived path**
@@ -2105,11 +2302,13 @@ Expected: PASS — every existing suite (Overview, format, dashboard, session, c
 - [ ] **Step 2: Typecheck, lint, format**
 
 Run:
+
 ```bash
 cd apps/web && npx tsc --noEmit
 cd apps/web && npx eslint app lib
 cd apps/web && npx prettier --check "app/skills/**/*.{ts,tsx,css}" "lib/machine-context.ts" "app/_components/shell-notice.tsx"
 ```
+
 Expected: all PASS. Fix any formatting/lint findings with `npx prettier --write` / targeted edits, re-run until clean.
 
 - [ ] **Step 3: `git diff --check`**
@@ -2135,6 +2334,7 @@ Run (background): `cd apps/web && npm run dev`
 - [ ] **Step 2: Read-only dogfood on the real signed-in account**
 
 Using the `agent-browser` or `claude-in-chrome` tooling already available in this environment, visit `/skills` and `/skills/<a real skill id>` signed in as the real dogfood account (31 Skills, DELL the one active machine). Verify, without clicking Approve/Pause/Resume:
+
 - `/skills` renders the list, sidebar shows "Skills" as the active/real link, status sentence matches real data.
 - Search narrows rows by name; status filter chips narrow by bucket; both combine.
 - A row click navigates to `/skills/<entryId>`.

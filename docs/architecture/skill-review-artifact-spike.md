@@ -21,15 +21,15 @@ wrong default. This document proposes the alternative architecture, per the brie
 
 ## 0. Audit: what already exists and is reused unchanged
 
-| Primitive | File | Reused as |
-|---|---|---|
-| Exact-ref Git identity resolution | `resolveSkillSourceLatest`, `gitLsRemoteRef` (`packages/core/src/skill-source.ts`) | Source-check comparison, unchanged |
-| Public-stack version identity resolution | `resolvePublicStackSourceLatest` (same file) | Source-check comparison, unchanged |
-| Pure tree diff | `diffSkillTrees` (same file) | Diff computation, unchanged — now actually called |
-| Tree hashing / path safety | `enumerateSkillTree`, `hashSkillTreeEntries`, `validateTreePath` (`packages/shared/src/tree.ts`) | Candidate-tree hashing on the CLI, unchanged |
-| Exact-revision materialization template | `restoreReference` (`packages/core/src/git-reference.ts`) | Pattern reused for a new CLI-side "fetch candidate at exact revision" path — same shallow-fetch, same `assertPathWithin`, same hash-then-ingest shape, done **locally**, never server-side |
-| Bounded content-addressed upload | `blobStore.put(userId, contentHash, bytes)` ticket flow (`packages/cloud-server/src/service.ts:573-615`), `maxSnapshotBytes` (`service.ts:56,94,113-114`) | The exact precedent the review-artifact upload reuses — Cloud already accepts a bounded, content-addressed blob from an authenticated CLI session for Memory; nothing new there |
-| CLI command surface | `packages/cli/src/commands/{skill,status,scan,push,publish}.ts` | Vocabulary audited for Step 2 below |
+| Primitive                                | File                                                                                                                                                      | Reused as                                                                                                                                                                                  |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Exact-ref Git identity resolution        | `resolveSkillSourceLatest`, `gitLsRemoteRef` (`packages/core/src/skill-source.ts`)                                                                        | Source-check comparison, unchanged                                                                                                                                                         |
+| Public-stack version identity resolution | `resolvePublicStackSourceLatest` (same file)                                                                                                              | Source-check comparison, unchanged                                                                                                                                                         |
+| Pure tree diff                           | `diffSkillTrees` (same file)                                                                                                                              | Diff computation, unchanged — now actually called                                                                                                                                          |
+| Tree hashing / path safety               | `enumerateSkillTree`, `hashSkillTreeEntries`, `validateTreePath` (`packages/shared/src/tree.ts`)                                                          | Candidate-tree hashing on the CLI, unchanged                                                                                                                                               |
+| Exact-revision materialization template  | `restoreReference` (`packages/core/src/git-reference.ts`)                                                                                                 | Pattern reused for a new CLI-side "fetch candidate at exact revision" path — same shallow-fetch, same `assertPathWithin`, same hash-then-ingest shape, done **locally**, never server-side |
+| Bounded content-addressed upload         | `blobStore.put(userId, contentHash, bytes)` ticket flow (`packages/cloud-server/src/service.ts:573-615`), `maxSnapshotBytes` (`service.ts:56,94,113-114`) | The exact precedent the review-artifact upload reuses — Cloud already accepts a bounded, content-addressed blob from an authenticated CLI session for Memory; nothing new there            |
+| CLI command surface                      | `packages/cli/src/commands/{skill,status,scan,push,publish}.ts`                                                                                           | Vocabulary audited for Step 2 below                                                                                                                                                        |
 
 Nothing here needs reinventing. The gap is entirely in **wiring**, not in missing pure logic.
 
@@ -39,7 +39,7 @@ Confirmed by direct inspection, not assumption:
 
 - `apps/web/lib/cloud-service.ts` never passes `checkSkillSource` to `createCloudService` — **`checkSkillSource` is optional and absent in the real deployed app today**. Every Skill currently reports `updateStatus: 'cannot-check'` in production, regardless of P5. This is a pre-existing P3 gap, not something P5 introduced.
 - `PortableLockedSkill` (the Cloud-side Skill record) carries only `contentHash` + a `restoration` reference (remote/path/revision) — **never file bytes**. This mirrors Memory's privacy architecture: Cloud is a control plane, not a content store, by design.
-- To materialize *either* the candidate or the approved tree server-side for a diff, the Next.js process would need to newly spawn `git` and fetch arbitrary, user-configured third-party remotes over the network from the production web server. That is a new operational capability, not a reuse of existing code, and it introduces:
+- To materialize _either_ the candidate or the approved tree server-side for a diff, the Next.js process would need to newly spawn `git` and fetch arbitrary, user-configured third-party remotes over the network from the production web server. That is a new operational capability, not a reuse of existing code, and it introduces:
   - SSRF-shaped risk (the server fetching attacker-influenced URLs — a Skill's `restoration.reference.remote` is user-supplied data)
   - Resource/DoS exposure (unbounded clone size/time, one server process doing this per-request)
   - A runtime dependency (a `git` binary + child-process spawning) the Next.js deployment target may not provide or permit
@@ -82,18 +82,18 @@ This is the "LOCAL = resolution, CLOUD = control, WEB = inspection" split the br
 
 ```ts
 type SkillReviewArtifact = {
-  entryId: string;                 // stable skill_... id — never a display name
-  approvedContentHash: string;     // what STAK had approved when this check ran
+  entryId: string; // stable skill_... id — never a display name
+  approvedContentHash: string; // what STAK had approved when this check ran
   source: {
-    kind: 'git' | 'public-stack';  // Local/dirty/ambiguous/unreachable never produce an artifact
-    safeLabel: string;             // same sanitized label already used elsewhere — never a path
+    kind: 'git' | 'public-stack'; // Local/dirty/ambiguous/unreachable never produce an artifact
+    safeLabel: string; // same sanitized label already used elsewhere — never a path
     trackedRef?: string;
   };
   candidate: {
-    revision: string;              // exact git commit / public version id
-    contentHash: string;           // sha256:<64hex> — real, not a revision string
+    revision: string; // exact git commit / public version id
+    contentHash: string; // sha256:<64hex> — real, not a revision string
   };
-  checkedAt: string;                // when the LOCAL check ran — Cloud never claims "live"
+  checkedAt: string; // when the LOCAL check ran — Cloud never claims "live"
   diff: {
     files: { relativePath: string; kind: 'added' | 'modified' | 'removed' }[];
   };
@@ -101,7 +101,7 @@ type SkillReviewArtifact = {
     // ONLY the files diff says changed, capped — never the whole tree, never unrelated files
     files: { relativePath: string; byteSize: number; blobRef: string }[];
   };
-  restoration: ReferenceRecord;     // already-existing type — what local reconciliation needs
+  restoration: ReferenceRecord; // already-existing type — what local reconciliation needs
 };
 ```
 
@@ -125,8 +125,8 @@ remove, run, scan, skill, status, try, use, whoami}`):
 - `stak scan` means "find agents and skills **on this machine**" — filesystem discovery, not a network
   operation. Wrong semantic fit. Rejected.
 - **`stak skill check [<skill>]`** (your stated preference) fits the existing `stak skill {update,
-  pause, resume}` subcommand family exactly, is honest that it contacts remotes (symmetry with `stak
-  login`/`stak memory backup` already being the explicit, user-initiated network actions in this CLI),
+pause, resume}` subcommand family exactly, is honest that it contacts remotes (symmetry with `stak
+login`/`stak memory backup` already being the explicit, user-initiated network actions in this CLI),
   and doesn't change the behavior of anything that already exists. **Recommended.**
 - No scope argument runs it for every checkable Skill; a scope argument checks one. Same selector
   resolution (`resolveSkillSelector`) `skill update`/`pause`/`resume` already use — no new ambiguity
@@ -151,9 +151,9 @@ background timer — exactly one artifact per invocation per changed Skill.
   text, not project data). Exact numbers are a product call, not an architecture one; both are
   config-driven like `maxSnapshotBytes` already is.
 - **Retention**: **one latest artifact per Skill**, not history. A new `stak skill check` for the same
-  Skill replaces the prior artifact (and its blob content) — review artifacts are a *working* fact
+  Skill replaces the prior artifact (and its blob content) — review artifacts are a _working_ fact
   ("here's the last thing a CLI found"), not an audit trail. (The Skill's actual approved-version
-  *history* already exists and is untouched — this is unrelated to that.)
+  _history_ already exists and is untouched — this is unrelated to that.)
 - **Invalidation**: an artifact is invalidated (deleted/ignored) the moment `approvedContentHash`
   changes under it (i.e., `approveSkillVersion` succeeds) — it described a source-vs-then-approved
   delta that no longer applies. Simplest rule: delete the artifact as part of the same transaction that
@@ -179,7 +179,7 @@ Narrowest policy, concretely:
   already uses; never public, never cross-account-readable.
 - **Deleted on invalidation** (§5) — content doesn't outlive its relevance.
 - **Can approved-file inspection work without storing the whole approved tree?** Partially: the
-  *currently-approved* Skill's files are genuinely never uploaded by this design — only the **diff**
+  _currently-approved_ Skill's files are genuinely never uploaded by this design — only the **diff**
   (new/changed candidate files) is. A "browse the full approved tree" feature (contract §11's "file
   list + selected file" for a Skill with **no pending update**) is a **separate, larger privacy
   decision** this spike does not resolve — it would require uploading the whole approved tree, not just
@@ -210,6 +210,7 @@ you prefer not to mint a separate artifact-id concept — functionally equivalen
 more compact and avoids re-validating two fields for internal consistency).
 
 Server-side verification, all already-available data, no new network calls:
+
 1. Artifact belongs to the authenticated user (ownership check, same pattern as every other write).
 2. Artifact's `entryId` matches the Skill being approved.
 3. Artifact's `candidate.revision`/`candidate.contentHash` are internally consistent (they were set
@@ -220,15 +221,15 @@ Server-side verification, all already-available data, no new network calls:
    this is the real staleness signal.
 5. **Latest-known-only semantics, explicitly chosen per your preference:** if upstream has since moved
    from A to B but no new `stak skill check` ran, approving the still-current artifact for A **remains
-   valid**. A is immutable, exactly what was reviewed, and approving it never implies B. The *next*
+   valid**. A is immutable, exactly what was reviewed, and approving it never implies B. The _next_
    `stak skill check` will independently surface B as a new, separate update-available fact. This is
    simpler and more honest than requiring Cloud to re-fetch upstream at approval time (which would
    reintroduce the exact server-side-Git problem §1 rejected).
 
 **This changes the earlier P3 "stale candidate" interpretation.** The original `approveSkillVersion`
 code's stale guard was "the submitted contentHash must equal the **current** `skill.contentHash`
-already in the bundle" — i.e., staleness was about *your own prior approval* moving under you, not
-about *upstream* moving. Under this model, staleness is about check 4 above (approved state moved) —
+already in the bundle" — i.e., staleness was about _your own prior approval_ moving under you, not
+about _upstream_ moving. Under this model, staleness is about check 4 above (approved state moved) —
 upstream moving is explicitly **not** staleness, per your preferred answer. Both are real concerns;
 this spike flags that they're two different guards, not one, and the frozen contract currently only
 describes the first. Not changed yet.
@@ -253,39 +254,40 @@ No change to this half of the flow at all — it's exactly what P5's Task 10/pla
 
 ## 10. Private vs. public sources
 
-| Source | Who fetches | Credentials | Remote-check behavior |
-|---|---|---|---|
-| Public Git | Local CLI only | None needed (anonymous `ls-remote`/`fetch`) | Checkable via `stak skill check` |
-| Private Git | Local CLI only | User's own existing local Git auth (SSH agent / credential helper) — **never** sent to or stored by Cloud | Checkable via `stak skill check`, exactly like public — Cloud never needs to distinguish public/private, because Cloud never fetches either one |
-| Public-stack | Local CLI (via the existing public-stack resolver) | N/A (STAK's own registry) | Checkable the same way, artifact's `source.kind: 'public-stack'` |
-| Local | N/A | N/A | Fail-closed, `cannot-check`, reason `local` — unchanged, no artifact ever produced |
-| Dirty/ambiguous Git | N/A | N/A | Fail-closed, unchanged |
-| Pinned exact commit (no tracked ref) | N/A | N/A | Fail-closed `pinned`, unchanged — "intentionally not update-trackable" stays true |
+| Source                               | Who fetches                                        | Credentials                                                                                               | Remote-check behavior                                                                                                                           |
+| ------------------------------------ | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Public Git                           | Local CLI only                                     | None needed (anonymous `ls-remote`/`fetch`)                                                               | Checkable via `stak skill check`                                                                                                                |
+| Private Git                          | Local CLI only                                     | User's own existing local Git auth (SSH agent / credential helper) — **never** sent to or stored by Cloud | Checkable via `stak skill check`, exactly like public — Cloud never needs to distinguish public/private, because Cloud never fetches either one |
+| Public-stack                         | Local CLI (via the existing public-stack resolver) | N/A (STAK's own registry)                                                                                 | Checkable the same way, artifact's `source.kind: 'public-stack'`                                                                                |
+| Local                                | N/A                                                | N/A                                                                                                       | Fail-closed, `cannot-check`, reason `local` — unchanged, no artifact ever produced                                                              |
+| Dirty/ambiguous Git                  | N/A                                                | N/A                                                                                                       | Fail-closed, unchanged                                                                                                                          |
+| Pinned exact commit (no tracked ref) | N/A                                                | N/A                                                                                                       | Fail-closed `pinned`, unchanged — "intentionally not update-trackable" stays true                                                               |
 
 Cloud never possesses, transmits, or needs private Git credentials under this model — the entire reason
 the local-CLI-plane design is safer, not just simpler.
 
 ## 11. Failure / security model
 
-| Case | Behavior |
-|---|---|
-| Source unreachable | Existing fail-closed `uncheckable`/`unreachable` — no artifact produced, nothing uploaded |
-| Auth-required private remote, no local auth | Same as unreachable from the CLI's perspective (git fetch fails) — fail-closed, no artifact |
-| Candidate too large / too many files | CLI refuses to produce an artifact beyond the size/file-count cap (§5); reports `cannot-check` with a reason rather than silently truncating |
-| Binary files in the diff | Content byte-size still counts toward the cap; the web only ever renders text for inspection (per original §11 of the P5 spec — "do not attempt to render arbitrary binary content as text") — binary diff entries show as a changed-file fact without a text preview |
-| Symlinks / path traversal | Already rejected by `validateTreePath`/`UnsafeTreePathError` at tree-enumeration time — unchanged, reused as-is |
-| Source moves mid-check | The CLI resolves once at the start of `stak skill check` and uses that single resolved revision for both the diff and the upload — no re-resolution mid-operation |
-| Approved version changes before upload completes | Upload still succeeds (artifact records the approvedContentHash it saw); becomes correctly stale/invalidated per §5/§8 whenever it's actually used |
-| Artifact upload interrupted | Same partial-upload handling Memory's existing ticket-based blob flow already has (pending ticket, finalize-or-discard) — reused, not reinvented |
-| Duplicate artifact upload | Same Skill checked twice → second upload replaces the first (per §5's "one latest, not history") — idempotent by design |
-| Artifact replay | Artifact is tied to `(userId, entryId)` ownership and invalidated on approval — a replayed old artifact for an already-approved Skill fails check 4 in §8 |
-| Cross-account access | Standard per-user ownership check, same as every other Cloud write/read in this codebase |
-| Artifact deletion | Explicit on invalidation (§5); also deletable via the same "delete cloud Memory"-style explicit user action if ever needed — not designed yet, not required for V0 |
-| Candidate content execution | Never — read/hash/diff/display only, at every stage, local and Cloud alike |
+| Case                                             | Behavior                                                                                                                                                                                                                                                              |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source unreachable                               | Existing fail-closed `uncheckable`/`unreachable` — no artifact produced, nothing uploaded                                                                                                                                                                             |
+| Auth-required private remote, no local auth      | Same as unreachable from the CLI's perspective (git fetch fails) — fail-closed, no artifact                                                                                                                                                                           |
+| Candidate too large / too many files             | CLI refuses to produce an artifact beyond the size/file-count cap (§5); reports `cannot-check` with a reason rather than silently truncating                                                                                                                          |
+| Binary files in the diff                         | Content byte-size still counts toward the cap; the web only ever renders text for inspection (per original §11 of the P5 spec — "do not attempt to render arbitrary binary content as text") — binary diff entries show as a changed-file fact without a text preview |
+| Symlinks / path traversal                        | Already rejected by `validateTreePath`/`UnsafeTreePathError` at tree-enumeration time — unchanged, reused as-is                                                                                                                                                       |
+| Source moves mid-check                           | The CLI resolves once at the start of `stak skill check` and uses that single resolved revision for both the diff and the upload — no re-resolution mid-operation                                                                                                     |
+| Approved version changes before upload completes | Upload still succeeds (artifact records the approvedContentHash it saw); becomes correctly stale/invalidated per §5/§8 whenever it's actually used                                                                                                                    |
+| Artifact upload interrupted                      | Same partial-upload handling Memory's existing ticket-based blob flow already has (pending ticket, finalize-or-discard) — reused, not reinvented                                                                                                                      |
+| Duplicate artifact upload                        | Same Skill checked twice → second upload replaces the first (per §5's "one latest, not history") — idempotent by design                                                                                                                                               |
+| Artifact replay                                  | Artifact is tied to `(userId, entryId)` ownership and invalidated on approval — a replayed old artifact for an already-approved Skill fails check 4 in §8                                                                                                             |
+| Cross-account access                             | Standard per-user ownership check, same as every other Cloud write/read in this codebase                                                                                                                                                                              |
+| Artifact deletion                                | Explicit on invalidation (§5); also deletable via the same "delete cloud Memory"-style explicit user action if ever needed — not designed yet, not required for V0                                                                                                    |
+| Candidate content execution                      | Never — read/hash/diff/display only, at every stage, local and Cloud alike                                                                                                                                                                                            |
 
 ## 12. Impact on current P5 design
 
 **Can proceed unchanged today** (none of this blocks them, already built in Tasks 1–8 or still buildable without the artifact):
+
 - Skills list: Ready / Paused / plain neutral-text install states
 - Source provenance (safe label, tracked ref)
 - Installed vs. approved version display
@@ -295,6 +297,7 @@ the local-CLI-plane design is safer, not just simpler.
 - All of Tasks 1–8 already built and reviewed in this session
 
 **Must wait for the review-artifact closure:**
+
 - Truthful "Update available" with a real, checkable backing fact (today it's always `cannot-check` in
   production, independent of P5 — this was already true before this session started)
 - Candidate file content / exact diff rendering
@@ -311,7 +314,7 @@ states without the artifact).
 
 - **New table** (name/number TBD, e.g. `supabase/migrations/00XX_skill_review_artifacts.sql`):
   `skill_review_artifacts(id, user_id, entry_id, approved_content_hash, source_kind, source_label,
-  tracked_ref, candidate_revision, candidate_content_hash, checked_at, diff_files jsonb, created_at)`,
+tracked_ref, candidate_revision, candidate_content_hash, checked_at, diff_files jsonb, created_at)`,
   unique on `(user_id, entry_id)` (one latest, enforced at the DB level).
 - **Blob storage**: reuse the existing blob store, keyed `(user_id, candidate_content_hash)` — no new
   bucket/subsystem.
@@ -337,7 +340,7 @@ store, matching your §12 constraint.
 From `docs/0.1.0-contract.md`:
 
 - **§5 ("Skill update model")**: "Update available" needs an explicit "as of the last `stak skill
-  check`" qualifier — it is not, and under this model never will be, a live Cloud-side check.
+check`" qualifier — it is not, and under this model never will be, a live Cloud-side check.
 - **§5's stale-review guard**: currently describes only "the submitted contentHash must match the
   Skill's current approved contentHash." Needs a second, explicit clause for "upstream moving after the
   artifact was created does NOT itself make the artifact stale" (§8 above) — otherwise a future reader
@@ -355,6 +358,7 @@ From `docs/0.1.0-contract.md`:
 ## 15. Estimated implementation size
 
 Rough file-count estimate, for sizing only:
+
 - `packages/spec`: 1 file touched (new types + 2 request schemas) — small
 - `packages/core`: 1 new file (`skill-check.ts`, built from §0's existing primitives) + tests — medium
 - `packages/cloud-server`: `product-service.ts` modified (read model + approve), 1 new method, repository interface extended, + tests — medium
@@ -370,6 +374,7 @@ Rough file-count estimate, for sizing only:
 ## 16. Recommendation
 
 Build the local-CLI-plane architecture (§2) as the fix for this gap. It:
+
 - Requires zero new trust boundary on Cloud (no outbound arbitrary-remote fetching, no git binary
   dependency, no private-credential handling added to the server)
 - Reuses every pure primitive already written in P2 (§0) — no parallel hashing/diff/resolution logic

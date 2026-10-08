@@ -107,7 +107,6 @@ export type OverviewView =
       dockCommand: string;
     };
 
-
 const attentionView = (item: NeedsAttention): NeedsAttentionView => {
   switch (item.kind) {
     case 'update-available':

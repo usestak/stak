@@ -27,8 +27,15 @@ export default async function SkillsPage({
 
   if (view.kind === 'error')
     return (
-      <ShellNotice active="skills" handle={handle} title="Couldn't load your Skills">
-        <p>STAK Cloud didn&apos;t respond. This is a temporary problem, not a change to your data. Reload to try again.</p>
+      <ShellNotice
+        active="skills"
+        handle={handle}
+        title="Couldn't load your Skills"
+      >
+        <p>
+          STAK Cloud didn&apos;t respond. This is a temporary problem, not a
+          change to your data. Reload to try again.
+        </p>
       </ShellNotice>
     );
   if (view.kind === 'no-machines')
@@ -44,11 +51,15 @@ export default async function SkillsPage({
   if (view.kind === 'choose-machine')
     return (
       <ShellNotice active="skills" handle={handle} title="Choose a machine">
-        <p>Skills shows installed state from that machine&apos;s last check-in. Pick the machine you want to view.</p>
+        <p>
+          Skills shows installed state from that machine&apos;s last check-in.
+          Pick the machine you want to view.
+        </p>
         {!view.anyCheckedIn ? (
           <p>
             None of your machines has checked in yet. Run{' '}
-            <code style={{ fontFamily: 'var(--mono)' }}>stak status</code> on the machine you want, then pick it here.
+            <code style={{ fontFamily: 'var(--mono)' }}>stak status</code> on
+            the machine you want, then pick it here.
           </p>
         ) : null}
         <MachineChooser options={view.machines} basePath="/skills" />

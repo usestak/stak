@@ -50,7 +50,10 @@ describe('buildReviewArtifactFiles', () => {
       DEFAULT_REVIEW_BOUNDS,
     );
     if (result.status !== 'ok') throw new Error('expected ok');
-    expect(result.files[0]).toMatchObject({ kind: 'removed', beforeText: 'bye' });
+    expect(result.files[0]).toMatchObject({
+      kind: 'removed',
+      beforeText: 'bye',
+    });
     expect(result.files[0]?.afterText).toBeUndefined();
   });
   it('classifies a modified text file with both before and after', () => {
@@ -70,7 +73,13 @@ describe('buildReviewArtifactFiles', () => {
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02]);
     const result = buildReviewArtifactFiles(
       [{ relativePath: 'a.png', type: 'file', content: png }],
-      [{ relativePath: 'a.png', type: 'file', content: Buffer.concat([png, Buffer.from([1])]) }],
+      [
+        {
+          relativePath: 'a.png',
+          type: 'file',
+          content: Buffer.concat([png, Buffer.from([1])]),
+        },
+      ],
       DEFAULT_REVIEW_BOUNDS,
     );
     if (result.status !== 'ok') throw new Error('expected ok');
@@ -81,29 +90,37 @@ describe('buildReviewArtifactFiles', () => {
   });
   it('returns unchanged files omitted entirely', () => {
     const same = file('x.md', 'same');
-    const result = buildReviewArtifactFiles([same], [same], DEFAULT_REVIEW_BOUNDS);
+    const result = buildReviewArtifactFiles(
+      [same],
+      [same],
+      DEFAULT_REVIEW_BOUNDS,
+    );
     if (result.status !== 'ok') throw new Error('expected ok');
     expect(result.files).toHaveLength(0);
   });
   it('exceeds-bounds when total bytes exceed the cap', () => {
     const huge = 'x'.repeat(DEFAULT_REVIEW_BOUNDS.maxTotalBytes + 1);
-    const result = buildReviewArtifactFiles([], [file('big.md', huge)], DEFAULT_REVIEW_BOUNDS);
+    const result = buildReviewArtifactFiles(
+      [],
+      [file('big.md', huge)],
+      DEFAULT_REVIEW_BOUNDS,
+    );
     expect(result.status).toBe('exceeds-bounds');
   });
   it('exceeds-bounds when file count exceeds the cap', () => {
-    const many = Array.from({ length: DEFAULT_REVIEW_BOUNDS.maxFiles + 1 }, (_, i) =>
-      file(`f${i}.md`, 'x'),
+    const many = Array.from(
+      { length: DEFAULT_REVIEW_BOUNDS.maxFiles + 1 },
+      (_, i) => file(`f${i}.md`, 'x'),
     );
     const result = buildReviewArtifactFiles([], many, DEFAULT_REVIEW_BOUNDS);
     expect(result.status).toBe('exceeds-bounds');
   });
   it('exceeds-bounds when one file exceeds the per-file cap, even if total is small', () => {
     const big = 'x'.repeat(DEFAULT_REVIEW_BOUNDS.maxSingleFileBytes + 1);
-    const result = buildReviewArtifactFiles(
-      [],
-      [file('one-big.md', big)],
-      { ...DEFAULT_REVIEW_BOUNDS, maxTotalBytes: DEFAULT_REVIEW_BOUNDS.maxSingleFileBytes + 1024 },
-    );
+    const result = buildReviewArtifactFiles([], [file('one-big.md', big)], {
+      ...DEFAULT_REVIEW_BOUNDS,
+      maxTotalBytes: DEFAULT_REVIEW_BOUNDS.maxSingleFileBytes + 1024,
+    });
     expect(result.status).toBe('exceeds-bounds');
   });
 
@@ -116,7 +133,11 @@ describe('buildReviewArtifactFiles', () => {
     if (result.status !== 'ok') throw new Error('expected ok');
     expect(result.files).toHaveLength(1);
     const record = result.files[0];
-    expect(record).toMatchObject({ relativePath: 'link', kind: 'modified', binary: true });
+    expect(record).toMatchObject({
+      relativePath: 'link',
+      kind: 'modified',
+      binary: true,
+    });
     expect(record?.beforeText).toBeUndefined();
     expect(record?.afterText).toBeUndefined();
     const oldTargetBytes = Buffer.from('./old-target', 'utf8');
@@ -140,7 +161,9 @@ describe('buildReviewArtifactFiles', () => {
     if (result.status !== 'ok') throw new Error('expected ok');
     expect(result.files[0]).toMatchObject({ kind: 'added', binary: true });
     expect(result.files[0]?.before).toBeUndefined();
-    expect(result.files[0]?.after?.byteSize).toBe(Buffer.from('./target', 'utf8').length);
+    expect(result.files[0]?.after?.byteSize).toBe(
+      Buffer.from('./target', 'utf8').length,
+    );
   });
 
   it('classifies a removed symlink as binary with before only', () => {
@@ -152,7 +175,9 @@ describe('buildReviewArtifactFiles', () => {
     if (result.status !== 'ok') throw new Error('expected ok');
     expect(result.files[0]).toMatchObject({ kind: 'removed', binary: true });
     expect(result.files[0]?.after).toBeUndefined();
-    expect(result.files[0]?.before?.byteSize).toBe(Buffer.from('./target', 'utf8').length);
+    expect(result.files[0]?.before?.byteSize).toBe(
+      Buffer.from('./target', 'utf8').length,
+    );
   });
 
   it('classifies a file-to-symlink type change at the same path as binary', () => {
@@ -167,7 +192,7 @@ describe('buildReviewArtifactFiles', () => {
     expect(result.files[0]?.afterText).toBeUndefined();
   });
 
-  it('counts a symlink target string\'s bytes toward the per-file bound', () => {
+  it("counts a symlink target string's bytes toward the per-file bound", () => {
     const hugeTarget = 'x'.repeat(DEFAULT_REVIEW_BOUNDS.maxSingleFileBytes + 1);
     const result = buildReviewArtifactFiles(
       [],
@@ -183,8 +208,12 @@ describe('materializeExactRevision (real git fixture, local only)', () => {
   let workRoot: string;
 
   const run = async (cwd: string, args: string[]) => {
-    const result = await spawnGit(args, { cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
-    if (result.exitCode !== 0) throw new Error(`git ${args[0]} failed: ${result.stderr}`);
+    const result = await spawnGit(args, {
+      cwd,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    });
+    if (result.exitCode !== 0)
+      throw new Error(`git ${args[0]} failed: ${result.stderr}`);
     return result;
   };
 
@@ -221,7 +250,9 @@ describe('materializeExactRevision (real git fixture, local only)', () => {
     });
     const skillFile = entries.find((e) => e.relativePath === 'SKILL.md');
     expect(skillFile?.type).toBe('file');
-    expect((skillFile as { content: Buffer }).content.toString()).toBe('# v1\n');
+    expect((skillFile as { content: Buffer }).content.toString()).toBe(
+      '# v1\n',
+    );
   });
 
   it('rejects a skill path that escapes the repository root', async () => {

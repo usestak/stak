@@ -114,7 +114,11 @@ export default async function OverviewPage({
 
   if (view.kind === 'error')
     return (
-      <ShellNotice active="overview" handle={handle} title="Couldn't load your Overview">
+      <ShellNotice
+        active="overview"
+        handle={handle}
+        title="Couldn't load your Overview"
+      >
         <p>
           STAK Cloud didn&apos;t respond. This is a temporary problem, not a
           change to your data. Reload to try again.

@@ -215,9 +215,7 @@ const base64Encode = (bytes: Uint8Array): string => {
     const hasB2 = i + 2 < bytes.length;
     result += BASE64_CHARS.charAt(b0 >> 2);
     result += BASE64_CHARS.charAt(((b0 & 0x03) << 4) | (b1 >> 4));
-    result += hasB1
-      ? BASE64_CHARS.charAt(((b1 & 0x0f) << 2) | (b2 >> 6))
-      : '=';
+    result += hasB1 ? BASE64_CHARS.charAt(((b1 & 0x0f) << 2) | (b2 >> 6)) : '=';
     result += hasB2 ? BASE64_CHARS.charAt(b2 & 0x3f) : '=';
   }
   return result;
@@ -442,11 +440,10 @@ export const createCloudClient = (
     approveSkillVersion: async (skillId, body) =>
       json(
         approveSkillVersionResponseSchema,
-        await request(
-          'POST',
-          `skills/${encodeURIComponent(skillId)}/approve`,
-          { auth: true, json: body },
-        ),
+        await request('POST', `skills/${encodeURIComponent(skillId)}/approve`, {
+          auth: true,
+          json: body,
+        }),
       ),
     reportSkillSourceCheck: async (skillId, body) =>
       json(

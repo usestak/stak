@@ -55,9 +55,21 @@ export function SkillActions({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        alignItems: 'flex-end',
+      }}
+    >
       <div style={{ display: 'flex', gap: 10 }}>
-        <button type="button" className="stak-pill" onClick={togglePause} disabled={pending !== null}>
+        <button
+          type="button"
+          className="stak-pill"
+          onClick={togglePause}
+          disabled={pending !== null}
+        >
           {pending === 'pause' ? '…' : paused ? 'Resume' : 'Pause'}
         </button>
         {updateAvailable ? (
@@ -73,17 +85,28 @@ export function SkillActions({
                 : undefined
             }
           >
-            {pending === 'approve' ? 'Approving…' : `Approve ${approvedVersionShort}→new`}
+            {pending === 'approve'
+              ? 'Approving…'
+              : `Approve ${approvedVersionShort}→new`}
           </button>
         ) : null}
       </div>
       {updateAvailable && !reviewArtifactId ? (
         <span style={{ fontSize: 12.5, color: 'var(--dim)' }}>
-          This update exceeds STAK&apos;s V0 review limits and can&apos;t be approved from the browser yet.
+          This update exceeds STAK&apos;s V0 review limits and can&apos;t be
+          approved from the browser yet.
         </span>
       ) : null}
-      <span role="status" aria-live="polite" style={{ fontSize: 12.5, color: error ? '#e5776a' : 'transparent' }}>
-        {error ? (stale ? `${error} Reload to review the latest candidate.` : error) : ''}
+      <span
+        role="status"
+        aria-live="polite"
+        style={{ fontSize: 12.5, color: error ? '#e5776a' : 'transparent' }}
+      >
+        {error
+          ? stale
+            ? `${error} Reload to review the latest candidate.`
+            : error
+          : ''}
       </span>
     </div>
   );

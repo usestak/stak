@@ -88,7 +88,11 @@ export const sortMachinesForSelection = (
   b: MachineSummary,
 ): number => {
   const rank = (m: MachineSummary) =>
-    m.status === 'updates-waiting' ? 0 : m.status === 'never-checked-in' ? 2 : 1;
+    m.status === 'updates-waiting'
+      ? 0
+      : m.status === 'never-checked-in'
+        ? 2
+        : 1;
   const ra = rank(a);
   const rb = rank(b);
   if (ra !== rb) return ra - rb;

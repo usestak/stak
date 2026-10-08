@@ -3,10 +3,7 @@ import { mkdir, rm, access } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
-import {
-  enumerateSkillTree,
-  type SkillTreeEntry,
-} from '@stack/shared';
+import { enumerateSkillTree, type SkillTreeEntry } from '@stack/shared';
 
 import { diffSkillTrees, type SkillTreeDiff } from './skill-source.js';
 import { spawnGit, type GitExecutor } from './git-reference.js';
@@ -43,7 +40,10 @@ export const materializeExactRevision = async (options: {
     // `-c core.autocrlf=false` guarantees byte-exact content regardless of the user's global
     // Git config — this materialization feeds content hashing and before/after diff text, so
     // line endings must never be silently rewritten by a local autocrlf setting.
-    const result = await git(['-c', 'core.autocrlf=false', ...args], { cwd: workDir, env });
+    const result = await git(['-c', 'core.autocrlf=false', ...args], {
+      cwd: workDir,
+      env,
+    });
     if (result.exitCode !== 0)
       throw new Error(
         `git ${args[0]} failed for ${options.remote}@${options.revision}: ${result.stderr.trim() || `exit ${result.exitCode}`}`,
@@ -61,11 +61,15 @@ export const materializeExactRevision = async (options: {
     const skillDir = path.resolve(workDir, normalizedSkillPath);
     const prefix = `${workDir}${path.sep}`;
     if (skillDir !== workDir && !skillDir.startsWith(prefix))
-      throw new Error(`Skill path escapes the repository root: ${options.skillPath}`);
+      throw new Error(
+        `Skill path escapes the repository root: ${options.skillPath}`,
+      );
     try {
       await access(skillDir);
     } catch {
-      throw new Error(`Skill path ${options.skillPath} is missing at this revision.`);
+      throw new Error(
+        `Skill path ${options.skillPath} is missing at this revision.`,
+      );
     }
     return await enumerateSkillTree(skillDir);
   } finally {
@@ -148,9 +152,12 @@ export const buildReviewArtifactFiles = (
   for (const change of diff.files) {
     const before = approvedByPath.get(change.relativePath);
     const after = candidateByPath.get(change.relativePath);
-    const relevantSides = [before, after].filter((s): s is EntryContent => s !== undefined);
+    const relevantSides = [before, after].filter(
+      (s): s is EntryContent => s !== undefined,
+    );
     for (const s of relevantSides)
-      if (s.content.length > bounds.maxSingleFileBytes) return { status: 'exceeds-bounds' };
+      if (s.content.length > bounds.maxSingleFileBytes)
+        return { status: 'exceeds-bounds' };
     totalBytes += relevantSides.reduce((sum, s) => sum + s.content.length, 0);
     if (totalBytes > bounds.maxTotalBytes) return { status: 'exceeds-bounds' };
 
@@ -158,16 +165,24 @@ export const buildReviewArtifactFiles = (
     // not meaningful prose to diff as a text change, and this correctly suppresses any
     // beforeText/afterText attempt (including for a file<->symlink type change at the same
     // path, which is also a mixed-type change).
-    const binary = relevantSides.some((s) => s.isSymlink) || relevantSides.some((s) => isBinary(s.content));
+    const binary =
+      relevantSides.some((s) => s.isSymlink) ||
+      relevantSides.some((s) => isBinary(s.content));
     const record: ReviewArtifactFileRecord = {
       relativePath: change.relativePath,
       kind: change.kind,
       binary,
       ...(before
-        ? { before: sideOf(before.content), ...(binary ? {} : { beforeText: before.content.toString('utf8') }) }
+        ? {
+            before: sideOf(before.content),
+            ...(binary ? {} : { beforeText: before.content.toString('utf8') }),
+          }
         : {}),
       ...(after
-        ? { after: sideOf(after.content), ...(binary ? {} : { afterText: after.content.toString('utf8') }) }
+        ? {
+            after: sideOf(after.content),
+            ...(binary ? {} : { afterText: after.content.toString('utf8') }),
+          }
         : {}),
     };
     files.push(record);
