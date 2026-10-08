@@ -1,4 +1,4 @@
-import { SiteHeader } from '@/app/_components/site-header';
+import { FocusedShell } from '@/app/_components/focused-shell';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,19 +25,13 @@ export default async function AuthErrorPage({
   };
 
   return (
-    <>
-      <SiteHeader />
-      <div className="page">
-        <main>
-          <h1>{copy.title}</h1>
-          <p className="lead">{copy.body}</p>
-          <p style={{ marginTop: '1.5rem' }}>
-            <a className="btn" href="/auth/login?next=/overview">
-              Try signing in again
-            </a>
-          </p>
-        </main>
+    <FocusedShell title={copy.title}>
+      <p>{copy.body}</p>
+      <div className="stak-focus-actions">
+        <a className="stak-btn" href="/auth/login?next=/overview">
+          Try signing in again
+        </a>
       </div>
-    </>
+    </FocusedShell>
   );
 }

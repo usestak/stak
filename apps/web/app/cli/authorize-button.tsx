@@ -11,9 +11,12 @@ export function AuthorizeButton({ userCode }: { userCode: string }) {
   const [message, setMessage] = useState('');
 
   return (
-    <div>
+    <div
+      className="stak-focus-actions"
+      style={{ flexDirection: 'column', alignItems: 'flex-start' }}
+    >
       <button
-        className="btn"
+        className="stak-btn"
         disabled={state === 'working' || state === 'done'}
         onClick={async () => {
           setState('working');
@@ -32,14 +35,13 @@ export function AuthorizeButton({ userCode }: { userCode: string }) {
             ? 'Authorizing…'
             : 'Authorize this device'}
       </button>
-      {state === 'done' && (
-        <p className="muted">You can return to your terminal.</p>
-      )}
+      {state === 'done' && <p>You can return to your terminal.</p>}
       {state === 'error' && (
         <>
-          <p className="error">{message}</p>
-          <p className="muted">
-            Run <code>stak login</code> again in your terminal for a new code.
+          <p className="stak-focus-error">{message}</p>
+          <p>
+            Run <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>{' '}
+            again in your terminal for a new code.
           </p>
         </>
       )}

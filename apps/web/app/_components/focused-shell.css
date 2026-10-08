@@ -1,0 +1,42 @@
+/* apps/web/app/_components/focused-shell.css — canonical for the focused-flow shell
+   (sign-in, auth/error, CLI approval, onboarding, memory/protect, memory/recover). Extends
+   overview/shell.css's tokens/.stak-notice card; never falls back to globals.css, which
+   remains the superseded system kept only for the public Stack/share pages. */
+.stak-focus-page {
+  width: 100%;
+  min-height: 100dvh;
+  background: var(--bg);
+}
+.stak-focus-brand {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.stak-focus-brand b {
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.18em;
+  color: var(--ink);
+}
+.stak-focus-eyebrow {
+  font: 500 11px var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.stak-focus-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+.stak-focus-error {
+  color: var(--red);
+}
+.stak-focus-success {
+  color: var(--green);
+}
+.stak-focus-code {
+  font: 600 1.3rem var(--mono);
+  letter-spacing: 0.16em;
+  color: var(--ink);
+}

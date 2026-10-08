@@ -101,25 +101,26 @@ export default async function SettingsPage() {
                 machine to set a mode and create your first backup.
               </p>
             )}
-            <p className="stak-settings-p">
-              Mode is set on your machine, not in the browser. To move to
-              Protected, run{' '}
-              <code style={{ fontFamily: 'var(--mono)' }}>
-                stak memory protect
-              </code>{' '}
-              on a machine that has your Memory — it encrypts every future
-              backup there before it leaves.
-            </p>
+            {view.mode === 'protected' ? (
+              <p className="stak-settings-p">
+                Mode is set on your machine, not in the browser. Add or change
+                recovery methods below.
+              </p>
+            ) : view.mode === 'standard' ? (
+              <p className="stak-settings-p">
+                Mode is set on your machine, not in the browser. To move to
+                Protected, run{' '}
+                <code style={{ fontFamily: 'var(--mono)' }}>
+                  stak memory protect
+                </code>{' '}
+                on a machine that has your Memory — it encrypts every future
+                backup there before it leaves.
+              </p>
+            ) : null}
           </section>
 
           <section className="stak-settings-section">
             <h2>Recovery</h2>
-            <p className="stak-settings-p">
-              Keep these facts separate: a Cloud backup existing doesn&apos;t
-              mean a recovery method is configured. You need a recovery method
-              to open Protected Memory on a new machine — STAK can&apos;t reset
-              it for you.
-            </p>
             {view.recoveryMethods.length > 0 ? (
               <div className="stak-settings-fact">
                 <span className="state">Configured</span>
@@ -144,8 +145,8 @@ export default async function SettingsPage() {
               </div>
             )}
             <p className="stak-settings-p">
-              Recovery setup starts on a machine that has your Memory — not in
-              this browser. Run{' '}
+              A Cloud backup existing doesn&apos;t mean recovery is configured —
+              a separate fact. Run{' '}
               <code style={{ fontFamily: 'var(--mono)' }}>
                 stak memory protect --passkey
               </code>{' '}

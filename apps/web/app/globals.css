@@ -143,11 +143,6 @@ p {
 .mono {
   font-family: var(--mono);
 }
-.lead {
-  color: var(--muted);
-  font-size: 1rem;
-  max-width: 48ch;
-}
 
 /* ---- cards & meta ---- */
 .card {
@@ -213,43 +208,12 @@ p {
   color: var(--muted);
 }
 
-/* ---- button ---- */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  font: inherit;
-  font-weight: 550;
-  padding: 0.55rem 1rem;
-  border-radius: 8px;
-  border: 1px solid var(--accent);
-  background: var(--accent);
-  color: var(--accent-text);
-  cursor: pointer;
-}
-.btn:hover {
-  opacity: 0.9;
-  text-decoration: none;
-}
-.btn:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-.btn-secondary {
-  background: transparent;
-  color: var(--text);
-  border-color: var(--border-strong);
-}
-
-.codechip {
-  font-size: 1.35rem;
-  font-family: var(--mono);
-  letter-spacing: 0.18em;
-  font-weight: 600;
-}
-.error {
-  color: #dc2626;
-}
+/* .btn/.codechip/.error were the superseded product-chrome system (buttons, device codes,
+   error text) — retired once /, /auth/error, /cli, /memory/protect, /memory/recover, and
+   /onboarding moved onto the focused-flow shell (app/_components/focused-shell.tsx +
+   overview/shell.css's .stak-btn/.stak-cmd). This file now serves only the public Stack/share
+   surface (/[owner], /[owner]/[slug]) and SiteHeader, which still use .card/.meta/.skills/etc
+   below. */
 
 /* ---- product shell ---- */
 .site-header-inner {

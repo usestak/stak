@@ -1,20 +1,9 @@
-import type { ReactNode } from 'react';
-
-import { SiteHeader } from '@/app/_components/site-header';
+import { FocusedShell } from '@/app/_components/focused-shell';
 import { supabaseServerClient } from '@/lib/supabase-server';
 
 import { AuthorizeButton } from './authorize-button';
 
 export const dynamic = 'force-dynamic';
-
-const Shell = ({ children }: { children: ReactNode }) => (
-  <>
-    <SiteHeader />
-    <div className="page">
-      <main>{children}</main>
-    </div>
-  </>
-);
 
 export default async function CliPage({
   searchParams,
@@ -24,13 +13,12 @@ export default async function CliPage({
   const { code } = await searchParams;
   if (!code)
     return (
-      <Shell>
-        <h1>Device authorization</h1>
-        <p className="muted">
+      <FocusedShell title="Device authorization">
+        <p>
           No code provided. Start from your terminal with{' '}
-          <code>stak login</code>.
+          <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>.
         </p>
-      </Shell>
+      </FocusedShell>
     );
 
   const supabase = await supabaseServerClient();
@@ -41,32 +29,25 @@ export default async function CliPage({
   if (!user) {
     const next = `/cli?code=${encodeURIComponent(code)}`;
     return (
-      <Shell>
-        <h1>Authorize the STAK CLI</h1>
-        <p className="muted">Verification code</p>
-        <p className="codechip">{code}</p>
-        <p style={{ marginTop: '1.5rem' }}>
+      <FocusedShell eyebrow="Verification code" title="Authorize the STAK CLI">
+        <p className="stak-focus-code">{code}</p>
+        <div className="stak-focus-actions">
           <a
-            className="btn"
+            className="stak-btn"
             href={`/auth/login?next=${encodeURIComponent(next)}`}
           >
             Sign in with GitHub
           </a>
-        </p>
-      </Shell>
+        </div>
+      </FocusedShell>
     );
   }
 
   return (
-    <Shell>
-      <h1>Authorize the STAK CLI</h1>
-      <p className="muted">
-        Confirm this matches the code shown in your terminal:
-      </p>
-      <p className="codechip">{code}</p>
-      <div style={{ marginTop: '1.5rem' }}>
-        <AuthorizeButton userCode={code} />
-      </div>
-    </Shell>
+    <FocusedShell title="Authorize the STAK CLI">
+      <p>Confirm this matches the code shown in your terminal:</p>
+      <p className="stak-focus-code">{code}</p>
+      <AuthorizeButton userCode={code} />
+    </FocusedShell>
   );
 }

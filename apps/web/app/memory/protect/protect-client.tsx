@@ -146,25 +146,25 @@ export function ProtectClient({
   };
 
   return (
-    <div style={{ marginTop: '1.5rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {status.kind === 'done' ? (
-        <p className="ok">
+        <p className="stak-focus-success">
           Protected backup enabled. Return to your terminal to finish.
         </p>
       ) : (
         <button
-          className="btn"
+          className="stak-btn"
           onClick={() => void run()}
           disabled={status.kind === 'working'}
         >
           {status.kind === 'working' ? 'Working…' : 'Set up passkey'}
         </button>
       )}
-      {status.kind === 'working' && <p className="muted">{status.message}</p>}
-      {status.kind === 'unsupported' && (
-        <p className="muted">{status.message}</p>
+      {status.kind === 'working' && <p>{status.message}</p>}
+      {status.kind === 'unsupported' && <p>{status.message}</p>}
+      {status.kind === 'error' && (
+        <p className="stak-focus-error">{status.message}</p>
       )}
-      {status.kind === 'error' && <p className="error">{status.message}</p>}
     </div>
   );
 }

@@ -479,3 +479,36 @@
   line-height: 1.55;
   font-size: 14.5px;
 }
+
+/* Shared button/command primitives — canonical for BOTH the signed-in control center
+   (.stak-frame) and the focused-flow shell (focused-shell.tsx). Any route rendering STAK
+   chrome should reach for these rather than globals.css's .btn/.card system, which is the
+   superseded visual language retained only for the public-facing Stack/share pages. */
+.stak-btn {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12.5px;
+  font-family: var(--sans);
+  padding: 7px 12px;
+  border: 1px solid var(--chip);
+  border-radius: 6px;
+  color: var(--ink);
+  background: none;
+  cursor: pointer;
+  align-self: flex-start;
+  text-decoration: none;
+}
+.stak-btn:hover {
+  border-color: var(--faint);
+}
+.stak-cmd {
+  font-family: var(--mono);
+  font-size: 13px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: var(--ink);
+  overflow-x: auto;
+  white-space: pre;
+}
