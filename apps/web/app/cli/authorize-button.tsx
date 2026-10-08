@@ -35,7 +35,14 @@ export function AuthorizeButton({ userCode }: { userCode: string }) {
       {state === 'done' && (
         <p className="muted">You can return to your terminal.</p>
       )}
-      {state === 'error' && <p className="error">{message}</p>}
+      {state === 'error' && (
+        <>
+          <p className="error">{message}</p>
+          <p className="muted">
+            Run <code>stak login</code> again in your terminal for a new code.
+          </p>
+        </>
+      )}
     </div>
   );
 }
