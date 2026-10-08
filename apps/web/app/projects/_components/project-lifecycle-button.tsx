@@ -21,7 +21,10 @@ export function ProjectLifecycleButton({
     setPending(true);
     setError(null);
     const next = lifecycle === 'active' ? 'archived' : 'active';
-    const result = await setProjectLifecycleAction({ projectId, lifecycle: next });
+    const result = await setProjectLifecycleAction({
+      projectId,
+      lifecycle: next,
+    });
     setPending(false);
     if (!result.ok) {
       setError(result.error);
@@ -31,17 +34,32 @@ export function ProjectLifecycleButton({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        alignItems: 'flex-start',
+      }}
+    >
       <button
         type="button"
         className="stak-pill"
         onClick={toggle}
         disabled={pending}
-        aria-label={lifecycle === 'active' ? 'Archive this Project' : 'Unarchive this Project'}
+        aria-label={
+          lifecycle === 'active'
+            ? 'Archive this Project'
+            : 'Unarchive this Project'
+        }
       >
         {pending ? '…' : lifecycle === 'active' ? 'Archive' : 'Unarchive'}
       </button>
-      <span role="status" aria-live="polite" style={{ fontSize: 12.5, color: error ? '#e5776a' : 'transparent' }}>
+      <span
+        role="status"
+        aria-live="polite"
+        style={{ fontSize: 12.5, color: error ? '#e5776a' : 'transparent' }}
+      >
         {error ?? ''}
       </span>
     </div>

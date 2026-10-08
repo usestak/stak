@@ -30,9 +30,7 @@ const machine = (over: Partial<MachineSummary> = {}): MachineSummary => ({
   ...over,
 });
 
-const memoryModel = (
-  over: Partial<MemoryReadModel> = {},
-): MemoryReadModel => ({
+const memoryModel = (over: Partial<MemoryReadModel> = {}): MemoryReadModel => ({
   mode: 'standard',
   latestBackupAt: nowIso(60 * 24),
   backups: [
@@ -136,7 +134,11 @@ describe('loadMemoryView', () => {
       await loadMemoryView(
         service({
           machines: [
-            machine({ memoryBackedUp: false, lastCheckinAt: null, status: 'never-checked-in' }),
+            machine({
+              memoryBackedUp: false,
+              lastCheckinAt: null,
+              status: 'never-checked-in',
+            }),
           ],
         }),
         USER,
@@ -221,7 +223,9 @@ describe('loadMemoryView', () => {
   it('never surfaces needsRecoveryMethod for Standard', async () => {
     const view = ready(
       await loadMemoryView(
-        service({ memory: memoryModel({ mode: 'standard', hasRecoveryMethod: false }) }),
+        service({
+          memory: memoryModel({ mode: 'standard', hasRecoveryMethod: false }),
+        }),
         USER,
         A1,
       ),
@@ -247,11 +251,7 @@ describe('loadMemoryView', () => {
   });
 
   it('returns error when getMemoryReadModel throws', async () => {
-    const view = await loadMemoryView(
-      service({ throwMemory: true }),
-      USER,
-      A1,
-    );
+    const view = await loadMemoryView(service({ throwMemory: true }), USER, A1);
     expect(view.kind).toBe('error');
   });
 });

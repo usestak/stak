@@ -48,10 +48,7 @@ export type ProjectDetailView =
       technical: { projectId: string };
     };
 
-const memoryFactFor = (
-  memory: MemoryReadModel,
-  projectId: string,
-): string => {
+const memoryFactFor = (memory: MemoryReadModel, projectId: string): string => {
   if (memory.mode === 'protected') return 'Unavailable — Protected Memory';
   if (memory.mode !== 'standard' || !memory.perProject) return 'Not available';
   const row = memory.perProject.find((p) => p.projectId === projectId);
@@ -121,7 +118,11 @@ export const loadProjectDetail = async (
     lifecycleLabel: lifecycleLabel(project.lifecycle),
     presence: presenceLabel(project.presentOn, viewingId),
     memoryFact: memoryFactFor(memory, projectId),
-    cliSelector: cliProjectSelector(project.projectId, project.name, allForSelector),
+    cliSelector: cliProjectSelector(
+      project.projectId,
+      project.name,
+      allForSelector,
+    ),
     technical: { projectId: project.projectId },
   };
 };

@@ -35,11 +35,20 @@ export default async function ProjectDetailPage({
   const { projectId } = await params;
   const { machine } = await searchParams;
   const handle = user.githubUsername ?? displayNameOf(user);
-  const view = await loadProjectDetail(getCloudService(), user, projectId, machine);
+  const view = await loadProjectDetail(
+    getCloudService(),
+    user,
+    projectId,
+    machine,
+  );
 
   if (view.kind === 'error')
     return (
-      <ShellNotice active="projects" handle={handle} title="Couldn't load this Project">
+      <ShellNotice
+        active="projects"
+        handle={handle}
+        title="Couldn't load this Project"
+      >
         <p>
           STAK Cloud didn&apos;t respond. This is a temporary problem, not a
           change to your data. Reload to try again.
@@ -68,7 +77,10 @@ export default async function ProjectDetailPage({
   if (view.kind === 'choose-machine')
     return (
       <ShellNotice active="projects" handle={handle} title="Choose a machine">
-        <p>This Project&apos;s presence is shown relative to one machine. Pick the machine you want to view.</p>
+        <p>
+          This Project&apos;s presence is shown relative to one machine. Pick
+          the machine you want to view.
+        </p>
         {!view.anyCheckedIn ? (
           <p>
             None of your machines has checked in yet. Run{' '}
@@ -76,7 +88,10 @@ export default async function ProjectDetailPage({
             the machine you want, then pick it here.
           </p>
         ) : null}
-        <MachineChooser options={view.machines} basePath={`/projects/${projectId}`} />
+        <MachineChooser
+          options={view.machines}
+          basePath={`/projects/${projectId}`}
+        />
       </ShellNotice>
     );
 
@@ -106,17 +121,25 @@ export default async function ProjectDetailPage({
         <div className="stak-summaries">
           <div className="stak-sum">
             <span className="k">LIFECYCLE</span>
-            <span className="v" style={{ fontSize: 15 }}>{view.lifecycleLabel}</span>
-            <span className="d">Archive is organizational only — Memory is preserved.</span>
+            <span className="v" style={{ fontSize: 15 }}>
+              {view.lifecycleLabel}
+            </span>
+            <span className="d">
+              Archive is organizational only — Memory is preserved.
+            </span>
           </div>
           <div className="stak-sum">
             <span className="k">ON {view.viewing.name.toUpperCase()}</span>
-            <span className="v" style={{ fontSize: 15 }}>{view.presence}</span>
+            <span className="v" style={{ fontSize: 15 }}>
+              {view.presence}
+            </span>
             <span className="d">{view.viewing.statusLabel}</span>
           </div>
           <div className="stak-sum">
             <span className="k">MEMORY</span>
-            <span className="v" style={{ fontSize: 15 }}>{view.memoryFact}</span>
+            <span className="v" style={{ fontSize: 15 }}>
+              {view.memoryFact}
+            </span>
             <span className="d"> </span>
           </div>
         </div>
@@ -125,24 +148,47 @@ export default async function ProjectDetailPage({
           <div className="stak-col">
             <section className="stak-mem-section">
               <h2>Mapping</h2>
-              <p style={{ fontSize: 13, color: 'var(--muted)', maxWidth: 560, lineHeight: 1.6 }}>
-                Mapping a Project to a local folder happens only on the machine itself — STAK
-                Cloud never stores or chooses a folder path. If {view.viewing.name} already
-                resolves this Project automatically through its Git remote, no mapping command is
-                needed there.
+              <p
+                style={{
+                  fontSize: 13,
+                  color: 'var(--muted)',
+                  maxWidth: 560,
+                  lineHeight: 1.6,
+                }}
+              >
+                Mapping a Project to a local folder happens only on the machine
+                itself — STAK Cloud never stores or chooses a folder path. If{' '}
+                {view.viewing.name} already resolves this Project automatically
+                through its Git remote, no mapping command is needed there.
               </p>
             </section>
 
             <section className="stak-mem-section">
               <h2>Actions</h2>
-              <ProjectLifecycleButton projectId={view.technical.projectId} lifecycle={view.lifecycle} />
+              <ProjectLifecycleButton
+                projectId={view.technical.projectId}
+                lifecycle={view.lifecycle}
+              />
             </section>
 
             <details style={{ fontSize: 12.5 }}>
-              <summary style={{ cursor: 'pointer', color: 'var(--faint)', fontSize: 12.5, fontWeight: 600 }}>
+              <summary
+                style={{
+                  cursor: 'pointer',
+                  color: 'var(--faint)',
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                }}
+              >
                 Technical details
               </summary>
-              <div style={{ marginTop: 10, font: '11.5px var(--mono)', color: 'var(--faint)' }}>
+              <div
+                style={{
+                  marginTop: 10,
+                  font: '11.5px var(--mono)',
+                  color: 'var(--faint)',
+                }}
+              >
                 <span>projectId: {view.technical.projectId}</span>
               </div>
             </details>

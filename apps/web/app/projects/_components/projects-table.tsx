@@ -32,15 +32,27 @@ export function ProjectsTable({
   );
 
   const counts = useMemo(() => {
-    const c: Record<ProjectStatusFilter, number> = { all: rows.length, active: 0, archived: 0 };
+    const c: Record<ProjectStatusFilter, number> = {
+      all: rows.length,
+      active: 0,
+      archived: 0,
+    };
     for (const r of rows) c[r.lifecycle] += 1;
     return c;
   }, [rows]);
 
   return (
     <div className="stak-projects">
-      <div className="stak-projects-toolbar" role="group" aria-label="Filter Projects">
-        <div className="stak-projects-filters" role="radiogroup" aria-label="Lifecycle">
+      <div
+        className="stak-projects-toolbar"
+        role="group"
+        aria-label="Filter Projects"
+      >
+        <div
+          className="stak-projects-filters"
+          role="radiogroup"
+          aria-label="Lifecycle"
+        >
           {STATUS_FILTERS.map((f) => (
             <button
               key={f}
@@ -74,22 +86,28 @@ export function ProjectsTable({
 
       {rows.length === 0 ? (
         <p className="stak-projects-empty">
-          No Projects yet. STAK learns about Projects when a machine checks
-          in and reports them — run <code>stak status</code> on a machine
-          with Projects STAK can see.
+          No Projects yet. STAK learns about Projects when a machine checks in
+          and reports them — run <code>stak status</code> on a machine with
+          Projects STAK can see.
         </p>
       ) : filtered.length === 0 ? (
         <p className="stak-projects-empty">No Projects match this filter.</p>
       ) : (
         filtered.map((r) => (
           <div key={r.projectId} className="stak-projects-row">
-            <Link href={`/projects/${r.projectId}`} className="stak-projects-name">
+            <Link
+              href={`/projects/${r.projectId}`}
+              className="stak-projects-name"
+            >
               <span className="n">{r.name}</span>
             </Link>
             <span className="stak-projects-lifecycle">{r.lifecycleLabel}</span>
             <span className="stak-projects-presence">{r.presence}</span>
             <span className="stak-projects-memory">{r.fileCountLabel}</span>
-            <ProjectLifecycleButton projectId={r.projectId} lifecycle={r.lifecycle} />
+            <ProjectLifecycleButton
+              projectId={r.projectId}
+              lifecycle={r.lifecycle}
+            />
           </div>
         ))
       )}

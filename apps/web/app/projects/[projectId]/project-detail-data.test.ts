@@ -63,7 +63,9 @@ const service = (opts: {
     if (opts.throwMachines) throw new Error('offline');
     return { machines: opts.machines ?? [machine()] };
   },
-  getProjectsReadModel: async () => ({ projects: opts.projects ?? [project()] }),
+  getProjectsReadModel: async () => ({
+    projects: opts.projects ?? [project()],
+  }),
   getMemoryReadModel: async () => opts.memory ?? memoryModel(),
 });
 
@@ -112,7 +114,12 @@ describe('loadProjectDetail', () => {
   it('shows Standard Memory file count for this one Project', async () => {
     const view = ready(
       await loadProjectDetail(
-        service({ memory: memoryModel({ mode: 'standard', perProject: [{ projectId: 'prj_abc', fileCount: 9 }] }) }),
+        service({
+          memory: memoryModel({
+            mode: 'standard',
+            perProject: [{ projectId: 'prj_abc', fileCount: 9 }],
+          }),
+        }),
         USER,
         'prj_abc',
         A1,
@@ -124,7 +131,9 @@ describe('loadProjectDetail', () => {
   it('never fabricates a Protected per-project file count', async () => {
     const view = ready(
       await loadProjectDetail(
-        service({ memory: memoryModel({ mode: 'protected', perProject: null }) }),
+        service({
+          memory: memoryModel({ mode: 'protected', perProject: null }),
+        }),
         USER,
         'prj_abc',
         A1,

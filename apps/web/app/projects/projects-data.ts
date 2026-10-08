@@ -117,7 +117,9 @@ export const loadProjectsList = async (
       lifecycleLabel: lifecycleLabel(p.lifecycle),
       presence: presenceLabel(p.presentOn, viewingId),
       fileCountLabel:
-        p.fileCount === null ? 'Unavailable' : `${p.fileCount} file${p.fileCount === 1 ? '' : 's'}`,
+        p.fileCount === null
+          ? 'Unavailable'
+          : `${p.fileCount} file${p.fileCount === 1 ? '' : 's'}`,
       cliSelector: cliProjectSelector(p.projectId, p.name, allForSelector),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -129,7 +131,7 @@ export const loadProjectsList = async (
 
   const statusSentence =
     rows.length === 0
-      ? "No Projects yet. STAK learns about Projects when a machine checks in and reports them — run `stak status` on a machine with Projects STAK can see."
+      ? 'No Projects yet. STAK learns about Projects when a machine checks in and reports them — run `stak status` on a machine with Projects STAK can see.'
       : notHereCount === 0
         ? `${activeCount} active Project${activeCount === 1 ? '' : 's'}, all on ${displayName(viewing)}.`
         : `${activeCount} active Project${activeCount === 1 ? '' : 's'}; ${notHereCount} not on ${displayName(viewing)}.`;

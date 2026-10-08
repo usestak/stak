@@ -26,7 +26,11 @@ export default async function ProjectsPage({
 
   if (view.kind === 'error')
     return (
-      <ShellNotice active="projects" handle={handle} title="Couldn't load your Projects">
+      <ShellNotice
+        active="projects"
+        handle={handle}
+        title="Couldn't load your Projects"
+      >
         <p>
           STAK Cloud didn&apos;t respond. This is a temporary problem, not a
           change to your data. Reload to try again.
@@ -47,8 +51,8 @@ export default async function ProjectsPage({
     return (
       <ShellNotice active="projects" handle={handle} title="Choose a machine">
         <p>
-          Projects shows presence from that machine&apos;s last check-in.
-          Pick the machine you want to view.
+          Projects shows presence from that machine&apos;s last check-in. Pick
+          the machine you want to view.
         </p>
         {!view.anyCheckedIn ? (
           <p>

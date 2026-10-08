@@ -21,8 +21,14 @@ export async function setProjectLifecycleAction(input: {
     );
     return { ok: true };
   } catch (error) {
-    if (error instanceof CloudServiceError && error.code === 'project-not-found')
-      return { ok: false, error: 'This Project no longer exists in your account.' };
+    if (
+      error instanceof CloudServiceError &&
+      error.code === 'project-not-found'
+    )
+      return {
+        ok: false,
+        error: 'This Project no longer exists in your account.',
+      };
     return {
       ok: false,
       error:

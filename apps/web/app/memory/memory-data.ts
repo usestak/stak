@@ -163,7 +163,9 @@ export const loadMemoryView = async (
     sidebar: {
       overview: { n: '', tone: 'neutral' },
       skills: '',
-      memory: backedUp ? { n: 'Backed up', tone: 'ready' } : { n: '', tone: 'neutral' },
+      memory: backedUp
+        ? { n: 'Backed up', tone: 'ready' }
+        : { n: '', tone: 'neutral' },
       projects: '',
       machines: String(active.length),
       stacks: '',

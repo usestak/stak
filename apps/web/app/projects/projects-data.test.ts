@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import type { MachineSummary, MachinesReadModel, ProjectSummary } from '@stack/spec';
+import type {
+  MachineSummary,
+  MachinesReadModel,
+  ProjectSummary,
+} from '@stack/spec';
 
 import {
   filterProjectRows,
