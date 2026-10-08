@@ -96,6 +96,11 @@
   color: var(--dim);
   font-size: 13.5px;
 }
+.stak-project-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 .stak-projects-chip:focus-visible,
 .stak-projects-search:focus-visible,
 .stak-projects-name:focus-visible {

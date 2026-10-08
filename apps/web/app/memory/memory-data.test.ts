@@ -148,6 +148,30 @@ describe('loadMemoryView', () => {
     expect(view.machineGap).toBe(false);
   });
 
+  it('never claims a never-checked-in machine is Up to date', async () => {
+    const view = ready(
+      await loadMemoryView(
+        service({
+          machines: [
+            machine({
+              memoryBackedUp: false,
+              lastCheckinAt: null,
+              status: 'never-checked-in',
+            }),
+          ],
+        }),
+        USER,
+        A1,
+      ),
+    );
+    expect(view.viewingCheckedIn).toBe(false);
+  });
+
+  it('marks viewingCheckedIn true for a machine that has checked in', async () => {
+    const view = ready(await loadMemoryView(service({}), USER, A1));
+    expect(view.viewingCheckedIn).toBe(true);
+  });
+
   it('exposes Standard perProject rows joined with known project names', async () => {
     const view = ready(
       await loadMemoryView(

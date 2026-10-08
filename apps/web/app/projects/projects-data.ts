@@ -2,6 +2,7 @@ import type { CloudService } from '@stack/cloud-server';
 import type { ProjectSummary } from '@stack/spec';
 
 import type { WebUser } from '../../lib/session.js';
+import { webAuth } from '../../lib/web-auth.js';
 import {
   machineOption,
   resolveViewingMachineId,
@@ -24,7 +25,6 @@ export type ProjectsService = Pick<
   'getMachinesReadModel' | 'getProjectsReadModel'
 >;
 
-const webAuth = (userId: string) => ({ userId, tokenId: 'web-session' });
 
 export type ProjectRow = {
   projectId: string;
@@ -131,7 +131,7 @@ export const loadProjectsList = async (
 
   const statusSentence =
     rows.length === 0
-      ? 'No Projects yet. STAK learns about Projects when a machine checks in and reports them — run `stak status` on a machine with Projects STAK can see.'
+      ? 'No Projects yet.'
       : notHereCount === 0
         ? `${activeCount} active Project${activeCount === 1 ? '' : 's'}, all on ${displayName(viewing)}.`
         : `${activeCount} active Project${activeCount === 1 ? '' : 's'}; ${notHereCount} not on ${displayName(viewing)}.`;

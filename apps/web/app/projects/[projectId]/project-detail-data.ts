@@ -2,6 +2,7 @@ import type { CloudService } from '@stack/cloud-server';
 import type { MemoryReadModel, ProjectSummary } from '@stack/spec';
 
 import type { WebUser } from '../../../lib/session.js';
+import { webAuth } from '../../../lib/web-auth.js';
 import {
   machineOption,
   resolveViewingMachineId,
@@ -23,7 +24,6 @@ export type ProjectDetailService = Pick<
   'getMachinesReadModel' | 'getProjectsReadModel' | 'getMemoryReadModel'
 >;
 
-const webAuth = (userId: string) => ({ userId, tokenId: 'web-session' });
 
 export type ProjectDetailView =
   | { kind: 'error' }
@@ -48,12 +48,13 @@ export type ProjectDetailView =
       technical: { projectId: string };
     };
 
-const memoryFactFor = (memory: MemoryReadModel, projectId: string): string => {
-  if (memory.mode === 'protected') return 'Unavailable — Protected Memory';
-  if (memory.mode !== 'standard' || !memory.perProject) return 'Not available';
-  const row = memory.perProject.find((p) => p.projectId === projectId);
-  if (!row) return 'Not available';
-  return `${row.fileCount} file${row.fileCount === 1 ? '' : 's'}`;
+const memoryFactFor = (
+  mode: MemoryReadModel['mode'],
+  fileCount: number | null,
+): string => {
+  if (mode === 'protected') return 'Unavailable — Protected Memory';
+  if (mode !== 'standard' || fileCount === null) return 'Not available';
+  return `${fileCount} file${fileCount === 1 ? '' : 's'}`;
 };
 
 export const loadProjectDetail = async (
@@ -117,7 +118,7 @@ export const loadProjectDetail = async (
     lifecycle: project.lifecycle,
     lifecycleLabel: lifecycleLabel(project.lifecycle),
     presence: presenceLabel(project.presentOn, viewingId),
-    memoryFact: memoryFactFor(memory, projectId),
+    memoryFact: memoryFactFor(memory.mode, project.fileCount),
     cliSelector: cliProjectSelector(
       project.projectId,
       project.name,

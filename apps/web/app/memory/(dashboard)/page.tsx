@@ -129,7 +129,11 @@ export default async function MemoryPage({
           <div className="stak-sum">
             <span className="k">ON {view.viewing.name.toUpperCase()}</span>
             <span className="v" style={{ fontSize: 15 }}>
-              {view.machineGap ? 'Changes not backed up' : 'Up to date'}
+              {!view.viewingCheckedIn
+                ? "Hasn't checked in"
+                : view.machineGap
+                  ? 'Changes not backed up'
+                  : 'Up to date'}
             </span>
             <span className="d">{view.viewing.statusLabel}</span>
           </div>

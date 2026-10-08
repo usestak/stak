@@ -1,7 +1,8 @@
-import { CloudServiceError, type CloudService } from '@stack/cloud-server';
+import type { CloudService } from '@stack/cloud-server';
 import type { MemoryReadModel } from '@stack/spec';
 
 import type { WebUser } from '../../lib/session.js';
+import { webAuth } from '../../lib/web-auth.js';
 import {
   relative,
   displayName,
@@ -19,8 +20,6 @@ export type MemoryService = Pick<
   CloudService,
   'getMachinesReadModel' | 'getMemoryReadModel' | 'getProjectsReadModel'
 >;
-
-const webAuth = (userId: string) => ({ userId, tokenId: 'web-session' });
 
 export type MemoryHistoryRow = {
   generation: number;
@@ -55,6 +54,9 @@ export type MemoryView =
        *  (contract: account Cloud-backup truth is kept separate from machine-level local-backup
        *  truth — never collapsed into one boolean). */
       machineGap: boolean;
+      /** True once the viewing machine has ever checked in. False means STAK has no backup
+       *  data for it at all — never render that as "up to date" (would be a fabricated claim). */
+      viewingCheckedIn: boolean;
       statusSentence: string;
       modeSentence: string;
       hasRecoveryMethod: boolean;
@@ -106,12 +108,7 @@ export const loadMemoryView = async (
     ]);
     memory = m;
     projects = p.projects;
-  } catch (error) {
-    if (
-      error instanceof CloudServiceError &&
-      error.code === 'machine-not-found'
-    )
-      return { kind: 'choose-machine', machines: options, anyCheckedIn };
+  } catch {
     return { kind: 'error' };
   }
 
@@ -173,6 +170,7 @@ export const loadMemoryView = async (
     mode: memory.mode,
     backedUp,
     machineGap,
+    viewingCheckedIn,
     statusSentence,
     modeSentence,
     hasRecoveryMethod: memory.hasRecoveryMethod,

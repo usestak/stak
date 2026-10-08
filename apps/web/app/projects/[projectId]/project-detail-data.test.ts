@@ -115,10 +115,8 @@ describe('loadProjectDetail', () => {
     const view = ready(
       await loadProjectDetail(
         service({
-          memory: memoryModel({
-            mode: 'standard',
-            perProject: [{ projectId: 'prj_abc', fileCount: 9 }],
-          }),
+          projects: [project({ fileCount: 9 })],
+          memory: memoryModel({ mode: 'standard' }),
         }),
         USER,
         'prj_abc',
@@ -126,6 +124,21 @@ describe('loadProjectDetail', () => {
       ),
     );
     expect(view.memoryFact).toBe('9 files');
+  });
+
+  it('agrees with the list page for a Standard Project with zero files', async () => {
+    const view = ready(
+      await loadProjectDetail(
+        service({
+          projects: [project({ fileCount: 0 })],
+          memory: memoryModel({ mode: 'standard' }),
+        }),
+        USER,
+        'prj_abc',
+        A1,
+      ),
+    );
+    expect(view.memoryFact).toBe('0 files');
   });
 
   it('never fabricates a Protected per-project file count', async () => {

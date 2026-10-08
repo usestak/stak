@@ -146,7 +146,7 @@ export default async function ProjectDetailPage({
 
         <div className="stak-body">
           <div className="stak-col">
-            <section className="stak-mem-section">
+            <section className="stak-project-section">
               <h2>Mapping</h2>
               <p
                 style={{
@@ -163,7 +163,7 @@ export default async function ProjectDetailPage({
               </p>
             </section>
 
-            <section className="stak-mem-section">
+            <section className="stak-project-section">
               <h2>Actions</h2>
               <ProjectLifecycleButton
                 projectId={view.technical.projectId}
