@@ -38,19 +38,25 @@ const memory = (over: Partial<MemoryReadModel> = {}): MemoryReadModel => ({
 });
 
 describe('shouldSkipOnboarding', () => {
-  it('shows onboarding for a brand-new account with no machines and no backup', () => {
+  // Routing matrix (P8 correction pass): skip ONLY when a Cloud backup
+  // exists AND at least one active (non-revoked) machine has checked in.
+
+  it('row 1: no backup, no machines -> onboarding', () => {
     expect(shouldSkipOnboarding({ machines: [], memory: memory() })).toBe(
       false,
     );
   });
 
-  it('shows onboarding while a machine exists but has never checked in and nothing is backed up', () => {
+  it('row 2: no backup, active checked-in machine -> onboarding', () => {
     expect(
-      shouldSkipOnboarding({ machines: [machine()], memory: memory() }),
+      shouldSkipOnboarding({
+        machines: [machine({ lastCheckinAt: nowIso(5) })],
+        memory: memory(),
+      }),
     ).toBe(false);
   });
 
-  it('skips onboarding once a machine has checked in and a backup exists', () => {
+  it('row 3: backup exists, active checked-in machine -> skip (Overview)', () => {
     expect(
       shouldSkipOnboarding({
         machines: [machine({ lastCheckinAt: nowIso(5) })],
@@ -59,10 +65,53 @@ describe('shouldSkipOnboarding', () => {
     ).toBe(true);
   });
 
-  it('never traps an established account even if the only machine was later revoked', () => {
+  it('row 4: backup exists, zero active machines -> onboarding', () => {
+    expect(
+      shouldSkipOnboarding({
+        machines: [],
+        memory: memory({ mode: 'standard', latestBackupAt: nowIso(5) }),
+      }),
+    ).toBe(false);
+  });
+
+  it('row 5: backup exists, only revoked historical machines (even if they checked in) -> onboarding', () => {
     expect(
       shouldSkipOnboarding({
         machines: [machine({ lastCheckinAt: nowIso(5), revoked: true })],
+        memory: memory({ mode: 'standard', latestBackupAt: nowIso(5) }),
+      }),
+    ).toBe(false);
+  });
+
+  it('row 6: backup exists, active machine exists but never checked in -> onboarding', () => {
+    expect(
+      shouldSkipOnboarding({
+        machines: [machine({ lastCheckinAt: null, revoked: false })],
+        memory: memory({ mode: 'standard', latestBackupAt: nowIso(5) }),
+      }),
+    ).toBe(false);
+  });
+
+  it('row 7: no backup, only revoked historical machines -> onboarding', () => {
+    expect(
+      shouldSkipOnboarding({
+        machines: [machine({ lastCheckinAt: nowIso(5), revoked: true })],
+        memory: memory(),
+      }),
+    ).toBe(false);
+  });
+
+  it('mixed fleet: one revoked (checked-in) + one active (checked-in) + backup -> skip', () => {
+    expect(
+      shouldSkipOnboarding({
+        machines: [
+          machine({ lastCheckinAt: nowIso(10), revoked: true }),
+          machine({
+            machineId: '00000000-0000-4000-8000-0000000000a2',
+            lastCheckinAt: nowIso(1),
+            revoked: false,
+          }),
+        ],
         memory: memory({ mode: 'standard', latestBackupAt: nowIso(5) }),
       }),
     ).toBe(true);

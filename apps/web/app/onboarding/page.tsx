@@ -103,7 +103,7 @@ export default async function OnboardingPage() {
                 Your STAK already has Cloud Memory. On the new machine, run:
               </p>
               <pre>
-                <code>{`stak login\nstak memory recover\nstak memory restore\nstak project map <folder>`}</code>
+                <code>{`stak login\nstak memory recover\nstak memory restore`}</code>
               </pre>
               <p className="muted">
                 <code style={{ fontFamily: 'var(--mono)' }}>recover</code>{' '}
@@ -112,9 +112,14 @@ export default async function OnboardingPage() {
                 writes it into your agents&apos; files — it never overwrites
                 anything already there. If your Memory is Protected, recover
                 needs a passkey or your recovery file (.stackkey) from this
-                account.{' '}
-                <code style={{ fontFamily: 'var(--mono)' }}>project map</code>{' '}
-                is only needed for projects not already present on this machine.
+                account.
+              </p>
+              <p className="muted">
+                Map projects if needed — any project not already present on this
+                machine:{' '}
+                <code style={{ fontFamily: 'var(--mono)' }}>
+                  stak project map &lt;project&gt; &lt;directory&gt;
+                </code>
               </p>
             </div>
           )}

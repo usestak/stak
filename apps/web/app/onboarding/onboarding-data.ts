@@ -20,21 +20,21 @@ export type OnboardingStep = {
 };
 
 /**
- * Account is considered established the moment it has both a machine that has
- * ever checked in and a Cloud Memory backup — the two real records the Final
- * Contract's onboarding derivation is built on. Check-in history survives a
- * later revoke (revoking is a current-access decision, not an erasure of past
- * setup), so revoking the only machine never re-traps an otherwise-established
- * account in onboarding — it shows the existing-account-new-machine flow.
+ * Account is considered established only when it has both a Cloud Memory
+ * backup and at least one currently-active, non-revoked machine that has
+ * successfully checked in. A revoked machine's check-in history doesn't
+ * count — revoking removes live CLI access, and an account with no live
+ * access needs the existing-account-new-machine recovery guidance, not
+ * Overview, regardless of what it once had.
  */
 export const shouldSkipOnboarding = (input: {
   machines: MachineSummary[];
   memory: MemoryReadModel;
 }): boolean => {
-  const hasCheckedInMachine = input.machines.some(
-    (m) => m.lastCheckinAt !== null,
+  const hasActiveCheckedInMachine = input.machines.some(
+    (m) => !m.revoked && m.lastCheckinAt !== null,
   );
-  return hasCheckedInMachine && input.memory.latestBackupAt !== null;
+  return hasActiveCheckedInMachine && input.memory.latestBackupAt !== null;
 };
 
 /**
