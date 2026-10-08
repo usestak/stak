@@ -25,7 +25,6 @@ export type ProjectsService = Pick<
   'getMachinesReadModel' | 'getProjectsReadModel'
 >;
 
-
 export type ProjectRow = {
   projectId: string;
   name: string;

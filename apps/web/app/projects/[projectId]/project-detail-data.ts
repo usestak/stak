@@ -24,7 +24,6 @@ export type ProjectDetailService = Pick<
   'getMachinesReadModel' | 'getProjectsReadModel' | 'getMemoryReadModel'
 >;
 
-
 export type ProjectDetailView =
   | { kind: 'error' }
   | { kind: 'not-found' }
