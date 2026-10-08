@@ -10,6 +10,7 @@ import {
   statusLabel,
   machineDot,
   displayName,
+  displayAgent,
   metaLine,
   checkedIn,
   isStale,
@@ -80,7 +81,9 @@ const memoryLabel = (m: MachineSummary): string => {
 const agentsLabel = (m: MachineSummary): string => {
   if (!checkedIn(m)) return NO_CHECKIN;
   const names =
-    m.agentsDetected.length > 0 ? m.agentsDetected.join(', ') : 'None detected';
+    m.agentsDetected.length > 0
+      ? m.agentsDetected.map(displayAgent).join(', ')
+      : 'None detected';
   return `${names} · ${asOf(m)}`;
 };
 
@@ -136,7 +139,7 @@ export const NEW_MACHINE_STEPS: {
     title: 'Map Projects if needed',
     syntax: 'stak project map <project> <directory>',
     copyable: false,
-    hint: 'run `stak project` first — most Projects resolve on their own and need no mapping',
+    hint: "most Projects resolve automatically; for one that doesn't, use the syntax above",
   },
 ];
 

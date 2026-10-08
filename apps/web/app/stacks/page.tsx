@@ -76,8 +76,9 @@ export default async function StacksPage({
             <span>{view.statusSentence}</span>
           </div>
           <span className="stak-sub">
-            A Stack is the Skills composed into your main environment, so any
-            machine gets your setup in one command.
+            A Stack is the Skills that make up your portable STAK environment.
+            Any machine can bring it down with{' '}
+            <code style={{ fontFamily: 'var(--mono)' }}>stak pull</code>.
           </span>
         </div>
         <div

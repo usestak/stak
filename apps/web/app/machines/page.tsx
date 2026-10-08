@@ -79,8 +79,8 @@ export default async function MachinesPage({
             <span>{view.statusSentence}</span>
           </div>
           <span className="stak-sub">
-            Each machine catches up when you run the CLI on it — status is from
-            its last check-in.
+            Each machine reports its state when you run STAK on it. This page
+            reflects its last check-in.
           </span>
         </div>
         <div

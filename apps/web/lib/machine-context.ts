@@ -33,6 +33,22 @@ export const displayPlatform = (
   }
 };
 
+/** Human-facing agent name — `agentsDetected` stores the raw lowercase AgentId
+ *  ('codex' | 'cursor' | 'claude', per `packages/spec/src/adapter.ts`). Display only — never
+ *  changes the stored identifier. Unknown ids pass through unchanged rather than guessing. */
+export const displayAgent = (id: string): string => {
+  switch (id) {
+    case 'codex':
+      return 'Codex';
+    case 'cursor':
+      return 'Cursor';
+    case 'claude':
+      return 'Claude Code';
+    default:
+      return id;
+  }
+};
+
 export const displayName = (m: MachineSummary): string =>
   m.name ?? 'Unnamed machine';
 export const shortId = (id: string): string => id.slice(0, 8);

@@ -5,6 +5,7 @@ import {
   machineOption,
   statusLabel,
   machineDot,
+  displayAgent,
 } from './machine-context.js';
 
 const A1 = '00000000-0000-4000-8000-0000000000a1';
@@ -55,6 +56,17 @@ describe('machineDot / statusLabel', () => {
     const m = machine({ status: 'never-checked-in', lastCheckinAt: null });
     expect(machineDot(m)).toBe('neutral');
     expect(statusLabel(m)).toBe('No check-in yet');
+  });
+});
+
+describe('displayAgent', () => {
+  it('maps the raw AgentId to a friendly product name', () => {
+    expect(displayAgent('codex')).toBe('Codex');
+    expect(displayAgent('cursor')).toBe('Cursor');
+    expect(displayAgent('claude')).toBe('Claude Code');
+  });
+  it('passes an unknown id through unchanged rather than guessing', () => {
+    expect(displayAgent('some-future-agent')).toBe('some-future-agent');
   });
 });
 

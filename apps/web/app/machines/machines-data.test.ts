@@ -19,7 +19,8 @@ const machine = (over: Partial<MachineSummary> = {}): MachineSummary => ({
   name: 'Dell',
   platform: 'win32',
   arch: 'x64',
-  agentsDetected: ['Claude Code', 'Codex'],
+  // Raw stored AgentIds (packages/spec/src/adapter.ts) — never the display name directly.
+  agentsDetected: ['codex', 'claude'],
   firstSeenAt: nowIso(60 * 24 * 10),
   lastCheckinAt: nowIso(12),
   memoryBackedUp: true,
@@ -146,6 +147,21 @@ describe('loadMachinesView', () => {
       ),
     );
     expect(view.cards[0]!.stale).toBe(true);
+  });
+
+  it('shows friendly agent display names, never raw lowercase ids', async () => {
+    const view = ready(
+      await loadMachinesView(
+        service({
+          machines: [machine({ agentsDetected: ['codex', 'claude'] })],
+        }),
+        USER,
+        A1,
+      ),
+    );
+    expect(view.cards[0]!.agentsLabel).toMatch(/Codex, Claude Code/);
+    expect(view.cards[0]!.agentsLabel).not.toContain('codex');
+    expect(view.cards[0]!.agentsLabel).not.toMatch(/\bclaude\b/);
   });
 
   it('shows zero reported Projects as a real, scoped measured fact (not invented uncertainty)', async () => {
