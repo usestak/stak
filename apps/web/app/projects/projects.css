@@ -1,0 +1,104 @@
+/* apps/web/app/projects/projects.css — extends shell.css tokens, mirrors skills.css structure. */
+.stak-projects {
+  display: flex;
+  flex-direction: column;
+}
+.stak-projects-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 0 28px 12px;
+}
+.stak-projects-filters {
+  display: flex;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.stak-projects-chip {
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--faint);
+  background: none;
+  border: none;
+  border-left: 1px solid var(--line-2);
+  cursor: pointer;
+  font-family: var(--sans);
+}
+.stak-projects-chip:first-child {
+  border-left: none;
+}
+.stak-projects-chip:hover:not(.active) {
+  background: #171615;
+  color: var(--ink);
+}
+.stak-projects-chip.active {
+  background: #1e1d1b;
+  color: var(--ink);
+  font-weight: 500;
+}
+.stak-projects-search {
+  margin-left: auto;
+  width: 260px;
+  padding: 7px 12px;
+  border: 1px solid var(--chip);
+  border-radius: 6px;
+  background: #151413;
+  color: var(--ink);
+  font: 13px var(--sans);
+}
+.stak-projects-search::placeholder {
+  color: var(--dim);
+}
+.stak-projects-search:hover {
+  border-color: var(--faint);
+}
+.stak-projects-head,
+.stak-projects-row {
+  display: grid;
+  grid-template-columns: 2.2fr 1fr 1.4fr 1fr auto;
+  gap: 14px;
+  padding: 9px 28px;
+  align-items: center;
+}
+.stak-projects-head {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  font: 500 10.5px var(--mono);
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+.stak-projects-row {
+  border-bottom: 1px solid #1c1b19;
+}
+.stak-projects-row:hover {
+  background: #171615;
+}
+.stak-projects-name {
+  font: 500 13px var(--mono);
+  color: inherit;
+  text-decoration: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stak-projects-name:hover {
+  text-decoration: none;
+}
+.stak-projects-lifecycle,
+.stak-projects-presence,
+.stak-projects-memory {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.stak-projects-empty {
+  padding: 24px 28px;
+  color: var(--dim);
+  font-size: 13.5px;
+}
+.stak-projects-chip:focus-visible,
+.stak-projects-search:focus-visible,
+.stak-projects-name:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+}
