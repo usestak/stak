@@ -133,7 +133,12 @@ describe('loadMemoryView', () => {
     const view = ready(
       await loadMemoryView(
         service({
-          machines: [machine({ memoryBackedUp: false, lastCheckinAt: nowIso(60 * 24 * 2) })],
+          machines: [
+            machine({
+              memoryBackedUp: false,
+              lastCheckinAt: nowIso(60 * 24 * 2),
+            }),
+          ],
           memory: memoryModel({ latestBackupAt: nowIso(60 * 24 * 7) }),
         }),
         USER,
@@ -142,7 +147,9 @@ describe('loadMemoryView', () => {
     );
     expect(view.machineSentence).toMatch(/last check-in/i);
     expect(view.machineSentence).toMatch(/dell/i);
-    expect(view.machineSentence).not.toMatch(/\bhas\b.*changes.*aren'?t backed up/i);
+    expect(view.machineSentence).not.toMatch(
+      /\bhas\b.*changes.*aren'?t backed up/i,
+    );
   });
 
   it('describes a checked-in machine with no gap as up to date at its last check-in', async () => {

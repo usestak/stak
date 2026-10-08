@@ -84,9 +84,9 @@ export default async function ProjectsPage({
           <div className="stak-projects-empty-state">
             <h2>No Projects yet</h2>
             <p>
-              STAK learns about Projects from your Memory backups. Run a
-              Memory backup on a machine that has agent Memory for a project,
-              and STAK will discover and register it here.
+              STAK learns about Projects from your Memory backups. Run a Memory
+              backup on a machine that has agent Memory for a project, and STAK
+              will discover and register it here.
             </p>
           </div>
         ) : (
