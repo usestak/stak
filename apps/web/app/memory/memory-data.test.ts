@@ -126,7 +126,39 @@ describe('loadMemoryView', () => {
       ),
     );
     expect(view.machineGap).toBe(true);
-    expect(view.statusSentence).toMatch(/dell/i);
+    expect(view.machineSentence).toMatch(/dell/i);
+  });
+
+  it('describes a stale-but-valid machine observation as tied to its last check-in, never as live state', async () => {
+    const view = ready(
+      await loadMemoryView(
+        service({
+          machines: [machine({ memoryBackedUp: false, lastCheckinAt: nowIso(60 * 24 * 2) })],
+          memory: memoryModel({ latestBackupAt: nowIso(60 * 24 * 7) }),
+        }),
+        USER,
+        A1,
+      ),
+    );
+    expect(view.machineSentence).toMatch(/last check-in/i);
+    expect(view.machineSentence).toMatch(/dell/i);
+    expect(view.machineSentence).not.toMatch(/\bhas\b.*changes.*aren'?t backed up/i);
+  });
+
+  it('describes a checked-in machine with no gap as up to date at its last check-in', async () => {
+    const view = ready(await loadMemoryView(service({}), USER, A1));
+    expect(view.machineSentence).toMatch(/up to date at its last check-in/i);
+  });
+
+  it('keeps statusSentence account-level only, never naming the machine', async () => {
+    const view = ready(
+      await loadMemoryView(
+        service({ machines: [machine({ memoryBackedUp: false })] }),
+        USER,
+        A1,
+      ),
+    );
+    expect(view.statusSentence).not.toMatch(/dell/i);
   });
 
   it('never flags a machine gap when the machine has not checked in', async () => {

@@ -26,6 +26,7 @@ export type MemoryHistoryRow = {
   mode: MemoryReadModel['mode'];
   createdAt: string;
   when: string;
+  isLatest: boolean;
 };
 
 export type MemoryPerProjectRow = {
@@ -58,6 +59,7 @@ export type MemoryView =
        *  data for it at all — never render that as "up to date" (would be a fabricated claim). */
       viewingCheckedIn: boolean;
       statusSentence: string;
+      machineSentence: string;
       modeSentence: string;
       hasRecoveryMethod: boolean;
       needsRecoveryMethod: boolean;
@@ -117,25 +119,30 @@ export const loadMemoryView = async (
 
   const statusSentence = !backedUp
     ? 'Not backed up yet.'
+    : `Backed up — latest ${relative(memory.latestBackupAt)}.`;
+
+  const machineSentence = !viewingCheckedIn
+    ? `${viewingName} hasn't checked in yet.`
     : machineGap
-      ? `Latest Cloud backup ${relative(memory.latestBackupAt)}. ${viewingName} has Memory changes that aren't backed up yet.`
-      : `Backed up — latest ${relative(memory.latestBackupAt)}.`;
+      ? `At ${viewingName}'s last check-in (${relative(viewing.lastCheckinAt)}), it had Memory changes that weren't backed up.`
+      : `${viewingName} was up to date at its last check-in, ${relative(viewing.lastCheckinAt)}.`;
 
   const modeSentence =
     memory.mode === 'protected'
-      ? "Protected: encrypted on your machine. STAK stores ciphertext and can't read it."
+      ? "Protected, account-wide: encrypted on your machine. STAK stores ciphertext and can't read it."
       : memory.mode === 'standard'
-        ? "Standard: private to your account. STAK's service can read it to deliver it."
+        ? "Standard, account-wide: private to your account; STAK's service can read it to deliver it."
         : 'No Memory mode set yet.';
 
   const needsRecoveryMethod =
     memory.mode === 'protected' && !memory.hasRecoveryMethod;
 
-  const history: MemoryHistoryRow[] = memory.backups.map((b) => ({
+  const history: MemoryHistoryRow[] = memory.backups.map((b, i) => ({
     generation: b.generation,
     mode: b.mode,
     createdAt: b.createdAt,
     when: relative(b.createdAt),
+    isLatest: i === 0,
   }));
 
   const nameById = new Map(projects.map((p) => [p.projectId, p.name]));
@@ -172,6 +179,7 @@ export const loadMemoryView = async (
     machineGap,
     viewingCheckedIn,
     statusSentence,
+    machineSentence,
     modeSentence,
     hasRecoveryMethod: memory.hasRecoveryMethod,
     needsRecoveryMethod,

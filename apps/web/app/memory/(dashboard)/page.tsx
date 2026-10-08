@@ -98,7 +98,7 @@ export default async function MemoryPage({
             />
             <span>{view.statusSentence}</span>
           </div>
-          <span className="stak-sub">{view.modeSentence}</span>
+          <span className="stak-sub">{view.machineSentence}</span>
         </div>
 
         <div className="stak-summaries">
@@ -111,7 +111,7 @@ export default async function MemoryPage({
                   ? 'Standard'
                   : 'Not set'}
             </span>
-            <span className="d">Account-wide — never per project.</span>
+            <span className="d">{view.modeSentence}</span>
           </div>
           <div className="stak-sum">
             <span className="k">RECOVERY</span>
@@ -143,9 +143,7 @@ export default async function MemoryPage({
               {view.backedUp ? view.history[0]!.when : 'None yet'}
             </span>
             <span className="d">
-              {view.backedUp
-                ? `Generation ${view.history[0]!.generation}`
-                : ' '}
+              {view.backedUp ? dateOnly(view.history[0]!.createdAt) : ' '}
             </span>
           </div>
         </div>
@@ -164,8 +162,10 @@ export default async function MemoryPage({
                       <span className="mode">
                         {h.mode === 'protected' ? 'Protected' : 'Standard'}
                       </span>
-                      <span className="gen">
-                        Generation {h.generation} · {dateOnly(h.createdAt)}
+                      <span className="meta">
+                        {h.isLatest
+                          ? `Latest backup · ${dateOnly(h.createdAt)}`
+                          : dateOnly(h.createdAt)}
                       </span>
                     </li>
                   ))}
@@ -201,15 +201,16 @@ export default async function MemoryPage({
               </section>
             ) : view.mode === 'protected' ? (
               <section className="stak-mem-section">
-                <h2>Protected</h2>
+                <h2>Projects</h2>
                 <p className="stak-mem-protected">
-                  Encrypted on your machine. STAK stores ciphertext and
-                  can&apos;t read your encrypted Memory content.
+                  {view.protectedProjectsKnownCount === 0
+                    ? 'No Projects are currently registered with STAK.'
+                    : `${view.protectedProjectsKnownCount} project${view.protectedProjectsKnownCount === 1 ? '' : 's'} known to STAK.`}
                 </p>
                 <p className="stak-mem-protected">
-                  {view.protectedProjectsKnownCount} project
-                  {view.protectedProjectsKnownCount === 1 ? '' : 's'} known to
-                  STAK.
+                  Protected backups are encrypted before they leave this
+                  machine, so STAK can&apos;t compute per-project file counts
+                  from their contents.
                 </p>
               </section>
             ) : null}

@@ -31,7 +31,7 @@
   color: var(--faint);
   font: 500 11.5px var(--mono);
 }
-.stak-mem-history .gen {
+.stak-mem-history .meta {
   color: var(--dim);
   font: 11.5px var(--mono);
   text-align: right;
