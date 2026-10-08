@@ -1,0 +1,148 @@
+/* apps/web/app/machines/machines.css — extends shell.css tokens, Machines-specific only. */
+.stak-machines-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.stak-machine-card {
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+}
+.stak-machine-card-head {
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 1px solid var(--line);
+}
+.stak-machine-card-name {
+  font-size: 18px;
+  font-weight: 600;
+}
+.stak-machine-card-meta {
+  font-size: 13px;
+  color: var(--faint);
+  margin-top: 4px;
+}
+.stak-machine-card-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.stak-stale-badge {
+  font: 500 11px var(--mono);
+  color: var(--amber);
+  border: 1px solid #4a3f24;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+.stak-machine-card-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  font-size: 13px;
+}
+.stak-machine-card-facts > div {
+  padding: 12px 20px;
+  border-bottom: 1px solid #1c1b19;
+}
+.stak-machine-card-facts > div:nth-child(2n) {
+  border-left: 1px solid #1c1b19;
+}
+.stak-machine-card-facts > div:nth-last-child(-n + 2) {
+  border-bottom: none;
+}
+.stak-machine-card-facts .k {
+  font: 500 10.5px var(--mono);
+  color: var(--dim);
+}
+.stak-machine-card-facts .v {
+  margin-top: 4px;
+}
+.stak-machine-card-foot {
+  padding: 14px 20px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.stak-pill-danger {
+  border-color: #6a2f28;
+  color: #f0a79b;
+}
+.stak-pill-danger:hover {
+  border-color: #e5776a;
+}
+
+.stak-revoke-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+  text-align: right;
+  max-width: 420px;
+}
+.stak-revoke-confirm p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--faint);
+}
+.stak-revoke-warn {
+  color: var(--amber) !important;
+}
+.stak-revoke-actions {
+  display: flex;
+  gap: 8px;
+}
+.stak-revoke-error {
+  font-size: 12.5px;
+  color: #e5776a;
+}
+
+.stak-updates-waiting-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.stak-updates-waiting-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+.stak-new-machine {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.stak-new-machine-steps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.stak-new-machine-step {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.stak-new-machine-step .cmd {
+  font: 12.5px var(--mono);
+  background: #1a1917;
+  border: 1px solid var(--line-2);
+  padding: 7px 10px;
+  border-radius: 6px;
+}
+.stak-new-machine-step .cmd .p {
+  color: var(--dim);
+}
+.stak-new-machine-step .hint {
+  font-size: 11.5px;
+  color: var(--faint);
+}

@@ -13,11 +13,19 @@ const DOT: Record<string, string> = {
 type NavKey =
   'overview' | 'skills' | 'memory' | 'projects' | 'machines' | 'stacks';
 
+const HREF: Record<NavKey, string> = {
+  overview: '/overview',
+  skills: '/skills',
+  memory: '/memory',
+  projects: '/projects',
+  machines: '/machines',
+  stacks: '/stacks',
+};
+
 /**
  * The signed-in application frame (STAK Final Contract): labelled sidebar of six places,
- * "Viewing as <machine>", account handle, Settings + Docs. Overview, Skills, Memory, and
- * Projects are real links; Machines and Stacks remain shell destinations rendered as
- * placeholders (aria-disabled) until their phases — their counts are still real P3 facts.
+ * "Viewing as <machine>", account handle, Settings + Docs. All six primary destinations —
+ * Overview, Skills, Memory, Projects, Machines, Stacks — are real links as of P7.
  * Primary nav is labelled, never icon-only.
  */
 export function AppSidebar({
@@ -79,54 +87,24 @@ export function AppSidebar({
       ) : null}
 
       <div className="stak-nav">
-        {items.map((item) =>
-          item.key === 'overview' ||
-          item.key === 'skills' ||
-          item.key === 'memory' ||
-          item.key === 'projects' ? (
-            <Link
-              key={item.key}
-              href={
-                item.key === 'overview'
-                  ? '/overview'
-                  : item.key === 'skills'
-                    ? '/skills'
-                    : item.key === 'memory'
-                      ? '/memory'
-                      : '/projects'
-              }
-              className="stak-nav-item"
-              aria-current={active === item.key ? 'page' : undefined}
-            >
-              <span>{item.label}</span>
-              {item.n ? (
-                <span
-                  className="n"
-                  style={{ color: DOT[item.tone] ?? '#85817a' }}
-                >
-                  {item.n}
-                </span>
-              ) : null}
-            </Link>
-          ) : (
-            <div
-              key={item.key}
-              className="stak-nav-item"
-              aria-disabled="true"
-              title="Arrives in a later phase"
-            >
-              <span>{item.label}</span>
-              {item.n ? (
-                <span
-                  className="n"
-                  style={{ color: DOT[item.tone] ?? '#85817a' }}
-                >
-                  {item.n}
-                </span>
-              ) : null}
-            </div>
-          ),
-        )}
+        {items.map((item) => (
+          <Link
+            key={item.key}
+            href={HREF[item.key]}
+            className="stak-nav-item"
+            aria-current={active === item.key ? 'page' : undefined}
+          >
+            <span>{item.label}</span>
+            {item.n ? (
+              <span
+                className="n"
+                style={{ color: DOT[item.tone] ?? '#85817a' }}
+              >
+                {item.n}
+              </span>
+            ) : null}
+          </Link>
+        ))}
       </div>
 
       <div className="stak-foot">

@@ -1,0 +1,70 @@
+/* apps/web/app/stacks/stacks.css — extends shell.css tokens, Stacks-specific only. */
+.stak-stack-card {
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+}
+.stak-stack-card-head {
+  padding: 18px 22px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-bottom: 1px solid var(--line);
+}
+.stak-stack-card-name {
+  font-size: 18px;
+  font-weight: 600;
+}
+.stak-stack-card-meta {
+  font-size: 13px;
+  color: var(--faint);
+}
+.stak-stack-composition-head {
+  display: grid;
+  grid-template-columns: 2fr 1fr 90px;
+  gap: 14px;
+  padding: 9px 22px;
+  border-bottom: 1px solid var(--line);
+  font: 500 10.5px var(--mono);
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+.stak-stack-composition-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 90px;
+  gap: 14px;
+  align-items: center;
+  padding: 9px 22px;
+  border-bottom: 1px solid #1c1b19;
+  font-size: 13px;
+}
+.stak-stack-composition-empty {
+  padding: 18px 22px;
+  color: var(--faint);
+  font-size: 13.5px;
+}
+.stak-stack-technical {
+  padding: 12px 22px;
+  font: 11.5px var(--mono);
+  color: var(--dim);
+}
+.stak-stacks-empty-state {
+  padding: 40px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 520px;
+}
+.stak-stacks-empty-state h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.stak-stacks-empty-state p {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--muted);
+  line-height: 1.6;
+}

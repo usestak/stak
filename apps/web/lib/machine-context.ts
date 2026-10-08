@@ -66,6 +66,15 @@ export const machineDot = (
       ? 'attention'
       : 'neutral';
 
+/** Frozen stale threshold (contract §11, "machine not seen in 30+ days"). A separate fact
+ *  from status — a machine can be up to date on skills yet still be stale by check-in age. */
+const STALE_DAYS = 30;
+export const isStale = (m: MachineSummary): boolean => {
+  if (m.lastCheckinAt === null) return false;
+  const days = (Date.now() - new Date(m.lastCheckinAt).getTime()) / 86_400_000;
+  return days >= STALE_DAYS;
+};
+
 export type MachineOption = {
   machineId: string;
   name: string;
