@@ -12,14 +12,27 @@ type Status =
   | { kind: 'error'; message: string }
   | { kind: 'done' };
 
-export function DeleteCloudMemory() {
+export function DeleteCloudMemory({
+  hasCloudMemory,
+}: {
+  hasCloudMemory: boolean;
+}) {
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [value, setValue] = useState('');
 
   if (status.kind === 'done')
     return (
       <p role="status" style={{ fontSize: 13.5, color: '#a19d94' }}>
-        Cloud Memory deleted. Local Memory on your machines is untouched.
+        Cloud Memory deleted and recovery methods revoked. Local Memory on your
+        machines is untouched.
+      </p>
+    );
+
+  if (!hasCloudMemory)
+    return (
+      <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+        Nothing to delete — STAK has no Cloud Memory backup for this account
+        yet.
       </p>
     );
 
@@ -69,8 +82,9 @@ export function DeleteCloudMemory() {
         <strong style={{ color: '#edeae3' }}>
           {DELETE_CONFIRMATION_PHRASE}
         </strong>{' '}
-        to permanently delete every Memory backup STAK holds. Files on your
-        machines aren&apos;t touched.
+        to permanently delete every Cloud Memory backup STAK holds and revoke
+        your recovery methods (passkey / recovery file). Native agent Memory and
+        all files on your machines are not touched.
       </label>
       <input
         id="delete-confirm"

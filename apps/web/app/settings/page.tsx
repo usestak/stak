@@ -201,14 +201,20 @@ export default async function SettingsPage() {
                 Not configured.
               </p>
             )}
-            <div style={{ display: 'flex', gap: 10 }}>
-              <a className="btn btn-secondary" href="/memory/protect">
-                Add a passkey
-              </a>
-              <a className="btn btn-secondary" href="/memory/recover">
-                Use recovery file
-              </a>
-            </div>
+            <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
+              Recovery setup starts on a machine that has your Memory — not in
+              this browser. Run{' '}
+              <code style={{ fontFamily: 'var(--mono)' }}>
+                stak memory protect --passkey
+              </code>{' '}
+              to add a passkey (it opens your browser for the passkey ceremony),
+              or{' '}
+              <code style={{ fontFamily: 'var(--mono)' }}>
+                stak memory protect
+              </code>{' '}
+              to write a recovery file (.stackkey) instead — entirely on that
+              machine, no browser step.
+            </p>
           </section>
 
           <section
@@ -245,11 +251,12 @@ export default async function SettingsPage() {
           >
             <h2 style={{ margin: 0 }}>Delete cloud Memory</h2>
             <p className="muted" style={{ margin: 0 }}>
-              Permanently removes every Memory backup STAK holds. Files on your
-              machines aren&apos;t touched. This is not archiving: archiving a
-              project never deletes anything.
+              Permanently removes every Cloud Memory backup STAK holds and
+              revokes your recovery methods (passkey / recovery file). Native
+              agent Memory and files on your machines aren&apos;t touched. This
+              is not archiving: archiving a project never deletes anything.
             </p>
-            <DeleteCloudMemory />
+            <DeleteCloudMemory hasCloudMemory={view.backedUp} />
           </section>
         </div>
       </main>
