@@ -381,6 +381,28 @@ export const createProductMethods = (config: ProductServiceConfig) => {
   };
 
   /**
+   * Retry a row's durable cleanup obligation WITHOUT touching anything else about the row
+   * (no environment mutation, no state-field change) — used by the idempotent-replay path
+   * below, which must still honour "every write to this row retries pending cleanup" even
+   * though it performs no OTHER write of its own.
+   */
+  const retryRowCleanup = async (
+    userId: string,
+    row: SkillReviewCheckRecord,
+  ): Promise<void> => {
+    const pending = row.pendingCleanupArtifactIds;
+    if (!pending || pending.length === 0) return;
+    const stillPending = await attemptCleanup(userId, pending);
+    if (stillPending.length !== pending.length) {
+      const next: SkillReviewCheckRecord = { ...row };
+      if (stillPending.length > 0)
+        next.pendingCleanupArtifactIds = stillPending;
+      else delete next.pendingCleanupArtifactIds;
+      await config.repository.putSkillReviewCheck(next);
+    }
+  };
+
+  /**
    * The full current review artifact for a Skill summary, or null. Only an update-available
    * check that is still bound to the summary's approved version yields one. File text is merged
    * in only from a payload whose bytes still hash to `artifactPayloadHash`; if the payload is
@@ -695,6 +717,12 @@ export const createProductMethods = (config: ProductServiceConfig) => {
           throw remoteConflict(
             'This review is no longer current. A newer check has superseded it — review again.',
           );
+        // The idempotent-return path performs no environment mutation and no state-field
+        // write of its own, but a durable cleanup obligation left on this row (e.g. the
+        // original approval's payload delete failed) must still be retried on every call
+        // that touches this row — including this replay. Only the cleanup list changes here,
+        // never the tombstone's identity-proving fields.
+        await retryRowCleanup(user.userId, stored);
         return {
           skillId: request.skillId,
           approvedVersion: stored.candidateContentHash,

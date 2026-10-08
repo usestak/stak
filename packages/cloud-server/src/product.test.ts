@@ -1752,6 +1752,128 @@ describe('approveSkillVersion — by artifact (P5a)', () => {
       ).rejects.toThrow(/no longer current/);
     });
 
+    it('G: replaying A after its own approval-time payload-delete failed retries cleanup and durably clears it — no second environment commit, A untouched otherwise', async () => {
+      const env = setup();
+      const seed = await seedSkill(env);
+      const a = await upload(env, seed, {
+        revision: 'b'.repeat(40),
+        contentHash: h('b'),
+      });
+      const realDelete = env.blobStore.deleteReviewPayload;
+      env.blobStore.deleteReviewPayload = async () => {
+        throw new Error('storage unavailable');
+      };
+      const first = await env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId: a.reviewArtifactId,
+      });
+      expect(first.environmentVersionNumber).toBeDefined();
+      // The consumed tombstone durably records A's payload as still needing deletion.
+      const afterFirst = await env.repository.getSkillReviewCheck(
+        seed.user.userId,
+        seed.skillId,
+      );
+      expect(afterFirst?.sourceCheckState).toBe('consumed');
+      expect(afterFirst?.pendingCleanupArtifactIds).toEqual([
+        a.reviewArtifactId,
+      ]);
+      // Storage recovers; the ORIGINAL HTTP response was lost, so the client retries the
+      // EXACT same request.
+      env.blobStore.deleteReviewPayload = realDelete;
+      const retry = await env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId: a.reviewArtifactId,
+      });
+      // Same semantic success, no second environment/version mutation.
+      expect(retry).toEqual({
+        skillId: seed.skillId,
+        approvedVersion: h('b'),
+        createdNew: true,
+      });
+      expect(retry.environmentVersionNumber).toBeUndefined();
+      const current = await env.service.getSkillDetail(seed.user, seed.skillId);
+      expect(current.approvedVersion).toBe(h('b'));
+      // Cleanup WAS retried on the replay itself and durably cleared.
+      expect(
+        await env.blobStore.getReviewPayload(
+          seed.user.userId,
+          a.reviewArtifactId,
+        ),
+      ).toBeNull();
+      const afterRetry = await env.repository.getSkillReviewCheck(
+        seed.user.userId,
+        seed.skillId,
+      );
+      expect(afterRetry?.pendingCleanupArtifactIds ?? []).toEqual([]);
+      // The tombstone itself is still exactly what it was — sufficient for future idempotency.
+      expect(afterRetry?.sourceCheckState).toBe('consumed');
+      expect(afterRetry?.reviewArtifactId).toBe(a.reviewArtifactId);
+      expect(afterRetry?.candidateContentHash).toBe(h('b'));
+    });
+
+    it('H: if cleanup fails again on replay, the obligation stays persisted for a further safe retry; a later Skill move to B is never rolled back by replaying A', async () => {
+      const env = setup();
+      const seed = await seedSkill(env);
+      const a = await upload(env, seed, {
+        revision: 'b'.repeat(40),
+        contentHash: h('b'),
+      });
+      const realDelete = env.blobStore.deleteReviewPayload;
+      env.blobStore.deleteReviewPayload = async () => {
+        throw new Error('storage unavailable');
+      };
+      await env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId: a.reviewArtifactId,
+      });
+      // First replay: cleanup is retried but fails again — obligation remains persisted.
+      const retry1 = await env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId: a.reviewArtifactId,
+      });
+      expect(retry1.approvedVersion).toBe(h('b'));
+      expect(retry1.environmentVersionNumber).toBeUndefined();
+      const afterRetry1 = await env.repository.getSkillReviewCheck(
+        seed.user.userId,
+        seed.skillId,
+      );
+      expect(afterRetry1?.pendingCleanupArtifactIds).toEqual([
+        a.reviewArtifactId,
+      ]);
+      // Storage recovers; a second identical replay retries again safely and clears it.
+      env.blobStore.deleteReviewPayload = realDelete;
+      const retry2 = await env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId: a.reviewArtifactId,
+      });
+      expect(retry2.approvedVersion).toBe(h('b'));
+      const afterRetry2 = await env.repository.getSkillReviewCheck(
+        seed.user.userId,
+        seed.skillId,
+      );
+      expect(afterRetry2?.pendingCleanupArtifactIds ?? []).toEqual([]);
+      // The Skill now advances to a fresh candidate C, approved as B.
+      const c = await upload(
+        env,
+        { ...seed, approvedContentHash: h('b') },
+        { revision: 'c'.repeat(40), contentHash: h('c') },
+      );
+      const b = await env.service.approveSkillVersion(seed.user, {
+        skillId: seed.skillId,
+        reviewArtifactId: c.reviewArtifactId,
+      });
+      expect(b.approvedVersion).toBe(h('c'));
+      // Replaying the OLD artifact A again must still never roll the Skill back to B(h('b')).
+      await expect(
+        env.service.approveSkillVersion(seed.user, {
+          skillId: seed.skillId,
+          reviewArtifactId: a.reviewArtifactId,
+        }),
+      ).rejects.toThrow(/no longer current/);
+      const current = await env.service.getSkillDetail(seed.user, seed.skillId);
+      expect(current.approvedVersion).toBe(h('c'));
+    });
+
     it('F: a consumed tombstone cannot be replayed from a different account', async () => {
       const env = setup();
       const alice = await seedSkill(env, 'alice');
