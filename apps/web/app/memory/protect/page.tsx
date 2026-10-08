@@ -27,8 +27,17 @@ export default async function MemoryProtectPage({
     return (
       <Shell>
         <h1>Protect your STAK Memory</h1>
+        <p className="lead">
+          Protection starts on the machine that has your Memory — this page
+          can&apos;t begin it on its own.
+        </p>
+        <p className="muted">Run on that machine:</p>
+        <pre>
+          <code>stak memory protect</code>
+        </pre>
         <p className="muted">
-          Start from your terminal with <code>stak memory protect</code>.
+          If you use a passkey, the CLI opens this browser with a secure session
+          to finish the ceremony.
         </p>
       </Shell>
     );

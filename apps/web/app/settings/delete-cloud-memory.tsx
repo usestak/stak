@@ -22,16 +22,16 @@ export function DeleteCloudMemory({
 
   if (status.kind === 'done')
     return (
-      <p role="status" style={{ fontSize: 13.5, color: '#a19d94' }}>
-        Cloud Memory deleted and recovery methods revoked. Local Memory on your
-        machines is untouched.
+      <p role="status" className="stak-settings-p">
+        Cloud Memory deleted and recovery methods revoked. Native agent Memory
+        and local files on your machines are untouched.
       </p>
     );
 
   if (!hasCloudMemory)
     return (
-      <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-        Nothing to delete — STAK has no Cloud Memory backup for this account
+      <p className="stak-settings-p">
+        Nothing to delete — there&apos;s no Cloud Memory backup for this account
         yet.
       </p>
     );
@@ -40,15 +40,11 @@ export function DeleteCloudMemory({
     return (
       <button
         type="button"
-        className="btn btn-secondary"
-        style={{
-          alignSelf: 'flex-start',
-          border: '1px solid #5a2a24',
-          color: '#e5776a',
-        }}
+        className="stak-btn stak-settings-danger"
+        style={{ color: 'var(--red)' }}
         onClick={() => setStatus({ kind: 'confirming' })}
       >
-        Delete cloud Memory…
+        Delete Cloud Memory…
       </button>
     );
 
@@ -74,17 +70,14 @@ export function DeleteCloudMemory({
         setStatus({ kind: 'done' });
       }}
     >
-      <label
-        htmlFor="delete-confirm"
-        style={{ fontSize: 13, color: '#a19d94' }}
-      >
+      <label htmlFor="delete-confirm" className="stak-settings-p">
         Type{' '}
-        <strong style={{ color: '#edeae3' }}>
+        <strong style={{ color: 'var(--ink)' }}>
           {DELETE_CONFIRMATION_PHRASE}
         </strong>{' '}
-        to permanently delete every Cloud Memory backup STAK holds and revoke
-        your recovery methods (passkey / recovery file). Native agent Memory and
-        all files on your machines are not touched.
+        to permanently delete every Cloud Memory backup and revoke your recovery
+        methods (passkey / recovery file). Native agent Memory and local files
+        on your machines are untouched.
       </label>
       <input
         id="delete-confirm"
@@ -93,31 +86,31 @@ export function DeleteCloudMemory({
         onChange={(event) => setValue(event.target.value)}
         autoComplete="off"
         style={{
-          background: '#1a1917',
-          border: '1px solid #2a2926',
+          background: 'var(--bg)',
+          border: '1px solid var(--line-2)',
           borderRadius: 6,
           padding: '8px 10px',
-          color: '#edeae3',
+          color: 'var(--ink)',
           font: '13.5px var(--mono)',
         }}
       />
       {status.kind === 'error' ? (
-        <p role="alert" style={{ fontSize: 13, color: '#e5776a' }}>
+        <p role="alert" style={{ fontSize: 13, color: 'var(--red)' }}>
           {status.message}
         </p>
       ) : null}
       <div style={{ display: 'flex', gap: 10 }}>
         <button
           type="submit"
-          className="btn"
+          className="stak-btn stak-settings-danger"
           disabled={status.kind === 'working'}
-          style={{ border: '1px solid #5a2a24', color: '#e5776a' }}
+          style={{ color: 'var(--red)' }}
         >
           {status.kind === 'working' ? 'Deleting…' : 'Permanently delete'}
         </button>
         <button
           type="button"
-          className="btn btn-secondary"
+          className="stak-btn"
           onClick={() => {
             setStatus({ kind: 'idle' });
             setValue('');

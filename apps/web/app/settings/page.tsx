@@ -10,6 +10,7 @@ import { displayNameOf, getSessionUser } from '@/lib/session';
 
 import { loadSettingsView } from './settings-data';
 import { DeleteCloudMemory } from './delete-cloud-memory';
+import './settings.css';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,149 +60,90 @@ export default async function SettingsPage() {
       <main className="stak-main">
         <div className="stak-head">
           <div className="stak-sentence">
-            <span style={{ fontSize: 26, fontWeight: 600 }}>Settings</span>
+            <span>Settings</span>
           </div>
+          <span className="stak-sub">
+            Account-wide controls — these apply to every machine on your STAK,
+            not just the one you&apos;re viewing elsewhere in the app.
+          </span>
         </div>
 
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 28,
-            maxWidth: 700,
-            padding: '8px 32px 40px',
-          }}
-        >
-          <section
-            style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
-          >
+        <div className="stak-col" style={{ borderRight: 'none', gap: 0 }}>
+          <section className="stak-settings-section">
             <h2>Account</h2>
-            <div className="card">
-              <div className="card-title">{displayNameOf(user)}</div>
+            <div className="stak-settings-row">
+              <span>{displayNameOf(user)}</span>
               {user.githubUsername ? (
-                <div className="muted">@{user.githubUsername}</div>
+                <span style={{ color: 'var(--faint)' }}>
+                  @{user.githubUsername}
+                </span>
               ) : null}
             </div>
             <form method="post" action="/auth/signout">
-              <button type="submit" className="btn btn-secondary">
+              <button type="submit" className="stak-btn">
                 Sign out
               </button>
             </form>
           </section>
 
-          <section
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-              paddingTop: 18,
-              borderTop: '1px solid #232220',
-            }}
-          >
-            <h2 style={{ margin: 0 }}>
-              Memory mode{' '}
-              <span
-                style={{ fontWeight: 400, color: '#a19d94', fontSize: 13.5 }}
-              >
-                · applies to all your Memory
-              </span>
+          <section className="stak-settings-section">
+            <h2>
+              Memory mode <span className="unit">· account-wide</span>
             </h2>
             {view.mode ? (
-              <div
-                style={{
-                  padding: '14px 16px',
-                  border: '1.5px solid #84cb8e',
-                  borderRadius: 8,
-                  fontSize: 13,
-                  lineHeight: 1.5,
-                  color: '#a19d94',
-                  maxWidth: 420,
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 14.5,
-                    fontWeight: 600,
-                    color: '#edeae3',
-                    marginBottom: 4,
-                  }}
-                >
-                  {MODE_COPY[view.mode].title}
-                </div>
-                {MODE_COPY[view.mode].body}
+              <div className="stak-settings-fact">
+                <span className="state">{MODE_COPY[view.mode].title}</span>
+                <span className="detail">{MODE_COPY[view.mode].body}</span>
               </div>
             ) : (
-              <p className="muted">
+              <p className="stak-settings-p">
                 Not backed up yet. Run <code>stak memory backup</code> on a
                 machine to set a mode and create your first backup.
               </p>
             )}
-            <span style={{ fontSize: 12.5, color: '#85817a' }}>
-              Switching to Protected encrypts every backup on your machine
-              first. Run{' '}
+            <p className="stak-settings-p">
+              Mode is set on your machine, not in the browser. To move to
+              Protected, run{' '}
               <code style={{ fontFamily: 'var(--mono)' }}>
                 stak memory protect
               </code>{' '}
-              on a machine that has your Memory — it can&apos;t be switched from
-              the browser, because the encryption happens on your machine.
-            </span>
+              on a machine that has your Memory — it encrypts every future
+              backup there before it leaves.
+            </p>
           </section>
 
-          <section
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-              paddingTop: 18,
-              borderTop: '1px solid #232220',
-            }}
-          >
-            <h2 style={{ margin: 0 }}>Recovery</h2>
-            <p className="muted" style={{ margin: 0 }}>
-              You need one of these to open Protected Memory on a new machine.
-              STAK can&apos;t reset them for you.
+          <section className="stak-settings-section">
+            <h2>Recovery</h2>
+            <p className="stak-settings-p">
+              Keep these facts separate: a Cloud backup existing doesn&apos;t
+              mean a recovery method is configured. You need a recovery method
+              to open Protected Memory on a new machine — STAK can&apos;t reset
+              it for you.
             </p>
-            {view.recoveryNeedsAttention ? (
-              <p
-                role="status"
-                style={{ fontSize: 13, color: '#e5b85c', margin: 0 }}
-              >
-                Needs attention — Protected Memory has no recovery method yet.
-              </p>
-            ) : null}
             {view.recoveryMethods.length > 0 ? (
-              <ul
-                style={{
-                  listStyle: 'none',
-                  margin: 0,
-                  padding: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 6,
-                }}
-              >
-                {view.recoveryMethods.map((m, index) => (
-                  <li
-                    key={`${m.type}-${index}`}
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      padding: '10px 14px',
-                      border: '1px solid #232220',
-                      borderRadius: 6,
-                      fontSize: 13.5,
-                    }}
-                  >
-                    <span>{m.label}</span>
-                  </li>
-                ))}
-              </ul>
+              <div className="stak-settings-fact">
+                <span className="state">Configured</span>
+                <span className="detail">
+                  {view.recoveryMethods.map((m) => m.label).join(', ')}
+                </span>
+              </div>
             ) : (
-              <p className="muted" style={{ margin: 0 }}>
-                Not configured.
-              </p>
+              <div className="stak-settings-fact">
+                <span className="state">
+                  {view.recoveryNeedsAttention ? (
+                    <span className="stak-settings-attn">Needs attention</span>
+                  ) : (
+                    'Not configured'
+                  )}
+                </span>
+                <span className="detail">
+                  {view.recoveryNeedsAttention
+                    ? 'Protected Memory has no recovery method yet.'
+                    : 'Standard Memory never requires one.'}
+                </span>
+              </div>
             )}
-            <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
+            <p className="stak-settings-p">
               Recovery setup starts on a machine that has your Memory — not in
               this browser. Run{' '}
               <code style={{ fontFamily: 'var(--mono)' }}>
@@ -212,49 +154,32 @@ export default async function SettingsPage() {
               <code style={{ fontFamily: 'var(--mono)' }}>
                 stak memory protect
               </code>{' '}
-              to write a recovery file (.stackkey) instead — entirely on that
-              machine, no browser step.
+              to write a recovery file instead — entirely on that machine, no
+              browser step. To use Protected Memory on a new machine, run{' '}
+              <code style={{ fontFamily: 'var(--mono)' }}>
+                stak memory recover
+              </code>{' '}
+              there.
             </p>
           </section>
 
-          <section
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-              paddingTop: 18,
-              borderTop: '1px solid #232220',
-            }}
-          >
-            <h2 style={{ margin: 0 }}>Machine access</h2>
-            <p className="muted" style={{ margin: 0 }}>
+          <section className="stak-settings-section">
+            <h2>Machine access</h2>
+            <p className="stak-settings-p">
               {view.activeMachineCount} active machine
               {view.activeMachineCount === 1 ? '' : 's'}.
             </p>
-            <a
-              className="btn btn-secondary"
-              style={{ alignSelf: 'flex-start' }}
-              href="/machines"
-            >
+            <a className="stak-btn" href="/machines">
               Manage machines
             </a>
           </section>
 
-          <section
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-              paddingTop: 18,
-              borderTop: '1px solid #232220',
-            }}
-          >
-            <h2 style={{ margin: 0 }}>Delete cloud Memory</h2>
-            <p className="muted" style={{ margin: 0 }}>
-              Permanently removes every Cloud Memory backup STAK holds and
-              revokes your recovery methods (passkey / recovery file). Native
-              agent Memory and files on your machines aren&apos;t touched. This
-              is not archiving: archiving a project never deletes anything.
+          <section className="stak-settings-section">
+            <h2>Delete Cloud Memory</h2>
+            <p className="stak-settings-p">
+              Deletes every Cloud Memory backup and revokes your recovery
+              methods. Native agent Memory and local files on your machines are
+              untouched.
             </p>
             <DeleteCloudMemory hasCloudMemory={view.backedUp} />
           </section>

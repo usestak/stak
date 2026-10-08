@@ -27,8 +27,20 @@ export default async function MemoryRecoverPage({
     return (
       <Shell>
         <h1>Unlock your STAK Memory</h1>
+        <p className="lead">
+          Recovery starts on the machine receiving the Memory — this page
+          can&apos;t begin it on its own.
+        </p>
+        <p className="muted">Run on that machine:</p>
+        <pre>
+          <code>stak memory recover</code>
+        </pre>
         <p className="muted">
-          Start from your terminal with <code>stak memory recover</code>.
+          If your Memory is Protected with a passkey, the CLI opens this browser
+          with a secure recovery session. Restoring it into your agents&apos;
+          files is a separate step —{' '}
+          <code style={{ fontFamily: 'var(--mono)' }}>stak memory restore</code>
+          , run on that machine afterward.
         </p>
       </Shell>
     );

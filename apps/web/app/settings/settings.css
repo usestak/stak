@@ -1,0 +1,88 @@
+/* apps/web/app/settings/settings.css — extends shell.css tokens, Settings-specific only. */
+.stak-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--line);
+}
+.stak-settings-section:first-child {
+  padding-top: 0;
+}
+.stak-settings-section:last-child {
+  border-bottom: none;
+}
+.stak-settings-section h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+.stak-settings-section h2 .unit {
+  font-weight: 400;
+  color: var(--faint);
+  font-size: 12.5px;
+}
+.stak-settings-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 13.5px;
+  gap: 16px;
+}
+.stak-settings-row + .stak-settings-row {
+  margin-top: 6px;
+}
+.stak-settings-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.stak-settings-fact .state {
+  font-size: 15px;
+  font-weight: 600;
+}
+.stak-settings-fact .detail {
+  font-size: 12.5px;
+  color: var(--faint);
+  line-height: 1.5;
+}
+.stak-settings-p {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--dim);
+  line-height: 1.55;
+  max-width: 560px;
+}
+.stak-settings-attn {
+  color: var(--amber);
+}
+.stak-settings-cmd {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+.stak-btn {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12.5px;
+  font-family: var(--sans);
+  padding: 7px 12px;
+  border: 1px solid var(--chip);
+  border-radius: 6px;
+  color: var(--ink);
+  background: none;
+  cursor: pointer;
+  align-self: flex-start;
+  text-decoration: none;
+}
+.stak-btn:hover {
+  border-color: var(--faint);
+}
+.stak-settings-danger {
+  border: 1px solid var(--red);
+}
