@@ -1,7 +1,6 @@
 import { redirect } from 'next/navigation';
 
 import { AppSidebar } from '../_components/app-sidebar';
-import { CommandDock } from '../_components/command-dock';
 import { MachineChooser } from '../_components/machine-chooser';
 import { ShellNotice } from '../_components/shell-notice';
 import { getCloudService } from '../../lib/cloud-service';
@@ -77,8 +76,8 @@ export default async function StacksPage({
             <span>{view.statusSentence}</span>
           </div>
           <span className="stak-sub">
-            A Stack bundles Skills and agent settings into your main
-            environment, so any machine gets your setup in one command.
+            A Stack is the Skills composed into your main environment, so any
+            machine gets your setup in one command.
           </span>
         </div>
         <div
@@ -101,11 +100,6 @@ export default async function StacksPage({
             </div>
           )}
         </div>
-        <CommandDock
-          machineName={view.viewing.name}
-          command={`stak use ${view.owned?.name ?? 'main'} --dry-run`}
-          hint="Prints what composing this Stack into your main environment would change, without changing anything."
-        />
       </main>
     </div>
   );

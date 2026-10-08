@@ -22,7 +22,7 @@
 }
 .stak-stack-composition-head {
   display: grid;
-  grid-template-columns: 2fr 1fr 90px;
+  grid-template-columns: 1fr 110px;
   gap: 14px;
   padding: 9px 22px;
   border-bottom: 1px solid var(--line);
@@ -32,7 +32,7 @@
 }
 .stak-stack-composition-row {
   display: grid;
-  grid-template-columns: 2fr 1fr 90px;
+  grid-template-columns: 1fr 110px;
   gap: 14px;
   align-items: center;
   padding: 9px 22px;
@@ -44,8 +44,19 @@
   color: var(--faint);
   font-size: 13.5px;
 }
+/* Technical identity lives behind a collapsed disclosure (contract §9/§16) — never part of
+   the normal reading path, same treatment as the accepted Skills detail page. */
 .stak-stack-technical {
   padding: 12px 22px;
+  border-top: 1px solid var(--line);
+}
+.stak-stack-technical summary {
+  font: 500 11px var(--mono);
+  color: var(--dim);
+  cursor: pointer;
+}
+.stak-stack-technical div {
+  margin-top: 8px;
   font: 11.5px var(--mono);
   color: var(--dim);
 }

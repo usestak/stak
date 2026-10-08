@@ -171,4 +171,87 @@ describe('loadStacksView', () => {
     );
     expect(view.owned?.versionLabel).toBe('No version yet');
   });
+
+  it('presents the version number as normal product wording, not raw "vN"', async () => {
+    const view = ready(
+      await loadStacksView(
+        service({ owned: [owned({ latestVersionNumber: 3 })] }),
+        USER,
+        A1,
+      ),
+    );
+    expect(view.owned?.versionLabel).toBe('Version 3');
+  });
+
+  it("names the Stack as the user's own in the headline", async () => {
+    const view = ready(
+      await loadStacksView(
+        service({ owned: [owned({ skillCount: 1 })], skills: [skill()] }),
+        USER,
+        A1,
+      ),
+    );
+    expect(view.statusSentence).toBe('Your main Stack has 1 Skill.');
+  });
+
+  it('never carries machine-installed/reconciliation state into Stack composition', async () => {
+    // A SkillSummary can legitimately describe update-available/installed-elsewhere facts
+    // (those belong to the Skills workspace), but the Stack composition row is desired-state
+    // only (contract §6/§17): `paused` from the resolved bundle, nothing else.
+    const machineUpdatesWaiting = skill({
+      sourceCheckState: 'update-available',
+      candidateRevision: 'rev_1',
+      reviewArtifactId: '00000000-0000-4000-8000-0000000000aa',
+      installs: [
+        { machineId: A1, name: 'Dell', installedVersion: 'sha256:oldoldold' },
+      ],
+    });
+    const view = ready(
+      await loadStacksView(
+        service({
+          owned: [owned({ skillCount: 1 })],
+          skills: [machineUpdatesWaiting],
+        }),
+        USER,
+        A1,
+      ),
+    );
+    expect(view.owned?.skills[0]).toEqual({
+      skillId: 'test-first',
+      name: 'test-first',
+      paused: false,
+    });
+  });
+
+  it('keeps Stack composition identical regardless of which machine is viewing', async () => {
+    const A2 = '00000000-0000-4000-8000-0000000000a2';
+    const base = {
+      owned: [owned({ skillCount: 1 })],
+      skills: [skill()],
+    };
+    const viewingHealthy = ready(
+      await loadStacksView(
+        service({ ...base, machines: [machine({ machineId: A1 })] }),
+        USER,
+        A1,
+      ),
+    );
+    const viewingBehind = ready(
+      await loadStacksView(
+        service({
+          ...base,
+          machines: [
+            machine({
+              machineId: A2,
+              status: 'updates-waiting',
+              updatesWaiting: ['test-first'],
+            }),
+          ],
+        }),
+        USER,
+        A2,
+      ),
+    );
+    expect(viewingHealthy.owned?.skills).toEqual(viewingBehind.owned?.skills);
+  });
 });

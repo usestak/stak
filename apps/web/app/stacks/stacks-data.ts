@@ -21,12 +21,17 @@ export type StacksService = Pick<
   'getMachinesReadModel' | 'getStacksReadModel' | 'getSkillsReadModel'
 >;
 
-const shortHash = (hash: string) => hash.slice(7, 15);
-
+/**
+ * Only desired-state facts (contract §6/§17): `paused` here comes straight from the resolved
+ * environment bundle's own `paused` flag — the Stack's OWN desired composition, not any
+ * machine's installed/reconciliation state. Deliberately carries no version identity: the
+ * environment only has a content hash, never a human-readable version, and manufacturing one
+ * (or showing the hash) would misrepresent an internal implementation detail as a product
+ * fact (contract §5/§7).
+ */
 export type StackSkillRow = {
   skillId: string;
   name: string;
-  approvedVersionShort: string;
   paused: boolean;
 };
 
@@ -48,7 +53,7 @@ const toStackCard = (
   versionLabel:
     owned.latestVersionNumber === null
       ? 'No version yet'
-      : `v${owned.latestVersionNumber}`,
+      : `Version ${owned.latestVersionNumber}`,
   skillCount: owned.skillCount,
   updatedAtLabel:
     owned.updatedAt === null ? 'Never' : relative(owned.updatedAt),
@@ -57,7 +62,6 @@ const toStackCard = (
     .map((s) => ({
       skillId: s.skillId,
       name: s.name,
-      approvedVersionShort: shortHash(s.approvedVersion),
       paused: s.paused,
     })),
 });
@@ -125,8 +129,8 @@ export const loadStacksView = async (
 
   const statusSentence = owned
     ? owned.skillCount === 0
-      ? `${owned.name} is empty.`
-      : `${owned.name} has ${owned.skillCount} Skill${owned.skillCount === 1 ? '' : 's'}.`
+      ? `Your ${owned.name} Stack is empty.`
+      : `Your ${owned.name} Stack has ${owned.skillCount} Skill${owned.skillCount === 1 ? '' : 's'}.`
     : "You don't have a Stack yet.";
 
   return {

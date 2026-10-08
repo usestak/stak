@@ -133,11 +133,20 @@ export default async function MachinesPage({
             </div>
             <div className="stak-new-machine-steps">
               {NEW_MACHINE_STEPS.map((step, i) => (
-                <div key={step.command} className="stak-new-machine-step">
-                  <span className="cmd">
-                    <span className="p">{i + 1} </span>
-                    {step.command}
-                  </span>
+                <div key={step.title} className="stak-new-machine-step">
+                  {step.copyable ? (
+                    <span className="cmd">
+                      <span className="p">{i + 1} </span>
+                      {step.syntax}
+                    </span>
+                  ) : (
+                    <>
+                      <span className="step-title">
+                        {i + 1} {step.title}
+                      </span>
+                      <span className="syntax-ref">{step.syntax}</span>
+                    </>
+                  )}
                   <span className="hint">{step.hint}</span>
                 </div>
               ))}

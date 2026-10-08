@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import type { MachineSummary, MachinesReadModel } from '@stack/spec';
 
-import { loadMachinesView, type MachinesService } from './machines-data.js';
+import {
+  NEW_MACHINE_STEPS,
+  loadMachinesView,
+  type MachinesService,
+} from './machines-data.js';
 
 const USER = { id: 'user-1' };
 const A1 = '00000000-0000-4000-8000-0000000000a1';
@@ -83,12 +87,12 @@ describe('loadMachinesView', () => {
     expect(view.cards[0]!.machineId).toBe(A1);
   });
 
-  it('shows a healthy up-to-date machine truthfully', async () => {
+  it('shows a healthy up-to-date machine truthfully, scoped to its check-in time', async () => {
     const view = ready(
       await loadMachinesView(service({ machines: [machine()] }), USER, A1),
     );
     expect(view.cards[0]!.statusLabel).toMatch(/Up to date/);
-    expect(view.cards[0]!.skillsLabel).toBe('Up to date');
+    expect(view.cards[0]!.skillsLabel).toBe('Up to date · as of 12 min ago');
     expect(view.cards[0]!.stale).toBe(false);
   });
 
@@ -104,8 +108,31 @@ describe('loadMachinesView', () => {
         A1,
       ),
     );
-    expect(view.cards[0]!.skillsLabel).toBe('2 updates waiting');
+    expect(view.cards[0]!.skillsLabel).toBe(
+      '2 updates waiting · as of 12 min ago',
+    );
     expect(view.updatesWaitingCards).toHaveLength(1);
+  });
+
+  it('ties every per-machine fact to its own check-in time, not a live state claim', async () => {
+    const view = ready(
+      await loadMachinesView(
+        service({ machines: [machine({ memoryBackedUp: false })] }),
+        USER,
+        A1,
+      ),
+    );
+    const c = view.cards[0]!;
+    // "Up to date"/"Backed up" alone would read as present-tense; every fact must name the
+    // check-in explicitly so a reader cannot mistake it for a live connection (contract §1/§3).
+    for (const label of [
+      c.skillsLabel,
+      c.projectsLabel,
+      c.memoryLabel,
+      c.agentsLabel,
+    ])
+      expect(label).toMatch(/as of/);
+    expect(c.memoryLabel).not.toMatch(/\bhere\b/i);
   });
 
   it('flags a machine stale past the frozen 30-day threshold', async () => {
@@ -119,6 +146,20 @@ describe('loadMachinesView', () => {
       ),
     );
     expect(view.cards[0]!.stale).toBe(true);
+  });
+
+  it('shows zero reported Projects as a real, scoped measured fact (not invented uncertainty)', async () => {
+    // `projectsPresent` is a required field of every check-in payload — not best-effort like
+    // the separate Cloud Project-registry sync — so 0 on a checked-in machine is a genuine
+    // measured fact, not an absence of reporting. The number stays; only its scope changes.
+    const view = ready(
+      await loadMachinesView(
+        service({ machines: [machine({ projectsPresent: 0 })] }),
+        USER,
+        A1,
+      ),
+    );
+    expect(view.cards[0]!.projectsLabel).toBe('0 projects · as of 12 min ago');
   });
 
   it('never coerces never-checked-in facts to zero', async () => {
@@ -200,6 +241,14 @@ describe('loadMachinesView', () => {
       ),
     );
     expect(view.cards[0]!.name).toBe('Unnamed machine');
+  });
+
+  it('never presents an incomplete CLI command as copy-pasteable', () => {
+    // The real syntax is `stak project map <project> <directory>` — a bare `stak project map`
+    // is not runnable as shown, so it must never be the step marked `copyable`.
+    for (const step of NEW_MACHINE_STEPS)
+      if (step.syntax.startsWith('stak project map'))
+        expect(step.copyable).toBe(false);
   });
 
   it('displays a friendly platform label', async () => {

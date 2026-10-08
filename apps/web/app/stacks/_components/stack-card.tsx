@@ -5,7 +5,7 @@ export function StackCard({ stack }: { stack: StackCardData }) {
     <div className="stak-stack-card">
       <div className="stak-stack-card-head">
         <div>
-          <div className="stak-stack-card-name">{stack.name}</div>
+          <div className="stak-stack-card-name">Your {stack.name} Stack</div>
           <div className="stak-stack-card-meta">
             {stack.versionLabel} · updated {stack.updatedAtLabel}
           </div>
@@ -23,28 +23,23 @@ export function StackCard({ stack }: { stack: StackCardData }) {
         <>
           <div className="stak-stack-composition-head">
             <span>SKILL</span>
-            <span>APPROVED</span>
-            <span>STATUS</span>
+            <span>IN STACK</span>
           </div>
           {stack.skills.map((s) => (
             <div key={s.skillId} className="stak-stack-composition-row">
               <span style={{ fontFamily: 'var(--mono)' }}>{s.name}</span>
-              <span
-                style={{ fontFamily: 'var(--mono)', color: 'var(--faint)' }}
-              >
-                {s.approvedVersionShort}
-              </span>
               <span style={{ color: s.paused ? 'var(--faint)' : 'var(--ink)' }}>
-                {s.paused ? 'Paused' : 'Ready'}
+                {s.paused ? 'Paused' : 'Included'}
               </span>
             </div>
           ))}
         </>
       )}
 
-      <div className="stak-stack-technical">
-        Technical details — environment id {stack.environmentId}
-      </div>
+      <details className="stak-stack-technical">
+        <summary>Technical details</summary>
+        <div>Environment id {stack.environmentId}</div>
+      </details>
     </div>
   );
 }
