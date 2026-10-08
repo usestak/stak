@@ -205,7 +205,7 @@ export default async function MemoryPage({
                 <p className="stak-mem-protected">
                   {view.protectedProjectsKnownCount === 0
                     ? 'No Projects are currently registered with STAK.'
-                    : `${view.protectedProjectsKnownCount} project${view.protectedProjectsKnownCount === 1 ? '' : 's'} known to STAK.`}
+                    : `${view.protectedProjectsKnownCount} project${view.protectedProjectsKnownCount === 1 ? '' : 's'} registered with STAK.`}
                 </p>
                 <p className="stak-mem-protected">
                   Protected backups are encrypted before they leave this
