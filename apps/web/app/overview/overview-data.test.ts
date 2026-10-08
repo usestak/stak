@@ -275,6 +275,14 @@ describe('loadOverview — checked-in truth (P4 §4/§5)', () => {
     expect(card?.seen).toMatch(/Checked in/);
     expect(JSON.stringify(v)).not.toMatch(/Online|Offline/);
   });
+
+  it('a single active machine is described precisely — never implying STAK itself "lives" only there when Cloud Memory backup exists', async () => {
+    const v = ready(await loadOverview(service({}), USER, A1));
+    expect(v.summaries.machines.detail).toBe(
+      'Atlas is your only active machine.',
+    );
+    expect(v.summaries.machines.detail).not.toMatch(/lives on|alone/i);
+  });
 });
 
 describe('loadOverview — Memory + projects copy (P4 §7/§15)', () => {
@@ -289,6 +297,14 @@ describe('loadOverview — Memory + projects copy (P4 §7/§15)', () => {
       ),
     );
     expect(v.summaries.projects.value).toBe('No projects yet');
+    // Projects are populated by project discovery/sync during check-in (`stak scan`), not by
+    // a Memory backup — the detail copy must not claim otherwise (P5 visual-correction §22A).
+    expect(v.summaries.projects.detail).toBe(
+      'Projects appear once a machine runs `stak scan` and reports them.',
+    );
+    expect(v.summaries.projects.detail).not.toMatch(
+      /back it up|Memory and you/i,
+    );
   });
 
   it('Protected shows a project count, never a per-file count; Standard never says "only you"', async () => {

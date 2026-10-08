@@ -375,7 +375,7 @@ export const loadOverview = async (
               label: 'PROJECTS',
               value: 'No projects yet',
               detail:
-                'Projects appear once an agent writes Memory and you back it up.',
+                'Projects appear once a machine runs `stak scan` and reports them.',
             }
           : isCheckedIn
             ? {
@@ -397,7 +397,7 @@ export const loadOverview = async (
         detail: !anyCheckedIn
           ? 'None has reported its STAK state yet.'
           : active.length === 1
-            ? `Your STAK lives on ${viewingName} alone.`
+            ? `${viewingName} is your only active machine.`
             : 'If one is lost, restore on another.',
       },
     },
