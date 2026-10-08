@@ -1,0 +1,56 @@
+/* apps/web/app/memory/(dashboard)/memory.css — extends shell.css tokens, Memory-specific only. */
+.stak-mem-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.stak-mem-empty,
+.stak-mem-caption {
+  font-size: 13px;
+  color: var(--dim);
+  margin: 0;
+}
+.stak-mem-history,
+.stak-mem-projects {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.stak-mem-history li {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid #1c1b19;
+  font-size: 13px;
+  align-items: baseline;
+}
+.stak-mem-history .mode {
+  color: var(--faint);
+  font: 500 11.5px var(--mono);
+}
+.stak-mem-history .gen {
+  color: var(--dim);
+  font: 11.5px var(--mono);
+  text-align: right;
+}
+.stak-mem-projects li {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid #1c1b19;
+  font-size: 13px;
+}
+.stak-mem-projects .count {
+  color: var(--faint);
+  font: 12px var(--mono);
+}
+.stak-mem-protected {
+  font-size: 13px;
+  color: var(--muted);
+  max-width: 560px;
+  line-height: 1.6;
+  margin: 0;
+}
