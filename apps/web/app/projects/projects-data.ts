@@ -67,6 +67,8 @@ export type ProjectsListView =
       sidebar: SidebarCounts;
       statusSentence: string;
       rows: ProjectRow[];
+      dockCommand: string;
+      dockHint: string;
     };
 
 export const loadProjectsList = async (
@@ -154,5 +156,8 @@ export const loadProjectsList = async (
     },
     statusSentence,
     rows,
+    dockCommand: 'stak memory backup',
+    dockHint:
+      "Finds Projects in this machine's Memory and syncs them to STAK Cloud.",
   };
 };

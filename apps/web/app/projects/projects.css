@@ -96,6 +96,25 @@
   color: var(--dim);
   font-size: 13.5px;
 }
+.stak-projects-empty-state {
+  padding: 40px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 520px;
+}
+.stak-projects-empty-state h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.stak-projects-empty-state p {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--muted);
+  line-height: 1.6;
+}
 .stak-project-section {
   display: flex;
   flex-direction: column;

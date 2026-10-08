@@ -198,7 +198,7 @@ export default async function ProjectDetailPage({
         <CommandDock
           machineName={view.viewing.name}
           command={`stak project map ${view.cliSelector} <directory>`}
-          hint="Binds this Project to a local folder on this machine. Local only — never sent to STAK Cloud."
+          hint="Template — replace <directory> with this Project's real folder on this machine before running."
         />
       </main>
     </div>

@@ -84,13 +84,7 @@ export function ProjectsTable({
         <span />
       </div>
 
-      {rows.length === 0 ? (
-        <p className="stak-projects-empty">
-          No Projects yet. STAK learns about Projects when a machine checks in
-          and reports them — run <code>stak status</code> on a machine with
-          Projects STAK can see.
-        </p>
-      ) : filtered.length === 0 ? (
+      {filtered.length === 0 ? (
         <p className="stak-projects-empty">No Projects match this filter.</p>
       ) : (
         filtered.map((r) => (

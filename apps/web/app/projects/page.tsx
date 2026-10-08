@@ -80,11 +80,22 @@ export default async function ProjectsPage({
             <span>{view.statusSentence}</span>
           </div>
         </div>
-        <ProjectsTable rows={view.rows} machineName={view.viewing.name} />
+        {view.rows.length === 0 ? (
+          <div className="stak-projects-empty-state">
+            <h2>No Projects yet</h2>
+            <p>
+              STAK learns about Projects from your Memory backups. Run a
+              Memory backup on a machine that has agent Memory for a project,
+              and STAK will discover and register it here.
+            </p>
+          </div>
+        ) : (
+          <ProjectsTable rows={view.rows} machineName={view.viewing.name} />
+        )}
         <CommandDock
           machineName={view.viewing.name}
-          command="stak project map <project> <directory>"
-          hint="Binds a Project to a local folder on this machine. Local only — never sent to STAK Cloud."
+          command={view.dockCommand}
+          hint={view.dockHint}
         />
       </main>
     </div>
