@@ -2,10 +2,29 @@
    (sign-in, auth/error, CLI approval, onboarding, memory/protect, memory/recover). Extends
    overview/shell.css's tokens/.stak-notice card; never falls back to globals.css, which
    remains the superseded system kept only for the public Stack/share pages. */
+/* min-height (not height) is deliberate: when content fits, the flex box is exactly
+   100dvh and centers it; when content is taller (small viewports), the box simply
+   grows to fit and the page scrolls normally — no clipped/centered-overflow and no
+   overflow:hidden hack needed. box-sizing: border-box keeps the padding inside that
+   100dvh instead of adding to it (avoiding the same overflow bug via padding). */
 .stak-focus-page {
+  box-sizing: border-box;
   width: 100%;
   min-height: 100dvh;
   background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+}
+/* .stak-notice's own `margin: 48px auto` (shared with the signed-in ShellNotice, which
+   needs it) is what caused the top strip and extra scroll here: a block child's margin
+   collapses through a plain block parent with no padding/border, rendering outside
+   .stak-focus-page's background box. The flex parent above already centers and spaces
+   this card, so neutralize that margin only within this shell. */
+.stak-focus-page .stak-notice {
+  margin: 0;
+  width: 100%;
 }
 .stak-focus-brand {
   display: flex;
