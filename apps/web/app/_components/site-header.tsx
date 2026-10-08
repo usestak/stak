@@ -10,12 +10,12 @@ export function SiteHeader({ user }: { user?: WebUser | null }) {
   return (
     <header className="site-header">
       <div className="site-header-inner">
-        <a href={user ? '/dashboard' : '/'} className="wordmark">
+        <a href={user ? '/overview' : '/'} className="wordmark">
           STAK
         </a>
         {user ? (
           <nav className="site-nav">
-            <a href="/dashboard">Stacks</a>
+            <a href="/overview">Overview</a>
             <a href="/settings">Settings</a>
             <AccountMenu
               name={displayNameOf(user)}

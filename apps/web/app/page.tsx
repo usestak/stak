@@ -6,8 +6,9 @@ import { getSessionUser } from '@/lib/session';
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  // Signed-in users go straight to their product; logged-out users see marketing.
-  if (await getSessionUser()) redirect('/dashboard');
+  // Signed-in users go through onboarding's own real-state check, which sends
+  // an already-established account straight on to Overview (never trapped).
+  if (await getSessionUser()) redirect('/onboarding');
   return (
     <>
       <SiteHeader />
@@ -20,7 +21,7 @@ export default async function HomePage() {
           </p>
 
           <p style={{ marginTop: '1.5rem' }}>
-            <a className="btn" href="/auth/login?next=/dashboard">
+            <a className="btn" href="/auth/login?next=/onboarding">
               Sign in with GitHub
             </a>
           </p>

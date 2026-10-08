@@ -13,6 +13,8 @@ const DOT: Record<string, string> = {
 type NavKey =
   'overview' | 'skills' | 'memory' | 'projects' | 'machines' | 'stacks';
 
+export type SidebarActiveKey = NavKey | 'settings';
+
 const HREF: Record<NavKey, string> = {
   overview: '/overview',
   skills: '/skills',
@@ -35,7 +37,7 @@ export function AppSidebar({
   viewing,
   machines,
 }: {
-  active: NavKey;
+  active: SidebarActiveKey;
   handle: string;
   counts: SidebarCounts;
   viewing: {
@@ -111,7 +113,7 @@ export function AppSidebar({
         <Link
           href="/settings"
           className="stak-nav-item"
-          aria-current={(active as string) === 'settings' ? 'page' : undefined}
+          aria-current={active === 'settings' ? 'page' : undefined}
         >
           <span>Settings</span>
         </Link>

@@ -35,8 +35,9 @@ describe('web product branding is STAK (R4)', () => {
   it('site header wordmark and landing hero use STAK', () => {
     const header = read('_components/site-header.tsx');
     expect(header).toContain('STAK');
-    // The nav to the user's stacks keeps the domain-object plural.
-    expect(header).toContain('>Stacks<');
+    // P8: the signed-in product now lives entirely behind AppSidebar; this
+    // header's nav only needs to land a signed-in visitor on their Overview.
+    expect(header).toContain('>Overview<');
     const landing = read('page.tsx');
     expect(landing).toContain('STAK Cloud');
     expect(landing).toContain('Your STAK');

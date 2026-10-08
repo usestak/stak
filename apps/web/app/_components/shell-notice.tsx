@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 
-import { AppSidebar } from './app-sidebar';
+import { AppSidebar, type SidebarActiveKey } from './app-sidebar';
 
-const PLACEHOLDER_COUNTS = {
+export const PLACEHOLDER_COUNTS = {
   overview: { n: '', tone: 'neutral' as const },
   skills: '',
   memory: { n: '', tone: 'neutral' as const },
@@ -19,7 +19,7 @@ export function ShellNotice({
   title,
   children,
 }: {
-  active: 'overview' | 'skills' | 'memory' | 'projects' | 'machines' | 'stacks';
+  active: SidebarActiveKey;
   handle: string;
   title: string;
   children: ReactNode;
