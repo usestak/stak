@@ -1,9 +1,14 @@
+import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 
 import { FocusedShell } from '@/app/_components/focused-shell';
 import { getSessionUser } from '@/lib/session';
 
 import { ProtectClient } from './protect-client';
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 export const dynamic = 'force-dynamic';
 

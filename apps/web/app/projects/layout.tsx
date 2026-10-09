@@ -1,6 +1,13 @@
 import type { ReactNode } from 'react';
+import type { Metadata } from 'next';
 
 import '../overview/shell.css';
+
+// Covers both /projects and /projects/[projectId] — signed-in, account-specific
+// views of this user's own Projects. Never indexable.
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 /** No nested routes exist under `/projects` (unlike `/memory`), so this is a plain layout —
  *  same shape as `apps/web/app/skills/layout.tsx`. Copies its exact font-link markup, for the

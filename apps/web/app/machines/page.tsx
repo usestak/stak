@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 
 import { AppSidebar } from '../_components/app-sidebar';
@@ -10,6 +11,10 @@ import { displayNameOf, getSessionUser } from '../../lib/session';
 import { NEW_MACHINE_STEPS, loadMachinesView } from './machines-data';
 import { MachineCards } from './_components/machine-cards';
 import './machines.css';
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 export const dynamic = 'force-dynamic';
 

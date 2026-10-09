@@ -1,4 +1,10 @@
+import type { Metadata } from 'next';
+
 import { FocusedShell } from '@/app/_components/focused-shell';
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 export const dynamic = 'force-dynamic';
 

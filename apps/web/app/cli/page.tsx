@@ -1,7 +1,13 @@
+import type { Metadata } from 'next';
+
 import { FocusedShell } from '@/app/_components/focused-shell';
 import { supabaseServerClient } from '@/lib/supabase-server';
 
 import { AuthorizeButton } from './authorize-button';
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 export const dynamic = 'force-dynamic';
 

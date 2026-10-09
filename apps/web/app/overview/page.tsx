@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 
 import { AppSidebar } from '@/app/_components/app-sidebar';
@@ -12,6 +13,10 @@ import {
   type NeedsAttentionView,
   type OverviewMachineCard,
 } from './overview-data';
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 export const dynamic = 'force-dynamic';
 

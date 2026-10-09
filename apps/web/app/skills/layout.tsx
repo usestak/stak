@@ -1,6 +1,13 @@
 import type { ReactNode } from 'react';
+import type { Metadata } from 'next';
 
 import '../overview/shell.css';
+
+// Covers both /skills and /skills/[skillId] — signed-in, account-specific
+// views of this user's own Skills. Never indexable.
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 /**
  * Signed-in shell layout for the Skills route segment — the same `.stak` design-token wrapper

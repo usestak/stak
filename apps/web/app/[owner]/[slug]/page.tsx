@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 
 import { isSafeDisplayUrl } from '@stack/spec';
@@ -5,8 +6,59 @@ import { isSafeDisplayUrl } from '@stack/spec';
 import { PublicShell } from '@/app/_components/public-shell';
 import { getCloudService } from '@/lib/cloud-service';
 import { relativeTime, skillCount } from '@/lib/format';
+import { siteOrigin } from '@/lib/site-origin';
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * Fields come from `getPublicStackResponseSchema` (packages/spec/src/public.ts),
+ * re-traced here rather than trusting Task 4's page-body audit as-is, since
+ * metadata can expose more than markup: `owner` (handle), `slug`,
+ * `displayName`, `description`, `updatedAt`, and `latest.version.versionNumber`
+ * / `latest.bundle.requirements.length` are all already rendered on the page
+ * body and contain no snapshot contents, local filesystem paths, content
+ * hashes, or credentials. Explicitly NOT used here: `stackId` (internal uuid),
+ * `latest.version.versionHash`/`digest` (content hashes), and any requirement
+ * `restoration.reference` detail (source remote/path/revision) — none of
+ * those belong in a page `<title>`/description even though some render in
+ * the page body as plain reference text.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ owner: string; slug: string }>;
+}): Promise<Metadata> {
+  const { owner, slug } = await params;
+  if (!owner.startsWith('@')) return { robots: { index: false, follow: false } };
+  const handle = owner.slice(1);
+
+  let stack;
+  try {
+    stack = await getCloudService().getPublicStack(handle, slug);
+  } catch {
+    return { robots: { index: false, follow: false } };
+  }
+
+  const url = `${siteOrigin()}/@${stack.owner}/${stack.slug}`;
+  const title = `${stack.displayName} by @${stack.owner} | STAK`;
+  const requirementCount = stack.latest?.bundle.requirements.length ?? 0;
+  const description = stack.description
+    ? stack.description
+    : stack.latest
+      ? `A STAK Stack with ${skillCount(requirementCount)}, shared by @${stack.owner}.`
+      : `@${stack.owner} has not published a version of this Stack yet.`;
+  // Indexable only once the Stack has a real published version — an empty
+  // Stack ("no published versions yet") is thin content and stays noindex.
+  const index = stack.latest !== null;
+
+  return {
+    title,
+    description,
+    alternates: { canonical: url },
+    openGraph: { title, description, url },
+    robots: { index, follow: index },
+  };
+}
 
 export default async function StackPage({
   params,

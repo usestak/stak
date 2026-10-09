@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 
 import { AppSidebar } from '../_components/app-sidebar';
@@ -9,6 +10,10 @@ import { displayNameOf, getSessionUser } from '../../lib/session';
 import { loadStacksView } from './stacks-data';
 import { StackCard } from './_components/stack-card';
 import './stacks.css';
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 export const dynamic = 'force-dynamic';
 

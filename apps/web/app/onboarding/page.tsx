@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 
 import { FocusedShell } from '@/app/_components/focused-shell';
@@ -5,6 +6,10 @@ import { getCloudService } from '@/lib/cloud-service';
 import { displayNameOf, getSessionUser } from '@/lib/session';
 
 import { loadOnboardingView, type OnboardingStep } from './onboarding-data';
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 export const dynamic = 'force-dynamic';
 
