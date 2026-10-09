@@ -119,11 +119,20 @@ export default async function MemoryPage({
               {view.hasRecoveryMethod ? 'Configured' : 'Not configured'}
             </span>
             <span className="d">
-              {view.needsRecoveryMethod
-                ? 'Needs attention — add a passkey or recovery file.'
-                : view.mode === 'protected'
-                  ? 'A passkey or recovery file unlocks your backups.'
-                  : ' '}
+              {view.needsRecoveryMethod ? (
+                <>
+                  Needs attention — without one, a lost device means lost
+                  Memory. Run{' '}
+                  <code style={{ fontFamily: 'var(--mono)' }}>
+                    stak memory protect
+                  </code>{' '}
+                  on a machine that has it.
+                </>
+              ) : view.mode === 'protected' ? (
+                'A passkey or recovery file unlocks your backups.'
+              ) : (
+                "Standard backups don't need one."
+              )}
             </span>
           </div>
           <div className="stak-sum">
@@ -153,7 +162,14 @@ export default async function MemoryPage({
             <section className="stak-mem-section">
               <h2>Backup history</h2>
               {view.history.length === 0 ? (
-                <p className="stak-mem-empty">No backups yet.</p>
+                <p className="stak-mem-empty">
+                  No backups yet — that&apos;s expected until your first one.
+                  Run{' '}
+                  <code style={{ fontFamily: 'var(--mono)' }}>
+                    stak memory backup
+                  </code>{' '}
+                  on {view.viewing.name} to create it.
+                </p>
               ) : (
                 <ul className="stak-mem-history">
                   {view.history.map((h) => (

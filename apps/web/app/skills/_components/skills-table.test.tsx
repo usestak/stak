@@ -42,3 +42,16 @@ test('each stacked row exposes a per-field accessible label alongside its value'
   expect(screen.getByText('Ready')).toBeInTheDocument();
   expect(screen.getByText('Installed')).toBeInTheDocument();
 });
+
+test('a truly empty Skills dataset renders no filter/search/table chrome, only the empty message', () => {
+  render(<SkillsTable rows={[]} machineName="dell" />);
+
+  expect(screen.getByText(/no skills in stak yet/i)).toBeInTheDocument();
+  expect(
+    screen.queryByRole('group', { name: /filter skills/i }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('searchbox', { name: /search skills/i }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByRole('row')).not.toBeInTheDocument();
+});

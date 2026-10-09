@@ -52,6 +52,17 @@ export function SkillsTable({
     return c;
   }, [rows]);
 
+  if (rows.length === 0)
+    return (
+      <div className="stak-skills">
+        <p className="stak-skills-empty">
+          No Skills in STAK yet. That&apos;s expected before your first scan —
+          run <code>stak scan</code> on a machine to find the ones you already
+          have there.
+        </p>
+      </div>
+    );
+
   return (
     <div className="stak-skills">
       <div
@@ -94,12 +105,7 @@ export function SkillsTable({
         <span>STATUS</span>
       </div>
 
-      {rows.length === 0 ? (
-        <p className="stak-skills-empty">
-          No Skills in STAK. Run <code>stak scan</code> on a machine to find the
-          ones you already have.
-        </p>
-      ) : filtered.length === 0 ? (
+      {filtered.length === 0 ? (
         <p className="stak-skills-empty">No Skills match this filter.</p>
       ) : (
         filtered.map((r) => (
