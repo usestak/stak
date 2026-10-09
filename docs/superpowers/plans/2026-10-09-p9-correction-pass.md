@@ -23,10 +23,12 @@
 ### Task A: Root-cause the signed-in shell mobile/tablet breakpoint defect and fix it at the shared-shell level
 
 **Files:**
+
 - Investigate first (read, do not assume): `apps/web/app/_components/app-sidebar.tsx`, `apps/web/app/_components/app-sidebar.css` or wherever its styles live, `apps/web/app/overview/shell.css` (the shared `.stak` scope and signed-in frame geometry), any signed-in `layout.tsx` that wraps `AppSidebar` + page content, `apps/web/app/globals.css` (body/html root rules).
 - Fix: whichever of the above actually contains the defect — do not guess, report the exact root cause first.
 
 **Interfaces:**
+
 - Consumes: nothing new.
 - Produces: a signed-in shell that, below the desktop-sidebar breakpoint, gives the main canvas the full viewport width with no reserved 216px column, no horizontal body overflow, and a coherent transition through tablet widths (not a "half mobile, half desktop" state). Task B (per-route re-review) and Task C/D depend on this being genuinely fixed before they proceed.
 
@@ -59,6 +61,7 @@
 ### Task C: Landing page — design audit and recomposition (preserve P9 copy, restore approved composition)
 
 **Files:**
+
 - Investigate: `main@5afafb9` vs. `main` pre-P9 root page (`git show 13758a5:apps/web/app/page.tsx` and its then-current CSS), `docs/0.1.0-contract.md`, any locally available Final Contract/Claude Design landing source (if DesignSync access via `/design-login` is genuinely unavailable, do not invent a new design — use the pre-P9 implementation and the approved P4-P8 visual language as structural truth, and say exactly which source was used).
 - Modify: `apps/web/app/page.tsx` (current P9 landing, commit `80a92a3`) — recompose, do not discard the copy.
 
@@ -75,6 +78,7 @@
 ### Task D: Remove P9-invented custom loading cards; audit for other made-up loading UI
 
 **Files:**
+
 - Remove: `apps/web/app/overview/loading.tsx`, `apps/web/app/memory/(dashboard)/loading.tsx` (added in the original P9 Task 6, commit `11b8cd5`) — unless investigation finds an approved Final Contract loading treatment already exists for these routes, in which case use that instead of removing.
 - Audit: every other `loading.tsx` added anywhere during the original P9 pass (should be none beyond these two, per the Task 6 ledger record, but confirm).
 
