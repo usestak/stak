@@ -109,18 +109,21 @@ export function SkillsTable({
             className="stak-skills-row"
           >
             <span className="stak-skills-name">
+              <span className="sr-only">Skill: </span>
               <span className="n">{r.name}</span>
               {r.description ? (
                 <span className="d">{r.description}</span>
               ) : null}
             </span>
             <span className="stak-skills-source">
+              <span className="sr-only">Source: </span>
               <span className="primary">{r.sourcePrimary}</span>
               <span className="secondary">
                 {r.sourceCheckNote ?? r.sourceSecondary}
               </span>
             </span>
             <span className="stak-skills-installed">
+              <span className="sr-only">On {machineName}: </span>
               <span className="primary">{r.reconciliationLabel}</span>
               {r.installedShortHash ? (
                 <span className="secondary">{r.installedShortHash}</span>
@@ -132,6 +135,7 @@ export function SkillsTable({
                 style={{ background: DOT[r.dot] }}
                 aria-hidden
               />
+              <span className="sr-only">Status: </span>
               {r.statusText}
               {r.reviewNote ? (
                 <span className="note"> · {r.reviewNote}</span>

@@ -42,6 +42,22 @@
   box-sizing: border-box;
 }
 
+/* Visually hidden but still exposed to assistive tech — use for field labels that are
+   redundant for sighted users (visual order/hierarchy already conveys them) but required
+   for a screen-reader user to retain meaning once a layout hides its visual header row. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 html {
   -webkit-text-size-adjust: 100%;
 }

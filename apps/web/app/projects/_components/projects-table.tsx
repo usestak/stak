@@ -93,11 +93,21 @@ export function ProjectsTable({
               href={`/projects/${r.projectId}`}
               className="stak-projects-name"
             >
+              <span className="sr-only">Project: </span>
               <span className="n">{r.name}</span>
             </Link>
-            <span className="stak-projects-lifecycle">{r.lifecycleLabel}</span>
-            <span className="stak-projects-presence">{r.presence}</span>
-            <span className="stak-projects-memory">{r.fileCountLabel}</span>
+            <span className="stak-projects-lifecycle">
+              <span className="sr-only">Lifecycle: </span>
+              {r.lifecycleLabel}
+            </span>
+            <span className="stak-projects-presence">
+              <span className="sr-only">On {machineName}: </span>
+              {r.presence}
+            </span>
+            <span className="stak-projects-memory">
+              <span className="sr-only">Memory: </span>
+              {r.fileCountLabel}
+            </span>
             <ProjectLifecycleButton
               projectId={r.projectId}
               lifecycle={r.lifecycle}
