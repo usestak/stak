@@ -126,3 +126,32 @@
   outline: 2px solid var(--orange);
   outline-offset: 2px;
 }
+
+/* Same reasoning as skills.css: the 5-column grid (name/lifecycle/presence/memory/action) has
+   no room at ~tablet widths and below, so rows stack instead of shrinking text. */
+@media (max-width: 767.98px) {
+  .stak-projects-toolbar {
+    flex-wrap: wrap;
+    padding: 0 18px 12px;
+  }
+  .stak-projects-search {
+    margin-left: 0;
+    width: 100%;
+  }
+  .stak-projects-head {
+    display: none;
+  }
+  .stak-projects-row {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 12px 18px;
+  }
+  .stak-projects-name {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}

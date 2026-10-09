@@ -13,6 +13,8 @@
 .stak-machine-card-head {
   padding: 16px 20px;
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: space-between;
   align-items: flex-start;
   border-bottom: 1px solid var(--line);
@@ -20,6 +22,7 @@
 .stak-machine-card-name {
   font-size: 18px;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 .stak-machine-card-meta {
   font-size: 13px;
@@ -155,4 +158,34 @@
 .stak-new-machine-step .syntax-ref {
   font: 11.5px var(--mono);
   color: var(--dim);
+}
+
+@media (max-width: 767.98px) {
+  .stak-machines-grid {
+    grid-template-columns: 1fr;
+  }
+  .stak-machine-card-facts {
+    grid-template-columns: 1fr;
+  }
+  .stak-machine-card-facts > div:nth-child(2n) {
+    border-left: none;
+  }
+  .stak-machine-card-facts > div:nth-last-child(-n + 2) {
+    border-bottom: 1px solid #1c1b19;
+  }
+  .stak-machine-card-facts > div:last-child {
+    border-bottom: none;
+  }
+  .stak-new-machine-steps {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .stak-revoke-confirm {
+    max-width: none;
+  }
+}
+
+@media (max-width: 479.98px) {
+  .stak-new-machine-steps {
+    grid-template-columns: 1fr;
+  }
 }

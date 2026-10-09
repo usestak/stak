@@ -24,13 +24,15 @@
 }
 .stak-settings-row {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: baseline;
   padding: 10px 14px;
   border: 1px solid var(--line);
   border-radius: 6px;
   font-size: 13.5px;
-  gap: 16px;
+  gap: 6px 16px;
+  overflow-wrap: anywhere;
 }
 .stak-settings-row + .stak-settings-row {
   margin-top: 6px;

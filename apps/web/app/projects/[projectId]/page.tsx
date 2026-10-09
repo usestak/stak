@@ -199,6 +199,7 @@ export default async function ProjectDetailPage({
           machineName={view.viewing.name}
           command={`stak project map ${view.cliSelector} <directory>`}
           hint="Template — replace <directory> with this Project's real folder on this machine before running. Local only — never sent to STAK Cloud."
+          kind="template"
         />
       </main>
     </div>

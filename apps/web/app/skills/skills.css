@@ -169,3 +169,40 @@
   border-color: var(--faint);
   background: #171615;
 }
+
+/* Below ~tablet width the 4-column grid (2.4fr/1.6fr/1.2fr/1.1fr) has no room left to shrink
+   without truncating the SOURCE/ON <MACHINE> facts or clipping the frozen status word — switch
+   to one stacked card per row instead of squeezing columns (contract: stacked rows over
+   uniform text-shrinking). The column header only makes sense against aligned columns, so it
+   is hidden in this layout; each row already carries its own labels via visual hierarchy
+   (name, then source, then installed-state, then status). */
+@media (max-width: 767.98px) {
+  .stak-skills-toolbar {
+    flex-wrap: wrap;
+    padding: 0 18px 12px;
+  }
+  .stak-skills-search {
+    margin-left: 0;
+    width: 100%;
+  }
+  .stak-skills-head {
+    display: none;
+  }
+  .stak-skills-row {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 12px 18px;
+  }
+  .stak-skills-name .d,
+  .stak-skills-source .primary,
+  .stak-skills-source .secondary,
+  .stak-skills-installed .primary,
+  .stak-skills-installed .secondary {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
+}

@@ -54,3 +54,24 @@
   line-height: 1.6;
   margin: 0;
 }
+
+@media (max-width: 767.98px) {
+  /* The 3-up grid (when / mode / meta) is fine on tablet, but below that the meta column
+     (e.g. "Latest backup · Jan 1, 2026") can be the longest piece of text in the row — stack
+     instead of squeezing it against the other two. */
+  .stak-mem-history li {
+    grid-template-columns: 1fr;
+    gap: 2px;
+    align-items: start;
+  }
+  .stak-mem-history .meta {
+    text-align: left;
+  }
+  .stak-mem-projects li {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .stak-mem-projects .name {
+    overflow-wrap: anywhere;
+  }
+}

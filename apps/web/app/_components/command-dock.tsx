@@ -11,10 +11,16 @@ export function CommandDock({
   machineName,
   command,
   hint,
+  kind = 'ready',
 }: {
   machineName: string;
   command: string;
   hint?: string;
+  /** 'template' marks a command that is NOT copy-paste-executable as-is (it still contains a
+   *  placeholder like <directory> the user must fill in before running it). Ready-to-run and
+   *  template commands must never look alike — this drives a visible "Template" badge and a
+   *  muted command color so a template is never mistaken for something safe to run verbatim. */
+  kind?: 'ready' | 'template';
 }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
@@ -26,9 +32,11 @@ export function CommandDock({
       // Clipboard may be unavailable (permissions/insecure context); fail quietly.
     }
   };
+  const isTemplate = kind === 'template';
   return (
-    <div className="stak-dock">
+    <div className={`stak-dock${isTemplate ? ' stak-dock--template' : ''}`}>
       <span className="scope">ON {machineName.toUpperCase()}</span>
+      {isTemplate ? <span className="stak-dock-badge">Template</span> : null}
       <span className="cmd">
         <span className="p">$ </span>
         {command}

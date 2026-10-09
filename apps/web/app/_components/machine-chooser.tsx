@@ -60,10 +60,14 @@ export function MachineChooser({
                     display: 'flex',
                   }}
                 >
-                  <span style={{ fontWeight: 600, fontSize: 13.5 }}>
+                  <span
+                    className="stak-chooser-name"
+                    style={{ fontWeight: 600, fontSize: 13.5 }}
+                  >
                     {m.name}
                   </span>
                   <span
+                    className="stak-chooser-sec"
                     style={{
                       fontSize: 12,
                       font: '11px var(--mono)',

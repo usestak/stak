@@ -374,6 +374,22 @@
   color: var(--dim);
   font-family: var(--sans);
 }
+/* A template command (still contains a placeholder like <directory>, not safe to run
+   verbatim) must never look like a ready-to-run one: a visible badge plus a muted command
+   color are the two signals, so neither a sighted skim nor a screen-reader pass can mistake
+   one for the other. */
+.stak-dock-badge {
+  font: 500 10px var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--amber);
+  border: 1px solid #4a3f24;
+  padding: 2px 7px;
+  border-radius: 4px;
+  flex: none;
+}
+.stak-dock--template .cmd {
+  color: var(--faint);
+}
 .stak-copy {
   font-size: 12px;
   border: 1px solid var(--chip);
@@ -488,6 +504,13 @@
   font: 11px var(--mono);
   color: var(--dim);
 }
+/* Long machine/identifier names must wrap inside the popover, never push it wider than its
+   anchor or clip silently. */
+.stak-ms-opt-name,
+.stak-ms-opt-sec {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 .stak-ms-empty {
   padding: 10px 9px;
   font-size: 12.5px;
@@ -527,6 +550,11 @@
 }
 .stak-chooser-list::-webkit-scrollbar {
   display: none;
+}
+.stak-chooser-name,
+.stak-chooser-sec {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .stak :focus-visible,
@@ -593,4 +621,82 @@
   color: var(--ink);
   overflow-x: auto;
   white-space: pre;
+}
+
+/* Long machine/identifier names in the rail machine-card header must wrap rather than push
+   the status word (frozen vocabulary — never clip it) off the card. */
+.stak-mcard {
+  overflow-wrap: anywhere;
+}
+.stak-mcard > span:first-of-type {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+/* P9 Task 2: signed-in content below the ~tablet rail breakpoint. Dense tables get their own
+   stacked-row rules in their route CSS; this covers the shared shell chrome every route sits
+   inside (head, summary strip, two-column body/rail, Command Dock, lists of fixed-width grid
+   rows) so nothing clips or requires horizontal scroll down to 360px. */
+@media (max-width: 767.98px) {
+  .stak-head {
+    padding: 20px 18px 16px;
+  }
+  .stak-summaries {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .stak-sum {
+    padding: 14px 16px 16px;
+  }
+  .stak-sum:first-child {
+    padding-left: 16px;
+  }
+  .stak-body {
+    grid-template-columns: 1fr;
+  }
+  .stak-col {
+    padding: 18px;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .stak-rail {
+    padding: 18px;
+  }
+  /* These rows are a 3-up grid (fixed label column / detail / action) sized for the 1fr main
+     column next to a 330px rail — at a single stacked column on a narrow viewport that fixed
+     column no longer fits. Stack each row's pieces instead of shrinking their text. */
+  .stak-attn,
+  .stak-act {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .stak-dock {
+    flex-wrap: wrap;
+    row-gap: 8px;
+    padding: 10px 18px;
+  }
+  .stak-dock .cmd {
+    flex: 1 1 100%;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+    order: 1;
+  }
+  .stak-dock .hint {
+    flex: 1 1 100%;
+    order: 2;
+  }
+  .stak-dock .stak-copy {
+    order: 3;
+  }
+  .stak-notice {
+    margin: 24px 16px;
+    padding: 20px;
+  }
+}
+
+@media (max-width: 479.98px) {
+  .stak-summaries {
+    grid-template-columns: 1fr;
+  }
 }

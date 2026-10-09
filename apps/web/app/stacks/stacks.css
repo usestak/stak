@@ -8,6 +8,8 @@
 .stak-stack-card-head {
   padding: 18px 22px;
   display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
   justify-content: space-between;
   align-items: baseline;
   border-bottom: 1px solid var(--line);
@@ -78,4 +80,20 @@
   font-size: 13.5px;
   color: var(--muted);
   line-height: 1.6;
+}
+
+@media (max-width: 767.98px) {
+  .stak-stack-card-head,
+  .stak-stack-composition-head,
+  .stak-stack-composition-row,
+  .stak-stack-composition-empty,
+  .stak-stack-technical {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .stak-stack-composition-head,
+  .stak-stack-composition-row {
+    grid-template-columns: 1fr 90px;
+    gap: 10px;
+  }
 }
