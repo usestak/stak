@@ -134,6 +134,10 @@
 }
 .stak-public-skill-source a {
   color: var(--faint);
+  /* Same link-in-text-block rationale as globals.css's `p a` rule: this
+     link sits inline among plain source-reference text, not inside a <p>,
+     so it needs its own underline. */
+  text-decoration: underline;
 }
 
 .stak-public-footer {

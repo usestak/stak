@@ -107,6 +107,15 @@ a {
 a:hover {
   text-decoration: underline;
 }
+/* WCAG 1.4.1 (Use of Color) / axe-core link-in-text-block: a link that sits
+   inline among plain-text sentences (inside a <p>) must stay visually
+   distinguishable without relying on color alone — found via Task 11's a11y
+   audit on the "device authorization" link in the public landing copy.
+   Standalone nav/card/button links aren't in running text, so they're
+   unaffected. */
+p a {
+  text-decoration: underline;
+}
 
 code {
   font-family: var(--mono);
