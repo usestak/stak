@@ -165,7 +165,7 @@ export default async function OverviewPage({
         viewing={view.viewing}
         machines={view.machines}
       />
-      <main className="stak-main">
+      <main id="main-content" className="stak-main">
         <div className="stak-head">
           <div className="stak-sentence">
             <span
@@ -177,7 +177,7 @@ export default async function OverviewPage({
               }}
               aria-hidden
             />
-            <span>{view.headline}</span>
+            <h1>{view.headline}</h1>
           </div>
           <span className="stak-sub">{view.detail}</span>
         </div>

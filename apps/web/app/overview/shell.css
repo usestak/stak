@@ -236,6 +236,13 @@
   font-weight: 600;
   letter-spacing: -0.01em;
 }
+/* Each page's headline is a real h1 (P9 Task 5) — reset the UA default margin/size/weight so
+   it inherits .stak-sentence's own typography instead of the browser's h1 defaults. */
+.stak-sentence h1 {
+  margin: 0;
+  font: inherit;
+  letter-spacing: inherit;
+}
 .stak-sub {
   font-size: 14.5px;
   color: var(--faint);

@@ -104,7 +104,7 @@ export default async function ProjectDetailPage({
         viewing={view.viewing}
         machines={view.machines}
       />
-      <main className="stak-main">
+      <main id="main-content" className="stak-main">
         <div className="stak-head">
           <span style={{ fontSize: 12.5, color: 'var(--dim)' }}>
             <Link href="/projects" style={{ color: 'inherit' }}>
@@ -113,7 +113,7 @@ export default async function ProjectDetailPage({
             / {view.name}
           </span>
           <div className="stak-sentence">
-            <span>{view.name}</span>
+            <h1>{view.name}</h1>
           </div>
           <span className="stak-sub">{view.lifecycleLabel}</span>
         </div>

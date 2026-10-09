@@ -73,10 +73,10 @@ export default async function MachinesPage({
         viewing={view.viewing}
         machines={view.machines}
       />
-      <main className="stak-main">
+      <main id="main-content" className="stak-main">
         <div className="stak-head">
           <div className="stak-sentence">
-            <span>{view.statusSentence}</span>
+            <h1>{view.statusSentence}</h1>
           </div>
           <span className="stak-sub">
             Each machine reports its state when you run STAK on it. This page

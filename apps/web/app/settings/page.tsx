@@ -57,10 +57,10 @@ export default async function SettingsPage() {
         viewing={null}
         machines={[]}
       />
-      <main className="stak-main">
+      <main id="main-content" className="stak-main">
         <div className="stak-head">
           <div className="stak-sentence">
-            <span>Settings</span>
+            <h1>Settings</h1>
           </div>
           <span className="stak-sub">
             Account-wide controls — these apply to every machine on your STAK,

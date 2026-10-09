@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 
+import { SkipLink } from './_components/skip-link';
 import './globals.css';
 
 export const metadata = {
@@ -10,7 +11,10 @@ export const metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <SkipLink />
+        {children}
+      </body>
     </html>
   );
 }

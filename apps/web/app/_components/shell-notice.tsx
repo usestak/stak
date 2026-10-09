@@ -33,7 +33,7 @@ export function ShellNotice({
         viewing={null}
         machines={[]}
       />
-      <main className="stak-main">
+      <main id="main-content" className="stak-main">
         <div className="stak-notice">
           <h1>{title}</h1>
           {children}

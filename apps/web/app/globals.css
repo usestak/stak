@@ -62,6 +62,34 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
+/* Skip link (P9 Task 5) — rendered once in the root layout, before every shell's own
+   `.stak`-scoped wrapper, so it can't inherit that scope's CSS custom properties. The colors
+   below are literal copies of shell.css's `.stak` tokens (--bg/--ink/--orange), not new hex
+   values, kept in sync manually since custom properties don't cross stylesheet scopes.
+   Visually hidden off-screen until the link itself receives focus, matching the standard
+   "skip to content" pattern. */
+.stak-skip-link {
+  position: absolute;
+  top: -48px;
+  left: 8px;
+  z-index: 1000;
+  padding: 10px 16px;
+  background: #121211; /* shell.css .stak --bg */
+  color: #edeae3; /* shell.css .stak --ink */
+  border: 2px solid #ee7a3b; /* shell.css .stak --orange */
+  border-radius: 6px;
+  font:
+    600 14px 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system,
+    'Segoe UI', Roboto, sans-serif;
+  text-decoration: none;
+  transition: top 0.15s ease;
+}
+.stak-skip-link:focus {
+  top: 8px;
+  outline: 2px solid #ee7a3b;
+  outline-offset: 2px;
+}
+
 body {
   margin: 0;
   background: var(--bg);

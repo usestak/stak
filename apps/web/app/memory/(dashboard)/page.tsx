@@ -88,7 +88,7 @@ export default async function MemoryPage({
         viewing={view.viewing}
         machines={view.machines}
       />
-      <main className="stak-main">
+      <main id="main-content" className="stak-main">
         <div className="stak-head">
           <div className="stak-sentence">
             <span
@@ -96,7 +96,7 @@ export default async function MemoryPage({
               style={{ width: 10, height: 10, background: DOT[statusDot] }}
               aria-hidden
             />
-            <span>{view.statusSentence}</span>
+            <h1>{view.statusSentence}</h1>
           </div>
           <span className="stak-sub">{view.machineSentence}</span>
         </div>

@@ -37,7 +37,7 @@ export function PublicShell({
             STAK
           </Link>
         </nav>
-        <main className="stak-public-main">
+        <main id="main-content" className="stak-public-main">
           <h1>{title}</h1>
           {children}
         </main>

@@ -80,7 +80,7 @@ export default async function SkillsPage({
         viewing={view.viewing}
         machines={view.machines}
       />
-      <main className="stak-main">
+      <main id="main-content" className="stak-main">
         <div className="stak-head">
           <div className="stak-sentence">
             <span
@@ -88,7 +88,7 @@ export default async function SkillsPage({
               style={{ width: 10, height: 10, background: DOT[view.statusDot] }}
               aria-hidden
             />
-            <span>{view.statusSentence}</span>
+            <h1>{view.statusSentence}</h1>
           </div>
           {view.sourceHealthSentence ? (
             <span className="stak-sub">{view.sourceHealthSentence}</span>

@@ -13,7 +13,9 @@ describe('PublicShell', () => {
       </PublicShell>,
     );
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
-    expect(screen.getByRole('main')).toBeInTheDocument();
+    const main = screen.getByRole('main');
+    expect(main).toBeInTheDocument();
+    expect(main).toHaveAttribute('id', 'main-content');
   });
 
   test('does not render signed-in account affordances', () => {

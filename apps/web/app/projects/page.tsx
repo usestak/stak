@@ -74,10 +74,10 @@ export default async function ProjectsPage({
         viewing={view.viewing}
         machines={view.machines}
       />
-      <main className="stak-main">
+      <main id="main-content" className="stak-main">
         <div className="stak-head">
           <div className="stak-sentence">
-            <span>{view.statusSentence}</span>
+            <h1>{view.statusSentence}</h1>
           </div>
         </div>
         {view.rows.length === 0 ? (

@@ -33,14 +33,14 @@ export function FocusedShell({
         href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
       />
       <div className="stak stak-focus-page">
-        <div className="stak-notice">
+        <main id="main-content" className="stak-notice">
           <div className="stak-focus-brand">
             <b>STAK</b>
           </div>
           {eyebrow ? <div className="stak-focus-eyebrow">{eyebrow}</div> : null}
           <h1>{title}</h1>
           {children}
-        </div>
+        </main>
       </div>
     </>
   );

@@ -161,7 +161,7 @@ export default async function SkillDetailPage({
         viewing={view.viewing}
         machines={view.machines}
       />
-      <main className="stak-main">
+      <main id="main-content" className="stak-main">
         <div className="stak-head">
           <span style={{ fontSize: 12.5, color: 'var(--dim)' }}>
             <Link href="/skills" style={{ color: 'inherit' }}>
@@ -175,7 +175,7 @@ export default async function SkillDetailPage({
               style={{ width: 10, height: 10, background: DOT[view.statusDot] }}
               aria-hidden
             />
-            <span>{view.name}</span>
+            <h1>{view.name}</h1>
           </div>
           <span className="stak-sub">{view.statusText}</span>
         </div>
