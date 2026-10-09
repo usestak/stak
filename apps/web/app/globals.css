@@ -106,35 +106,6 @@ pre code {
   font-size: inherit;
 }
 
-/* ---- shell ---- */
-.site-header {
-  border-bottom: 1px solid var(--border);
-}
-.site-header-inner,
-.page {
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 0 1.5rem;
-}
-.site-header-inner {
-  display: flex;
-  align-items: center;
-  height: 56px;
-}
-.wordmark {
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  color: var(--text);
-  font-size: 0.98rem;
-}
-.wordmark:hover {
-  text-decoration: none;
-}
-.page {
-  padding-top: 2.5rem;
-  padding-bottom: 4rem;
-}
-
 h1 {
   font-size: 1.5rem;
   font-weight: 650;
@@ -160,21 +131,7 @@ p {
   font-family: var(--mono);
 }
 
-/* ---- cards & meta ---- */
-.card {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--panel);
-  padding: 1.1rem 1.25rem;
-}
-.card + .card {
-  margin-top: 0.75rem;
-}
-.card-title {
-  font-size: 1.05rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
+/* ---- meta ---- */
 .meta {
   display: flex;
   flex-wrap: wrap;
@@ -189,65 +146,16 @@ p {
   color: var(--faint);
 }
 
-/* ---- skills list ---- */
-.skills {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-.skills li {
-  padding: 0.7rem 1rem;
-  border-top: 1px solid var(--border);
-}
-.skills li:first-child {
-  border-top: none;
-}
-.skill-name {
-  font-family: var(--mono);
-  font-size: 0.9rem;
-  font-weight: 550;
-}
-.skill-desc {
-  color: var(--muted);
-  font-size: 0.88rem;
-  margin-top: 0.15rem;
-}
-.skill-source {
-  color: var(--faint);
-  font-size: 0.8rem;
-  margin-top: 0.3rem;
-}
-.skill-source a {
-  color: var(--muted);
-}
-
-/* .btn/.codechip/.error were the superseded product-chrome system (buttons, device codes,
-   error text) — retired once /, /auth/error, /cli, /memory/protect, /memory/recover, and
-   /onboarding moved onto the focused-flow shell (app/_components/focused-shell.tsx +
-   overview/shell.css's .stak-btn/.stak-cmd). This file now serves only the public Stack/share
-   surface (/[owner], /[owner]/[slug]) and SiteHeader, which still use .card/.meta/.skills/etc
-   below. */
-
-/* ---- product shell ---- */
-.site-header-inner {
-  justify-content: space-between;
-}
-.site-nav {
-  display: flex;
-  align-items: center;
-  gap: 1.25rem;
-  font-size: 0.9rem;
-}
-.site-nav > a {
-  color: var(--muted);
-}
-.site-nav > a:hover {
-  color: var(--text);
-  text-decoration: none;
-}
+/* .btn, .codechip, .error, .card, .card-title, .skills, .skill-name/desc/source, and
+   .site-header (plus .site-header-inner/.site-nav/.wordmark) were the superseded
+   product-chrome system (buttons, device codes, error text, public Stack cards/skill list,
+   top bar) — retired in P8/P9 once every route moved onto the current STAK Final Contract
+   shells: the signed-in frame (app-sidebar.tsx + overview/shell.css), the focused-flow shell
+   (focused-shell.tsx), and the public Stack/share shell (public-shell.tsx +
+   public-shell.css for /[owner], /[owner]/[slug]). The .account rules below remain only
+   because account-menu.tsx (itself now unused by any route) still references them; .muted,
+   .mono, .meta, h1, h2, p below remain as generic base-typography utilities still used by
+   not-yet-migrated routes (e.g. the memory dashboard's .meta). */
 
 /* account menu (native <details>) */
 .account {
@@ -308,28 +216,4 @@ p {
 .account-signout:hover {
   background: var(--panel-subtle);
   text-decoration: none;
-}
-
-/* clickable cards + notices */
-.card-link {
-  display: block;
-  color: inherit;
-}
-.card-link:hover {
-  border-color: var(--border-strong);
-  text-decoration: none;
-}
-.notice {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--panel-subtle);
-  padding: 1.25rem 1.5rem;
-  margin-top: 1rem;
-}
-.notice p {
-  margin: 0.35rem 0;
-}
-.notice pre {
-  background: var(--panel);
-  margin-top: 0.75rem;
 }

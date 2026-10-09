@@ -32,12 +32,15 @@ describe('web product branding is STAK (R4)', () => {
     expect(read('layout.tsx')).toContain("title: 'STAK Cloud'");
   });
 
-  it('site header wordmark and landing hero use STAK', () => {
-    const header = read('_components/site-header.tsx');
-    expect(header).toContain('STAK');
-    // P8: the signed-in product now lives entirely behind AppSidebar; this
-    // header's nav only needs to land a signed-in visitor on their Overview.
-    expect(header).toContain('>Overview<');
+  it('signed-in shell and public shell wordmarks, and landing hero, use STAK', () => {
+    // P9 Task 4: the orphaned SiteHeader was retired in favor of two dedicated
+    // shells — AppSidebar for signed-in routes, PublicShell for the anonymous
+    // /[owner] and /[owner]/[slug] pages. Both must still carry the STAK brand.
+    const sidebar = read('_components/app-sidebar.tsx');
+    expect(sidebar).toContain('STAK');
+    expect(sidebar).toContain("label: 'Overview'");
+    const publicShell = read('_components/public-shell.tsx');
+    expect(publicShell).toContain('STAK');
     const landing = read('page.tsx');
     expect(landing).toContain('STAK Cloud');
     expect(landing).toContain('Your STAK');
