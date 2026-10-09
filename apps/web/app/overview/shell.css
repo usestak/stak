@@ -14,6 +14,15 @@
   --green: #84cb8e;
   --amber: #e5b85c;
   --red: #e5776a;
+  /* .stak always renders a dark surface regardless of OS color-scheme
+     preference, so plain <a> tags need their own link color here instead
+     of inheriting globals.css's `--link`, which switches to a light-mode
+     blue (#2563eb) under `prefers-color-scheme: light`/no-preference —
+     that blue has ~3.7:1 contrast against this panel's #121211, below
+     WCAG AA's 4.5:1 for normal text (axe-core color-contrast, found via
+     Task 11's a11y audit). #7aa2f7 matches globals.css's own dark-mode
+     --link value, which already passes contrast against a near-black bg. */
+  --link: #7aa2f7;
   --sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
   background: var(--bg);
