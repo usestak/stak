@@ -132,6 +132,88 @@
   color: var(--dim);
 }
 
+/* Mobile/tablet nav (P9 Task 1): hidden on desktop by default; the toggle button and
+   overlay panel only take effect below the 1024px rail breakpoint (see media query below). */
+.stak-side-topbar {
+  display: contents;
+}
+.stak-nav-toggle {
+  display: none;
+}
+.stak-backdrop {
+  display: none;
+}
+.stak-nav-panel {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 18px;
+}
+
+@media (max-width: 1023.98px) {
+  .stak-side {
+    width: 100%;
+    flex: none;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    padding: 10px 14px;
+    gap: 0;
+  }
+  .stak-side-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .stak-side-topbar .stak-brand {
+    padding: 0;
+  }
+  .stak-nav-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    flex: none;
+    border: 1px solid var(--chip);
+    border-radius: 6px;
+    background: none;
+    color: var(--ink);
+    font-size: 16px;
+    cursor: pointer;
+  }
+  .stak-nav-toggle:hover {
+    border-color: var(--faint);
+  }
+  .stak-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    border: none;
+    padding: 0;
+    background: rgba(0, 0, 0, 0.5);
+    cursor: default;
+  }
+  .stak-nav-panel {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 50;
+    width: min(320px, 86vw);
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+    padding: 16px 10px;
+    overflow-y: auto;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  }
+  .stak-nav-panel:not([data-open='true']) {
+    display: none;
+  }
+}
+
 /* Content */
 .stak-main {
   flex: 1;
