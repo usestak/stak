@@ -161,6 +161,20 @@
 }
 
 @media (max-width: 1023.98px) {
+  /* .stak-frame is a row flex container at desktop widths so the 216px rail and the main
+     content sit side by side. Below the rail breakpoint, .stak-side collapses to a full-width
+     topbar (below) — but without switching the PARENT to a column layout too, that full-width
+     topbar stays a row sibling of .stak-main and the flex row tries to fit a 100%-wide item
+     plus .stak-main's content side by side, squeezing .stak-main to ~0 width while .stak-side
+     stretches to the frame's full height (align-items default is stretch) leaving a tall blank
+     area under the topbar. That was the actual signed-in mobile/tablet defect: a narrow
+     squeezed content strip, a large blank region, and horizontal body overflow from content
+     trying to render inside a ~0px-wide main column — not a mismatched pair of breakpoints
+     (there was only ever one, 1023.98px, here), but one breakpoint that changed the sidebar's
+     own box without ever telling its flex parent to stack instead of stay in a row. */
+  .stak-frame {
+    flex-direction: column;
+  }
   .stak-side {
     width: 100%;
     flex: none;
