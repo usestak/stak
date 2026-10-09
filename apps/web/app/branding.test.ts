@@ -29,7 +29,11 @@ const allSources = (): string => {
 
 describe('web product branding is STAK (R4)', () => {
   it('root metadata title uses STAK', () => {
-    expect(read('layout.tsx')).toContain("title: 'STAK Cloud'");
+    // P9 Task 8: layout.tsx grew a title template ("STAK — %s") so that
+    // per-page titles (e.g. the landing page's) are prefixed with the brand;
+    // the fallback `default` title remains the literal product name.
+    expect(read('layout.tsx')).toContain("default: 'STAK Cloud'");
+    expect(read('layout.tsx')).toContain("template: 'STAK — %s'");
   });
 
   it('signed-in shell and public shell wordmarks, and landing hero, use STAK', () => {
@@ -41,9 +45,12 @@ describe('web product branding is STAK (R4)', () => {
     expect(sidebar).toContain("label: 'Overview'");
     const publicShell = read('_components/public-shell.tsx');
     expect(publicShell).toContain('STAK');
+    // P9 Task 8: `/` became an indexable public landing page rather than a
+    // bare sign-in card — it still carries the STAK brand and the required
+    // "Your STAK should survive your laptop." line.
     const landing = read('page.tsx');
-    expect(landing).toContain('STAK Cloud');
-    expect(landing).toContain('Your STAK');
+    expect(landing).toContain('STAK');
+    expect(landing).toContain('Your STAK should survive your laptop.');
   });
 
   it('CLI authorization uses STAK CLI', () => {

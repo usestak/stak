@@ -4,7 +4,10 @@ import { SkipLink } from './_components/skip-link';
 import './globals.css';
 
 export const metadata = {
-  title: 'STAK Cloud',
+  title: {
+    default: 'STAK Cloud',
+    template: 'STAK — %s',
+  },
   description: 'Portable AI agent environments.',
 };
 
