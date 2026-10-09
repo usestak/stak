@@ -10,8 +10,12 @@ describe('Public owner/stack NotFound', () => {
     render(<OwnerNotFound />);
     expect(screen.getByText(/not found/i)).toBeInTheDocument();
     // PublicShell's nav is labelled "STAK", never the signed-in AppSidebar's "Primary" nav.
-    expect(screen.getByRole('navigation', { name: 'STAK' })).toBeInTheDocument();
-    expect(screen.queryByRole('navigation', { name: 'Primary' })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('navigation', { name: 'STAK' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('navigation', { name: 'Primary' }),
+    ).not.toBeInTheDocument();
   });
 
   test('renders exactly one h1 and a single main landmark carrying main-content', () => {

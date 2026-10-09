@@ -112,11 +112,7 @@ export function AppSidebar({
       </div>
 
       {open ? (
-        <div
-          className="stak-backdrop"
-          aria-hidden
-          onClick={close}
-        />
+        <div className="stak-backdrop" aria-hidden onClick={close} />
       ) : null}
 
       <div id={NAV_PANEL_ID} className="stak-nav-panel" data-open={open}>

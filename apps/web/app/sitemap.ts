@@ -1,5 +1,5 @@
-import type { MetadataRoute } from "next";
-import { siteOrigin } from "../lib/site-origin";
+import type { MetadataRoute } from 'next';
+import { siteOrigin } from '../lib/site-origin';
 
 /**
  * Only the public landing page is included here. There is no safe
@@ -17,7 +17,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     {
       url: origin,
       lastModified: new Date(),
-      changeFrequency: "daily",
+      changeFrequency: 'daily',
       priority: 1,
     },
   ];

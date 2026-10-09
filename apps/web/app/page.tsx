@@ -69,27 +69,27 @@ export default async function HomePage() {
 
           <h2>Move your setup, not just your code</h2>
           <p>
-            Coding agents like Claude Code and Codex build up Skills and
-            Memory as you work with them — context that&apos;s easy to lose
-            when you switch machines. STAK keeps that Memory backed up and
-            your Skills reproducible, so the agent on a new machine picks up
-            where the last one left off instead of starting cold.
+            Coding agents like Claude Code and Codex build up Skills and Memory
+            as you work with them — context that&apos;s easy to lose when you
+            switch machines. STAK keeps that Memory backed up and your Skills
+            reproducible, so the agent on a new machine picks up where the last
+            one left off instead of starting cold.
           </p>
 
           <h2>Your STAK should survive your laptop.</h2>
           <p>
             Laptops get replaced, wiped, or lost — that shouldn&apos;t mean
             losing everything an agent has learned about your projects. Your
-            STAK should survive your laptop: Memory you&apos;ve backed up can
-            be recovered with a passkey, Skills can be checked out again, and
-            projects can be mapped back onto a new machine instead of
-            rebuilding from scratch.
+            STAK should survive your laptop: Memory you&apos;ve backed up can be
+            recovered with a passkey, Skills can be checked out again, and
+            projects can be mapped back onto a new machine instead of rebuilding
+            from scratch.
           </p>
 
           <h2>From your terminal</h2>
           <p>
-            STAK is driven from the CLI, not a dashboard you manage by hand.
-            The web app shows what&apos;s already true about your machines.
+            STAK is driven from the CLI, not a dashboard you manage by hand. The
+            web app shows what&apos;s already true about your machines.
           </p>
           <p className="stak-focus-eyebrow">On a machine with your STAK</p>
           <pre className="stak-cmd">

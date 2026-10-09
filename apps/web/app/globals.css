@@ -79,8 +79,13 @@ html {
   border: 2px solid #ee7a3b; /* shell.css .stak --orange */
   border-radius: 6px;
   font:
-    600 14px 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system,
-    'Segoe UI', Roboto, sans-serif;
+    600 14px 'IBM Plex Sans',
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
   text-decoration: none;
   transition: top 0.15s ease;
 }

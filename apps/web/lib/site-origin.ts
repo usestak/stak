@@ -8,11 +8,11 @@
  */
 export function siteOrigin(): string {
   const configured = process.env.STAK_APP_URL || process.env.STACK_APP_URL;
-  if (configured) return configured.replace(/\/+$/, "");
-  if (process.env.NODE_ENV === "production") {
+  if (configured) return configured.replace(/\/+$/, '');
+  if (process.env.NODE_ENV === 'production') {
     throw new Error(
-      "STAK_APP_URL is not set in production — refusing to emit a localhost canonical.",
+      'STAK_APP_URL is not set in production — refusing to emit a localhost canonical.',
     );
   }
-  return "http://localhost:3000";
+  return 'http://localhost:3000';
 }

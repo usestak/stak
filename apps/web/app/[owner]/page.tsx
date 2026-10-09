@@ -29,7 +29,8 @@ export async function generateMetadata({
   params: Promise<{ owner: string }>;
 }): Promise<Metadata> {
   const { owner } = await params;
-  if (!owner.startsWith('@')) return { robots: { index: false, follow: false } };
+  if (!owner.startsWith('@'))
+    return { robots: { index: false, follow: false } };
   const handle = owner.slice(1);
 
   let profile;
@@ -101,10 +102,15 @@ export default async function ProfilePage({
                   Cloud version {stack.latestVersionNumber}
                 </span>
               ) : null}
-              <span className="dot">Updated {relativeTime(stack.updatedAt)}</span>
+              <span className="dot">
+                Updated {relativeTime(stack.updatedAt)}
+              </span>
             </div>
             {stack.description ? (
-              <div className="stak-public-muted" style={{ marginTop: '0.4rem' }}>
+              <div
+                className="stak-public-muted"
+                style={{ marginTop: '0.4rem' }}
+              >
                 {stack.description}
               </div>
             ) : null}

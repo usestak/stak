@@ -29,7 +29,8 @@ export async function generateMetadata({
   params: Promise<{ owner: string; slug: string }>;
 }): Promise<Metadata> {
   const { owner, slug } = await params;
-  if (!owner.startsWith('@')) return { robots: { index: false, follow: false } };
+  if (!owner.startsWith('@'))
+    return { robots: { index: false, follow: false } };
   const handle = owner.slice(1);
 
   let stack;
@@ -100,8 +101,8 @@ export default async function StackPage({
         <code>{`stak use ${ref}\nstak try ${ref} -- codex`}</code>
       </pre>
       <p className="stak-public-muted">
-        Supported agents: Codex, Cursor, Claude. Isolated{' '}
-        <code>stak try</code> is Codex-only in V0.1.
+        Supported agents: Codex, Cursor, Claude. Isolated <code>stak try</code>{' '}
+        is Codex-only in V0.1.
       </p>
 
       <h2>Skills</h2>
@@ -115,9 +116,7 @@ export default async function StackPage({
             const reference = requirement.restoration.reference;
             return (
               <li key={requirement.id}>
-                <div className="stak-public-skill-name">
-                  {requirement.name}
-                </div>
+                <div className="stak-public-skill-name">{requirement.name}</div>
                 {requirement.metadata.description ? (
                   <div className="stak-public-skill-desc">
                     {requirement.metadata.description}
@@ -125,7 +124,10 @@ export default async function StackPage({
                 ) : null}
                 <div className="stak-public-skill-source">
                   {isSafeDisplayUrl(reference.remote) ? (
-                    <a href={reference.remote} rel="noopener noreferrer nofollow">
+                    <a
+                      href={reference.remote}
+                      rel="noopener noreferrer nofollow"
+                    >
                       {reference.remote}
                     </a>
                   ) : (
@@ -138,7 +140,10 @@ export default async function StackPage({
           })}
         </ul>
       )}
-      <p className="stak-public-muted" style={{ fontSize: '0.82rem', marginTop: '1rem' }}>
+      <p
+        className="stak-public-muted"
+        style={{ fontSize: '0.82rem', marginTop: '1rem' }}
+      >
         Source references are provided by the author. Repository accessibility
         is not verified by STAK.
       </p>

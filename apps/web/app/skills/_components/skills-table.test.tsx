@@ -14,7 +14,7 @@ const row: SkillRow = {
   sourceSecondary: 'v1.2.0',
   sourceCheckNote: undefined,
   reviewNote: undefined,
-  reconciliationState: 'installed',
+  reconciliationState: 'matches-approved',
   reconciliationLabel: 'Installed',
   installedShortHash: 'abc12345',
   primaryStatus: 'ready',
@@ -34,7 +34,9 @@ test('each stacked row exposes a per-field accessible label alongside its value'
   const link = screen.getByRole('link', { name: /ByteRover/i });
 
   expect(link).toHaveAccessibleName(/Skill:\s*ByteRover/i);
-  expect(link).toHaveAccessibleName(/Source:\s*github\.com\/byterover\/cipher/i);
+  expect(link).toHaveAccessibleName(
+    /Source:\s*github\.com\/byterover\/cipher/i,
+  );
   expect(link).toHaveAccessibleName(/On dell:\s*Installed/i);
   expect(link).toHaveAccessibleName(/Status:\s*Ready/i);
 

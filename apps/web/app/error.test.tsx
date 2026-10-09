@@ -15,7 +15,9 @@ describe('ErrorBoundary', () => {
     );
     expect(screen.queryByText(/10\.0\.0\.5/)).not.toBeInTheDocument();
     expect(screen.queryByText(/supabase/i)).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /try again/i }),
+    ).toBeInTheDocument();
   });
 
   test('renders exactly one h1 and a single main landmark carrying main-content', () => {

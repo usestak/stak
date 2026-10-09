@@ -57,8 +57,13 @@ describe('SkipLink', () => {
     const stakBlock = stakBlockMatch![1];
 
     function extractToken(block: string, name: string): string {
-      const match = block.match(new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{3,8});`));
-      expect(match, `expected --${name} to be defined in .stak block`).not.toBeNull();
+      const match = block.match(
+        new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{3,8});`),
+      );
+      expect(
+        match,
+        `expected --${name} to be defined in .stak block`,
+      ).not.toBeNull();
       return match![1].toLowerCase();
     }
 
@@ -66,18 +71,24 @@ describe('SkipLink', () => {
     const shellInk = extractToken(stakBlock, 'ink');
     const shellOrange = extractToken(stakBlock, 'orange');
 
-    const skipLinkBlockMatch = globalsCss.match(/\.stak-skip-link\s*\{([\s\S]*?)\n\}/);
+    const skipLinkBlockMatch = globalsCss.match(
+      /\.stak-skip-link\s*\{([\s\S]*?)\n\}/,
+    );
     expect(skipLinkBlockMatch).not.toBeNull();
     const skipLinkBlock = skipLinkBlockMatch![1];
 
-    const skipLinkFocusBlockMatch = globalsCss.match(/\.stak-skip-link:focus\s*\{([\s\S]*?)\n\}/);
+    const skipLinkFocusBlockMatch = globalsCss.match(
+      /\.stak-skip-link:focus\s*\{([\s\S]*?)\n\}/,
+    );
     expect(skipLinkFocusBlockMatch).not.toBeNull();
     const skipLinkFocusBlock = skipLinkFocusBlockMatch![1];
 
     const skipLinkBg = skipLinkBlock
       .match(/background:\s*(#[0-9a-fA-F]{3,8});/)?.[1]
       .toLowerCase();
-    const skipLinkInk = skipLinkBlock.match(/color:\s*(#[0-9a-fA-F]{3,8});/)?.[1].toLowerCase();
+    const skipLinkInk = skipLinkBlock
+      .match(/color:\s*(#[0-9a-fA-F]{3,8});/)?.[1]
+      .toLowerCase();
     const skipLinkBorderOrange = skipLinkBlock
       .match(/border:\s*2px solid\s*(#[0-9a-fA-F]{3,8});/)?.[1]
       .toLowerCase();

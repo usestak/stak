@@ -35,12 +35,14 @@
 ### Task 1: Shared responsive shell — mobile/tablet navigation for signed-in surfaces
 
 **Files:**
+
 - Modify: `apps/web/app/_components/app-sidebar.tsx`
 - Create: `apps/web/app/_components/app-sidebar-mobile.tsx` (or equivalent collapsed/overlay nav component — name finalized during implementation based on existing component conventions)
 - Modify: `apps/web/app/_components/app-sidebar.css` (or wherever its styles live — confirm exact filename at implementation time; audit found CSS colocated per-route, sidebar styles may be in `overview/shell.css` or a dedicated file — check before editing)
 - Test: `apps/web/app/_components/app-sidebar.test.tsx` (create if no existing test file for this component)
 
 **Interfaces:**
+
 - Consumes: existing `AppSidebar` props (machine/account/nav-item data shape — read the current component before changing its signature).
 - Produces: a `AppSidebar` that renders a full 216px rail at desktop widths (≥1024px reference) and a collapsed/overlay pattern below that, reachable via a visible, keyboard-operable toggle control with an accessible name (e.g., `aria-label="Open navigation"`), exposing all primary routes (`/overview`, `/skills`, `/memory`, `/projects`, `/machines`, `/stacks`, `/settings`), the selected-route indicator (`aria-current="page"`), account identity, and Viewing-as machine context where present. Later tasks (2, 3) consume this hardened component as-is — do not change its external prop contract without updating every route layout that imports it.
 
@@ -52,28 +54,28 @@ Read `apps/web/app/_components/app-sidebar.tsx` end to end, and locate its style
 
 ```tsx
 // apps/web/app/_components/app-sidebar.test.tsx
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { AppSidebar } from "./app-sidebar";
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { AppSidebar } from './app-sidebar';
 
 const baseProps = {
-  activeRoute: "/overview",
-  account: { email: "dev@example.com" },
-  machine: { name: "DELL", lastCheckIn: new Date().toISOString() },
+  activeRoute: '/overview',
+  account: { email: 'dev@example.com' },
+  machine: { name: 'DELL', lastCheckIn: new Date().toISOString() },
 };
 
-test("exposes a keyboard-reachable navigation toggle below desktop width", async () => {
+test('exposes a keyboard-reachable navigation toggle below desktop width', async () => {
   render(<AppSidebar {...baseProps} />);
-  const toggle = screen.getByRole("button", { name: /open navigation/i });
+  const toggle = screen.getByRole('button', { name: /open navigation/i });
   expect(toggle).toBeInTheDocument();
   await userEvent.tab();
   expect(toggle).toHaveFocus();
 });
 
-test("marks the active route with aria-current", () => {
+test('marks the active route with aria-current', () => {
   render(<AppSidebar {...baseProps} />);
-  const link = screen.getByRole("link", { name: /overview/i });
-  expect(link).toHaveAttribute("aria-current", "page");
+  const link = screen.getByRole('link', { name: /overview/i });
+  expect(link).toHaveAttribute('aria-current', 'page');
 });
 ```
 
@@ -109,12 +111,14 @@ git commit -m "feat(p9): accessible mobile/tablet navigation for signed-in shell
 ### Task 2: Signed-in route responsive fixes (tables, detail pages, Command Dock)
 
 **Files:**
+
 - Modify: `apps/web/app/skills/skills.css`, `apps/web/app/projects/projects.css`, `apps/web/app/machines/machines.css`, `apps/web/app/stacks/stacks.css`, `apps/web/app/memory/(dashboard)/memory.css`, `apps/web/app/settings/settings.css`, `apps/web/app/overview/shell.css`
 - Modify: `apps/web/app/_components/command-dock.tsx` and its CSS
 - Modify: `apps/web/app/_components/machine-chooser.tsx`, `apps/web/app/_components/machine-selector.tsx`
 - Test: extend `apps/web/app/_components/command-dock.test.ts` (logic file already exists per audit — add/confirm a render-level test alongside it) or create `command-dock.test.tsx`
 
 **Interfaces:**
+
 - Consumes: Task 1's hardened `AppSidebar` (routes render inside layouts that already use it — no change needed to layout files unless they hard-code a sidebar width that now conflicts).
 - Produces: dense list/table routes (Skills, Projects, Stacks composition, Backup history, Machines) that preserve meaning at ≤768px via stacked rows or priority columns (not uniform text shrinking); a Command Dock that never gains horizontal body overflow and keeps Copy reachable at 360px; a machine chooser/selector usable by keyboard with long names that don't break layout.
 
@@ -126,16 +130,18 @@ Grep for literal pixel widths and `overflow: hidden` across the listed CSS files
 
 ```tsx
 // apps/web/app/_components/command-dock.test.tsx
-import { render, screen } from "@testing-library/react";
-import { CommandDock } from "./command-dock";
+import { render, screen } from '@testing-library/react';
+import { CommandDock } from './command-dock';
 
-test("ready-to-run command exposes a Copy button with accessible name", () => {
+test('ready-to-run command exposes a Copy button with accessible name', () => {
   render(<CommandDock command="stak scan" status="ready" />);
-  expect(screen.getByRole("button", { name: /copy/i })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /copy/i })).toBeInTheDocument();
 });
 
-test("template command is visually and semantically distinguished from a ready command", () => {
-  render(<CommandDock command="stak scan --machine <name>" status="template" />);
+test('template command is visually and semantically distinguished from a ready command', () => {
+  render(
+    <CommandDock command="stak scan --machine <name>" status="template" />,
+  );
   expect(screen.getByText(/template/i)).toBeInTheDocument();
 });
 ```
@@ -167,10 +173,12 @@ git commit -m "fix(p9): responsive table/detail/Command Dock behavior on signed-
 ### Task 3: Focused-flow shell responsiveness verification
 
 **Files:**
+
 - Modify (if gaps found): `apps/web/app/_components/focused-shell.tsx`, `apps/web/app/_components/focused-shell.css`
 - No new files expected — this task is verification-first; only touch code if Step 2 finds a real defect.
 
 **Interfaces:**
+
 - Consumes: the P8-accepted `FocusedShell` (centered vertically+horizontally at desktop, natural scroll at small/short viewports — already implemented per commit `13758a5`).
 - Produces: confirmation (or a fix) that `/`, `/auth/error`, `/cli`, `/onboarding`, `/memory/protect`, `/memory/recover` all render correctly through this shell at every test width, including a short-height desktop viewport.
 
@@ -196,12 +204,14 @@ git commit -m "fix(p9): focused-shell responsiveness gaps found during verificat
 ### Task 4: Public Stack pages — visual migration off the orphaned SiteHeader system
 
 **Files:**
+
 - Modify: `apps/web/app/[owner]/page.tsx`, `apps/web/app/[owner]/[slug]/page.tsx`
 - Create: `apps/web/app/_components/public-shell.tsx` + `apps/web/app/_components/public-shell.css` (a new shared public shell — not `AppSidebar`, not raw `FocusedShell`, per brief §4)
 - Modify or retire: `apps/web/app/_components/site-header.tsx` (retire only once nothing imports it — confirm via grep before deleting, per brief §45)
 - Test: `apps/web/app/_components/public-shell.test.tsx`
 
 **Interfaces:**
+
 - Consumes: real public fields already loaded by `[owner]/page.tsx` and `[owner]/[slug]/page.tsx` (owner, slug, Stack composition, Skill requirements — read current data-loading code before changing markup).
 - Produces: a `PublicShell` component rendering STAK's current visual language (graphite/off-white/orange, IBM Plex, thin borders) for anonymous viewers, with semantic `<nav>`/`<main>`/`<footer>` landmarks, real `<Link>`/`<a>` navigation (no click-handler-only nav), and no sidebar. Task 8/9 (SEO) consume this shell's markup structure when adding metadata and JSON-LD — do not change its top-level landmark structure after this task without updating those.
 
@@ -211,22 +221,28 @@ git commit -m "fix(p9): focused-shell responsiveness gaps found during verificat
 
 ```tsx
 // apps/web/app/_components/public-shell.test.tsx
-import { render, screen } from "@testing-library/react";
-import { PublicShell } from "./public-shell";
+import { render, screen } from '@testing-library/react';
+import { PublicShell } from './public-shell';
 
-test("renders exactly one h1 and a main landmark", () => {
+test('renders exactly one h1 and a main landmark', () => {
   render(
     <PublicShell title="demo-stack by alice">
       <p>content</p>
-    </PublicShell>
+    </PublicShell>,
   );
-  expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-  expect(screen.getByRole("main")).toBeInTheDocument();
+  expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  expect(screen.getByRole('main')).toBeInTheDocument();
 });
 
-test("does not render signed-in account affordances", () => {
-  render(<PublicShell title="demo-stack by alice"><p>content</p></PublicShell>);
-  expect(screen.queryByRole("button", { name: /sign out/i })).not.toBeInTheDocument();
+test('does not render signed-in account affordances', () => {
+  render(
+    <PublicShell title="demo-stack by alice">
+      <p>content</p>
+    </PublicShell>,
+  );
+  expect(
+    screen.queryByRole('button', { name: /sign out/i }),
+  ).not.toBeInTheDocument();
 });
 ```
 
@@ -265,12 +281,14 @@ git commit -m "chore(p9): retire orphaned SiteHeader after public-shell migratio
 ### Task 5: Accessibility sweep — landmarks, headings, forms, focus, keyboard, contrast
 
 **Files:**
+
 - Modify: `apps/web/app/globals.css` (focus-visible treatment, skip-link styles)
 - Create: `apps/web/app/_components/skip-link.tsx` + usage in root `apps/web/app/layout.tsx` and in `PublicShell` (Task 4)
 - Modify: any interactive component found to use a div-as-button pattern (identify during Step 1 — likely candidates: `machine-chooser.tsx`, `machine-selector.tsx`, `account-menu.tsx`, confirmation dialogs in Settings/Memory)
 - Test: `apps/web/app/_components/skip-link.test.tsx`
 
 **Interfaces:**
+
 - Consumes: Task 1's sidebar (needs a `<main id="main-content">` target to skip to) and Task 4's `PublicShell` (needs the same landmark id).
 - Produces: a shared skip-link pattern (`Skip to main content`) present once per shell (signed-in, focused, public), targeting a single consistent `id="main-content"` per page — no duplicate main landmarks.
 
@@ -280,19 +298,21 @@ git commit -m "chore(p9): retire orphaned SiteHeader after public-shell migratio
 
 ```tsx
 // apps/web/app/_components/skip-link.test.tsx
-import { render, screen } from "@testing-library/react";
-import { SkipLink } from "./skip-link";
+import { render, screen } from '@testing-library/react';
+import { SkipLink } from './skip-link';
 
-test("skip link targets main-content and is the first focusable element", () => {
+test('skip link targets main-content and is the first focusable element', () => {
   render(
     <>
       <SkipLink />
-      <nav><a href="/x">x</a></nav>
+      <nav>
+        <a href="/x">x</a>
+      </nav>
       <main id="main-content">content</main>
-    </>
+    </>,
   );
-  const link = screen.getByRole("link", { name: /skip to main content/i });
-  expect(link).toHaveAttribute("href", "#main-content");
+  const link = screen.getByRole('link', { name: /skip to main content/i });
+  expect(link).toHaveAttribute('href', '#main-content');
 });
 ```
 
@@ -318,6 +338,7 @@ git commit -m "feat(p9): skip link, focus-visible treatment, and keyboard/semant
 ### Task 6: Loading, empty, and error state consistency
 
 **Files:**
+
 - Create: `apps/web/app/not-found.tsx` (global 404)
 - Create: `apps/web/app/error.tsx` (global error boundary)
 - Create per-route `loading.tsx` only where a route performs a genuinely slow data fetch (identify during Step 1 — do not blanket-add to every route)
@@ -326,6 +347,7 @@ git commit -m "feat(p9): skip link, focus-visible treatment, and keyboard/semant
 - Test: `apps/web/app/not-found.test.tsx`, `apps/web/app/error.test.tsx`
 
 **Interfaces:**
+
 - Consumes: Task 4's `PublicShell` for the public not-found page; Task 1/3 shells for signed-in/focused not-found.
 - Produces: a 404 page and error boundary styled in STAK's visual language, reachable test coverage confirming they render without crashing and without leaking internals.
 
@@ -335,25 +357,32 @@ git commit -m "feat(p9): skip link, focus-visible treatment, and keyboard/semant
 
 ```tsx
 // apps/web/app/not-found.test.tsx
-import { render, screen } from "@testing-library/react";
-import NotFound from "./not-found";
+import { render, screen } from '@testing-library/react';
+import NotFound from './not-found';
 
-test("renders a clear not-found message with a safe next action", () => {
+test('renders a clear not-found message with a safe next action', () => {
   render(<NotFound />);
   expect(screen.getByText(/not found/i)).toBeInTheDocument();
-  expect(screen.getByRole("link")).toBeInTheDocument();
+  expect(screen.getByRole('link')).toBeInTheDocument();
 });
 ```
 
 ```tsx
 // apps/web/app/error.test.tsx
-import { render, screen } from "@testing-library/react";
-import ErrorBoundary from "./error";
+import { render, screen } from '@testing-library/react';
+import ErrorBoundary from './error';
 
-test("renders a safe error message without leaking internals", () => {
-  render(<ErrorBoundary error={new Error("Supabase: connection refused at 10.0.0.5")} reset={() => {}} />);
+test('renders a safe error message without leaking internals', () => {
+  render(
+    <ErrorBoundary
+      error={new Error('Supabase: connection refused at 10.0.0.5')}
+      reset={() => {}}
+    />,
+  );
   expect(screen.queryByText(/10\.0\.0\.5/)).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument();
+  expect(
+    screen.getByRole('button', { name: /try again/i }),
+  ).toBeInTheDocument();
 });
 ```
 
@@ -379,6 +408,7 @@ git commit -m "feat(p9): global not-found/error pages, truthful public 404, empt
 ### Task 7: Site-origin config, robots, sitemap
 
 **Files:**
+
 - Create: `apps/web/lib/site-origin.ts`
 - Modify: `apps/web/lib/env.ts` (extend `cloudEnv()` or add a sibling helper — check Step 1 before deciding)
 - Create: `apps/web/app/robots.ts`
@@ -386,6 +416,7 @@ git commit -m "feat(p9): global not-found/error pages, truthful public 404, empt
 - Test: `apps/web/lib/site-origin.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing new (reads `process.env`).
 - Produces: `siteOrigin(): string` — returns the production origin (`https://usestak.app` once `STAK_APP_URL`/equivalent is set) or a safe local fallback, never a bogus `localhost` canonical when `NODE_ENV === "production"` without an explicit env var set (in that case, throw or log a clear error rather than emit a wrong canonical — surfaces as the launch-checklist item in Task 12). Task 9 (per-route metadata) and Task 8's `sitemap.ts`/`robots.ts` consume this function.
 
@@ -395,24 +426,24 @@ git commit -m "feat(p9): global not-found/error pages, truthful public 404, empt
 
 ```ts
 // apps/web/lib/site-origin.test.ts
-import { describe, test, expect, vi } from "vitest";
-import { siteOrigin } from "./site-origin";
+import { describe, test, expect, vi } from 'vitest';
+import { siteOrigin } from './site-origin';
 
-describe("siteOrigin", () => {
-  test("returns STAK_APP_URL when set", () => {
-    vi.stubEnv("STAK_APP_URL", "https://usestak.app");
-    expect(siteOrigin()).toBe("https://usestak.app");
+describe('siteOrigin', () => {
+  test('returns STAK_APP_URL when set', () => {
+    vi.stubEnv('STAK_APP_URL', 'https://usestak.app');
+    expect(siteOrigin()).toBe('https://usestak.app');
   });
 
-  test("falls back to localhost outside production", () => {
-    vi.stubEnv("STAK_APP_URL", "");
-    vi.stubEnv("NODE_ENV", "development");
-    expect(siteOrigin()).toBe("http://localhost:3000");
+  test('falls back to localhost outside production', () => {
+    vi.stubEnv('STAK_APP_URL', '');
+    vi.stubEnv('NODE_ENV', 'development');
+    expect(siteOrigin()).toBe('http://localhost:3000');
   });
 
-  test("throws rather than emit a bogus localhost canonical in production with no origin configured", () => {
-    vi.stubEnv("STAK_APP_URL", "");
-    vi.stubEnv("NODE_ENV", "production");
+  test('throws rather than emit a bogus localhost canonical in production with no origin configured', () => {
+    vi.stubEnv('STAK_APP_URL', '');
+    vi.stubEnv('NODE_ENV', 'production');
     expect(() => siteOrigin()).toThrow();
   });
 });
@@ -424,13 +455,13 @@ describe("siteOrigin", () => {
 // apps/web/lib/site-origin.ts
 export function siteOrigin(): string {
   const configured = process.env.STAK_APP_URL || process.env.STACK_APP_URL;
-  if (configured) return configured.replace(/\/$/, "");
-  if (process.env.NODE_ENV === "production") {
+  if (configured) return configured.replace(/\/$/, '');
+  if (process.env.NODE_ENV === 'production') {
     throw new Error(
-      "STAK_APP_URL is not set in production — refusing to emit a localhost canonical."
+      'STAK_APP_URL is not set in production — refusing to emit a localhost canonical.',
     );
   }
-  return "http://localhost:3000";
+  return 'http://localhost:3000';
 }
 ```
 
@@ -452,10 +483,12 @@ git commit -m "feat(p9): site-origin config, robots.ts, sitemap.ts"
 ### Task 8: Public landing (`/`) SEO content and routing decision
 
 **Files:**
+
 - Modify: `apps/web/app/page.tsx`
 - Modify: `apps/web/app/layout.tsx` (title template, root metadata)
 
 **Interfaces:**
+
 - Consumes: Task 4's `PublicShell` if `/` is reclassified as a public landing surface rather than a bare sign-in card (decision made in Step 1); Task 7's `siteOrigin()`.
 - Produces: an indexable `/` with real, non-keyword-stuffed prose about STAK, plus a sign-in action, OR a documented STOP if the current auth-routing architecture can't support this without a larger restructure.
 
@@ -481,12 +514,14 @@ git commit -m "feat(p9): indexable public landing with real STAK product copy an
 ### Task 9: Per-route metadata, index/noindex matrix, dynamic public Stack metadata, structured data
 
 **Files:**
+
 - Modify: every signed-in/focused route's `page.tsx` or `layout.tsx` to add `metadata: { robots: { index: false, follow: false } }` (noindex) — `/overview`, `/skills`, `/skills/[skillId]`, `/memory`, `/projects`, `/projects/[projectId]`, `/machines`, `/stacks`, `/settings`, `/onboarding`, `/auth/error`, `/cli`, `/memory/protect`, `/memory/recover`
 - Modify: `apps/web/app/[owner]/page.tsx` — add `generateMetadata` using real public owner data; noindex if thin/empty
 - Modify: `apps/web/app/[owner]/[slug]/page.tsx` — add `generateMetadata` using real Stack name/owner/reference data; noindex on private/nonexistent Stack (paired with Task 6's `notFound()` call)
 - Create: `apps/web/app/_lib/structured-data.ts` (JSON-LD builder, only if Step 4 below finds truthful fields to populate)
 
 **Interfaces:**
+
 - Consumes: Task 7's `siteOrigin()` for canonical URLs; Task 4's `PublicShell` data-loading for real Stack/owner fields; Task 8's root title template.
 - Produces: a complete index/noindex matrix matching brief §24; unique, safe `generateMetadata` output per public Stack page; optional JSON-LD only where every field is real.
 
@@ -502,10 +537,10 @@ git commit -m "feat(p9): indexable public landing with real STAK product copy an
 
 ```ts
 // apps/web/app/settings/metadata.test.ts
-import { describe, test, expect } from "vitest";
-import { metadata } from "./page";
+import { describe, test, expect } from 'vitest';
+import { metadata } from './page';
 
-test("settings route is noindex", () => {
+test('settings route is noindex', () => {
   expect(metadata.robots).toMatchObject({ index: false });
 });
 ```
