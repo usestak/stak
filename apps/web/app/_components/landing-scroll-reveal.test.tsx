@@ -47,7 +47,7 @@ test('landing content is fully present with no IntersectionObserver support (def
     screen.getByRole('heading', { level: 2, name: 'Move to a new machine' }),
   ).toBeInTheDocument();
   expect(
-    screen.getByText('Each machine catches up when you use the STAK CLI there.'),
+    screen.getByText('Each machine catches up on its next CLI run there.'),
   ).toBeInTheDocument();
 
   // No [data-reveal] section was ever hidden - the component couldn't add

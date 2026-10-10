@@ -146,7 +146,7 @@ function PreviewCard() {
   return (
     <div className="stak-landing-preview" aria-label="Illustrative preview">
       <div className="stak-landing-preview-head">
-        <span>OVERVIEW · VIEWING AS ATLAS</span>
+        <span>OVERVIEW · VIEWING AS DELL</span>
         <span>Last backup 12 min ago</span>
       </div>
       <div className="stak-landing-preview-status">
@@ -170,7 +170,17 @@ function PreviewCard() {
           <span className="k">MEMORY</span>
           <span className="v">
             <span className="v1">Backed up</span>
-            <span className="v2">27 files across 9 projects</span>
+            {/* Protected Memory's perProject is always null - the Cloud
+                never decrypts the ciphertext bundle to get per-project file
+                counts (contract: Memory read-model data availability). A
+                per-project *file* count is Standard-only and would be faked
+                here if shown next to "Protected". The project count itself
+                is honest: it comes from the account-side cloud_projects
+                registry, not the ciphertext, which the contract gives as
+                the explicit allowed phrasing for a Protected summary line
+                ("Protected · Backed up <time> · N projects known to
+                STAK"). */}
+            <span className="v2">9 projects known to STAK</span>
           </span>
           <span className="s" style={{ color: 'var(--green)' }}>
             Protected
@@ -181,7 +191,7 @@ function PreviewCard() {
           <span className="v">
             <span className="v1">2 machines</span>
             <span className="v2">
-              Atlas up to date · Studio 1 update waiting
+              DELL up to date · MacBook 1 update waiting
             </span>
           </span>
           <span className="s" style={{ color: 'var(--amber)' }}>
@@ -190,7 +200,7 @@ function PreviewCard() {
         </div>
       </div>
       <div className="stak-landing-preview-dock">
-        <span className="scope">ON ATLAS</span>
+        <span className="scope">ON DELL</span>
         <span className="cmd">
           <span className="p">$ </span>stak memory backup
         </span>
@@ -302,24 +312,49 @@ function MoveToNewMachine() {
   return (
     <section id="move" className="stak-landing-section" data-reveal>
       <h2>Move to a new machine</h2>
+      {/* Real fresh-machine sequence (contract: "install CLI -> stak login
+          (approve) -> stak memory recover -> stak memory restore -> stak
+          project map <unavailable projects>", plus `stak scan` to detect
+          agents/existing setup and `stak skill update` to install approved
+          Skill versions - both verified directly against
+          packages/cli/src/commands/scan.ts and skill.ts). `stak memory
+          restore` moves the private STAK store into native agent Memory
+          files; it has nothing to do with Skills, which is a previously-
+          mislabeled step this rebuilds. */}
       <ol className="stak-landing-steps">
+        <li>
+          <span className="step-name">Install the CLI</span>
+          <code>npm install -g @usestak/cli</code>
+        </li>
         <li>
           <span className="step-name">Log in</span>
           <code>stak login</code>
+        </li>
+        <li>
+          <span className="step-name">Scan your setup</span>
+          <code>stak scan</code>
         </li>
         <li>
           <span className="step-name">Recover your Memory</span>
           <code>stak memory recover</code>
         </li>
         <li>
-          <span className="step-name">Restore your Skills</span>
+          <span className="step-name">Restore it to your agents</span>
           <code>stak memory restore</code>
+        </li>
+        <li>
+          <span className="step-name">Install your Skills</span>
+          <code>stak skill update</code>
         </li>
         <li>
           <span className="step-name">Map your projects</span>
           <code>stak project map &lt;project&gt; &lt;directory&gt;</code>
         </li>
       </ol>
+      <p className="stak-landing-caption">
+        Protected Memory needs your passkey or recovery file during{' '}
+        <code>stak memory recover</code>.
+      </p>
     </section>
   );
 }
@@ -327,9 +362,11 @@ function MoveToNewMachine() {
 function ClosingBar() {
   return (
     <div className="stak-landing-closing" data-reveal>
-      <span>Each machine catches up when you use the STAK CLI there.</span>
+      <span>Each machine catches up on its next CLI run there.</span>
       <span className="stak-landing-closing-muted">
-        No daemon. No surprise background changes.
+        That&apos;s state reporting, not Skill installs. No daemon, no
+        background changes - a Skill only updates when you run{' '}
+        <code>stak skill update</code>.
       </span>
     </div>
   );

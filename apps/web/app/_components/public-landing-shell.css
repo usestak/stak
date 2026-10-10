@@ -39,17 +39,30 @@
   }
 }
 
-/* ---- Nav ---- */
+/* ---- Nav ----
+   True 3-region grid (P9 quality fix): 1fr auto 1fr means the middle
+   column (the 4 nav links) sizes to its own content and is geometrically
+   centered in the bar - the left (wordmark) and right (sign in/install)
+   regions each get an equal, independent 1fr track, so unequal
+   wordmark/CTA widths never pull the links off-center the way the old
+   flex-row-after-logo + margin-left:auto layout did. `gap` is symmetric
+   on both sides of the center column, so it doesn't break the centering
+   math. Below 1024px this is overridden back to the original flex layout
+   (see the tablet media query) - the mobile <details> disclosure's
+   position is unchanged by this fix. */
 .stak-landing-nav {
   flex: none;
   height: 64px;
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 36px;
   padding: 0 48px;
   border-bottom: 1px solid var(--line);
 }
 .stak-landing-wordmark {
+  grid-column: 1;
+  justify-self: start;
   font-weight: 700;
   font-size: 16px;
   letter-spacing: 0.18em;
@@ -61,6 +74,8 @@
   text-decoration: none;
 }
 .stak-landing-nav-links {
+  grid-column: 2;
+  justify-self: center;
   display: flex;
   gap: 26px;
   font-size: 14px;
@@ -80,6 +95,8 @@
    pattern as account-menu.tsx's account menu and stack-card.tsx's
    "Technical details" - keyboard-operable with no custom JS. */
 .stak-landing-nav-disclosure {
+  grid-column: 2;
+  justify-self: center;
   display: none;
   position: relative;
   flex: none;
@@ -153,7 +170,8 @@
   background: var(--bg);
 }
 .stak-landing-nav-actions {
-  margin-left: auto;
+  grid-column: 3;
+  justify-self: end;
   display: flex;
   gap: 12px;
   align-items: center;
@@ -321,6 +339,20 @@
   font-size: 13.5px;
   color: var(--faint);
   line-height: 1.5;
+}
+/* globals.css's bare `code { background: var(--panel-subtle) }` rule is
+   tuned for the light-theme prose system; .stak forces a dark surface
+   regardless of OS color-scheme preference (same override reasoning as
+   .stak-landing-steps code below), so inline <code> inside this caption
+   (and the closing bar's muted line) needs the same explicit override. */
+.stak-landing-caption code,
+.stak-landing-closing-muted code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  color: var(--faint);
+  background: none;
+  border: none;
+  padding: 0;
 }
 
 /* ---- Preview card (illustrative, not live data) ---- */
@@ -619,7 +651,13 @@
 
 /* Tablet: intentional two-column composition, not a squeezed desktop. */
 @media (max-width: 1023.98px) {
+  /* Restore the original flex-row layout below 1024px (unchanged from the
+     prior sub-pass): the nav-links grid column is irrelevant here since
+     .stak-landing-nav-links is hidden and the disclosure takes over, and
+     the brief asks for the mobile disclosure's position/behavior to stay
+     exactly as it was before the desktop grid-centering fix. */
   .stak-landing-nav {
+    display: flex;
     padding: 0 28px;
     gap: 20px;
   }
