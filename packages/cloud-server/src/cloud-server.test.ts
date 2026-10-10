@@ -158,6 +158,89 @@ describe('cloud auth', () => {
   });
 });
 
+describe('getPendingCliAuthSession (read-only peek)', () => {
+  it('returns the real pending status and label when the CLI set one', async () => {
+    const { call, service } = setup();
+    const start = await call('POST', 'cli/auth/start', {
+      body: { label: 'temi-laptop' },
+    });
+    const userCode = (start.jsonBody as { userCode: string }).userCode;
+
+    const view = await service.getPendingCliAuthSession(userCode);
+
+    expect(view).toEqual({
+      status: 'pending',
+      label: 'temi-laptop',
+      expiresAt: (start.jsonBody as { expiresAt: string }).expiresAt,
+    });
+  });
+
+  it('returns pending with no label when the CLI never set one', async () => {
+    const { call, service } = setup();
+    const start = await call('POST', 'cli/auth/start', { body: {} });
+    const userCode = (start.jsonBody as { userCode: string }).userCode;
+
+    const view = await service.getPendingCliAuthSession(userCode);
+
+    expect(view).toEqual({
+      status: 'pending',
+      expiresAt: (start.jsonBody as { expiresAt: string }).expiresAt,
+    });
+    expect(view).not.toHaveProperty('label');
+  });
+
+  it('lazily transitions an expired pending session to expired, persisting the change', async () => {
+    const { call, service, repository, advance } = setup();
+    const start = await call('POST', 'cli/auth/start', { body: {} });
+    const userCode = (start.jsonBody as { userCode: string }).userCode;
+    advance(120_000);
+
+    const view = await service.getPendingCliAuthSession(userCode);
+    expect(view?.status).toBe('expired');
+
+    // Not just the returned value — the stored record itself must now be 'expired'.
+    const stored = await repository.findAuthSessionByUserCode(userCode);
+    expect(stored?.status).toBe('expired');
+  });
+
+  it('returns the real status for an already-approved session, without mutating it', async () => {
+    const { call, service } = setup();
+    const start = await call('POST', 'cli/auth/start', { body: {} });
+    const userCode = (start.jsonBody as { userCode: string }).userCode;
+    await service.approveCliAuth({
+      userCode,
+      profile: { userId: USER_A, githubUsername: 'temi' },
+    });
+
+    const view = await service.getPendingCliAuthSession(userCode);
+    expect(view?.status).toBe('approved');
+  });
+
+  it('returns the real status for an already-consumed session', async () => {
+    const { call, service, signIn } = setup();
+    // signIn runs the full start -> approve -> token exchange, consuming the session.
+    await signIn(USER_A, 'temi');
+    // signIn doesn't expose the userCode, so drive it manually here instead.
+    const start = await call('POST', 'cli/auth/start', { body: {} });
+    const userCode = (start.jsonBody as { userCode: string }).userCode;
+    const deviceSecret = (start.jsonBody as { deviceSecret: string })
+      .deviceSecret;
+    await service.approveCliAuth({
+      userCode,
+      profile: { userId: USER_A, githubUsername: 'temi' },
+    });
+    await call('POST', 'cli/auth/token', { body: { deviceSecret } });
+
+    const view = await service.getPendingCliAuthSession(userCode);
+    expect(view?.status).toBe('consumed');
+  });
+
+  it('returns null for an unknown code', async () => {
+    const { service } = setup();
+    expect(await service.getPendingCliAuthSession('NOPE-NOPE')).toBeNull();
+  });
+});
+
 describe('cloud environments', () => {
   it('creates the first version, then commits optimistically', async () => {
     const { call, signIn } = setup();

@@ -35,6 +35,8 @@ import type { RemoteMemoryBackend } from '@stack/memory';
 
 import { RemoteConflict } from './repository.js';
 import type {
+  CliAuthSessionRecord,
+  CliAuthSessionStatus,
   CloudBlobStore,
   CloudProfile,
   CloudRepository,
@@ -79,6 +81,17 @@ export type TicketPayload = {
 
 export type AuthenticatedUser = { userId: string; tokenId: string };
 
+/**
+ * Real-only read model for the CLI "Approve this machine?" screen (shown BEFORE the user
+ * clicks Approve). Carries only fields that genuinely exist on {@link CliAuthSessionRecord} —
+ * never a fabricated platform/arch. `label` is present only if the CLI user set one.
+ */
+export type PendingCliAuthSessionView = {
+  status: CliAuthSessionStatus;
+  label?: string;
+  expiresAt: string;
+};
+
 export type CloudServiceConfig = {
   repository: CloudRepository & PublicStackRepository;
   blobStore: CloudBlobStore;
@@ -110,6 +123,14 @@ export const createCloudService = (config: CloudServiceConfig) => {
   const maxSnapshotBytes =
     config.maxSnapshotBytes ?? DEFAULT_MAX_SNAPSHOT_BYTES;
   const appUrl = config.appUrl.replace(/\/+$/, '');
+
+  /**
+   * The one lazy-expiry date comparison, shared by {@link approveCliAuth} and
+   * {@link getPendingCliAuthSession} so neither can drift from the other.
+   */
+  const isPastExpiry = (
+    session: Pick<CliAuthSessionRecord, 'expiresAt'>,
+  ): boolean => new Date(session.expiresAt).getTime() < nowMs();
 
   const genUserCode = (): string => {
     const bytes = randomBytes(8);
@@ -384,7 +405,7 @@ export const createCloudService = (config: CloudServiceConfig) => {
         input.userCode,
       );
       if (!session) throw notFound('not-found', 'Unknown authorization code.');
-      if (new Date(session.expiresAt).getTime() < nowMs()) {
+      if (isPastExpiry(session)) {
         await config.repository.updateAuthSession(session.sessionId, {
           status: 'expired',
         });
@@ -399,6 +420,39 @@ export const createCloudService = (config: CloudServiceConfig) => {
         userId: input.profile.userId,
       });
       return { approved: true };
+    },
+
+    /**
+     * Read-only peek at a pending CLI auth session, used to render the "Approve this
+     * machine?" screen truthfully BEFORE the user clicks Approve — including the expired
+     * and already-consumed/approved states, without needing a failed approval attempt.
+     * Same trust model as the approval page itself: the code is the credential, exactly
+     * like `approveCliAuth`'s lookup. Never mutates, except the one legitimate lazy-expiry
+     * transition (pending + past `expiresAt` -> `expired`), using the exact same date
+     * comparison `approveCliAuth` uses. No platform/arch field exists on the session, so
+     * none is read or returned here.
+     */
+    getPendingCliAuthSession: async (
+      userCode: string,
+    ): Promise<PendingCliAuthSessionView | null> => {
+      const session =
+        await config.repository.findAuthSessionByUserCode(userCode);
+      if (!session) return null;
+      if (session.status === 'pending' && isPastExpiry(session)) {
+        await config.repository.updateAuthSession(session.sessionId, {
+          status: 'expired',
+        });
+        return {
+          status: 'expired',
+          expiresAt: session.expiresAt,
+          ...(session.label ? { label: session.label } : {}),
+        };
+      }
+      return {
+        status: session.status,
+        expiresAt: session.expiresAt,
+        ...(session.label ? { label: session.label } : {}),
+      };
     },
 
     revokeToken: async (user: AuthenticatedUser): Promise<void> => {
