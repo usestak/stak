@@ -47,8 +47,11 @@ describe('web product branding is STAK (R4)', () => {
     expect(publicShell).toContain('STAK');
     // P9 Task 8: `/` became an indexable public landing page rather than a
     // bare sign-in card — it still carries the STAK brand and the required
-    // "Your STAK should survive your laptop." line.
-    const landing = read('page.tsx');
+    // "Your STAK should survive your laptop." line. P9 Task 2 moved that
+    // landing content from page.tsx into its own shell component
+    // (PublicLandingShell) as part of the S.01 recomposition, so the brand
+    // guard now reads the shell rather than the thin page.tsx wrapper.
+    const landing = read('_components/public-landing-shell.tsx');
     expect(landing).toContain('STAK');
     expect(landing).toContain('Your STAK should survive your laptop.');
   });

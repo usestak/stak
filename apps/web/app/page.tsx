@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 
-import { FocusedShell } from './_components/focused-shell';
+import { PublicLandingShell } from './_components/public-landing-shell';
 import { siteOrigin } from '@/lib/site-origin';
 import { getSessionUser } from '@/lib/session';
 
@@ -33,46 +33,11 @@ export default async function HomePage() {
   // Signed-in users go through onboarding's own real-state check, which sends
   // an already-established account straight on to Overview (never trapped).
   // This redirect never fires for an anonymous visitor or crawler — they see
-  // the full landing content below, rendered through the same approved
-  // FocusedShell composition as auth/onboarding/device-authorization, kept
-  // real SEO content (one <h1>, server-rendered prose) via FocusedShell's
-  // `title` prop rather than a hand-built public-page layout.
+  // the full public landing composition below (P9 Task 2: the real S.01
+  // design-contract structure - nav, split hero, feature strip, and truthful
+  // product-explainer sections - replacing the narrow FocusedShell card from
+  // commit c9f7c05, which didn't match the approved design).
   if (await getSessionUser()) redirect('/onboarding');
 
-  return (
-    <FocusedShell title="STAK is the control plane for portable AI agent environments.">
-      <p>Your skills. Your memory. Your setup. Any agent. Any machine.</p>
-
-      <div className="stak-focus-actions">
-        <a className="stak-btn" href="/auth/login?next=/onboarding">
-          Sign in with GitHub
-        </a>
-      </div>
-
-      <p>
-        Coding agents like Claude Code and Codex build up Skills and Memory as
-        you work with them — context that&apos;s easy to lose when you switch
-        machines. STAK keeps that Memory backed up and your Skills reproducible,
-        so the agent on a new machine picks up where the last one left off
-        instead of starting cold.
-      </p>
-
-      <p>
-        Your STAK should survive your laptop. Memory you&apos;ve backed up can
-        be recovered with a passkey, Skills can be checked out again, and
-        projects can be mapped back onto a new machine instead of rebuilding
-        from scratch.
-      </p>
-
-      <p className="stak-focus-eyebrow">From your terminal</p>
-      <pre className="stak-cmd">
-        <code>{`stak login\nstak scan\nstak memory backup`}</code>
-      </pre>
-
-      <p>
-        Authorizing a device? Continue to{' '}
-        <a href="/cli">device authorization</a>.
-      </p>
-    </FocusedShell>
-  );
+  return <PublicLandingShell />;
 }
