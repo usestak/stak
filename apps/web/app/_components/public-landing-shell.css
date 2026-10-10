@@ -28,6 +28,11 @@
   --stak-motion-standard: 220ms; /* hover color/background, disclosure */
   --stak-motion-reveal: 360ms; /* deliberate entrance/scroll reveal */
   --stak-motion-ease: cubic-bezier(0.16, 1, 0.3, 1); /* ease-out, shared */
+  /* P9 Task 5: a single stagger-offset unit, multiplied (via calc()) per
+     element instead of each sequence inventing its own ad hoc delay number
+     (a minor finding from the Task 3/4 review). Still only 3 duration
+     tiers above - this is an offset, not a 4th tier. */
+  --stak-motion-stagger: 70ms;
 }
 
 @keyframes stak-landing-rise {
@@ -867,6 +872,159 @@
   flex: none;
 }
 
+/* ---- Macro narrative + proof-visual micro-motion (P9 Task 5) ----
+   Extends the exact same [data-reveal] / stak-reveal-armed /
+   stak-reveal-visible machinery from LandingScrollReveal - every selector
+   below requires `.stak-reveal-armed` on an ancestor `[data-reveal]`
+   section, so if JS never runs, reduced-motion is set, or
+   IntersectionObserver is unavailable, none of this ever applies and
+   every proof visual is exactly as server-rendered. No new classes are
+   added by JS; only the staging/sequencing of the existing reveal is
+   extended. Transform only, never opacity, never a loop, never a fake
+   live/sync/daemon/upload cue - every rule here fires once, when the
+   section first enters view, same as the rest of this file.
+
+   Macro story: the hero preview (above) already settles in framed as
+   DELL's reported state. Scrolling down, the Skills/Memory/Machines/
+   Stacks proof cards settle in from alternating sides - a deliberate
+   "gathering toward the middle" rhythm, not a literal animation of data
+   moving, that reads as these facts collecting into one portable STAK
+   picture. The Move-to-a-new-machine flow below is the explicit climax:
+   DELL's node settles first, a connector snaps in, the STAK node
+   materializes (the backup), a second connector snaps in, and the
+   MacBook node arrives last from the opposite side - the clearest,
+   most deliberately sequenced motion on the page, because it's the one
+   place the page is explicitly about moving machines. */
+
+/* Skills: card arrives from the left; the before/after diff lines settle
+   in sequence (old, then new) rather than appearing as static text, and
+   the "Update available" badge is deliberately the LAST thing to resolve
+   in the row - it only lands once the diff that justifies it is already
+   visible, never before. */
+#skills[data-reveal].stak-reveal-armed .stak-landing-proof-card {
+  transform: translateX(-14px);
+  transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
+}
+#skills[data-reveal].stak-reveal-armed .stak-landing-proof-diff .before,
+#skills[data-reveal].stak-reveal-armed .stak-landing-proof-diff .after {
+  transform: translateX(-10px);
+  transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
+}
+#skills[data-reveal].stak-reveal-armed .stak-landing-proof-diff .after {
+  transform: translateX(10px);
+  transition-delay: var(--stak-motion-stagger);
+}
+#skills[data-reveal].stak-reveal-armed .stak-landing-proof-row .stak-landing-proof-status {
+  transform: translateY(6px) scale(0.92);
+  transition: transform var(--stak-motion-standard) var(--stak-motion-ease);
+  transition-delay: calc(var(--stak-motion-stagger) * 3);
+}
+#skills[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-card,
+#skills[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-diff .before,
+#skills[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-diff .after,
+#skills[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-row .stak-landing-proof-status {
+  transform: none;
+}
+
+/* Memory: the Standard and Protected cards settle in from opposite sides
+   and meet in the middle - the clearest literal "converging" moment in
+   the collecting sequence, since this section is explicitly a two-sided
+   comparison. */
+#memory-privacy[data-reveal].stak-reveal-armed .stak-landing-proof-mode:nth-child(1) {
+  transform: translateX(-14px);
+  transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
+}
+#memory-privacy[data-reveal].stak-reveal-armed .stak-landing-proof-mode:nth-child(2) {
+  transform: translateX(14px);
+  transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
+  transition-delay: var(--stak-motion-stagger);
+}
+#memory-privacy[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-mode {
+  transform: none;
+}
+
+/* Machines: card arrives from the right (alternating with Skills' left
+   entrance), and the desired/reported fact rows resolve one after the
+   other - the same "facts resolving under a settled card" rhythm as the
+   hero preview rows above, reused rather than invented fresh. */
+#machines[data-reveal].stak-reveal-armed .stak-landing-proof-card {
+  transform: translateX(14px);
+  transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
+}
+#machines[data-reveal].stak-reveal-armed .stak-landing-proof-facts-row {
+  transform: translateY(10px);
+  transition: transform var(--stak-motion-standard) var(--stak-motion-ease);
+}
+#machines[data-reveal].stak-reveal-armed .stak-landing-proof-facts-row:nth-child(3) {
+  transition-delay: var(--stak-motion-stagger);
+}
+#machines[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-card,
+#machines[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-facts-row {
+  transform: none;
+}
+
+/* Stacks: card arrives from the left again, and the Included/Paused rows
+   stagger in the same cadence as the feature strip above. */
+#stacks-proof[data-reveal].stak-reveal-armed .stak-landing-proof-stack {
+  transform: translateX(-14px);
+  transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
+}
+#stacks-proof[data-reveal].stak-reveal-armed .stak-landing-proof-stack-comp-row {
+  transform: translateY(8px);
+  transition: transform var(--stak-motion-standard) var(--stak-motion-ease);
+}
+#stacks-proof[data-reveal].stak-reveal-armed .stak-landing-proof-stack-comp-row:nth-child(4) {
+  transition-delay: var(--stak-motion-stagger);
+}
+#stacks-proof[data-reveal].stak-reveal-armed .stak-landing-proof-stack-comp-row:nth-child(5) {
+  transition-delay: calc(var(--stak-motion-stagger) * 2);
+}
+#stacks-proof[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-stack,
+#stacks-proof[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-stack-comp-row {
+  transform: none;
+}
+
+/* Move to a new machine: the climax. DELL settles from the left, a
+   connector snaps in (scaleX from its own left edge, so it reads as a
+   line extending rather than a width change - no layout box ever
+   resizes), the STAK node materializes in the middle, a second connector
+   snaps in, and MacBook arrives last from the right. This sequence shows
+   the order the real steps happen in when *you* run them (install, log
+   in, recover, restore - see the steps list right below it) - it is not,
+   and must never look like, a live sync/upload/daemon animation: it
+   plays once on scroll-in and then holds still. */
+#move[data-reveal].stak-reveal-armed .stak-landing-proof-flow-node,
+#move[data-reveal].stak-reveal-armed .stak-landing-proof-flow-arrow {
+  transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
+}
+#move[data-reveal].stak-reveal-armed .stak-landing-proof-flow-node:nth-child(1) {
+  transform: translateX(-16px);
+}
+#move[data-reveal].stak-reveal-armed .stak-landing-proof-flow-arrow:nth-child(2) {
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition-duration: var(--stak-motion-standard);
+  transition-delay: calc(var(--stak-motion-stagger) * 2);
+}
+#move[data-reveal].stak-reveal-armed .stak-landing-proof-flow-node:nth-child(3) {
+  transform: translateY(10px) scale(0.95);
+  transition-delay: calc(var(--stak-motion-stagger) * 3);
+}
+#move[data-reveal].stak-reveal-armed .stak-landing-proof-flow-arrow:nth-child(4) {
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition-duration: var(--stak-motion-standard);
+  transition-delay: calc(var(--stak-motion-stagger) * 5);
+}
+#move[data-reveal].stak-reveal-armed .stak-landing-proof-flow-node:nth-child(5) {
+  transform: translateX(16px);
+  transition-delay: calc(var(--stak-motion-stagger) * 6);
+}
+#move[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-flow-node,
+#move[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-flow-arrow {
+  transform: none;
+}
+
 /* ---- Closing reassurance bar ---- */
 .stak-landing-closing {
   margin: 32px 48px 64px;
@@ -1053,6 +1211,35 @@
   .stak-landing-proof-flow-arrow {
     display: none;
   }
+  /* improve-animations audit (P9 Task 5 self-review): below 768px these
+     cards/nodes reflow into a single vertical stack, so a horizontal
+     translateX entrance no longer matches the layout's own axis
+     (physicality/origin should track the actual direction content
+     moves). Swap to vertical offsets at this breakpoint instead of
+     reusing the desktop horizontal values. */
+  #memory-privacy[data-reveal].stak-reveal-armed .stak-landing-proof-mode:nth-child(1) {
+    transform: translateY(-10px);
+  }
+  #memory-privacy[data-reveal].stak-reveal-armed .stak-landing-proof-mode:nth-child(2) {
+    transform: translateY(10px);
+  }
+  #move[data-reveal].stak-reveal-armed .stak-landing-proof-flow-node:nth-child(1) {
+    transform: translateY(-12px);
+  }
+  #move[data-reveal].stak-reveal-armed .stak-landing-proof-flow-node:nth-child(5) {
+    transform: translateY(12px);
+  }
+  /* Explicit nth-child-scoped visible-state resets: the base
+     `.stak-reveal-visible` reset rule above (outside this media query)
+     ties in specificity with the :nth-child offset rules just above, so
+     it needs a same-specificity override here rather than relying on
+     source order across the file. */
+  #memory-privacy[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-mode:nth-child(1),
+  #memory-privacy[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-mode:nth-child(2),
+  #move[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-flow-node:nth-child(1),
+  #move[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-flow-node:nth-child(5) {
+    transform: none;
+  }
 }
 
 @media (max-width: 479.98px) {
@@ -1084,7 +1271,22 @@
   .stak-landing-preview-status,
   .stak-landing-preview-row,
   [data-reveal].stak-reveal-armed,
-  [data-reveal].stak-reveal-armed .stak-landing-feature {
+  [data-reveal].stak-reveal-armed .stak-landing-feature,
+  /* P9 Task 5: the macro narrative + proof-visual micro-motion extends
+     this same catch-all - belt-and-suspenders alongside
+     LandingScrollReveal's own reduced-motion check, which already skips
+     adding `.stak-reveal-armed` at all under this preference, so none of
+     these selectors can match in practice either way. */
+  [data-reveal].stak-reveal-armed .stak-landing-proof-card,
+  [data-reveal].stak-reveal-armed .stak-landing-proof-stack,
+  [data-reveal].stak-reveal-armed .stak-landing-proof-mode,
+  [data-reveal].stak-reveal-armed .stak-landing-proof-facts-row,
+  [data-reveal].stak-reveal-armed .stak-landing-proof-stack-comp-row,
+  [data-reveal].stak-reveal-armed .stak-landing-proof-diff .before,
+  [data-reveal].stak-reveal-armed .stak-landing-proof-diff .after,
+  [data-reveal].stak-reveal-armed .stak-landing-proof-row .stak-landing-proof-status,
+  [data-reveal].stak-reveal-armed .stak-landing-proof-flow-node,
+  [data-reveal].stak-reveal-armed .stak-landing-proof-flow-arrow {
     animation: none;
     transition: none;
     transform: none;
