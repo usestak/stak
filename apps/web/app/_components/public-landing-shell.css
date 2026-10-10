@@ -7,12 +7,36 @@
    token/raw value already used elsewhere in this codebase is reused
    instead (see the task report for the full mapping table).
 
-   No motion/animation in this file - P9 Task 3 layers that in afterward. */
+   P9 Task 3 motion system: this codebase has no existing shared animation
+   vocabulary (checked globals.css and every other _components/*.css before
+   adding this - the only prior `transition` in apps/web is the unrelated
+   skip-link's `top` transition in globals.css) and no animation library is
+   installed, so a small page-scoped vocabulary is defined once below and
+   reused everywhere else in this file - never a fourth/fifth arbitrary
+   timing value. Every animated property here is `transform` only (never
+   `opacity`, so no server-rendered text is ever visually hidden) except
+   the two purely-decorative, non-text hover/press accents (border/background
+   -color on buttons), which are paint-only and don't move layout. */
 
 .stak-landing {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
+
+  /* Shared motion vocabulary (3 tiers only): */
+  --stak-motion-fast: 120ms; /* press/hover feedback */
+  --stak-motion-standard: 220ms; /* hover color/background, disclosure */
+  --stak-motion-reveal: 360ms; /* deliberate entrance/scroll reveal */
+  --stak-motion-ease: cubic-bezier(0.16, 1, 0.3, 1); /* ease-out, shared */
+}
+
+@keyframes stak-landing-rise {
+  from {
+    transform: translateY(10px);
+  }
+  to {
+    transform: translateY(0);
+  }
 }
 
 /* ---- Nav ---- */
@@ -45,8 +69,10 @@
 }
 .stak-landing-nav-links a {
   color: var(--faint);
+  transition: color var(--stak-motion-fast) var(--stak-motion-ease);
 }
-.stak-landing-nav-links a:hover {
+.stak-landing-nav-links a:hover,
+.stak-landing-nav-links a:focus-visible {
   color: var(--ink);
 }
 /* Mobile/tablet nav-link disclosure (<1024px) - hidden on desktop where
@@ -67,13 +93,25 @@
   border: 1px solid var(--line-2);
   border-radius: 6px;
   white-space: nowrap;
+  transition:
+    color var(--stak-motion-fast) var(--stak-motion-ease),
+    border-color var(--stak-motion-fast) var(--stak-motion-ease),
+    transform var(--stak-motion-fast) var(--stak-motion-ease);
 }
 .stak-landing-nav-disclosure > summary::-webkit-details-marker {
   display: none;
 }
 .stak-landing-nav-disclosure > summary:hover {
   color: var(--ink);
+  border-color: var(--faint);
 }
+.stak-landing-nav-disclosure > summary:active {
+  transform: scale(0.97);
+}
+/* Progressive-enhancement disclosure entrance: browsers that support
+   @starting-style animate the panel in; browsers that don't just show it
+   instantly (native <details> behavior, unchanged). Either way the panel
+   is fully usable with no JS. */
 .stak-landing-nav-disclosure-panel {
   position: absolute;
   left: 0;
@@ -88,14 +126,29 @@
   flex-direction: column;
   gap: 2px;
   z-index: 20;
+  /* Anchored to the summary toggle it drops from (top-left), not the
+     default center origin - improve-animations audit, physicality &
+     origin: trigger-anchored popovers should scale from their trigger. */
+  transform-origin: top left;
+  transform: translateY(0) scale(1);
+  transition: transform var(--stak-motion-standard) var(--stak-motion-ease);
+}
+@starting-style {
+  .stak-landing-nav-disclosure[open] > .stak-landing-nav-disclosure-panel {
+    transform: translateY(-4px) scale(0.97);
+  }
 }
 .stak-landing-nav-disclosure-panel a {
   color: var(--faint);
   font-size: 14px;
   padding: 9px 10px;
   border-radius: 6px;
+  transition:
+    color var(--stak-motion-fast) var(--stak-motion-ease),
+    background-color var(--stak-motion-fast) var(--stak-motion-ease);
 }
-.stak-landing-nav-disclosure-panel a:hover {
+.stak-landing-nav-disclosure-panel a:hover,
+.stak-landing-nav-disclosure-panel a:focus-visible {
   color: var(--ink);
   background: var(--bg);
 }
@@ -110,8 +163,10 @@
   font-size: 14px;
   color: var(--muted);
   padding: 8px 12px;
+  transition: color var(--stak-motion-fast) var(--stak-motion-ease);
 }
-.stak-landing-signin:hover {
+.stak-landing-signin:hover,
+.stak-landing-signin:focus-visible {
   color: var(--ink);
 }
 .stak-landing-install-cta {
@@ -123,10 +178,18 @@
   border-radius: 6px;
   text-decoration: none;
   white-space: nowrap;
+  display: inline-block;
+  transition:
+    background-color var(--stak-motion-standard) var(--stak-motion-ease),
+    transform var(--stak-motion-fast) var(--stak-motion-ease);
 }
-.stak-landing-install-cta:hover {
+.stak-landing-install-cta:hover,
+.stak-landing-install-cta:focus-visible {
   background: var(--muted);
   text-decoration: none;
+}
+.stak-landing-install-cta:active {
+  transform: scale(0.97);
 }
 
 .stak-landing-main {
@@ -148,6 +211,14 @@
   flex-direction: column;
   gap: 24px;
   min-width: 0;
+  /* Macro narrative, step 1: the current-machine state (hero copy) settles
+     in first. Transform-only (no opacity) - the h1/lead/paragraph text is
+     fully opaque and present in the server-rendered HTML the entire time,
+     just offset a few px before this runs; nothing is ever hidden from a
+     crawler or a no-JS visitor, this is a pure CSS keyframe with no JS
+     dependency. */
+  animation: stak-landing-rise var(--stak-motion-reveal) var(--stak-motion-ease)
+    both;
 }
 .stak-landing-eyebrow {
   font: 500 12px var(--mono);
@@ -211,10 +282,39 @@
   border-radius: 5px;
   padding: 4px 10px;
   cursor: pointer;
+  transition:
+    border-color var(--stak-motion-fast) var(--stak-motion-ease),
+    color var(--stak-motion-fast) var(--stak-motion-ease),
+    transform var(--stak-motion-fast) var(--stak-motion-ease);
 }
-.stak-landing-copy:hover {
+.stak-landing-copy:hover,
+.stak-landing-copy:focus-visible {
   border-color: var(--faint);
   color: var(--ink);
+}
+.stak-landing-copy:active {
+  transform: scale(0.95);
+}
+/* Confirmation pop: a one-shot transform-only overshoot when the "Copied"
+   state lands, layered on top of the label flip (the real confirmation).
+   fill-mode "both" means it also holds its 1.0 end state, so it never
+   leaves the button mid-transform if re-triggered quickly. */
+.stak-landing-copy--copied {
+  border-color: var(--green);
+  color: var(--ink);
+  animation: stak-landing-copy-pop var(--stak-motion-standard)
+    var(--stak-motion-ease) both;
+}
+@keyframes stak-landing-copy-pop {
+  0% {
+    transform: scale(0.95);
+  }
+  60% {
+    transform: scale(1.06);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 .stak-landing-caption {
   margin: 0;
@@ -233,6 +333,12 @@
   flex-direction: column;
   gap: 18px;
   min-width: 0;
+  /* Macro narrative, step 2: the preview card settles in just after the
+     hero copy (140ms stagger) - "these facts exist because of what you just
+     read", not a separate unrelated entrance. Transform-only, same reasons
+     as .stak-landing-hero-copy above. */
+  animation: stak-landing-rise var(--stak-motion-reveal) var(--stak-motion-ease)
+    140ms both;
 }
 .stak-landing-preview-head {
   display: flex;
@@ -248,6 +354,14 @@
   align-items: center;
   font-size: 22px;
   font-weight: 600;
+  /* Macro narrative, step 4 (the "restrained transition suggesting
+     portability/cloud-backing" the brief asks for): the backed-up state
+     settles once, right after the card arrives and just before the
+     Skills/Memory/Machines rows resolve under it - never a looping pulse,
+     never a fake progress/sync bar, just a one-time settle that reads as
+     "this is already true", not "this is happening live". */
+  animation: stak-landing-rise var(--stak-motion-standard) var(--stak-motion-ease)
+    220ms both;
 }
 .stak-landing-preview-rows {
   display: flex;
@@ -264,6 +378,25 @@
 }
 .stak-landing-preview-row:last-child {
   border-bottom: none;
+}
+/* Macro narrative, step 3: Skills / Memory / Machines resolve one after
+   another, inside the card's own settle. Small translateY + per-row delay
+   (70ms apart, 220ms standard tier) on top of the card's 140ms entrance
+   delay - never a 4th/5th timing value, just the standard tier reused with
+   a stagger offset, which is what "facts resolving" actually looks like
+   rather than a generic group fade. Transform-only, text stays opaque. */
+.stak-landing-preview-row {
+  animation: stak-landing-rise var(--stak-motion-standard) var(--stak-motion-ease)
+    both;
+}
+.stak-landing-preview-row:nth-child(1) {
+  animation-delay: 180ms;
+}
+.stak-landing-preview-row:nth-child(2) {
+  animation-delay: 250ms;
+}
+.stak-landing-preview-row:nth-child(3) {
+  animation-delay: 320ms;
 }
 .stak-landing-preview-row .k {
   font: 500 11px var(--mono);
@@ -322,12 +455,55 @@
   text-align: center;
 }
 
+/* ---- Scroll reveal (armed by LandingScrollReveal, see that file) ----
+   Base state (no class): every [data-reveal] section is exactly as laid
+   out above - fully visible, full opacity, in place. `.stak-reveal-armed`
+   is only ever added by JS right before observing, so a no-JS or failed-
+   script visitor never sees this rule at all. Transform-only (translateY),
+   never opacity, for the same SEO-safety reason as the hero/preview
+   entrance above - these sections hold real explainer copy, not
+   decorative content, and should never be visually hidden by this file,
+   only offset a few px until they're actually in view. */
+[data-reveal].stak-reveal-armed {
+  transform: translateY(16px);
+  transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
+}
+[data-reveal].stak-reveal-armed.stak-reveal-visible {
+  transform: translateY(0);
+}
+
 /* ---- Feature strip ---- */
 .stak-landing-features {
   margin: 48px 48px 0;
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   border-top: 1px solid var(--line-2);
+}
+/* Group entrance: once the strip itself is revealed, its 5 items stagger
+   in 60ms apart (within the 30-80ms band) - same reveal duration/easing,
+   just offset per item, so it reads as one coordinated motion rather than
+   5 separate ones. */
+.stak-landing-features.stak-reveal-armed .stak-landing-feature {
+  transform: translateY(12px);
+  transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
+}
+.stak-landing-features.stak-reveal-armed.stak-reveal-visible .stak-landing-feature {
+  transform: translateY(0);
+}
+.stak-landing-features.stak-reveal-armed .stak-landing-feature:nth-child(1) {
+  transition-delay: 0ms;
+}
+.stak-landing-features.stak-reveal-armed .stak-landing-feature:nth-child(2) {
+  transition-delay: 60ms;
+}
+.stak-landing-features.stak-reveal-armed .stak-landing-feature:nth-child(3) {
+  transition-delay: 120ms;
+}
+.stak-landing-features.stak-reveal-armed .stak-landing-feature:nth-child(4) {
+  transition-delay: 180ms;
+}
+.stak-landing-features.stak-reveal-armed .stak-landing-feature:nth-child(5) {
+  transition-delay: 240ms;
 }
 .stak-landing-feature {
   padding: 22px 20px 0 0;
@@ -569,5 +745,43 @@
   }
   .stak-landing-feature:first-child {
     border-top: none;
+  }
+}
+
+/* ================= Reduced motion ================= */
+/* Step 4 of the P9 Task 3 brief: with `prefers-reduced-motion: reduce`,
+   every staged entrance/reveal becomes immediate (content is already
+   visible either way, since nothing above ever used opacity - this just
+   removes the deliberate delay/offset too) and there is no scroll-
+   choreography dependency left for a reduced-motion visitor to even
+   notice. Interaction feedback (hover/press/copy-confirmation) stays, but
+   collapses to a near-instant transition instead of eased/staged timing. */
+@media (prefers-reduced-motion: reduce) {
+  .stak-landing-hero-copy,
+  .stak-landing-preview,
+  .stak-landing-preview-status,
+  .stak-landing-preview-row,
+  [data-reveal].stak-reveal-armed,
+  [data-reveal].stak-reveal-armed .stak-landing-feature {
+    animation: none;
+    transition: none;
+    transform: none;
+  }
+  .stak-landing-nav-links a,
+  .stak-landing-signin,
+  .stak-landing-install-cta,
+  .stak-landing-copy,
+  .stak-landing-nav-disclosure > summary,
+  .stak-landing-nav-disclosure-panel,
+  .stak-landing-nav-disclosure-panel a {
+    transition-duration: 1ms;
+  }
+  .stak-landing-install-cta:active,
+  .stak-landing-copy:active,
+  .stak-landing-nav-disclosure > summary:active {
+    transform: none;
+  }
+  .stak-landing-copy--copied {
+    animation: none;
   }
 }

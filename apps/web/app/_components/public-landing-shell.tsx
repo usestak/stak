@@ -4,6 +4,7 @@ import '../overview/shell.css';
 import './public-landing-shell.css';
 
 import { CopyCommand } from './copy-command';
+import { LandingScrollReveal } from './landing-scroll-reveal';
 
 /**
  * Public, signed-out landing page shell (P9 Task 2). Replaces the narrow
@@ -18,8 +19,15 @@ import { CopyCommand } from './copy-command';
  * page shell, not a reusable library component, so it owns its full content
  * rather than accepting flags to toggle sections on/off.
  *
- * No motion/animation here by design - that's P9 Task 3, sequenced after
- * this one. The only interactive leaf is `CopyCommand` (clipboard copy).
+ * P9 Task 3 layers a small motion system on top of this same markup: CSS-
+ * only entrance animation on the hero/preview card (see
+ * public-landing-shell.css), and a scroll-reveal for the sections below the
+ * fold, armed by the non-visual `LandingScrollReveal` client island. Every
+ * `[data-reveal]` section here is fully visible in this server-rendered
+ * markup with no base rule hiding it - the island only ever adds a class
+ * that can offset it, and only once the section is actually on screen (or a
+ * fallback timer fires). The other interactive leaf is `CopyCommand`
+ * (clipboard copy).
  */
 export function PublicLandingShell() {
   return (
@@ -45,6 +53,7 @@ export function PublicLandingShell() {
           <ClosingBar />
         </main>
       </div>
+      <LandingScrollReveal />
     </>
   );
 }
@@ -223,6 +232,7 @@ function FeatureStrip() {
       id="stacks"
       className="stak-landing-features"
       aria-label="What STAK does"
+      data-reveal
     >
       {features.map((feature) => (
         <div className="stak-landing-feature" key={feature.title}>
@@ -236,7 +246,7 @@ function FeatureStrip() {
 
 function HowItWorks() {
   return (
-    <section id="how-it-works" className="stak-landing-section">
+    <section id="how-it-works" className="stak-landing-section" data-reveal>
       <h2>How it works</h2>
       <ol className="stak-landing-steps">
         <li>
@@ -266,7 +276,7 @@ function HowItWorks() {
 
 function MemoryAndPrivacy() {
   return (
-    <section id="memory-privacy" className="stak-landing-section">
+    <section id="memory-privacy" className="stak-landing-section" data-reveal>
       <h2>Memory &amp; privacy</h2>
       <div className="stak-landing-privacy-grid">
         <div className="stak-landing-privacy-card">
@@ -290,7 +300,7 @@ function MemoryAndPrivacy() {
 
 function MoveToNewMachine() {
   return (
-    <section id="move" className="stak-landing-section">
+    <section id="move" className="stak-landing-section" data-reveal>
       <h2>Move to a new machine</h2>
       <ol className="stak-landing-steps">
         <li>
@@ -316,7 +326,7 @@ function MoveToNewMachine() {
 
 function ClosingBar() {
   return (
-    <div className="stak-landing-closing">
+    <div className="stak-landing-closing" data-reveal>
       <span>Each machine catches up when you use the STAK CLI there.</span>
       <span className="stak-landing-closing-muted">
         No daemon. No surprise background changes.

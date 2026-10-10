@@ -4,12 +4,17 @@ import { useState } from 'react';
 
 /**
  * Minimal client island (P9 Task 2, public landing shell): a single copy-to-
- * clipboard button for one command line. Not a motion/animation component -
- * just `onClick` + `navigator.clipboard`, matching this task's "Copy-button
- * interactivity is a minimal client island, not motion" constraint. Kept as
- * its own tiny leaf (vercel-composition-patterns: isolate interactivity in a
- * leaf component) so the surrounding hero/section markup stays a Server
- * Component.
+ * clipboard button for one command line - `onClick` + `navigator.clipboard`.
+ * Kept as its own tiny leaf (vercel-composition-patterns: isolate
+ * interactivity in a leaf component) so the surrounding hero/section markup
+ * stays a Server Component.
+ *
+ * P9 Task 3 adds a confirmation micro-interaction on top of the existing
+ * "Copy" -> "Copied" label flip: a transform-only pop (`.stak-landing-copy
+ * --copied` in public-landing-shell.css), using the page's shared fast-
+ * feedback timing. `prefers-reduced-motion: reduce` collapses it to a near-
+ * instant transition; the label flip itself (the actual confirmation) is
+ * unaffected either way.
  */
 export function CopyCommand({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
@@ -30,7 +35,13 @@ export function CopyCommand({ command }: { command: string }) {
   return (
     <button
       type="button"
-      className="stak-landing-copy"
+      // P9 Task 3: `.stak-landing-copy--copied` adds a transform-only
+      // confirmation pop (see public-landing-shell.css's motion-vocabulary
+      // section) - purely a visual accent on top of the label flip below,
+      // which already carried the actual confirmation state.
+      className={
+        copied ? 'stak-landing-copy stak-landing-copy--copied' : 'stak-landing-copy'
+      }
       onClick={onCopy}
       aria-label={`Copy command: ${command}`}
     >
