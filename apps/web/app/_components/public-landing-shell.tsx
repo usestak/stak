@@ -61,6 +61,20 @@ function LandingNav() {
         <a href="#stacks">Stacks</a>
         <a href="#install">CLI</a>
       </div>
+      {/* Below 1024px .stak-landing-nav-links is hidden by CSS; this native
+          <details> disclosure (same pattern as account-menu.tsx and
+          stack-card.tsx's "Technical details") carries the same 4 links so
+          they stay reachable instead of being dropped. Keyboard-operable by
+          default, no JS required. */}
+      <details className="stak-landing-nav-disclosure">
+        <summary aria-label="Navigation">Menu</summary>
+        <div className="stak-landing-nav-disclosure-panel">
+          <a href="#how-it-works">How it works</a>
+          <a href="#memory-privacy">Memory &amp; privacy</a>
+          <a href="#stacks">Stacks</a>
+          <a href="#install">CLI</a>
+        </div>
+      </details>
       <div className="stak-landing-nav-actions">
         <a className="stak-landing-signin" href="/auth/login?next=/onboarding">
           Sign in

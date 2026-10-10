@@ -49,6 +49,56 @@
 .stak-landing-nav-links a:hover {
   color: var(--ink);
 }
+/* Mobile/tablet nav-link disclosure (<1024px) - hidden on desktop where
+   .stak-landing-nav-links shows the links inline. Same native <details>
+   pattern as account-menu.tsx's account menu and stack-card.tsx's
+   "Technical details" - keyboard-operable with no custom JS. */
+.stak-landing-nav-disclosure {
+  display: none;
+  position: relative;
+  flex: none;
+}
+.stak-landing-nav-disclosure > summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--faint);
+  padding: 7px 11px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.stak-landing-nav-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.stak-landing-nav-disclosure > summary:hover {
+  color: var(--ink);
+}
+.stak-landing-nav-disclosure-panel {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  min-width: 200px;
+  max-width: calc(100vw - 32px);
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 20;
+}
+.stak-landing-nav-disclosure-panel a {
+  color: var(--faint);
+  font-size: 14px;
+  padding: 9px 10px;
+  border-radius: 6px;
+}
+.stak-landing-nav-disclosure-panel a:hover {
+  color: var(--ink);
+  background: var(--bg);
+}
 .stak-landing-nav-actions {
   margin-left: auto;
   display: flex;
@@ -400,6 +450,9 @@
   .stak-landing-nav-links {
     display: none;
   }
+  .stak-landing-nav-disclosure {
+    display: block;
+  }
   .stak-landing-hero {
     grid-template-columns: 1fr;
     padding: 40px 28px 0;
@@ -438,6 +491,10 @@
   }
   .stak-landing-signin {
     padding: 8px 6px;
+    font-size: 13px;
+  }
+  .stak-landing-nav-disclosure > summary {
+    padding: 6px 9px;
     font-size: 13px;
   }
   .stak-landing-install-cta {
