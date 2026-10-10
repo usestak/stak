@@ -349,7 +349,8 @@
    tuned for the light-theme prose system; .stak forces a dark surface
    regardless of OS color-scheme preference (same override reasoning as
    .stak-landing-steps code below), so inline <code> inside this caption
-   (and the closing bar's muted line) needs the same explicit override. */
+   (and the relocated section note's muted line below) needs the same
+   explicit override. */
 .stak-landing-caption code,
 .stak-landing-closing-muted code {
   font-family: var(--mono);
@@ -397,8 +398,8 @@
      Skills/Memory/Machines rows resolve under it - never a looping pulse,
      never a fake progress/sync bar, just a one-time settle that reads as
      "this is already true", not "this is happening live". */
-  animation: stak-landing-rise var(--stak-motion-standard) var(--stak-motion-ease)
-    220ms both;
+  animation: stak-landing-rise var(--stak-motion-standard)
+    var(--stak-motion-ease) 220ms both;
 }
 .stak-landing-preview-rows {
   display: flex;
@@ -423,8 +424,8 @@
    a stagger offset, which is what "facts resolving" actually looks like
    rather than a generic group fade. Transform-only, text stays opaque. */
 .stak-landing-preview-row {
-  animation: stak-landing-rise var(--stak-motion-standard) var(--stak-motion-ease)
-    both;
+  animation: stak-landing-rise var(--stak-motion-standard)
+    var(--stak-motion-ease) both;
 }
 .stak-landing-preview-row:nth-child(1) {
   animation-delay: 180ms;
@@ -524,7 +525,8 @@
   transform: translateY(12px);
   transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
 }
-.stak-landing-features.stak-reveal-armed.stak-reveal-visible .stak-landing-feature {
+.stak-landing-features.stak-reveal-armed.stak-reveal-visible
+  .stak-landing-feature {
   transform: translateY(0);
 }
 .stak-landing-features.stak-reveal-armed .stak-landing-feature:nth-child(1) {
@@ -914,15 +916,24 @@
   transform: translateX(10px);
   transition-delay: var(--stak-motion-stagger);
 }
-#skills[data-reveal].stak-reveal-armed .stak-landing-proof-row .stak-landing-proof-status {
+#skills[data-reveal].stak-reveal-armed
+  .stak-landing-proof-row
+  .stak-landing-proof-status {
   transform: translateY(6px) scale(0.92);
   transition: transform var(--stak-motion-standard) var(--stak-motion-ease);
   transition-delay: calc(var(--stak-motion-stagger) * 3);
 }
-#skills[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-card,
-#skills[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-diff .before,
-#skills[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-diff .after,
-#skills[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-row .stak-landing-proof-status {
+#skills[data-reveal].stak-reveal-armed.stak-reveal-visible
+  .stak-landing-proof-card,
+#skills[data-reveal].stak-reveal-armed.stak-reveal-visible
+  .stak-landing-proof-diff
+  .before,
+#skills[data-reveal].stak-reveal-armed.stak-reveal-visible
+  .stak-landing-proof-diff
+  .after,
+#skills[data-reveal].stak-reveal-armed.stak-reveal-visible
+  .stak-landing-proof-row
+  .stak-landing-proof-status {
   transform: none;
 }
 
@@ -930,16 +941,19 @@
    and meet in the middle - the clearest literal "converging" moment in
    the collecting sequence, since this section is explicitly a two-sided
    comparison. */
-#memory-privacy[data-reveal].stak-reveal-armed .stak-landing-proof-mode:nth-child(1) {
+#memory-privacy[data-reveal].stak-reveal-armed
+  .stak-landing-proof-mode:nth-child(1) {
   transform: translateX(-14px);
   transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
 }
-#memory-privacy[data-reveal].stak-reveal-armed .stak-landing-proof-mode:nth-child(2) {
+#memory-privacy[data-reveal].stak-reveal-armed
+  .stak-landing-proof-mode:nth-child(2) {
   transform: translateX(14px);
   transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
   transition-delay: var(--stak-motion-stagger);
 }
-#memory-privacy[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-mode {
+#memory-privacy[data-reveal].stak-reveal-armed.stak-reveal-visible
+  .stak-landing-proof-mode {
   transform: none;
 }
 
@@ -955,11 +969,14 @@
   transform: translateY(10px);
   transition: transform var(--stak-motion-standard) var(--stak-motion-ease);
 }
-#machines[data-reveal].stak-reveal-armed .stak-landing-proof-facts-row:nth-child(3) {
+#machines[data-reveal].stak-reveal-armed
+  .stak-landing-proof-facts-row:nth-child(3) {
   transition-delay: var(--stak-motion-stagger);
 }
-#machines[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-card,
-#machines[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-facts-row {
+#machines[data-reveal].stak-reveal-armed.stak-reveal-visible
+  .stak-landing-proof-card,
+#machines[data-reveal].stak-reveal-armed.stak-reveal-visible
+  .stak-landing-proof-facts-row {
   transform: none;
 }
 
@@ -969,18 +986,23 @@
   transform: translateX(-14px);
   transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
 }
-#stacks-proof[data-reveal].stak-reveal-armed .stak-landing-proof-stack-comp-row {
+#stacks-proof[data-reveal].stak-reveal-armed
+  .stak-landing-proof-stack-comp-row {
   transform: translateY(8px);
   transition: transform var(--stak-motion-standard) var(--stak-motion-ease);
 }
-#stacks-proof[data-reveal].stak-reveal-armed .stak-landing-proof-stack-comp-row:nth-child(4) {
+#stacks-proof[data-reveal].stak-reveal-armed
+  .stak-landing-proof-stack-comp-row:nth-child(4) {
   transition-delay: var(--stak-motion-stagger);
 }
-#stacks-proof[data-reveal].stak-reveal-armed .stak-landing-proof-stack-comp-row:nth-child(5) {
+#stacks-proof[data-reveal].stak-reveal-armed
+  .stak-landing-proof-stack-comp-row:nth-child(5) {
   transition-delay: calc(var(--stak-motion-stagger) * 2);
 }
-#stacks-proof[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-stack,
-#stacks-proof[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-stack-comp-row {
+#stacks-proof[data-reveal].stak-reveal-armed.stak-reveal-visible
+  .stak-landing-proof-stack,
+#stacks-proof[data-reveal].stak-reveal-armed.stak-reveal-visible
+  .stak-landing-proof-stack-comp-row {
   transform: none;
 }
 
@@ -997,48 +1019,123 @@
 #move[data-reveal].stak-reveal-armed .stak-landing-proof-flow-arrow {
   transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
 }
-#move[data-reveal].stak-reveal-armed .stak-landing-proof-flow-node:nth-child(1) {
+#move[data-reveal].stak-reveal-armed
+  .stak-landing-proof-flow-node:nth-child(1) {
   transform: translateX(-16px);
 }
-#move[data-reveal].stak-reveal-armed .stak-landing-proof-flow-arrow:nth-child(2) {
+#move[data-reveal].stak-reveal-armed
+  .stak-landing-proof-flow-arrow:nth-child(2) {
   transform: scaleX(0);
   transform-origin: left center;
   transition-duration: var(--stak-motion-standard);
   transition-delay: calc(var(--stak-motion-stagger) * 2);
 }
-#move[data-reveal].stak-reveal-armed .stak-landing-proof-flow-node:nth-child(3) {
+#move[data-reveal].stak-reveal-armed
+  .stak-landing-proof-flow-node:nth-child(3) {
   transform: translateY(10px) scale(0.95);
   transition-delay: calc(var(--stak-motion-stagger) * 3);
 }
-#move[data-reveal].stak-reveal-armed .stak-landing-proof-flow-arrow:nth-child(4) {
+#move[data-reveal].stak-reveal-armed
+  .stak-landing-proof-flow-arrow:nth-child(4) {
   transform: scaleX(0);
   transform-origin: left center;
   transition-duration: var(--stak-motion-standard);
   transition-delay: calc(var(--stak-motion-stagger) * 5);
 }
-#move[data-reveal].stak-reveal-armed .stak-landing-proof-flow-node:nth-child(5) {
+#move[data-reveal].stak-reveal-armed
+  .stak-landing-proof-flow-node:nth-child(5) {
   transform: translateX(16px);
   transition-delay: calc(var(--stak-motion-stagger) * 6);
 }
-#move[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-flow-node,
-#move[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-flow-arrow {
+#move[data-reveal].stak-reveal-armed.stak-reveal-visible
+  .stak-landing-proof-flow-node,
+#move[data-reveal].stak-reveal-armed.stak-reveal-visible
+  .stak-landing-proof-flow-arrow {
   transform: none;
 }
 
-/* ---- Closing reassurance bar ---- */
-.stak-landing-closing {
-  margin: 32px 48px 64px;
-  padding: 14px 18px;
-  border: 1px solid var(--line-2);
-  border-radius: 8px;
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 15px;
-  flex-wrap: wrap;
+/* ---- Relocated "no daemon" note (P9 Task S6) ----
+   Was the page-ending closing bar; now a secondary paragraph right under
+   the Machines proof visual, since that's the section this point is
+   actually about (what a check-in is vs. isn't). Same two-tier contrast
+   as the old bar: the lead sentence at the section's normal copy color,
+   the explanatory half a step quieter via .stak-landing-closing-muted. */
+.stak-landing-section-note {
+  margin: 18px 0 0;
+  max-width: 640px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--muted);
 }
 .stak-landing-closing-muted {
   color: var(--faint);
+}
+
+/* ---- Site footer (P9 Task S6) ----
+   Real footer replacing the old closing bar as the page's final element.
+   Same .stak tokens/IBM Plex as the rest of the page - no new colors. */
+.stak-landing-footer {
+  flex: none;
+  margin-top: 64px;
+  border-top: 1px solid var(--line);
+  padding: 40px 48px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.stak-landing-footer-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 48px;
+}
+.stak-landing-footer-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 280px;
+}
+.stak-landing-footer-wordmark {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.18em;
+  color: var(--ink);
+}
+.stak-landing-footer-thesis {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--faint);
+}
+.stak-landing-footer-groups {
+  display: flex;
+  gap: 56px;
+}
+.stak-landing-footer-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 120px;
+}
+.stak-landing-footer-heading {
+  font: 500 11px var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.stak-landing-footer-group a {
+  font-size: 14px;
+  color: var(--faint);
+  transition: color var(--stak-motion-fast) var(--stak-motion-ease);
+}
+.stak-landing-footer-group a:hover,
+.stak-landing-footer-group a:focus-visible {
+  color: var(--ink);
+}
+.stak-landing-footer-bottom {
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--dim);
 }
 
 /* ================= Responsive ================= */
@@ -1081,11 +1178,15 @@
   .stak-landing-section {
     margin: 48px 28px 0;
   }
-  .stak-landing-closing {
-    margin: 28px 28px 48px;
-  }
   .stak-landing-proof-diff {
     grid-template-columns: 1fr;
+  }
+  .stak-landing-footer {
+    padding: 36px 28px 24px;
+    gap: 24px;
+  }
+  .stak-landing-footer-groups {
+    gap: 36px;
   }
 }
 
@@ -1161,10 +1262,21 @@
   .stak-landing-privacy-grid {
     grid-template-columns: 1fr;
   }
-  .stak-landing-closing {
-    margin: 24px 16px 40px;
+  .stak-landing-footer {
+    margin-top: 48px;
+    padding: 28px 16px 20px;
+    gap: 24px;
+  }
+  .stak-landing-footer-top {
     flex-direction: column;
-    gap: 6px;
+    gap: 24px;
+  }
+  .stak-landing-footer-brand {
+    max-width: none;
+  }
+  .stak-landing-footer-groups {
+    flex-wrap: wrap;
+    gap: 24px 32px;
   }
 
   /* Proof visuals: simplify to a single stacked column and drop the
@@ -1217,16 +1329,20 @@
      (physicality/origin should track the actual direction content
      moves). Swap to vertical offsets at this breakpoint instead of
      reusing the desktop horizontal values. */
-  #memory-privacy[data-reveal].stak-reveal-armed .stak-landing-proof-mode:nth-child(1) {
+  #memory-privacy[data-reveal].stak-reveal-armed
+    .stak-landing-proof-mode:nth-child(1) {
     transform: translateY(-10px);
   }
-  #memory-privacy[data-reveal].stak-reveal-armed .stak-landing-proof-mode:nth-child(2) {
+  #memory-privacy[data-reveal].stak-reveal-armed
+    .stak-landing-proof-mode:nth-child(2) {
     transform: translateY(10px);
   }
-  #move[data-reveal].stak-reveal-armed .stak-landing-proof-flow-node:nth-child(1) {
+  #move[data-reveal].stak-reveal-armed
+    .stak-landing-proof-flow-node:nth-child(1) {
     transform: translateY(-12px);
   }
-  #move[data-reveal].stak-reveal-armed .stak-landing-proof-flow-node:nth-child(5) {
+  #move[data-reveal].stak-reveal-armed
+    .stak-landing-proof-flow-node:nth-child(5) {
     transform: translateY(12px);
   }
   /* Explicit nth-child-scoped visible-state resets: the base
@@ -1234,10 +1350,14 @@
      ties in specificity with the :nth-child offset rules just above, so
      it needs a same-specificity override here rather than relying on
      source order across the file. */
-  #memory-privacy[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-mode:nth-child(1),
-  #memory-privacy[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-mode:nth-child(2),
-  #move[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-flow-node:nth-child(1),
-  #move[data-reveal].stak-reveal-armed.stak-reveal-visible .stak-landing-proof-flow-node:nth-child(5) {
+  #memory-privacy[data-reveal].stak-reveal-armed.stak-reveal-visible
+    .stak-landing-proof-mode:nth-child(1),
+  #memory-privacy[data-reveal].stak-reveal-armed.stak-reveal-visible
+    .stak-landing-proof-mode:nth-child(2),
+  #move[data-reveal].stak-reveal-armed.stak-reveal-visible
+    .stak-landing-proof-flow-node:nth-child(1),
+  #move[data-reveal].stak-reveal-armed.stak-reveal-visible
+    .stak-landing-proof-flow-node:nth-child(5) {
     transform: none;
   }
 }
@@ -1254,6 +1374,13 @@
   }
   .stak-landing-feature:first-child {
     border-top: none;
+  }
+  .stak-landing-footer-groups {
+    flex-direction: column;
+    gap: 20px;
+  }
+  .stak-landing-footer-group {
+    min-width: 0;
   }
 }
 
@@ -1297,7 +1424,8 @@
   .stak-landing-copy,
   .stak-landing-nav-disclosure > summary,
   .stak-landing-nav-disclosure-panel,
-  .stak-landing-nav-disclosure-panel a {
+  .stak-landing-nav-disclosure-panel a,
+  .stak-landing-footer-group a {
     transition-duration: 1ms;
   }
   .stak-landing-install-cta:active,

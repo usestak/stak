@@ -60,8 +60,8 @@ export function PublicLandingShell() {
           <MachinesProof />
           <StacksProof />
           <MoveToNewMachine />
-          <ClosingBar />
         </main>
+        <SiteFooter />
       </div>
       <LandingScrollReveal />
     </>
@@ -143,8 +143,8 @@ function Hero() {
           </div>
         </div>
         <p className="stak-landing-caption">
-          Step 2 opens your browser to approve the machine. Your setup stays
-          on it until you choose to back it up.
+          Step 2 opens your browser to approve the machine. Your setup stays on
+          it until you choose to back it up.
         </p>
       </div>
       <PreviewCard />
@@ -168,9 +168,7 @@ function PreviewCard() {
           <span className="k">SKILLS</span>
           <span className="v">
             <span className="v1">31 ready</span>
-            <span className="v2">
-              Inspect source, files and capabilities.
-            </span>
+            <span className="v2">Inspect source, files and capabilities.</span>
           </span>
           <span className="s" style={{ color: 'var(--orange)' }}>
             2 updates
@@ -320,15 +318,15 @@ function MemoryAndPrivacy() {
         <div className="stak-landing-privacy-card">
           <span className="t">Standard</span>
           <span className="b">
-            Account-wide: private to your account; STAK&apos;s service can
-            read it to deliver it.
+            Account-wide: private to your account; STAK&apos;s service can read
+            it to deliver it.
           </span>
         </div>
         <div className="stak-landing-privacy-card">
           <span className="t">Protected</span>
           <span className="b">
-            Account-wide: encrypted on your machine before upload; STAK
-            stores ciphertext and can&apos;t read it.
+            Account-wide: encrypted on your machine before upload; STAK stores
+            ciphertext and can&apos;t read it.
           </span>
         </div>
       </div>
@@ -347,10 +345,25 @@ function MachinesProof() {
     >
       <h2>Machines</h2>
       <p className="stak-landing-proof-claim">
-        See what you approved, and what each machine actually reported at
-        its last check-in - not a live connection.
+        See what you approved, and what each machine actually reported at its
+        last check-in - not a live connection.
       </p>
       <MachineCheckInProof />
+      {/* Relocated from the old closing bar (P9 Task S6): this is a
+          product-principles point about *this* section's subject (what a
+          machine's check-in actually is), not a page-ending disclaimer, so
+          it reads more naturally here than at the very bottom of the page.
+          Wording is Task 3's corrected, precise phrasing, unchanged - it
+          only appears in this one place now, so there's no duplicate
+          elsewhere on the page. */}
+      <p className="stak-landing-section-note">
+        <span>Each machine catches up on its next CLI run there.</span>{' '}
+        <span className="stak-landing-closing-muted">
+          That&apos;s state reporting, not Skill installs. No daemon, no
+          background changes - a Skill only updates when you run{' '}
+          <code>stak skill update</code>.
+        </span>
+      </p>
     </section>
   );
 }
@@ -365,8 +378,8 @@ function StacksProof() {
     >
       <h2>Stacks</h2>
       <p className="stak-landing-proof-claim">
-        Inspect exactly what&apos;s included before you apply a Stack -
-        paused Skills stay out, nothing silently added.
+        Inspect exactly what&apos;s included before you apply a Stack - paused
+        Skills stay out, nothing silently added.
       </p>
       <StackCompositionProof />
     </section>
@@ -425,15 +438,57 @@ function MoveToNewMachine() {
   );
 }
 
-function ClosingBar() {
+/**
+ * Real site footer (P9 Task S6), replacing the old closing reassurance bar
+ * - the page no longer ends on a disclaimer. Every link here is a
+ * confirmed-real destination:
+ * - PRODUCT reuses the exact same same-page anchors as `LandingNav`.
+ * - ACCOUNT reuses the exact same real hrefs as `LandingNav`.
+ * - PROJECT links to STAK's real public GitHub repo (confirmed in
+ *   packages/cli/package.json's repository/bugs/homepage fields and
+ *   README.md), opened in a new tab since it leaves the site.
+ * A LEGAL group (Privacy/Terms) is deliberately omitted - no such
+ * page/route exists anywhere in this app yet, and this footer never
+ * invents a URL. See the task report for this as a launch requirement.
+ */
+function SiteFooter() {
   return (
-    <div className="stak-landing-closing" data-reveal>
-      <span>Each machine catches up on its next CLI run there.</span>
-      <span className="stak-landing-closing-muted">
-        That&apos;s state reporting, not Skill installs. No daemon, no
-        background changes - a Skill only updates when you run{' '}
-        <code>stak skill update</code>.
-      </span>
-    </div>
+    <footer className="stak-landing-footer" data-reveal>
+      <div className="stak-landing-footer-top">
+        <div className="stak-landing-footer-brand">
+          <span className="stak-landing-footer-wordmark">STAK</span>
+          <p className="stak-landing-footer-thesis">
+            The control plane for portable AI agent environments.
+          </p>
+        </div>
+        <nav className="stak-landing-footer-groups" aria-label="Footer">
+          <div className="stak-landing-footer-group">
+            <span className="stak-landing-footer-heading">Product</span>
+            <a href="#how-it-works">How it works</a>
+            <a href="#memory-privacy">Memory &amp; privacy</a>
+            <a href="#stacks">Stacks</a>
+            <a href="#install">CLI</a>
+          </div>
+          <div className="stak-landing-footer-group">
+            <span className="stak-landing-footer-heading">Account</span>
+            <a href="/auth/login?next=/onboarding">Sign in</a>
+            <a href="#install">Install the CLI</a>
+          </div>
+          <div className="stak-landing-footer-group">
+            <span className="stak-landing-footer-heading">Project</span>
+            <a
+              href="https://github.com/usestak/stak"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              GitHub
+            </a>
+          </div>
+        </nav>
+      </div>
+      <div className="stak-landing-footer-bottom">
+        <span>STAK</span>
+      </div>
+    </footer>
   );
 }

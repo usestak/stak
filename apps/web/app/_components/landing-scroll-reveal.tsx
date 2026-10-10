@@ -5,8 +5,8 @@ import { useEffect } from 'react';
 /**
  * Non-visual client island (P9 Task 3): arms the scroll-reveal motion on
  * `[data-reveal]` sections of the public landing page (feature strip, the
- * three truthful explainer sections, the closing bar) and reveals each one
- * the first time it enters the viewport.
+ * three truthful explainer sections, the real site footer) and reveals
+ * each one the first time it enters the viewport.
  *
  * Progressive enhancement, deliberately conservative:
  * - Every `[data-reveal]` section is already fully visible in the
