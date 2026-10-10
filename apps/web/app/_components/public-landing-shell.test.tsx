@@ -1,112 +1,200 @@
 import { afterEach, expect, test } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 
 import { PublicLandingShell } from './public-landing-shell';
 
 afterEach(cleanup);
 
-// P9 quality fix: below 1024px the 4 in-page nav links (How it works /
-// Memory & privacy / Stacks / CLI) move behind a native <details> disclosure
-// instead of being dropped from the DOM, so they stay reachable at every
-// width. This asserts the disclosure exists, carries the same links/hrefs as
-// the always-visible desktop nav, and is keyboard-operable (native
-// <details>/<summary> needs no extra wiring for that).
-test('mobile/tablet nav disclosure exposes the 4 in-page nav links with correct hrefs', () => {
+// P9 Task 1 rebuild: the public landing page now follows the approved
+// STAK-Landing-Layered / STAK-Landing-Responsive design docs exactly - nav,
+// hero, Problem, "This Is Your STAK", Move, Privacy, Machines, Close, and a
+// real footer with the clipped oversized wordmark. These tests check
+// structure/copy fidelity and the handful of real interactive controls,
+// not the (stubbed, Task-2) scroll story.
+
+test('nav renders the wordmark, the 4 in-page/external links, sign-in, install CTA, and a mobile menu toggle', () => {
   render(<PublicLandingShell />);
 
-  const expectedLinks = [
-    { name: 'How it works', href: '#how-it-works' },
-    { name: 'Memory & privacy', href: '#memory-privacy' },
-    { name: 'Stacks', href: '#stacks' },
-    { name: 'CLI', href: '#install' },
-  ];
-
-  // The desktop nav-links row still renders the same 4 links (hidden by CSS
-  // below 1024px, not removed from markup).
   const nav = screen.getByRole('navigation', { name: 'STAK' });
+  expect(within(nav).getByRole('link', { name: 'STAK' })).toHaveAttribute(
+    'href',
+    '/',
+  );
+
+  const expectedLinks = [
+    { name: 'How it works', href: '#how' },
+    { name: 'Memory & privacy', href: '#privacy' },
+    { name: 'Machines', href: '#machines' },
+    { name: 'GitHub', href: 'https://github.com/usestak/stak' },
+  ];
   for (const { name, href } of expectedLinks) {
     const link = within(nav).getAllByRole('link', { name })[0];
     expect(link).toHaveAttribute('href', href);
   }
 
-  // The disclosure toggle has a clear accessible name and starts closed.
-  const toggle = screen.getByText('Menu');
-  expect(toggle.tagName).toBe('SUMMARY');
-  expect(toggle).toHaveAttribute('aria-label', 'Navigation');
-  const details = toggle.closest('details');
-  expect(details).not.toBeNull();
-  expect(details).not.toHaveAttribute('open');
+  expect(
+    within(nav).getByRole('link', { name: 'Sign in' }),
+  ).toHaveAttribute('href', '/auth/login?next=/onboarding');
+  expect(
+    within(nav).getAllByRole('link', { name: 'Install the CLI' })[0],
+  ).toHaveAttribute('href', '#install');
 
-  // The panel inside the disclosure carries the same 4 links/hrefs.
-  for (const { name, href } of expectedLinks) {
-    const links = within(details!).getAllByRole('link', { name });
-    expect(links.length).toBeGreaterThan(0);
-    expect(links[links.length - 1]).toHaveAttribute('href', href);
+  const menuToggle = within(nav).getByRole('button', { name: 'Menu' });
+  expect(menuToggle).toHaveAttribute('aria-expanded', 'false');
+  fireEvent.click(menuToggle);
+  expect(menuToggle).toHaveAttribute('aria-expanded', 'true');
+  // The opened panel repeats the 4 links plus Sign in.
+  for (const { name } of expectedLinks) {
+    expect(within(nav).getAllByText(name).length).toBeGreaterThan(1);
   }
-
-  // Sign in / Install the CLI stay outside the disclosure and remain
-  // directly reachable, unchanged by this fix.
-  expect(within(nav).getByText('Sign in')).toBeInTheDocument();
-  expect(within(nav).getByText('Install the CLI')).toBeInTheDocument();
-  expect(details!.contains(within(nav).getByText('Sign in'))).toBe(false);
 });
 
-// P9 Task 4 (landing storytelling): each major section gets one concrete
-// product-derived proof visual. These assertions check the visual exists,
-// carries honest synthetic content, and never regresses the two hard
-// constraints called out in the brief: Task S3's Protected-Memory fix
-// (no fabricated per-project file count next to Protected) and the frozen
-// status vocabulary (no banned live-connectivity words).
-test('Skills section pairs its claim with a before/after diff proof visual', () => {
+test('hero renders the exact headline lines, lead copy, and a copy-anywhere install row', () => {
   render(<PublicLandingShell />);
+
+  expect(screen.getAllByText('Your').length).toBeGreaterThan(0);
+  expect(screen.getAllByText('should').length).toBeGreaterThan(0);
+  expect(screen.getByText('survive your laptop.')).toBeInTheDocument();
+  expect(screen.getByText('should survive')).toBeInTheDocument();
+  expect(screen.getByText('your laptop.')).toBeInTheDocument();
+
   expect(
-    screen.getByRole('heading', { name: 'Skills' }),
+    screen.getByText(
+      'Carry your Skills, Memory, and setup as one portable STAK. Inspect it on one machine, bring it back on the next.',
+    ),
   ).toBeInTheDocument();
+
+  // The same install command also appears as a copy row in the Close
+  // section below; the hero's is the first one in document order.
+  const installRow = screen.getAllByRole('button', {
+    name: 'Copy command: npm install -g @usestak/cli',
+  })[0];
+  expect(installRow).toHaveTextContent('npm install -g @usestak/cli');
+  fireEvent.click(installRow);
+  expect(installRow).toHaveTextContent('Copied ✓');
+});
+
+test('Problem section shows the DELL snapshot with the exact synthetic rows', () => {
+  render(<PublicLandingShell />);
+
   expect(
-    screen.getAllByText('code-review-checklist').length,
-  ).toBeGreaterThan(0);
+    screen.getByRole('heading', {
+      name: 'Your agent setup is stuck on this machine.',
+    }),
+  ).toBeInTheDocument();
+  expect(screen.getAllByText('Claude Code').length).toBeGreaterThan(0);
+  expect(screen.getByText('24')).toBeInTheDocument();
+  expect(screen.getByText('Still tied to DELL.')).toBeInTheDocument();
+});
+
+test('This Is Your STAK shows a 4-way tab control and all 4 object cards with their rows', () => {
+  render(<PublicLandingShell />);
+
+  expect(
+    screen.getByRole('heading', {
+      name: 'The parts of your agent setup, in one place.',
+    }),
+  ).toBeInTheDocument();
+
+  const tabs = screen.getAllByRole('tab', { name: /SKILLS|MEMORY|PROJECTS|STACK/ });
+  expect(tabs.length).toBe(4);
+
+  expect(screen.getByText('review-pr')).toBeInTheDocument();
   expect(screen.getByText('Update available')).toBeInTheDocument();
-  expect(screen.getByText(/Flag missing error handling/)).toBeInTheDocument();
+  expect(screen.getAllByText(/stak scan/).length).toBeGreaterThan(0);
+
+  // Switching tabs changes which card is marked active (structural, not
+  // just visual - the mobile-only recomposition CSS keys off this).
+  const memoryTab = screen.getByRole('tab', { name: 'MEMORY' });
+  fireEvent.click(memoryTab);
+  expect(memoryTab).toHaveAttribute('aria-selected', 'true');
 });
 
-test('Memory & privacy section shows an honest Standard-vs-Protected proof with no fabricated Protected file count', () => {
+test('Move to another machine lists the 4 real steps with the real CLI commands, and the corrected stak run note', () => {
   render(<PublicLandingShell />);
-  expect(screen.getByText('3 projects · 41 files')).toBeInTheDocument();
-  // Exact honest phrasing from Task S3's fix - never a per-project file
-  // count next to Protected.
-  const protectedCount = screen.getAllByText('9 projects known to STAK');
-  expect(protectedCount.length).toBeGreaterThan(0);
-  expect(screen.queryByText(/files across 9 projects/)).not.toBeInTheDocument();
-});
 
-test('Machines section shows a desired-vs-reported card with frozen vocabulary only, no live-connectivity claim', () => {
-  render(<PublicLandingShell />);
   expect(
-    screen.getByRole('heading', { name: 'Machines' }),
+    screen.getByRole('heading', { name: 'Bring your STAK to a new machine.' }),
   ).toBeInTheDocument();
-  expect(screen.getByText('Needs attention')).toBeInTheDocument();
-  expect(screen.getByText(/not a live\s*connection/)).toBeInTheDocument();
-  expect(screen.queryByText(/\bOnline\b/)).not.toBeInTheDocument();
-  expect(screen.queryByText(/\bIn sync\b/)).not.toBeInTheDocument();
+  expect(screen.getAllByText(/stak login/).length).toBeGreaterThan(0);
+  expect(screen.getByText(/stak pull/)).toBeInTheDocument();
+  expect(screen.getByText(/stak memory recover/)).toBeInTheDocument();
+  expect(screen.getByText(/stak memory restore/)).toBeInTheDocument();
+
+  // The design's bare, nonexistent `stak run` is corrected to the real
+  // `run <agent>` CLI form (packages/cli/src/commands/run.ts).
+  expect(screen.getByText(/stak run claude/)).toBeInTheDocument();
+  expect(screen.queryByText(/stak run$/)).not.toBeInTheDocument();
 });
 
-test('Stacks section shows a composition crop with only the main Stack and Included/Paused rows', () => {
+test('Privacy section has working Standard/Protected tabs with the honest Protected ciphertext treatment', () => {
   render(<PublicLandingShell />);
+
   expect(
-    screen.getByRole('heading', { name: 'Stacks' }),
+    screen.getByRole('heading', { name: 'Choose who can read your Memory.' }),
   ).toBeInTheDocument();
-  expect(screen.getByText('Your main Stack')).toBeInTheDocument();
-  expect(screen.getAllByText('Included').length).toBe(2);
-  expect(screen.getByText('Paused')).toBeInTheDocument();
+
+  const standardTab = screen.getByRole('tab', { name: 'Standard' });
+  const protectedTab = screen.getByRole('tab', { name: 'Protected' });
+  expect(standardTab).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByText('Easy recovery')).toBeInTheDocument();
+
+  fireEvent.click(protectedTab);
+  expect(protectedTab).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByText('Only you can unlock it')).toBeInTheDocument();
+  expect(
+    screen.getByText('b64:9QeX2kT0vR+aLw7mYc1Zp4Hs…Nf8uE3jQ0bD6tVyK2oPq=='),
+  ).toBeInTheDocument();
 });
 
-test('Move to a new machine shows the DELL -> STAK -> MacBook flow above the real 7-step sequence', () => {
+test('Machines section has a working DELL/MacBook viewing-as toggle and both machine cards', () => {
   render(<PublicLandingShell />);
-  const section = screen
-    .getByRole('heading', { name: 'Move to a new machine' })
-    .closest('section')!;
-  expect(within(section).getByText('DELL')).toBeInTheDocument();
-  expect(within(section).getByText('STAK')).toBeInTheDocument();
-  expect(within(section).getByText('MacBook')).toBeInTheDocument();
-  expect(within(section).getByText('New machine')).toBeInTheDocument();
+
+  expect(
+    screen.getByRole('heading', { name: 'Know where each machine left off.' }),
+  ).toBeInTheDocument();
+
+  const dellBtn = screen.getByRole('button', { name: 'DELL' });
+  const macBtn = screen.getByRole('button', { name: 'MacBook' });
+  expect(dellBtn).toHaveAttribute('aria-pressed', 'true');
+
+  fireEvent.click(macBtn);
+  expect(macBtn).toHaveAttribute('aria-pressed', 'true');
+  expect(dellBtn).toHaveAttribute('aria-pressed', 'false');
+
+  expect(screen.getByText('Updates waiting · 3 hours ago')).toBeInTheDocument();
+  expect(screen.getByText(/stak skill update/)).toBeInTheDocument();
+});
+
+test('Close section has the 2-step copyable install+login command bar', () => {
+  render(<PublicLandingShell />);
+
+  expect(
+    screen.getByRole('heading', { name: 'Change the laptop. Keep your STAK.' }),
+  ).toBeInTheDocument();
+
+  const loginRow = screen.getByRole('button', {
+    name: 'Copy command: stak login',
+  });
+  fireEvent.click(loginRow);
+  expect(loginRow).toHaveTextContent('Copied ✓');
+});
+
+test('footer omits the nonexistent /app link and keeps only real destinations', () => {
+  render(<PublicLandingShell />);
+
+  const footer = screen.getByRole('contentinfo');
+  expect(within(footer).getByText('How it works').closest('a')).toHaveAttribute(
+    'href',
+    '#how',
+  );
+  expect(
+    within(footer).getByText('Sign in').closest('a'),
+  ).toHaveAttribute('href', '/auth/login?next=/onboarding');
+  expect(within(footer).queryByText('Control center')).not.toBeInTheDocument();
+  expect(within(footer).queryByText(/\/app\b/)).not.toBeInTheDocument();
+  expect(footer.querySelector('a[href="/app"]')).toBeNull();
+  expect(
+    within(footer).getByText('GitHub').closest('a'),
+  ).toHaveAttribute('href', 'https://github.com/usestak/stak');
 });

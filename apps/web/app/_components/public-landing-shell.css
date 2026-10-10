@@ -1,78 +1,124 @@
-/* apps/web/app/_components/public-landing-shell.css - the signed-out public
-   landing page (P9 Task 2). Structural/copy recomposition of the Final
-   Contract's S.01 frame at full product-page width, built on the same
-   .stak token scope as every other shell (overview/shell.css) - no new
-   raw color values are introduced here; everywhere the Final Contract
-   markup named a hex with no exact existing token, the closest existing
-   token/raw value already used elsewhere in this codebase is reused
-   instead (see the task report for the full mapping table).
+/* apps/web/app/_components/public-landing-shell.css
+   Public, signed-out landing page - rebuilt against the approved
+   STAK-Landing-Layered / STAK-Landing-Responsive design docs (P9 "Task 1").
 
-   P9 Task 3 motion system: this codebase has no existing shared animation
-   vocabulary (checked globals.css and every other _components/*.css before
-   adding this - the only prior `transition` in apps/web is the unrelated
-   skip-link's `top` transition in globals.css) and no animation library is
-   installed, so a small page-scoped vocabulary is defined once below and
-   reused everywhere else in this file - never a fourth/fifth arbitrary
-   timing value. Every animated property here is `transform` only (never
-   `opacity`, so no server-rendered text is ever visually hidden) except
-   the two purely-decorative, non-text hover/press accents (border/background
-   -color on buttons), which are paint-only and don't move layout. */
+   TOKEN MAPPING (design hex -> .stak token, see overview/shell.css):
+     #0E0E0D page bg      -> var(--panel)  EXACT
+     #121211 card/row bg  -> var(--bg)     EXACT
+     #EDEAE3 ink          -> var(--ink)    EXACT
+     #C9C5BC muted text   -> var(--muted)  EXACT
+     #A19D94 faint text   -> var(--faint)  EXACT
+     #85817A dim text     -> var(--dim)    EXACT
+     #EE7A3B orange       -> var(--orange) EXACT
+     #84CB8E green        -> var(--green)  EXACT
+     #E5B85C amber        -> var(--amber)  EXACT
+     #232220 border tier  -> var(--line)   EXACT
+     #2A2926 border tier  -> var(--line-2) EXACT
+     #34332F chip         -> var(--chip)   EXACT
+     -- no exact match; closest existing token used, flagged in task report:
+     #1E1D1B / #1C1B19 hairlines -> var(--line) (closest; ~5/0x07 per channel off)
+     #141413 / #111110 / #161614 card-surface variants -> var(--bg) (closest)
+     #15120F / #0A0A09 darker strips -> var(--panel) (closest)
+     #3A3934 hover border -> var(--chip) (closest)
+     #5E5A53 secondary mono -> var(--dim) (closest)
+     #8A867E neutral status -> var(--dim) (closest)
+     #2F5A3A / #6E8F74 protected-mode green tints -> color-mix(var(--green), ...)
+       rather than a new raw hex (still zero new literal colors).
+*/
 
 .stak-landing {
-  min-height: 100dvh;
-  display: flex;
-  flex-direction: column;
-
-  /* Shared motion vocabulary (3 tiers only): */
-  --stak-motion-fast: 120ms; /* press/hover feedback */
-  --stak-motion-standard: 220ms; /* hover color/background, disclosure */
-  --stak-motion-reveal: 360ms; /* deliberate entrance/scroll reveal */
-  --stak-motion-ease: cubic-bezier(0.16, 1, 0.3, 1); /* ease-out, shared */
-  /* P9 Task 5: a single stagger-offset unit, multiplied (via calc()) per
-     element instead of each sequence inventing its own ad hoc delay number
-     (a minor finding from the Task 3/4 review). Still only 3 duration
-     tiers above - this is an offset, not a 4th tier. */
-  --stak-motion-stagger: 70ms;
+  container-type: inline-size;
+  container-name: stak-landing;
+  background: var(--panel);
+  color: var(--ink);
+  font-family: var(--sans);
+  overflow-x: clip;
 }
 
-@keyframes stak-landing-rise {
-  from {
-    transform: translateY(10px);
-  }
-  to {
-    transform: translateY(0);
-  }
+.stak-landing h1,
+.stak-landing h2 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+
+.stak-landing p {
+  margin: 0;
+}
+
+.stak-landing-eyebrow {
+  display: block;
+  font: 500 12px var(--mono);
+  letter-spacing: 0.1em;
+  color: var(--orange);
+  margin-bottom: 16px;
+}
+
+.stak-landing-small {
+  font-size: 14px;
+  color: var(--faint);
+}
+
+.stak-landing-tone-green {
+  color: var(--green);
+}
+.stak-landing-tone-orange {
+  color: var(--orange);
+}
+.stak-landing-tone-amber {
+  color: var(--amber);
+}
+.stak-landing-tone-faint {
+  color: var(--faint);
+}
+.stak-landing-tone-dim {
+  color: var(--dim);
+}
+
+.stak-landing-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--dim);
+  box-sizing: border-box;
+}
+.stak-landing-dot[data-tone='green'] {
+  background: var(--green);
+  border-color: var(--green);
+}
+.stak-landing-dot[data-tone='amber'] {
+  background: var(--amber);
+  border-color: var(--amber);
+}
+.stak-landing-dot[data-tone='faint'] {
+  background: transparent;
 }
 
 /* ---- Nav ----
-   True 3-region grid (P9 quality fix): 1fr auto 1fr means the middle
-   column (the 4 nav links) sizes to its own content and is geometrically
-   centered in the bar - the left (wordmark) and right (sign in/install)
-   regions each get an equal, independent 1fr track, so unequal
-   wordmark/CTA widths never pull the links off-center the way the old
-   flex-row-after-logo + margin-left:auto layout did. `gap` is symmetric
-   on both sides of the center column, so it doesn't break the centering
-   math. Below 1024px this is overridden back to the original flex layout
-   (see the tablet media query) - the mobile <details> disclosure's
-   position is unchanged by this fix. */
+   Design: `navPos: desk ? 'relative' : 'sticky'` - sticky only below
+   desktop; `navPad`/`navGap` vary per width. Centered links column uses a
+   real 1fr-auto-1fr grid so the link row stays geometrically centered. */
 .stak-landing-nav {
-  flex: none;
-  height: 64px;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--panel);
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  gap: 36px;
-  padding: 0 48px;
+  column-gap: 12px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--line);
+  min-height: 56px;
 }
 .stak-landing-wordmark {
   grid-column: 1;
   justify-self: start;
   font-weight: 700;
-  font-size: 16px;
-  letter-spacing: 0.18em;
+  font-size: 15px;
+  letter-spacing: 0.2em;
   color: var(--ink);
-  flex: none;
 }
 .stak-landing-wordmark:hover {
   color: var(--ink);
@@ -81,1359 +127,1149 @@
 .stak-landing-nav-links {
   grid-column: 2;
   justify-self: center;
-  display: flex;
-  gap: 26px;
+  display: none;
+  gap: 24px;
   font-size: 14px;
-  color: var(--faint);
   white-space: nowrap;
 }
 .stak-landing-nav-links a {
   color: var(--faint);
-  transition: color var(--stak-motion-fast) var(--stak-motion-ease);
+  transition: color 150ms ease;
 }
 .stak-landing-nav-links a:hover,
 .stak-landing-nav-links a:focus-visible {
   color: var(--ink);
 }
-/* Mobile/tablet nav-link disclosure (<1024px) - hidden on desktop where
-   .stak-landing-nav-links shows the links inline. Same native <details>
-   pattern as account-menu.tsx's account menu and stack-card.tsx's
-   "Technical details" - keyboard-operable with no custom JS. */
-.stak-landing-nav-disclosure {
-  grid-column: 2;
-  justify-self: center;
-  display: none;
-  position: relative;
-  flex: none;
-}
-.stak-landing-nav-disclosure > summary {
-  list-style: none;
-  cursor: pointer;
-  font-size: 14px;
-  color: var(--faint);
-  padding: 7px 11px;
-  border: 1px solid var(--line-2);
-  border-radius: 6px;
-  white-space: nowrap;
-  transition:
-    color var(--stak-motion-fast) var(--stak-motion-ease),
-    border-color var(--stak-motion-fast) var(--stak-motion-ease),
-    transform var(--stak-motion-fast) var(--stak-motion-ease);
-}
-.stak-landing-nav-disclosure > summary::-webkit-details-marker {
-  display: none;
-}
-.stak-landing-nav-disclosure > summary:hover {
-  color: var(--ink);
-  border-color: var(--faint);
-}
-.stak-landing-nav-disclosure > summary:active {
-  transform: scale(0.97);
-}
-/* Progressive-enhancement disclosure entrance: browsers that support
-   @starting-style animate the panel in; browsers that don't just show it
-   instantly (native <details> behavior, unchanged). Either way the panel
-   is fully usable with no JS. */
-.stak-landing-nav-disclosure-panel {
-  position: absolute;
-  left: 0;
-  top: calc(100% + 8px);
-  min-width: 200px;
-  max-width: calc(100vw - 32px);
-  background: var(--panel);
-  border: 1px solid var(--line-2);
-  border-radius: 8px;
-  padding: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  z-index: 20;
-  /* Anchored to the summary toggle it drops from (top-left), not the
-     default center origin - improve-animations audit, physicality &
-     origin: trigger-anchored popovers should scale from their trigger. */
-  transform-origin: top left;
-  transform: translateY(0) scale(1);
-  transition: transform var(--stak-motion-standard) var(--stak-motion-ease);
-}
-@starting-style {
-  .stak-landing-nav-disclosure[open] > .stak-landing-nav-disclosure-panel {
-    transform: translateY(-4px) scale(0.97);
-  }
-}
-.stak-landing-nav-disclosure-panel a {
-  color: var(--faint);
-  font-size: 14px;
-  padding: 9px 10px;
-  border-radius: 6px;
-  transition:
-    color var(--stak-motion-fast) var(--stak-motion-ease),
-    background-color var(--stak-motion-fast) var(--stak-motion-ease);
-}
-.stak-landing-nav-disclosure-panel a:hover,
-.stak-landing-nav-disclosure-panel a:focus-visible {
-  color: var(--ink);
-  background: var(--bg);
-}
-.stak-landing-nav-actions {
+.stak-landing-nav-right {
   grid-column: 3;
   justify-self: end;
   display: flex;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
-  flex: none;
 }
 .stak-landing-signin {
+  display: none;
   font-size: 14px;
   color: var(--muted);
-  padding: 8px 12px;
-  transition: color var(--stak-motion-fast) var(--stak-motion-ease);
-}
-.stak-landing-signin:hover,
-.stak-landing-signin:focus-visible {
-  color: var(--ink);
+  padding: 8px 10px;
+  min-height: 44px;
+  align-items: center;
 }
 .stak-landing-install-cta {
+  display: none;
+  min-height: 44px;
+  align-items: center;
   background: var(--ink);
-  color: var(--bg);
+  color: var(--panel);
   font-weight: 600;
   font-size: 14px;
-  padding: 9px 16px;
+  padding: 0 15px;
   border-radius: 6px;
-  text-decoration: none;
-  white-space: nowrap;
-  display: inline-block;
-  transition:
-    background-color var(--stak-motion-standard) var(--stak-motion-ease),
-    transform var(--stak-motion-fast) var(--stak-motion-ease);
+  transition: transform 150ms ease;
 }
 .stak-landing-install-cta:hover,
 .stak-landing-install-cta:focus-visible {
-  background: var(--muted);
   text-decoration: none;
+  transform: translateY(-1px);
 }
 .stak-landing-install-cta:active {
   transform: scale(0.97);
 }
+.stak-landing-install-cta-mobile {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  background: var(--ink);
+  color: var(--panel);
+  font-weight: 600;
+  font-size: 14px;
+  border-radius: 6px;
+}
+.stak-landing-install-cta-mobile:active {
+  transform: scale(0.97);
+}
 
-.stak-landing-main {
-  flex: 1;
+/* Mobile/tablet nav menu (NavMenuToggle leaf) */
+.stak-landing-navmenu {
+  position: relative;
+}
+.stak-landing-navmenu-btn {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: transparent;
   display: flex;
   flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.stak-landing-navmenu-bar {
+  width: 16px;
+  height: 1.5px;
+  background: var(--ink);
+  transition: transform 250ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.stak-landing-navmenu-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  left: 0;
+  width: max(260px, 100vw - 32px);
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  z-index: 25;
+}
+.stak-landing-navmenu-panel a {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 17px;
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+}
+.stak-landing-navmenu-panel a:last-child {
+  border-bottom: none;
+  color: var(--muted);
+  font-size: 15px;
+}
+.stak-landing-navmenu-k {
+  font: 13px var(--mono);
+  color: var(--dim);
+}
+
+/* Desktop (>=1024px container width): links row shown, menu hidden, nav
+   becomes position: relative (design: `navPos: desk ? 'relative' : ...`). */
+@container stak-landing (min-width: 1024px) {
+  .stak-landing-nav {
+    position: relative;
+    padding: 18px clamp(20px, 4cqi, 56px);
+    column-gap: 28px;
+  }
+  .stak-landing-nav-links {
+    display: flex;
+  }
+  .stak-landing-signin,
+  .stak-landing-install-cta {
+    display: flex;
+  }
+  .stak-landing-install-cta-mobile,
+  .stak-landing-navmenu {
+    display: none;
+  }
+}
+@container stak-landing (min-width: 640px) and (max-width: 1023.98px) {
+  .stak-landing-nav {
+    padding: 12px 28px;
+    column-gap: 28px;
+  }
+  .stak-landing-install-cta-mobile {
+    display: none;
+  }
+  .stak-landing-signin,
+  .stak-landing-install-cta {
+    display: flex;
+  }
+}
+@container stak-landing (max-width: 639.98px) {
+  .stak-landing-install-cta {
+    display: none;
+  }
 }
 
 /* ---- Hero ---- */
 .stak-landing-hero {
-  display: grid;
-  grid-template-columns: minmax(360px, 540px) 1fr;
-  gap: 56px;
-  padding: 64px 48px 0;
-  align-items: start;
-}
-.stak-landing-hero-copy {
+  padding: clamp(48px, 7cqi, 96px) clamp(20px, 4cqi, 56px) clamp(32px, 4cqi, 56px);
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  min-width: 0;
-  /* Macro narrative, step 1: the current-machine state (hero copy) settles
-     in first. Transform-only (no opacity) - the h1/lead/paragraph text is
-     fully opaque and present in the server-rendered HTML the entire time,
-     just offset a few px before this runs; nothing is ever hidden from a
-     crawler or a no-JS visitor, this is a pure CSS keyframe with no JS
-     dependency. */
-  animation: stak-landing-rise var(--stak-motion-reveal) var(--stak-motion-ease)
-    both;
+  align-items: center;
+  text-align: center;
+  gap: 20px;
 }
-.stak-landing-eyebrow {
-  font: 500 12px var(--mono);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+.stak-landing-h1 {
+  margin: 0;
+  width: 100%;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+}
+.stak-landing-h1--desktop {
+  display: none;
+  font-size: clamp(34px, 6.4cqi, 88px);
+  line-height: 0.98;
+  text-wrap: balance;
+}
+.stak-landing-h1-row {
+  display: grid;
+  grid-template-columns: calc(50% - 2.05em) 1fr;
+  align-items: baseline;
+  width: 100%;
+}
+.stak-landing-h1-your {
+  justify-self: end;
+  padding-right: 0.24em;
+}
+.stak-landing-h1-wordrow {
+  justify-self: start;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.24em;
+  white-space: nowrap;
+}
+.stak-landing-h1-line2 {
+  display: block;
+}
+.stak-landing-h1--mobile {
+  font-size: clamp(34px, 10cqi, 46px);
+  line-height: 1.02;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.stak-landing-h1-line {
+  display: block;
+  white-space: nowrap;
+}
+.stak-landing-h1-word {
   color: var(--orange);
 }
-.stak-landing-hero-copy h1 {
-  margin: 0;
-  font-size: 50px;
-  line-height: 1.04;
-  font-weight: 600;
-  letter-spacing: -0.03em;
+.stak-landing-h1--mobile .stak-landing-h1-word {
+  display: flex;
+  justify-content: center;
+  padding: 0.04em 0;
 }
 .stak-landing-lead {
-  margin: 0;
-  font-size: 18px;
-  line-height: 1.45;
-  color: var(--ink);
-  font-weight: 500;
-}
-.stak-landing-hero-copy > p:not(.stak-landing-lead):not(.stak-landing-caption) {
-  margin: 0;
-  font-size: 16.5px;
+  font-size: clamp(16px, 1.5cqi, 19px);
   line-height: 1.55;
   color: var(--muted);
+  max-width: 560px;
+  text-wrap: pretty;
 }
-.stak-landing-install {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--line-2);
-  border-radius: 8px;
-  overflow: hidden;
-  font: 500 14.5px var(--mono);
-}
-.stak-landing-install-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding: 13px 16px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
-}
-.stak-landing-install-row:last-child {
-  border-bottom: none;
-}
-.stak-landing-install-cmd {
-  overflow-wrap: anywhere;
-  color: var(--ink);
-}
-.stak-landing-install-n {
-  color: var(--dim);
-}
-.stak-landing-copy {
-  flex: none;
-  font: 500 12px var(--sans);
-  color: var(--dim);
-  background: none;
-  border: 1px solid var(--chip);
-  border-radius: 5px;
-  padding: 4px 10px;
-  cursor: pointer;
-  transition:
-    border-color var(--stak-motion-fast) var(--stak-motion-ease),
-    color var(--stak-motion-fast) var(--stak-motion-ease),
-    transform var(--stak-motion-fast) var(--stak-motion-ease);
-}
-.stak-landing-copy:hover,
-.stak-landing-copy:focus-visible {
-  border-color: var(--faint);
-  color: var(--ink);
-}
-.stak-landing-copy:active {
-  transform: scale(0.95);
-}
-/* Confirmation pop: a one-shot transform-only overshoot when the "Copied"
-   state lands, layered on top of the label flip (the real confirmation).
-   fill-mode "both" means it also holds its 1.0 end state, so it never
-   leaves the button mid-transform if re-triggered quickly. */
-.stak-landing-copy--copied {
-  border-color: var(--green);
-  color: var(--ink);
-  animation: stak-landing-copy-pop var(--stak-motion-standard)
-    var(--stak-motion-ease) both;
-}
-@keyframes stak-landing-copy-pop {
-  0% {
-    transform: scale(0.95);
-  }
-  60% {
-    transform: scale(1.06);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
-.stak-landing-caption {
-  margin: 0;
-  font-size: 13.5px;
-  color: var(--faint);
-  line-height: 1.5;
-}
-/* globals.css's bare `code { background: var(--panel-subtle) }` rule is
-   tuned for the light-theme prose system; .stak forces a dark surface
-   regardless of OS color-scheme preference (same override reasoning as
-   .stak-landing-steps code below), so inline <code> inside this caption
-   (and the relocated section note's muted line below) needs the same
-   explicit override. */
-.stak-landing-caption code,
-.stak-landing-closing-muted code {
-  font-family: var(--mono);
-  font-size: 0.92em;
-  color: var(--faint);
-  background: none;
-  border: none;
-  padding: 0;
+.stak-landing-install-anchor {
+  scroll-margin-top: 64px;
 }
 
-/* ---- Preview card (illustrative, not live data) ---- */
-.stak-landing-preview {
-  background: var(--panel);
-  border: 1px solid var(--line-2);
-  border-radius: 10px;
-  padding: 26px;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  min-width: 0;
-  /* Macro narrative, step 2: the preview card settles in just after the
-     hero copy (140ms stagger) - "these facts exist because of what you just
-     read", not a separate unrelated entrance. Transform-only, same reasons
-     as .stak-landing-hero-copy above. */
-  animation: stak-landing-rise var(--stak-motion-reveal) var(--stak-motion-ease)
-    140ms both;
+@container stak-landing (min-width: 640px) {
+  .stak-landing-h1--desktop {
+    display: block;
+  }
+  .stak-landing-h1--mobile {
+    display: none;
+  }
 }
-.stak-landing-preview-head {
+
+/* Copy-anywhere-in-row command bar (CopyRow leaf) */
+.stak-landing-cmdrow {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  font: 500 11px var(--mono);
+  width: 100%;
+  max-width: 460px;
+  min-height: 52px;
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 8px 8px 8px 14px;
+  font: 500 clamp(12.5px, 3.4cqi, 15px) var(--mono);
+  text-align: left;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+.stak-landing-cmdrow-cmd {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stak-landing-cmdrow-p,
+.stak-landing-cmdrow-n {
   color: var(--dim);
+}
+.stak-landing-cmdrow-copy {
+  flex: none;
+  font-size: 12px;
+  color: var(--dim);
+  border: 1px solid var(--line-2);
+  padding: 4px 9px;
+  border-radius: 5px;
+  cursor: pointer;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+}
+.stak-landing-cmdrow-copy--done {
+  color: var(--green);
+}
+
+/* Scroll-story container stub (P9 Task 2 fills the pinned animation in).
+   Static "frame 0" rendering + the layout track Task 2 needs. */
+.stak-landing-story {
+  width: 100%;
+  max-width: 1200px;
+  margin-top: clamp(12px, 2cqi, 28px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(16px, 2.4cqi, 28px);
+  padding: clamp(16px, 3vh, 40px) 0;
+}
+.stak-landing-story-caption {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+  width: 100%;
+}
+.stak-landing-story-cap {
+  font-size: clamp(22px, 2.6cqi, 36px);
+  line-height: 1.18;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.stak-landing-story-sub {
+  font-size: clamp(15px, 1.3cqi, 17px);
+  line-height: 1.5;
+  color: var(--faint);
+}
+.stak-landing-story-cmd {
+  font: clamp(12.5px, 1cqi, 14px) var(--mono);
+  color: var(--muted);
+}
+.stak-landing-story-m {
+  color: var(--dim);
+}
+.stak-landing-story-stage {
+  position: relative;
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 24px 0;
+}
+.stak-landing-story-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+}
+.stak-landing-story-zone-n {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.stak-landing-story-zone-s {
+  font: 11px var(--mono);
+  color: var(--dim);
+}
+
+/* ---- Shared section shell ---- */
+.stak-landing-section {
+  border-top: 1px solid var(--line);
+  padding: clamp(56px, 8cqi, 112px) clamp(20px, 4cqi, 56px);
+  max-width: 1328px;
+  margin: 0 auto;
+}
+.stak-landing-section--panel {
+  background: var(--bg);
+  max-width: none;
+  margin: 0;
+}
+.stak-landing-section--panel > * {
+  max-width: 1216px;
+  margin: 0 auto;
+}
+.stak-landing-section h2 {
+  font-size: clamp(30px, 4.2cqi, 54px);
+  line-height: 1.05;
+  text-wrap: balance;
+}
+.stak-landing-section p {
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.stak-landing-section-head {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-bottom: clamp(28px, 4cqi, 48px);
+}
+.stak-landing-section-head--narrow p {
+  max-width: 760px;
+}
+.stak-landing-section-head-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+@container stak-landing (min-width: 640px) {
+  .stak-landing-section-head {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: clamp(20px, 4cqi, 64px);
+  }
+  .stak-landing-section-head > div:first-child {
+    flex: 1;
+  }
+  .stak-landing-section-head > p,
+  .stak-landing-section-head-copy {
+    flex: 1;
+  }
+}
+
+/* ---- Problem section ---- */
+.stak-landing-problem-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: clamp(36px, 6cqi, 88px);
+  align-items: center;
+}
+.stak-landing-problem-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 580px;
+}
+.stak-landing-problem-copy h2 {
+  text-wrap: balance;
+}
+.stak-landing-problem-rule {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font: 500 clamp(14px, 1.2cqi, 16px) var(--mono);
+  color: var(--ink);
   flex-wrap: wrap;
 }
-.stak-landing-preview-status {
+.stak-landing-dellcard {
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.stak-landing-dellcard-head {
   display: flex;
-  gap: 12px;
+  justify-content: space-between;
   align-items: center;
-  font-size: 22px;
-  font-weight: 600;
-  /* Macro narrative, step 4 (the "restrained transition suggesting
-     portability/cloud-backing" the brief asks for): the backed-up state
-     settles once, right after the card arrives and just before the
-     Skills/Memory/Machines rows resolve under it - never a looping pulse,
-     never a fake progress/sync bar, just a one-time settle that reads as
-     "this is already true", not "this is happening live". */
-  animation: stak-landing-rise var(--stak-motion-standard)
-    var(--stak-motion-ease) 220ms both;
+  gap: 12px;
+  padding: 14px clamp(16px, 2cqi, 22px);
+  flex-wrap: wrap;
 }
-.stak-landing-preview-rows {
-  display: flex;
-  flex-direction: column;
-  border-top: 1px solid var(--line);
-}
-.stak-landing-preview-row {
-  display: grid;
-  grid-template-columns: 90px 1fr auto;
-  gap: 14px;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--line);
-  align-items: baseline;
-}
-.stak-landing-preview-row:last-child {
-  border-bottom: none;
-}
-/* Macro narrative, step 3: Skills / Memory / Machines resolve one after
-   another, inside the card's own settle. Small translateY + per-row delay
-   (70ms apart, 220ms standard tier) on top of the card's 140ms entrance
-   delay - never a 4th/5th timing value, just the standard tier reused with
-   a stagger offset, which is what "facts resolving" actually looks like
-   rather than a generic group fade. Transform-only, text stays opaque. */
-.stak-landing-preview-row {
-  animation: stak-landing-rise var(--stak-motion-standard)
-    var(--stak-motion-ease) both;
-}
-.stak-landing-preview-row:nth-child(1) {
-  animation-delay: 180ms;
-}
-.stak-landing-preview-row:nth-child(2) {
-  animation-delay: 250ms;
-}
-.stak-landing-preview-row:nth-child(3) {
-  animation-delay: 320ms;
-}
-.stak-landing-preview-row .k {
-  font: 500 11px var(--mono);
-  color: var(--dim);
-}
-.stak-landing-preview-row .v {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.stak-landing-preview-row .v1 {
+.stak-landing-dellcard-name {
+  display: block;
   font-size: 15px;
   font-weight: 600;
 }
-.stak-landing-preview-row .v2 {
-  font-size: 12.5px;
+.stak-landing-dellcard-sub {
+  display: block;
+  font-size: 13px;
   color: var(--faint);
 }
-.stak-landing-preview-row .s {
-  font-size: 12px;
-  white-space: nowrap;
-}
-.stak-landing-preview-dock {
-  margin-top: auto;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  font: 12.5px var(--mono);
-}
-.stak-landing-preview-dock .scope {
-  font-size: 10px;
-  color: var(--orange);
-  flex: none;
-}
-.stak-landing-preview-dock .cmd {
-  flex: 1;
-  overflow-wrap: anywhere;
-}
-.stak-landing-preview-dock .p {
-  color: var(--dim);
-}
-.stak-landing-preview-dock .hint {
-  font-size: 11px;
-  color: var(--dim);
-  flex: none;
-}
-.stak-landing-preview-note {
-  margin: 0;
-  font-size: 11.5px;
-  color: var(--dim);
-  text-align: center;
-}
-
-/* ---- Scroll reveal (armed by LandingScrollReveal, see that file) ----
-   Base state (no class): every [data-reveal] section is exactly as laid
-   out above - fully visible, full opacity, in place. `.stak-reveal-armed`
-   is only ever added by JS right before observing, so a no-JS or failed-
-   script visitor never sees this rule at all. Transform-only (translateY),
-   never opacity, for the same SEO-safety reason as the hero/preview
-   entrance above - these sections hold real explainer copy, not
-   decorative content, and should never be visually hidden by this file,
-   only offset a few px until they're actually in view. */
-[data-reveal].stak-reveal-armed {
-  transform: translateY(16px);
-  transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
-}
-[data-reveal].stak-reveal-armed.stak-reveal-visible {
-  transform: translateY(0);
-}
-
-/* ---- Feature strip ---- */
-.stak-landing-features {
-  margin: 48px 48px 0;
+.stak-landing-dellrow {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  border-top: 1px solid var(--line-2);
-}
-/* Group entrance: once the strip itself is revealed, its 5 items stagger
-   in 60ms apart (within the 30-80ms band) - same reveal duration/easing,
-   just offset per item, so it reads as one coordinated motion rather than
-   5 separate ones. */
-.stak-landing-features.stak-reveal-armed .stak-landing-feature {
-  transform: translateY(12px);
-  transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
-}
-.stak-landing-features.stak-reveal-armed.stak-reveal-visible
-  .stak-landing-feature {
-  transform: translateY(0);
-}
-.stak-landing-features.stak-reveal-armed .stak-landing-feature:nth-child(1) {
-  transition-delay: 0ms;
-}
-.stak-landing-features.stak-reveal-armed .stak-landing-feature:nth-child(2) {
-  transition-delay: 60ms;
-}
-.stak-landing-features.stak-reveal-armed .stak-landing-feature:nth-child(3) {
-  transition-delay: 120ms;
-}
-.stak-landing-features.stak-reveal-armed .stak-landing-feature:nth-child(4) {
-  transition-delay: 180ms;
-}
-.stak-landing-features.stak-reveal-armed .stak-landing-feature:nth-child(5) {
-  transition-delay: 240ms;
-}
-.stak-landing-feature {
-  padding: 22px 20px 0 0;
-  border-left: 1px solid var(--line-2);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.stak-landing-feature:first-child {
-  border-left: none;
-  padding-left: 0;
-}
-.stak-landing-feature:not(:first-child) {
-  padding-left: 20px;
-}
-.stak-landing-feature .t {
-  font-size: 16px;
-  font-weight: 600;
-}
-.stak-landing-feature .b {
-  font-size: 13.5px;
-  color: var(--faint);
-  line-height: 1.5;
-}
-
-/* ---- Shared truthful sections (how it works / memory & privacy / move) ---- */
-.stak-landing-section {
-  margin: 56px 48px 0;
-  padding-top: 40px;
+  grid-template-columns: clamp(72px, 9cqi, 96px) minmax(0, 1fr);
+  gap: clamp(12px, 2cqi, 24px);
+  padding: 16px clamp(16px, 2cqi, 22px);
   border-top: 1px solid var(--line);
 }
-.stak-landing-section h2 {
-  margin: 0 0 20px;
-  font-size: 22px;
+.stak-landing-dellrow-label {
+  font: 500 10.5px var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--dim);
+  padding-top: 11px;
+}
+.stak-landing-dellrow-lines {
+  display: flex;
+  flex-direction: column;
+}
+.stak-landing-dellline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: 14.5px;
+}
+.stak-landing-dellline:first-child {
+  border-top: none;
+}
+.stak-landing-dellline-b {
+  font: 500 13px var(--mono);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.stak-landing-dellcard-foot {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 13px clamp(16px, 2cqi, 22px);
+  border-top: 1px solid var(--line-2);
+  background: var(--panel);
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+/* ---- This is your STAK: object tabs + grid ---- */
+.stak-landing-objtabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 3px;
+  margin-bottom: 16px;
+}
+.stak-landing-objtab {
+  min-height: 44px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  font: 500 11px var(--mono);
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: background 250ms ease, color 250ms ease;
+}
+.stak-landing-objtab--active {
+  background: var(--ink);
+  color: var(--panel);
+}
+.stak-landing-objgrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.stak-landing-objcard {
+  background: var(--panel);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.stak-landing-objcard[data-active='false'] {
+  display: none;
+}
+.stak-landing-objcard-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.stak-landing-objcard-k {
+  font: 500 11px var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+.stak-landing-objcard-big {
+  font-size: 24px;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
-.stak-landing-steps {
+.stak-landing-objcard-d {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--faint);
+}
+.stak-landing-objcard-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 4px;
+  font: 12px var(--mono);
+}
+.stak-landing-objcard-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+}
+.stak-landing-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: 13.5px var(--mono);
+  margin-top: clamp(28px, 4cqi, 48px);
+}
+.stak-landing-strip-cmd {
+  white-space: nowrap;
+}
+.stak-landing-strip-note {
+  font-family: var(--sans);
+  font-size: 13.5px;
+  color: var(--faint);
+}
+
+@container stak-landing (min-width: 640px) {
+  .stak-landing-objtabs {
+    display: none;
+  }
+  .stak-landing-objcard[data-active='false'] {
+    display: flex;
+  }
+  .stak-landing-objgrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .stak-landing-strip {
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+  }
+}
+@container stak-landing (min-width: 1024px) {
+  .stak-landing-objgrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* ---- Move to another machine ---- */
+.stak-landing-moves {
+  list-style: none;
   margin: 0;
   padding: 0;
-  list-style: none;
   display: flex;
   flex-direction: column;
 }
-.stak-landing-steps li {
+.stak-landing-move {
   display: grid;
-  grid-template-columns: 220px 1fr;
-  gap: 16px;
-  align-items: baseline;
-  padding: 13px 0;
-  border-top: 1px solid var(--line);
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 14px;
 }
-.stak-landing-steps li:first-child {
-  border-top: none;
+.stak-landing-move-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
-.stak-landing-steps .step-name {
-  font-size: 15px;
-  font-weight: 500;
+.stak-landing-move-n {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--chip);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 500 12px var(--mono);
+  color: var(--ink);
+  background: var(--panel);
 }
-.stak-landing-steps code {
-  /* globals.css defines a bare `code { background: var(--panel-subtle) }`
-     rule for the light-theme prose system; .stak forces a dark surface
-     regardless of OS color-scheme preference, so that rule needs an
-     explicit override here instead of inheriting a near-white chip. */
-  font-family: var(--mono);
-  font-size: 13.5px;
+.stak-landing-move-line {
+  flex: 1;
+  width: 1px;
+  background: var(--line-2);
+}
+.stak-landing-move-body {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 5px 0 26px;
+  min-width: 0;
+}
+.stak-landing-move-t {
+  font: 500 11px var(--mono);
+  letter-spacing: 0.04em;
   color: var(--faint);
-  background: none;
-  border: none;
-  padding: 0;
+}
+.stak-landing-move-n-inline {
+  display: none;
+}
+.stak-landing-move-cmd {
+  font: 500 14.5px var(--mono);
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  padding: 11px 12px;
+}
+.stak-landing-move-d {
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.stak-landing-notes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  margin-top: 14px;
+}
+.stak-landing-note {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+  border-radius: 10px;
+}
+.stak-landing-note--dashed {
+  border: 1px dashed var(--line-2);
+  color: var(--faint);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.stak-landing-note--solid {
+  border: 1px solid var(--chip);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.stak-landing-note-cmd {
+  font: 500 13.5px var(--mono);
+  color: var(--muted);
   overflow-wrap: anywhere;
 }
+
+@container stak-landing (min-width: 640px) {
+  .stak-landing-moves {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .stak-landing-move {
+    grid-template-columns: minmax(0, 1fr);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel);
+    padding: 18px;
+    gap: 12px;
+    transition: border-color 250ms ease, transform 250ms ease;
+  }
+  .stak-landing-move:hover {
+    border-color: var(--chip);
+    transform: translateY(-2px);
+  }
+  .stak-landing-move-rail {
+    display: none;
+  }
+  .stak-landing-move-n-inline {
+    display: inline;
+  }
+  .stak-landing-move-body {
+    padding: 0;
+  }
+  .stak-landing-move-cmd {
+    background: var(--bg);
+  }
+  .stak-landing-notes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container stak-landing (min-width: 1024px) {
+  .stak-landing-moves {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* ---- Privacy section ---- */
 .stak-landing-privacy-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
+  gap: clamp(32px, 5cqi, 72px);
+  align-items: start;
 }
-.stak-landing-privacy-card {
+.stak-landing-privacy-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.stak-landing-pvtabs {
+  display: flex;
   border: 1px solid var(--line-2);
   border-radius: 8px;
+  padding: 3px;
+  gap: 3px;
+  align-self: stretch;
+}
+.stak-landing-pvtab {
+  flex: 1;
+  min-height: 44px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--faint);
+  transition: background 250ms ease, color 250ms ease;
+}
+.stak-landing-pvtab--active {
+  background: var(--ink);
+  color: var(--panel);
+}
+.stak-landing-pvcopy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 76px;
+}
+.stak-landing-pvcopy-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.stak-landing-pvcopy-desc {
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.stak-landing-pvcopy-rec {
+  display: block;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--faint);
+  min-height: 22px;
+}
+.stak-landing-pvgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 14px;
+  margin-top: 8px;
+}
+.stak-landing-pvcard {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.stak-landing-pvcard[data-protected='true'] {
+  border-color: color-mix(in srgb, var(--green) 45%, var(--line-2));
+}
+.stak-landing-pvcard-k {
+  font: 500 10.5px var(--mono);
+  color: var(--dim);
+}
+.stak-landing-pvcard-text {
+  font: 13px/1.6 var(--mono);
+  color: var(--ink);
+}
+.stak-landing-pvcard-text--mono {
+  word-break: break-all;
+}
+.stak-landing-pvcard[data-protected='true'] .stak-landing-pvcard-text {
+  color: color-mix(in srgb, var(--green) 55%, var(--faint));
+}
+.stak-landing-pvcard-who {
+  font-size: 12.5px;
+  color: var(--faint);
+}
+
+@container stak-landing (min-width: 640px) {
+  .stak-landing-privacy-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+  }
+  .stak-landing-pvtabs {
+    align-self: flex-start;
+  }
+  .stak-landing-pvtab {
+    flex: none;
+  }
+}
+
+/* ---- Machines section ---- */
+.stak-landing-machinepanel {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.stak-landing-machinepanel-head {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.stak-landing-viewas {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.stak-landing-viewas-label {
+  color: var(--dim);
+}
+.stak-landing-viewas-btn {
+  min-height: 44px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 11px;
+  border-radius: 5px;
+  cursor: pointer;
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--faint);
+  transition: border-color 200ms ease, color 200ms ease;
+}
+.stak-landing-viewas-btn--active {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+.stak-landing-machinegrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+}
+.stak-landing-machinecard {
   padding: 18px 20px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-.stak-landing-privacy-card .t {
-  font-size: 15px;
-  font-weight: 600;
-}
-.stak-landing-privacy-card .b {
-  font-size: 14px;
-  color: var(--muted);
-  line-height: 1.55;
-}
-
-/* ---- Product-proof visuals (P9 Task 4) ----
-   Small cropped-UI treatments styled to echo the real signed-in Skills/
-   Memory/Machines/Stacks surfaces (see landing-proof-visuals.tsx for the
-   exact source grammar each one is modeled on). All .stak tokens, no new
-   colors. */
-.stak-landing-proof-claim {
-  margin: 0 0 18px;
-  max-width: 640px;
-  font-size: 14.5px;
-  line-height: 1.55;
-  color: var(--muted);
-}
-.stak-landing-proof-card {
-  border: 1px solid var(--line-2);
-  border-radius: 8px;
-  max-width: 640px;
-  overflow: hidden;
-}
-.stak-landing-proof-note {
-  margin: 0;
-  padding: 10px 16px;
-  font-size: 11.5px;
-  color: var(--dim);
+  gap: 12px;
   border-top: 1px solid var(--line);
+  background: transparent;
+  transition: background 300ms ease;
 }
-
-/* Skills diff crop */
-.stak-landing-proof-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--line);
-  flex-wrap: wrap;
-}
-.stak-landing-proof-name {
-  font: 500 14px var(--mono);
-  color: var(--ink);
-}
-.stak-landing-proof-source {
-  font-size: 12.5px;
-  color: var(--faint);
-  flex: 1;
-}
-.stak-landing-proof-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
-  white-space: nowrap;
-}
-.stak-landing-proof-diff-head {
-  padding: 10px 16px 0;
-  font: 500 11.5px var(--mono);
-  color: var(--faint);
-}
-.stak-landing-proof-diff {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  padding: 8px 16px 14px;
-}
-.stak-landing-proof-diff pre {
-  margin: 0;
-  font: 11.5px var(--mono);
-  line-height: 1.6;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-  padding: 10px;
-  border-radius: 6px;
+.stak-landing-machinecard[data-viewing='true'] {
   background: var(--panel);
 }
-.stak-landing-proof-diff .before {
-  color: var(--faint);
-}
-.stak-landing-proof-diff .after {
-  color: var(--ink);
-}
-
-/* Memory mode comparison */
-.stak-landing-proof-modes {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
-  margin-top: 16px;
-}
-.stak-landing-proof-modes .stak-landing-proof-note {
-  grid-column: 1 / -1;
-  border: 1px solid var(--line-2);
-  border-radius: 8px;
-  border-top: 1px solid var(--line-2);
-}
-.stak-landing-proof-mode {
-  border: 1px solid var(--line-2);
-  border-radius: 8px;
-  padding: 16px 18px;
+.stak-landing-machinecard-head {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
 }
-.stak-landing-proof-mode .k {
-  font: 500 10.5px var(--mono);
-  letter-spacing: 0.06em;
-  color: var(--dim);
-}
-.stak-landing-proof-mode .v {
+.stak-landing-machinecard-name {
   font-size: 17px;
   font-weight: 600;
 }
-.stak-landing-proof-mode .d {
+.stak-landing-machinecard-viewing {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--orange);
+}
+.stak-landing-machinecard-kind {
   font-size: 12.5px;
   color: var(--faint);
-  line-height: 1.5;
+  margin-top: 3px;
+  white-space: nowrap;
 }
-
-/* Machines desired-vs-reported card */
-.stak-landing-proof-machine-head {
+.stak-landing-machinecard-status {
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
-  padding: 16px 18px;
-  border-bottom: 1px solid var(--line);
-  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+  font-size: 13px;
+  white-space: nowrap;
 }
-.stak-landing-proof-machine-name {
-  font-size: 16px;
-  font-weight: 600;
-  margin-right: 10px;
-}
-.stak-landing-proof-machine-meta {
-  font-size: 12.5px;
-  color: var(--faint);
-}
-.stak-landing-proof-facts {
+.stak-landing-machinecard-rows {
   display: flex;
   flex-direction: column;
-}
-.stak-landing-proof-facts-head,
-.stak-landing-proof-facts-row {
-  display: grid;
-  grid-template-columns: 90px 1fr 1fr;
-  gap: 12px;
-  padding: 10px 18px;
-  border-bottom: 1px solid var(--line);
-  align-items: baseline;
-}
-.stak-landing-proof-facts-row:last-child {
-  border-bottom: none;
-}
-.stak-landing-proof-facts-head {
-  font: 500 10px var(--mono);
-  letter-spacing: 0.06em;
-  color: var(--dim);
-}
-.stak-landing-proof-facts-head span:empty {
-  display: none;
-}
-.stak-landing-proof-facts-row {
   font-size: 13px;
 }
-.stak-landing-proof-facts-row .k {
-  font: 500 11px var(--mono);
-  color: var(--dim);
-}
-
-/* Stacks composition crop - mirrors stacks.css's own grammar at a smaller
-   scale (same column split, same border rhythm, no new pattern). */
-.stak-landing-proof-stack-head {
+.stak-landing-machinecard-row {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
   gap: 12px;
-  padding: 16px 18px;
-  border-bottom: 1px solid var(--line);
-  flex-wrap: wrap;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
 }
-.stak-landing-proof-stack-name {
-  font-size: 16px;
-  font-weight: 600;
-  margin-right: 10px;
+.stak-landing-machinecard-row:first-child {
+  border-top: none;
 }
-.stak-landing-proof-stack-comp-head {
-  display: grid;
-  grid-template-columns: 1fr 100px;
-  gap: 12px;
-  padding: 9px 18px;
-  border-bottom: 1px solid var(--line);
-  font: 500 10px var(--mono);
-  letter-spacing: 0.06em;
-  color: var(--dim);
-}
-.stak-landing-proof-stack-comp-row {
-  display: grid;
-  grid-template-columns: 1fr 100px;
-  gap: 12px;
-  align-items: center;
-  padding: 9px 18px;
-  border-bottom: 1px solid var(--line);
-  font-size: 13px;
-}
-.stak-landing-proof-stack-skill {
-  font-family: var(--mono);
+.stak-landing-machinepanel-strip {
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font: 12.5px var(--mono);
 }
 
-/* Move-to-new-machine flow */
-.stak-landing-proof-flow {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
+@container stak-landing (min-width: 640px) {
+  .stak-landing-machinepanel-head {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .stak-landing-machinecard-head {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .stak-landing-machinecard {
+    border-right: 1px solid var(--line);
+    border-top: none;
+  }
+  .stak-landing-machinepanel-strip {
+    flex-direction: row;
+    align-items: center;
+    gap: 14px;
+  }
 }
-.stak-landing-proof-flow-node {
+
+/* ---- Close / final CTA ---- */
+.stak-landing-close {
+  border-top: 1px solid var(--line);
+  padding: clamp(72px, 10cqi, 140px) clamp(20px, 4cqi, 56px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 22px;
+}
+.stak-landing-close h2 {
+  font-size: clamp(34px, 5.6cqi, 76px);
+  line-height: 1;
+  max-width: 15ch;
+  text-wrap: balance;
+}
+.stak-landing-close p {
+  max-width: 520px;
+}
+.stak-landing-close-cmds {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 520px;
   border: 1px solid var(--line-2);
   border-radius: 8px;
-  padding: 10px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 128px;
+  overflow: hidden;
+  font: 500 clamp(13px, 3.5cqi, 15px) var(--mono);
+  text-align: left;
 }
-.stak-landing-proof-flow-node .n {
-  font: 600 13px var(--mono);
-  color: var(--ink);
+.stak-landing-close-cmds .stak-landing-cmdrow {
+  max-width: none;
+  border: none;
+  border-radius: 0;
+  background: var(--panel);
 }
-.stak-landing-proof-flow-node .s {
-  font-size: 11.5px;
-  color: var(--faint);
-}
-.stak-landing-proof-flow-arrow {
-  color: var(--dim);
-  font-size: 16px;
-  flex: none;
+.stak-landing-close-cmds .stak-landing-cmdrow:first-child {
+  border-bottom: 1px solid var(--line);
 }
 
-/* ---- Macro narrative + proof-visual micro-motion (P9 Task 5) ----
-   Extends the exact same [data-reveal] / stak-reveal-armed /
-   stak-reveal-visible machinery from LandingScrollReveal - every selector
-   below requires `.stak-reveal-armed` on an ancestor `[data-reveal]`
-   section, so if JS never runs, reduced-motion is set, or
-   IntersectionObserver is unavailable, none of this ever applies and
-   every proof visual is exactly as server-rendered. No new classes are
-   added by JS; only the staging/sequencing of the existing reveal is
-   extended. Transform only, never opacity, never a loop, never a fake
-   live/sync/daemon/upload cue - every rule here fires once, when the
-   section first enters view, same as the rest of this file.
-
-   Macro story: the hero preview (above) already settles in framed as
-   DELL's reported state. Scrolling down, the Skills/Memory/Machines/
-   Stacks proof cards settle in from alternating sides - a deliberate
-   "gathering toward the middle" rhythm, not a literal animation of data
-   moving, that reads as these facts collecting into one portable STAK
-   picture. The Move-to-a-new-machine flow below is the explicit climax:
-   DELL's node settles first, a connector snaps in, the STAK node
-   materializes (the backup), a second connector snaps in, and the
-   MacBook node arrives last from the opposite side - the clearest,
-   most deliberately sequenced motion on the page, because it's the one
-   place the page is explicitly about moving machines. */
-
-/* Skills: card arrives from the left; the before/after diff lines settle
-   in sequence (old, then new) rather than appearing as static text, and
-   the "Update available" badge is deliberately the LAST thing to resolve
-   in the row - it only lands once the diff that justifies it is already
-   visible, never before. */
-#skills[data-reveal].stak-reveal-armed .stak-landing-proof-card {
-  transform: translateX(-14px);
-  transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
-}
-#skills[data-reveal].stak-reveal-armed .stak-landing-proof-diff .before,
-#skills[data-reveal].stak-reveal-armed .stak-landing-proof-diff .after {
-  transform: translateX(-10px);
-  transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
-}
-#skills[data-reveal].stak-reveal-armed .stak-landing-proof-diff .after {
-  transform: translateX(10px);
-  transition-delay: var(--stak-motion-stagger);
-}
-#skills[data-reveal].stak-reveal-armed
-  .stak-landing-proof-row
-  .stak-landing-proof-status {
-  transform: translateY(6px) scale(0.92);
-  transition: transform var(--stak-motion-standard) var(--stak-motion-ease);
-  transition-delay: calc(var(--stak-motion-stagger) * 3);
-}
-#skills[data-reveal].stak-reveal-armed.stak-reveal-visible
-  .stak-landing-proof-card,
-#skills[data-reveal].stak-reveal-armed.stak-reveal-visible
-  .stak-landing-proof-diff
-  .before,
-#skills[data-reveal].stak-reveal-armed.stak-reveal-visible
-  .stak-landing-proof-diff
-  .after,
-#skills[data-reveal].stak-reveal-armed.stak-reveal-visible
-  .stak-landing-proof-row
-  .stak-landing-proof-status {
-  transform: none;
-}
-
-/* Memory: the Standard and Protected cards settle in from opposite sides
-   and meet in the middle - the clearest literal "converging" moment in
-   the collecting sequence, since this section is explicitly a two-sided
-   comparison. */
-#memory-privacy[data-reveal].stak-reveal-armed
-  .stak-landing-proof-mode:nth-child(1) {
-  transform: translateX(-14px);
-  transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
-}
-#memory-privacy[data-reveal].stak-reveal-armed
-  .stak-landing-proof-mode:nth-child(2) {
-  transform: translateX(14px);
-  transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
-  transition-delay: var(--stak-motion-stagger);
-}
-#memory-privacy[data-reveal].stak-reveal-armed.stak-reveal-visible
-  .stak-landing-proof-mode {
-  transform: none;
-}
-
-/* Machines: card arrives from the right (alternating with Skills' left
-   entrance), and the desired/reported fact rows resolve one after the
-   other - the same "facts resolving under a settled card" rhythm as the
-   hero preview rows above, reused rather than invented fresh. */
-#machines[data-reveal].stak-reveal-armed .stak-landing-proof-card {
-  transform: translateX(14px);
-  transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
-}
-#machines[data-reveal].stak-reveal-armed .stak-landing-proof-facts-row {
-  transform: translateY(10px);
-  transition: transform var(--stak-motion-standard) var(--stak-motion-ease);
-}
-#machines[data-reveal].stak-reveal-armed
-  .stak-landing-proof-facts-row:nth-child(3) {
-  transition-delay: var(--stak-motion-stagger);
-}
-#machines[data-reveal].stak-reveal-armed.stak-reveal-visible
-  .stak-landing-proof-card,
-#machines[data-reveal].stak-reveal-armed.stak-reveal-visible
-  .stak-landing-proof-facts-row {
-  transform: none;
-}
-
-/* Stacks: card arrives from the left again, and the Included/Paused rows
-   stagger in the same cadence as the feature strip above. */
-#stacks-proof[data-reveal].stak-reveal-armed .stak-landing-proof-stack {
-  transform: translateX(-14px);
-  transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
-}
-#stacks-proof[data-reveal].stak-reveal-armed
-  .stak-landing-proof-stack-comp-row {
-  transform: translateY(8px);
-  transition: transform var(--stak-motion-standard) var(--stak-motion-ease);
-}
-#stacks-proof[data-reveal].stak-reveal-armed
-  .stak-landing-proof-stack-comp-row:nth-child(4) {
-  transition-delay: var(--stak-motion-stagger);
-}
-#stacks-proof[data-reveal].stak-reveal-armed
-  .stak-landing-proof-stack-comp-row:nth-child(5) {
-  transition-delay: calc(var(--stak-motion-stagger) * 2);
-}
-#stacks-proof[data-reveal].stak-reveal-armed.stak-reveal-visible
-  .stak-landing-proof-stack,
-#stacks-proof[data-reveal].stak-reveal-armed.stak-reveal-visible
-  .stak-landing-proof-stack-comp-row {
-  transform: none;
-}
-
-/* Move to a new machine: the climax. DELL settles from the left, a
-   connector snaps in (scaleX from its own left edge, so it reads as a
-   line extending rather than a width change - no layout box ever
-   resizes), the STAK node materializes in the middle, a second connector
-   snaps in, and MacBook arrives last from the right. This sequence shows
-   the order the real steps happen in when *you* run them (install, log
-   in, recover, restore - see the steps list right below it) - it is not,
-   and must never look like, a live sync/upload/daemon animation: it
-   plays once on scroll-in and then holds still. */
-#move[data-reveal].stak-reveal-armed .stak-landing-proof-flow-node,
-#move[data-reveal].stak-reveal-armed .stak-landing-proof-flow-arrow {
-  transition: transform var(--stak-motion-reveal) var(--stak-motion-ease);
-}
-#move[data-reveal].stak-reveal-armed
-  .stak-landing-proof-flow-node:nth-child(1) {
-  transform: translateX(-16px);
-}
-#move[data-reveal].stak-reveal-armed
-  .stak-landing-proof-flow-arrow:nth-child(2) {
-  transform: scaleX(0);
-  transform-origin: left center;
-  transition-duration: var(--stak-motion-standard);
-  transition-delay: calc(var(--stak-motion-stagger) * 2);
-}
-#move[data-reveal].stak-reveal-armed
-  .stak-landing-proof-flow-node:nth-child(3) {
-  transform: translateY(10px) scale(0.95);
-  transition-delay: calc(var(--stak-motion-stagger) * 3);
-}
-#move[data-reveal].stak-reveal-armed
-  .stak-landing-proof-flow-arrow:nth-child(4) {
-  transform: scaleX(0);
-  transform-origin: left center;
-  transition-duration: var(--stak-motion-standard);
-  transition-delay: calc(var(--stak-motion-stagger) * 5);
-}
-#move[data-reveal].stak-reveal-armed
-  .stak-landing-proof-flow-node:nth-child(5) {
-  transform: translateX(16px);
-  transition-delay: calc(var(--stak-motion-stagger) * 6);
-}
-#move[data-reveal].stak-reveal-armed.stak-reveal-visible
-  .stak-landing-proof-flow-node,
-#move[data-reveal].stak-reveal-armed.stak-reveal-visible
-  .stak-landing-proof-flow-arrow {
-  transform: none;
-}
-
-/* ---- Relocated "no daemon" note (P9 Task S6) ----
-   Was the page-ending closing bar; now a secondary paragraph right under
-   the Machines proof visual, since that's the section this point is
-   actually about (what a check-in is vs. isn't). Same two-tier contrast
-   as the old bar: the lead sentence at the section's normal copy color,
-   the explanatory half a step quieter via .stak-landing-closing-muted. */
-.stak-landing-section-note {
-  margin: 18px 0 0;
-  max-width: 640px;
-  font-size: 14px;
-  line-height: 1.55;
-  color: var(--muted);
-}
-.stak-landing-closing-muted {
-  color: var(--faint);
-}
-
-/* ---- Site footer (P9 Task S6) ----
-   Real footer replacing the old closing bar as the page's final element.
-   Same .stak tokens/IBM Plex as the rest of the page - no new colors. */
+/* ---- Footer ---- */
 .stak-landing-footer {
-  flex: none;
-  margin-top: 64px;
   border-top: 1px solid var(--line);
-  padding: 40px 48px 28px;
+  padding: clamp(40px, 6cqi, 72px) clamp(20px, 4cqi, 56px) 0;
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: clamp(48px, 7cqi, 96px);
+  overflow: hidden;
 }
-.stak-landing-footer-top {
-  display: flex;
-  justify-content: space-between;
-  gap: 48px;
+.stak-landing-footer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px 20px;
+  max-width: 1328px;
+  width: 100%;
+  margin: 0 auto;
 }
 .stak-landing-footer-brand {
+  grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-width: 280px;
 }
-.stak-landing-footer-wordmark {
+.stak-landing-footer-brand .stak-landing-wordmark {
   font-weight: 700;
   font-size: 15px;
-  letter-spacing: 0.18em;
-  color: var(--ink);
+  letter-spacing: 0.2em;
 }
 .stak-landing-footer-thesis {
-  margin: 0;
   font-size: 13.5px;
-  line-height: 1.55;
   color: var(--faint);
-}
-.stak-landing-footer-groups {
-  display: flex;
-  gap: 56px;
+  line-height: 1.55;
+  max-width: 240px;
 }
 .stak-landing-footer-group {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-width: 120px;
-}
-.stak-landing-footer-heading {
-  font: 500 11px var(--mono);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--dim);
+  font-size: 14px;
 }
 .stak-landing-footer-group a {
-  font-size: 14px;
-  color: var(--faint);
-  transition: color var(--stak-motion-fast) var(--stak-motion-ease);
+  color: var(--muted);
 }
 .stak-landing-footer-group a:hover,
 .stak-landing-footer-group a:focus-visible {
   color: var(--ink);
 }
-.stak-landing-footer-bottom {
-  padding-top: 20px;
-  border-top: 1px solid var(--line);
-  font-size: 12px;
+.stak-landing-footer-heading {
+  font: 500 11px var(--mono);
+  letter-spacing: 0.08em;
   color: var(--dim);
 }
-
-/* ================= Responsive ================= */
-
-/* Tablet: intentional two-column composition, not a squeezed desktop. */
-@media (max-width: 1023.98px) {
-  /* Restore the original flex-row layout below 1024px (unchanged from the
-     prior sub-pass): the nav-links grid column is irrelevant here since
-     .stak-landing-nav-links is hidden and the disclosure takes over, and
-     the brief asks for the mobile disclosure's position/behavior to stay
-     exactly as it was before the desktop grid-centering fix. */
-  .stak-landing-nav {
-    display: flex;
-    padding: 0 28px;
-    gap: 20px;
-  }
-  .stak-landing-nav-links {
-    display: none;
-  }
-  .stak-landing-nav-disclosure {
-    display: block;
-  }
-  .stak-landing-hero {
-    grid-template-columns: 1fr;
-    padding: 40px 28px 0;
-    gap: 32px;
-  }
-  .stak-landing-hero-copy h1 {
-    font-size: 40px;
-  }
-  .stak-landing-features {
-    margin: 40px 28px 0;
-    grid-template-columns: repeat(3, 1fr);
-    row-gap: 24px;
-  }
-  .stak-landing-feature:nth-child(4) {
-    border-left: none;
-    padding-left: 0;
-  }
-  .stak-landing-section {
-    margin: 48px 28px 0;
-  }
-  .stak-landing-proof-diff {
-    grid-template-columns: 1fr;
-  }
-  .stak-landing-footer {
-    padding: 36px 28px 24px;
-    gap: 24px;
-  }
-  .stak-landing-footer-groups {
-    gap: 36px;
-  }
+.stak-landing-footer-wm {
+  height: 29cqi;
+  margin: 0 calc(-1 * clamp(20px, 4cqi, 56px));
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  user-select: none;
+  pointer-events: none;
+}
+.stak-landing-footer-wm span {
+  font-size: 40cqi;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 0.72;
+  color: #2c2b27;
+  white-space: nowrap;
 }
 
-/* Mobile: hero stacks naturally, CTA/install visible early, single column
-   everywhere, no horizontal overflow at any width down to 360px. */
-@media (max-width: 767.98px) {
-  .stak-landing-nav {
-    padding: 0 16px;
-    height: 56px;
-    gap: 12px;
-  }
-  .stak-landing-wordmark {
-    font-size: 14px;
-  }
-  .stak-landing-signin {
-    padding: 8px 6px;
-    font-size: 13px;
-  }
-  .stak-landing-nav-disclosure > summary {
-    padding: 6px 9px;
-    font-size: 13px;
-  }
-  .stak-landing-install-cta {
-    font-size: 13px;
-    padding: 8px 12px;
-  }
-  .stak-landing-hero {
-    padding: 28px 16px 0;
-    gap: 24px;
-  }
-  .stak-landing-hero-copy h1 {
-    font-size: 32px;
-    line-height: 1.1;
-  }
-  .stak-landing-lead {
-    font-size: 16px;
-  }
-  .stak-landing-preview {
-    padding: 18px;
-  }
-  .stak-landing-preview-status {
-    font-size: 19px;
-  }
-  .stak-landing-preview-row {
-    grid-template-columns: 1fr;
-    gap: 4px;
-  }
-  .stak-landing-preview-row .s {
-    justify-self: start;
-  }
-  .stak-landing-features {
-    margin: 36px 16px 0;
-    grid-template-columns: repeat(2, 1fr);
-  }
-  .stak-landing-feature:nth-child(3) {
-    border-left: none;
-    padding-left: 0;
-  }
-  .stak-landing-feature {
-    padding-top: 18px;
-  }
-  .stak-landing-section {
-    margin: 40px 16px 0;
-    padding-top: 28px;
-  }
-  .stak-landing-section h2 {
-    font-size: 19px;
-  }
-  .stak-landing-steps li {
-    grid-template-columns: 1fr;
-    gap: 4px;
-  }
-  .stak-landing-privacy-grid {
-    grid-template-columns: 1fr;
-  }
-  .stak-landing-footer {
-    margin-top: 48px;
-    padding: 28px 16px 20px;
-    gap: 24px;
-  }
-  .stak-landing-footer-top {
-    flex-direction: column;
-    gap: 24px;
+@container stak-landing (min-width: 640px) {
+  .stak-landing-footer-grid {
+    grid-template-columns: minmax(0, 1.6fr) repeat(4, minmax(0, 1fr));
   }
   .stak-landing-footer-brand {
-    max-width: none;
+    grid-column: span 1;
   }
-  .stak-landing-footer-groups {
-    flex-wrap: wrap;
-    gap: 24px 32px;
+}
+@container stak-landing (min-width: 1024px) {
+  .stak-landing-footer-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
   }
-
-  /* Proof visuals: simplify to a single stacked column and drop the
-     before/after side-by-side diff to one block, so narrow widths get a
-     short vertical card, not a cramped wall of mini-UI. */
-  .stak-landing-proof-diff {
-    grid-template-columns: 1fr;
-    padding: 8px 14px 12px;
+  .stak-landing-footer-wm {
+    height: 25cqi;
   }
-  .stak-landing-proof-row,
-  .stak-landing-proof-machine-head,
-  .stak-landing-proof-stack-head {
-    padding: 12px 14px;
-  }
-  .stak-landing-proof-diff-head {
-    padding: 10px 14px 0;
-  }
-  .stak-landing-proof-note {
-    padding: 10px 14px;
-  }
-  .stak-landing-proof-modes {
-    grid-template-columns: 1fr;
-    gap: 10px;
-  }
-  .stak-landing-proof-facts-head,
-  .stak-landing-proof-facts-row {
-    grid-template-columns: 1fr;
-    gap: 2px;
-    padding: 10px 14px;
-  }
-  .stak-landing-proof-stack-comp-head,
-  .stak-landing-proof-stack-comp-row {
-    grid-template-columns: 1fr auto;
-    padding: 9px 14px;
-  }
-  .stak-landing-proof-flow {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-  }
-  .stak-landing-proof-flow-node {
-    min-width: 0;
-  }
-  .stak-landing-proof-flow-arrow {
-    display: none;
-  }
-  /* improve-animations audit (P9 Task 5 self-review): below 768px these
-     cards/nodes reflow into a single vertical stack, so a horizontal
-     translateX entrance no longer matches the layout's own axis
-     (physicality/origin should track the actual direction content
-     moves). Swap to vertical offsets at this breakpoint instead of
-     reusing the desktop horizontal values. */
-  #memory-privacy[data-reveal].stak-reveal-armed
-    .stak-landing-proof-mode:nth-child(1) {
-    transform: translateY(-10px);
-  }
-  #memory-privacy[data-reveal].stak-reveal-armed
-    .stak-landing-proof-mode:nth-child(2) {
-    transform: translateY(10px);
-  }
-  #move[data-reveal].stak-reveal-armed
-    .stak-landing-proof-flow-node:nth-child(1) {
-    transform: translateY(-12px);
-  }
-  #move[data-reveal].stak-reveal-armed
-    .stak-landing-proof-flow-node:nth-child(5) {
-    transform: translateY(12px);
-  }
-  /* Explicit nth-child-scoped visible-state resets: the base
-     `.stak-reveal-visible` reset rule above (outside this media query)
-     ties in specificity with the :nth-child offset rules just above, so
-     it needs a same-specificity override here rather than relying on
-     source order across the file. */
-  #memory-privacy[data-reveal].stak-reveal-armed.stak-reveal-visible
-    .stak-landing-proof-mode:nth-child(1),
-  #memory-privacy[data-reveal].stak-reveal-armed.stak-reveal-visible
-    .stak-landing-proof-mode:nth-child(2),
-  #move[data-reveal].stak-reveal-armed.stak-reveal-visible
-    .stak-landing-proof-flow-node:nth-child(1),
-  #move[data-reveal].stak-reveal-armed.stak-reveal-visible
-    .stak-landing-proof-flow-node:nth-child(5) {
-    transform: none;
+  .stak-landing-footer-wm span {
+    color: #272623;
   }
 }
 
-@media (max-width: 479.98px) {
-  .stak-landing-features {
-    grid-template-columns: 1fr;
-  }
-  .stak-landing-feature {
-    border-left: none !important;
-    padding-left: 0 !important;
-    border-top: 1px solid var(--line-2);
-    padding-top: 16px;
-  }
-  .stak-landing-feature:first-child {
-    border-top: none;
-  }
-  .stak-landing-footer-groups {
-    flex-direction: column;
-    gap: 20px;
-  }
-  .stak-landing-footer-group {
-    min-width: 0;
-  }
+/* ---- Accessibility: visible focus everywhere on this page ---- */
+.stak-landing a:focus-visible,
+.stak-landing button:focus-visible,
+.stak-landing [role='button']:focus-visible,
+.stak-landing [role='tab']:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
 }
 
-/* ================= Reduced motion ================= */
-/* Step 4 of the P9 Task 3 brief: with `prefers-reduced-motion: reduce`,
-   every staged entrance/reveal becomes immediate (content is already
-   visible either way, since nothing above ever used opacity - this just
-   removes the deliberate delay/offset too) and there is no scroll-
-   choreography dependency left for a reduced-motion visitor to even
-   notice. Interaction feedback (hover/press/copy-confirmation) stays, but
-   collapses to a near-instant transition instead of eased/staged timing. */
 @media (prefers-reduced-motion: reduce) {
-  .stak-landing-hero-copy,
-  .stak-landing-preview,
-  .stak-landing-preview-status,
-  .stak-landing-preview-row,
-  [data-reveal].stak-reveal-armed,
-  [data-reveal].stak-reveal-armed .stak-landing-feature,
-  /* P9 Task 5: the macro narrative + proof-visual micro-motion extends
-     this same catch-all - belt-and-suspenders alongside
-     LandingScrollReveal's own reduced-motion check, which already skips
-     adding `.stak-reveal-armed` at all under this preference, so none of
-     these selectors can match in practice either way. */
-  [data-reveal].stak-reveal-armed .stak-landing-proof-card,
-  [data-reveal].stak-reveal-armed .stak-landing-proof-stack,
-  [data-reveal].stak-reveal-armed .stak-landing-proof-mode,
-  [data-reveal].stak-reveal-armed .stak-landing-proof-facts-row,
-  [data-reveal].stak-reveal-armed .stak-landing-proof-stack-comp-row,
-  [data-reveal].stak-reveal-armed .stak-landing-proof-diff .before,
-  [data-reveal].stak-reveal-armed .stak-landing-proof-diff .after,
-  [data-reveal].stak-reveal-armed .stak-landing-proof-row .stak-landing-proof-status,
-  [data-reveal].stak-reveal-armed .stak-landing-proof-flow-node,
-  [data-reveal].stak-reveal-armed .stak-landing-proof-flow-arrow {
-    animation: none;
-    transition: none;
-    transform: none;
-  }
-  .stak-landing-nav-links a,
-  .stak-landing-signin,
-  .stak-landing-install-cta,
-  .stak-landing-copy,
-  .stak-landing-nav-disclosure > summary,
-  .stak-landing-nav-disclosure-panel,
-  .stak-landing-nav-disclosure-panel a,
-  .stak-landing-footer-group a {
-    transition-duration: 1ms;
-  }
-  .stak-landing-install-cta:active,
-  .stak-landing-copy:active,
-  .stak-landing-nav-disclosure > summary:active {
-    transform: none;
-  }
-  .stak-landing-copy--copied {
-    animation: none;
+  .stak-landing * {
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
   }
 }

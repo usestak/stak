@@ -3,38 +3,44 @@ import Link from 'next/link';
 import '../overview/shell.css';
 import './public-landing-shell.css';
 
-import { CopyCommand } from './copy-command';
-import { LandingScrollReveal } from './landing-scroll-reveal';
 import {
-  MachineCheckInProof,
-  MachineMoveFlow,
-  MemoryModeProof,
-  SkillDiffProof,
-  StackCompositionProof,
-} from './landing-proof-visuals';
+  CopyRow,
+  MachinesPanel,
+  NavMenuToggle,
+  ObjectsGrid,
+  PrivacyPanel,
+  type MachineCard,
+  type ObjCard,
+  type PrivacyMode,
+} from './landing-interactive';
 
 /**
- * Public, signed-out landing page shell (P9 Task 2). Replaces the narrow
- * FocusedShell-based card from commit c9f7c05 with the full public-product
- * composition from the STAK Final Contract design doc (S.01): a real top
- * nav, a split hero with an illustrative product preview, a feature strip,
- * and truthful product-explainer sections. Same `.stak` token scope as every
- * other shell (overview/shell.css) - no new colors are introduced here.
+ * Public, signed-out landing page shell - P9 "Task 1" (structure, copy, and
+ * static/interactive non-scroll-story sections), rebuilt FAITHFULLY against
+ * the approved design doc (`STAK-Landing-Layered.dc.html` for content/
+ * interaction/desktop intent, `STAK-Landing-Responsive.dc.html` for width-
+ * specific recomposition) - this is a from-scratch rebuild superseding the
+ * prior "Final Contract" based composition, not an iteration on it.
  *
- * Deliberately not parameterized with boolean props (vercel-composition-
- * patterns: avoid boolean-prop proliferation) - this is a single-purpose
- * page shell, not a reusable library component, so it owns its full content
- * rather than accepting flags to toggle sections on/off.
+ * Breakpoints follow the design's own thresholds, driven by CONTAINER width
+ * (not viewport media queries, not user-agent sniffing): < 640 mobile,
+ * 640-1023 tablet, >= 1024 desktop. `.stak-landing` below sets
+ * `container-type: inline-size` and every width-specific rule in
+ * public-landing-shell.css is a `@container` rule keyed to that container -
+ * per the Responsive doc's own explicit note ("In production use CSS
+ * container queries on the landing root"). JS state is used ONLY for the
+ * handful of truly *structural* recompositions CSS can't express on its own
+ * (which single object card shows on mobile, which machine is "being
+ * viewed", which privacy mode's copy/cloud panel renders) - see
+ * landing-interactive.tsx; every one of those is a leaf Client Component so
+ * this file and all its copy stay a plain Server Component, fully
+ * crawlable without JS.
  *
- * P9 Task 3 layers a small motion system on top of this same markup: CSS-
- * only entrance animation on the hero/preview card (see
- * public-landing-shell.css), and a scroll-reveal for the sections below the
- * fold, armed by the non-visual `LandingScrollReveal` client island. Every
- * `[data-reveal]` section here is fully visible in this server-rendered
- * markup with no base rule hiding it - the island only ever adds a class
- * that can offset it, and only once the section is actually on screen (or a
- * fallback timer fires). The other interactive leaf is `CopyCommand`
- * (clipboard copy).
+ * The hero's pinned DELL -> STAK -> MacBook scroll story and the rotating
+ * hero word are intentionally left as a static "frame 0" stub here - P9
+ * Task 2 implements the actual scroll-scrubbing/rotation motion on top of
+ * this same markup (design doc's own "STATIC FRAMES" note: "A fixed step
+ * renders one frame with no pinning; use it for previews").
  */
 export function PublicLandingShell() {
   return (
@@ -51,22 +57,27 @@ export function PublicLandingShell() {
       />
       <div className="stak stak-landing">
         <LandingNav />
-        <main id="main-content" className="stak-landing-main">
+        <main id="main-content">
           <Hero />
-          <FeatureStrip />
-          <SkillsProof />
-          <HowItWorks />
-          <MemoryAndPrivacy />
-          <MachinesProof />
-          <StacksProof />
-          <MoveToNewMachine />
+          <ProblemSection />
+          <YourStakSection />
+          <MoveSection />
+          <PrivacySection />
+          <MachinesSection />
+          <CloseSection />
         </main>
         <SiteFooter />
       </div>
-      <LandingScrollReveal />
     </>
   );
 }
+
+const NAV_LINKS = [
+  { t: 'How it works', u: '#how', k: '→' },
+  { t: 'Memory & privacy', u: '#privacy', k: '→' },
+  { t: 'Machines', u: '#machines', k: '→' },
+  { t: 'GitHub', u: 'https://github.com/usestak/stak', k: '↗' },
+];
 
 function LandingNav() {
   return (
@@ -75,32 +86,22 @@ function LandingNav() {
         STAK
       </Link>
       <div className="stak-landing-nav-links">
-        <a href="#how-it-works">How it works</a>
-        <a href="#memory-privacy">Memory &amp; privacy</a>
-        <a href="#stacks">Stacks</a>
-        <a href="#install">CLI</a>
+        <a href="#how">How it works</a>
+        <a href="#privacy">Memory &amp; privacy</a>
+        <a href="#machines">Machines</a>
+        <a href="https://github.com/usestak/stak">GitHub</a>
       </div>
-      {/* Below 1024px .stak-landing-nav-links is hidden by CSS; this native
-          <details> disclosure (same pattern as account-menu.tsx and
-          stack-card.tsx's "Technical details") carries the same 4 links so
-          they stay reachable instead of being dropped. Keyboard-operable by
-          default, no JS required. */}
-      <details className="stak-landing-nav-disclosure">
-        <summary aria-label="Navigation">Menu</summary>
-        <div className="stak-landing-nav-disclosure-panel">
-          <a href="#how-it-works">How it works</a>
-          <a href="#memory-privacy">Memory &amp; privacy</a>
-          <a href="#stacks">Stacks</a>
-          <a href="#install">CLI</a>
-        </div>
-      </details>
-      <div className="stak-landing-nav-actions">
-        <a className="stak-landing-signin" href="/auth/login?next=/onboarding">
+      <div className="stak-landing-nav-right">
+        <a href="/auth/login?next=/onboarding" className="stak-landing-signin">
           Sign in
         </a>
-        <a className="stak-landing-install-cta" href="#install">
+        <a href="#install" className="stak-landing-install-cta">
           Install the CLI
         </a>
+        <a href="#install" className="stak-landing-install-cta-mobile">
+          Install
+        </a>
+        <NavMenuToggle links={NAV_LINKS} />
       </div>
     </nav>
   );
@@ -108,385 +109,522 @@ function LandingNav() {
 
 function Hero() {
   return (
-    <section className="stak-landing-hero">
-      <div className="stak-landing-hero-copy">
-        <span className="stak-landing-eyebrow">
-          For developers who work with AI agents
+    <section className="stak-landing-hero" aria-label="STAK">
+      {/* Two distinct compositions (design: separate `mob`/`notMob` markup,
+          not just a reflow of the same lines) - desktop groups "Your [WORD]
+          should" on one line and "survive your laptop." on the next; mobile
+          stacks four lines so the rotating word never shifts "Your"/
+          "should". Both render; CSS shows exactly one per container width. */}
+      <h1
+        className="stak-landing-h1 stak-landing-h1--desktop"
+        aria-label="Your STAK should survive your laptop."
+      >
+        <span className="stak-landing-h1-row" aria-hidden="true">
+          <span className="stak-landing-h1-your">Your</span>
+          <span className="stak-landing-h1-wordrow">
+            {/* Rotating word stub - Task 2 implements the letter-flip
+                rotation through STAK / SKILLS / MEMORY / AGENT. */}
+            <span className="stak-landing-h1-word">STAK</span>
+            <span>should</span>
+          </span>
         </span>
-        {/* The real h1 - required verbatim by branding.test.ts and kept as
-            the headline, distinct from the "control plane" statement below
-            it (two statements with a clear hierarchy, not competing for the
-            same line). */}
-        <h1>Your STAK should survive your laptop.</h1>
-        <p className="stak-landing-lead">
-          STAK is the control plane for portable AI agent environments.
-        </p>
-        <p>
-          You&apos;ve spent months teaching Claude, Codex and Cursor how you
-          work. STAK backs up those skills, that Memory and your setup. A new
-          machine picks up where the old one left off.
-        </p>
-        <div className="stak-landing-install" id="install">
-          <div className="stak-landing-install-row">
-            <span className="stak-landing-install-cmd">
-              <span className="stak-landing-install-n">1 $ </span>
-              npm install -g @usestak/cli
-            </span>
-            <CopyCommand command="npm install -g @usestak/cli" />
-          </div>
-          <div className="stak-landing-install-row">
-            <span className="stak-landing-install-cmd">
-              <span className="stak-landing-install-n">2 $ </span>
-              stak login
-            </span>
-            <CopyCommand command="stak login" />
+        <span className="stak-landing-h1-line2" aria-hidden="true">
+          survive your laptop.
+        </span>
+      </h1>
+      <h1
+        className="stak-landing-h1 stak-landing-h1--mobile"
+        aria-label="Your STAK should survive your laptop."
+      >
+        <span className="stak-landing-h1-line" aria-hidden="true">
+          Your
+        </span>
+        <span className="stak-landing-h1-word" aria-hidden="true">
+          STAK
+        </span>
+        <span className="stak-landing-h1-line" aria-hidden="true">
+          should survive
+        </span>
+        <span className="stak-landing-h1-line" aria-hidden="true">
+          your laptop.
+        </span>
+      </h1>
+      <p className="stak-landing-lead">
+        Carry your Skills, Memory, and setup as one portable STAK. Inspect it
+        on one machine, bring it back on the next.
+      </p>
+      <div id="install" className="stak-landing-install-anchor" />
+      <CopyRow command="npm install -g @usestak/cli" />
+      {/* Scroll-story container stub (P9 Task 2 fills this with the pinned
+          DELL -> Your STAK -> MacBook card-fan animation across 7 steps).
+          Rendered here as a static "frame 0" so the layout this later work
+          needs already exists. */}
+      <div className="stak-landing-story" aria-hidden="true">
+        <div className="stak-landing-story-caption">
+          <span className="stak-landing-story-cap">
+            Your agent setup starts on DELL.
+          </span>
+          <span className="stak-landing-story-sub">
+            Skills, Memory and local setup accumulate as you work.
+          </span>
+          <div className="stak-landing-story-cmd">
+            <span className="stak-landing-story-m">DELL $ </span>
+            stak scan
           </div>
         </div>
-        <p className="stak-landing-caption">
-          Step 2 opens your browser to approve the machine. Your setup stays on
-          it until you choose to back it up.
-        </p>
+        <div className="stak-landing-story-stage">
+          <div className="stak-landing-story-zone">
+            <span className="stak-landing-story-zone-n">DELL</span>
+            <span className="stak-landing-story-zone-s">working copy</span>
+          </div>
+          <div className="stak-landing-story-zone">
+            <span className="stak-landing-story-zone-n">Your STAK</span>
+            <span className="stak-landing-story-zone-s">empty</span>
+          </div>
+          <div className="stak-landing-story-zone">
+            <span className="stak-landing-story-zone-n">MacBook</span>
+            <span className="stak-landing-story-zone-s">not set up yet</span>
+          </div>
+        </div>
       </div>
-      <PreviewCard />
     </section>
   );
 }
 
-function PreviewCard() {
+function ProblemSection() {
   return (
-    <div className="stak-landing-preview" aria-label="Illustrative preview">
-      <div className="stak-landing-preview-head">
-        <span>OVERVIEW · VIEWING AS DELL</span>
-        <span>Last backup 12 min ago</span>
-      </div>
-      <div className="stak-landing-preview-status">
-        <span className="stak-dot" style={{ background: 'var(--green)' }} />
-        <span>Your STAK is backed up.</span>
-      </div>
-      <div className="stak-landing-preview-rows">
-        <div className="stak-landing-preview-row">
-          <span className="k">SKILLS</span>
-          <span className="v">
-            <span className="v1">31 ready</span>
-            <span className="v2">Inspect source, files and capabilities.</span>
-          </span>
-          <span className="s" style={{ color: 'var(--orange)' }}>
-            2 updates
-          </span>
-        </div>
-        <div className="stak-landing-preview-row">
-          <span className="k">MEMORY</span>
-          <span className="v">
-            <span className="v1">Backed up</span>
-            {/* Protected Memory's perProject is always null - the Cloud
-                never decrypts the ciphertext bundle to get per-project file
-                counts (contract: Memory read-model data availability). A
-                per-project *file* count is Standard-only and would be faked
-                here if shown next to "Protected". The project count itself
-                is honest: it comes from the account-side cloud_projects
-                registry, not the ciphertext, which the contract gives as
-                the explicit allowed phrasing for a Protected summary line
-                ("Protected · Backed up <time> · N projects known to
-                STAK"). */}
-            <span className="v2">9 projects known to STAK</span>
-          </span>
-          <span className="s" style={{ color: 'var(--green)' }}>
-            Protected
-          </span>
-        </div>
-        <div className="stak-landing-preview-row">
-          <span className="k">MACHINES</span>
-          <span className="v">
-            <span className="v1">2 machines</span>
-            <span className="v2">
-              DELL up to date · MacBook 1 update waiting
+    <section className="stak-landing-section" aria-label="The problem">
+      <div className="stak-landing-problem-grid">
+        <div className="stak-landing-problem-copy">
+          <span className="stak-landing-eyebrow">THE PROBLEM</span>
+          <h2>Your agent setup is stuck on this machine.</h2>
+          <p>
+            Every week your agents get better. You add Skills, they build
+            Memory, and your workflow starts to feel like yours. Move to a
+            new machine, and too much of that setup doesn&apos;t come with
+            you.
+          </p>
+          <div className="stak-landing-problem-rule">
+            <span>New laptop</span>
+            <span className="stak-landing-tone-orange">→</span>
+            <span className="stak-landing-tone-orange">
+              rebuild what you already taught your agents.
             </span>
-          </span>
-          <span className="s" style={{ color: 'var(--amber)' }}>
-            1 waiting
-          </span>
+          </div>
+        </div>
+        <div className="stak-landing-dellcard">
+          <div className="stak-landing-dellcard-head">
+            <span className="stak-landing-dellcard-name">DELL</span>
+            <span className="stak-landing-dellcard-sub">
+              What your agents rely on
+            </span>
+          </div>
+          <DellRow label="SKILLS">
+            <DellLine a="Claude Code" b="24" />
+            <DellLine a="Codex" b="9" />
+            <DellLine a="Shared across both" b="2" faint />
+          </DellRow>
+          <DellRow label="MEMORY">
+            <DellLine a="Claude Code" b="local" faint />
+            <DellLine a="Codex" b="local" faint />
+          </DellRow>
+          <DellRow label="PROJECT">
+            <DellLine a="ledger-api" b="present" faint />
+          </DellRow>
+          <DellRow label="SETUP">
+            <DellLine a="Agent setup" b="spread across tools" faint />
+          </DellRow>
+          <div className="stak-landing-dellcard-foot">
+            <span className="stak-landing-dot" data-tone="faint" />
+            Still tied to DELL.
+          </div>
         </div>
       </div>
-      <div className="stak-landing-preview-dock">
-        <span className="scope">ON DELL</span>
-        <span className="cmd">
-          <span className="p">$ </span>stak memory backup
-        </span>
-        <span className="hint">Copy</span>
-      </div>
-      <p className="stak-landing-preview-note">
-        Illustrative preview, not your account data.
-      </p>
+    </section>
+  );
+}
+
+function DellRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="stak-landing-dellrow">
+      <span className="stak-landing-dellrow-label">{label}</span>
+      <div className="stak-landing-dellrow-lines">{children}</div>
     </div>
   );
 }
 
-function FeatureStrip() {
-  const features = [
-    {
-      title: 'Skills you can inspect',
-      body: 'See the source, the files, every version and the exact diff before you approve an update.',
-    },
-    {
-      title: 'Memory you can recover',
-      body: 'Back up what your agents learned. Private to your account, or Protected: encrypted on your machine.',
-    },
-    {
-      title: 'Projects that move with you',
-      body: 'A project keeps its Memory when the folder or the machine changes. Map it and carry on.',
-    },
-    {
-      title: 'Machines, honestly',
-      body: 'See which machine is current, and when each one last checked in.',
-    },
-    {
-      title: 'Stacks you can reuse',
-      body: 'Inspect a whole setup, preview what it changes, apply it with one command.',
-    },
-  ];
-
+function DellLine({
+  a,
+  b,
+  faint,
+}: {
+  a: string;
+  b: string;
+  faint?: boolean;
+}) {
   return (
-    <section
-      id="stacks"
-      className="stak-landing-features"
-      aria-label="What STAK does"
-      data-reveal
-    >
-      {features.map((feature) => (
-        <div className="stak-landing-feature" key={feature.title}>
-          <span className="t">{feature.title}</span>
-          <span className="b">{feature.body}</span>
+    <div className="stak-landing-dellline">
+      <span className={faint ? 'stak-landing-tone-faint' : undefined}>
+        {a}
+      </span>
+      <span
+        className={
+          faint
+            ? 'stak-landing-dellline-b stak-landing-tone-faint'
+            : 'stak-landing-dellline-b'
+        }
+      >
+        {b}
+      </span>
+    </div>
+  );
+}
+
+const OBJS: ObjCard[] = [
+  {
+    k: 'SKILLS',
+    s: '31 ready',
+    statusTone: 'green',
+    big: 'The instructions they follow',
+    d: 'Reusable instructions that shape how your agents work.',
+    rows: [
+      { a: 'review-pr', b: 'Ready', tone: 'green' },
+      { a: 'test-first', b: 'Update available', tone: 'orange' },
+      { a: 'debug-flaky', b: 'Paused', tone: 'faint' },
+    ],
+  },
+  {
+    k: 'MEMORY',
+    s: 'Backed up',
+    statusTone: 'green',
+    big: 'What they remember',
+    d: 'Context your agents build as you work.',
+    rows: [
+      { a: 'ledger-api', b: '6 files', tone: 'faint' },
+      { a: 'stak-cli', b: '5 files', tone: 'faint' },
+      { a: 'history', b: '14 backups', tone: 'faint' },
+    ],
+  },
+  {
+    k: 'PROJECTS',
+    s: '9',
+    statusTone: 'faint',
+    big: 'Where the work belongs',
+    d: 'Keep the right Memory connected to the right project.',
+    rows: [
+      { a: 'ledger-api', b: 'On this machine', tone: 'green' },
+      { a: 'mobile-app', b: 'Not on this machine', tone: 'faint' },
+      { a: 'infra', b: 'Archived', tone: 'faint' },
+    ],
+  },
+  {
+    k: 'STACK',
+    s: 'main',
+    statusTone: 'faint',
+    big: 'What you take with you',
+    d: 'The Skills you want together in your portable setup.',
+    rows: [
+      { a: 'Included', b: '30 skills', tone: 'green' },
+      { a: 'Paused', b: '1 skill', tone: 'faint' },
+      { a: 'Agents', b: 'Claude · Codex · Cursor', tone: 'faint' },
+    ],
+  },
+];
+
+function YourStakSection() {
+  return (
+    <section className="stak-landing-section">
+      <div className="stak-landing-section-head">
+        <div>
+          <span className="stak-landing-eyebrow">THIS IS YOUR STAK</span>
+          <h2>The parts of your agent setup, in one place.</h2>
         </div>
-      ))}
+        <p>
+          STAK gives you one view of the Skills, Memory, Projects, and setup
+          you want to carry with you.
+        </p>
+      </div>
+      <ObjectsGrid objs={OBJS} />
+      <div className="stak-landing-strip">
+        <span className="stak-landing-strip-cmd">
+          <span className="stak-landing-tone-dim">$ </span>stak scan
+        </span>
+        <span className="stak-landing-strip-note">
+          Start by seeing what STAK can carry.
+        </span>
+      </div>
     </section>
   );
 }
 
-function SkillsProof() {
-  return (
-    <section
-      id="skills"
-      className="stak-landing-section"
-      aria-label="Skills proof"
-      data-reveal
-    >
-      <h2>Skills</h2>
-      <p className="stak-landing-proof-claim">
-        Every Skill update shows you the exact diff before you approve it -
-        never a silent change.
-      </p>
-      <SkillDiffProof />
-    </section>
-  );
-}
+const MOVES = [
+  {
+    n: '1',
+    t: 'CONNECT THIS MACHINE',
+    cmd: 'stak login',
+    d: 'Approve it in your browser.',
+  },
+  {
+    n: '2',
+    t: 'GET YOUR SETUP',
+    cmd: 'stak pull',
+    d: 'Pull down the Stack you already approved.',
+  },
+  {
+    n: '3',
+    t: 'BRING YOUR MEMORY BACK',
+    cmd: 'stak memory recover',
+    d: 'Recover the Memory you backed up from your other machine.',
+  },
+  {
+    n: '4',
+    t: 'PUT IT BACK WHERE YOUR AGENTS USE IT',
+    cmd: 'stak memory restore',
+    d: 'Restore recovered Memory into your agents.',
+  },
+];
 
-function HowItWorks() {
+function MoveSection() {
   return (
-    <section id="how-it-works" className="stak-landing-section" data-reveal>
-      <h2>How it works</h2>
-      <ol className="stak-landing-steps">
-        <li>
-          <span className="step-name">Install</span>
-          <code>npm install -g @usestak/cli</code>
-        </li>
-        <li>
-          <span className="step-name">Log in</span>
-          <code>stak login</code>
-        </li>
-        <li>
-          <span className="step-name">Scan your setup</span>
-          <code>stak scan</code>
-        </li>
-        <li>
-          <span className="step-name">Back up</span>
-          <code>stak memory backup</code>
-        </li>
-        <li>
-          <span className="step-name">Recover on a new machine</span>
-          <code>stak memory recover</code>
-        </li>
+    <section id="how" className="stak-landing-section stak-landing-section--panel">
+      <div className="stak-landing-section-head stak-landing-section-head--narrow">
+        <div>
+          <span className="stak-landing-eyebrow">MOVE TO ANOTHER MACHINE</span>
+          <h2>Bring your STAK to a new machine.</h2>
+        </div>
+        <p>You choose when it moves. Nothing happens in the background.</p>
+      </div>
+      <ol className="stak-landing-moves">
+        {MOVES.map((m, i) => (
+          <li key={m.n} className="stak-landing-move">
+            <div className="stak-landing-move-rail">
+              <span className="stak-landing-move-n">{m.n}</span>
+              {i < MOVES.length - 1 ? (
+                <span className="stak-landing-move-line" />
+              ) : null}
+            </div>
+            <div className="stak-landing-move-body">
+              <span className="stak-landing-move-t">
+                <span className="stak-landing-move-n-inline">{m.n} · </span>
+                {m.t}
+              </span>
+              <span className="stak-landing-move-cmd">
+                <span className="stak-landing-tone-dim">$ </span>
+                {m.cmd}
+              </span>
+              <span className="stak-landing-move-d">{m.d}</span>
+            </div>
+          </li>
+        ))}
       </ol>
-    </section>
-  );
-}
-
-function MemoryAndPrivacy() {
-  return (
-    <section id="memory-privacy" className="stak-landing-section" data-reveal>
-      <h2>Memory &amp; privacy</h2>
-      <div className="stak-landing-privacy-grid">
-        <div className="stak-landing-privacy-card">
-          <span className="t">Standard</span>
-          <span className="b">
-            Account-wide: private to your account; STAK&apos;s service can read
-            it to deliver it.
+      <div className="stak-landing-notes">
+        <div className="stak-landing-note stak-landing-note--dashed">
+          <span>
+            Projects usually resolve on their own. If one doesn&apos;t:
+          </span>
+          <span className="stak-landing-note-cmd">
+            <span className="stak-landing-tone-dim">$ </span>
+            stak project map &lt;project&gt; &lt;directory&gt;
           </span>
         </div>
-        <div className="stak-landing-privacy-card">
-          <span className="t">Protected</span>
-          <span className="b">
-            Account-wide: encrypted on your machine before upload; STAK stores
-            ciphertext and can&apos;t read it.
+        <div className="stak-landing-note stak-landing-note--solid">
+          <span className="stak-landing-note-cmd">
+            <span className="stak-landing-tone-orange">$ </span>
+            stak run claude
+          </span>
+          <span>
+            Set up Claude Code (or Codex / Cursor) with your approved setup
+            and launch it on this machine.
           </span>
         </div>
       </div>
-      <MemoryModeProof />
     </section>
   );
 }
 
-function MachinesProof() {
+const PRIVACY_MODES: [PrivacyMode, PrivacyMode] = [
+  {
+    key: 'standard',
+    label: 'Standard',
+    title: 'Easy recovery',
+    desc: 'Private to your account. Sign in on a new machine and bring your Memory back.',
+    rec: 'On Standard, sign in on a new machine and recover.',
+    cloudLabel: 'IN STAK CLOUD',
+    cloudText: 'Migrations must run inside a transaction. CI uses Postgres 15.',
+    cloudWho: 'Readable by STAK to recover it for you.',
+    tone: 'muted',
+  },
+  {
+    key: 'protected',
+    label: 'Protected',
+    title: 'Only you can unlock it',
+    desc: "STAK can store your backup, but can't read it. You'll need your passkey or recovery file on a new machine.",
+    rec: 'On Protected, use your passkey or recovery file to unlock it.',
+    cloudLabel: 'IN STAK CLOUD',
+    cloudText: 'b64:9QeX2kT0vR+aLw7mYc1Zp4Hs…Nf8uE3jQ0bD6tVyK2oPq==',
+    cloudWho: 'Encrypted before it leaves DELL. STAK can’t read it.',
+    tone: 'green',
+  },
+];
+
+function PrivacySection() {
   return (
-    <section
-      id="machines"
-      className="stak-landing-section"
-      aria-label="Machines proof"
-      data-reveal
-    >
-      <h2>Machines</h2>
-      <p className="stak-landing-proof-claim">
-        See what you approved, and what each machine actually reported at its
-        last check-in - not a live connection.
-      </p>
-      <MachineCheckInProof />
-      {/* Relocated from the old closing bar (P9 Task S6): this is a
-          product-principles point about *this* section's subject (what a
-          machine's check-in actually is), not a page-ending disclaimer, so
-          it reads more naturally here than at the very bottom of the page.
-          Wording is Task 3's corrected, precise phrasing, unchanged - it
-          only appears in this one place now, so there's no duplicate
-          elsewhere on the page. */}
-      <p className="stak-landing-section-note">
-        <span>Each machine catches up on its next CLI run there.</span>{' '}
-        <span className="stak-landing-closing-muted">
-          That&apos;s state reporting, not Skill installs. No daemon, no
-          background changes - a Skill only updates when you run{' '}
-          <code>stak skill update</code>.
-        </span>
-      </p>
+    <section id="privacy" className="stak-landing-section">
+      <div className="stak-landing-privacy-grid">
+        <div className="stak-landing-privacy-copy">
+          <span className="stak-landing-eyebrow">PRIVACY IS A CHOICE</span>
+          <h2>Choose who can read your Memory.</h2>
+          <p>
+            Memory mode applies to your whole account. Standard keeps
+            recovery simple. Protected keeps your Memory unreadable to STAK.
+          </p>
+          <PrivacyPanel modes={PRIVACY_MODES} />
+        </div>
+      </div>
     </section>
   );
 }
 
-function StacksProof() {
+const MACHINE_CARDS: [MachineCard, MachineCard] = [
+  {
+    name: 'DELL',
+    kind: 'XPS 15 · Windows 11',
+    status: 'Up to date · 12 min ago',
+    tone: 'green',
+    rows: [
+      { a: 'Skills', b: '31 of 31 approved' },
+      { a: 'Projects', b: '7 of 9 on this machine' },
+      { a: 'Memory', b: 'Backed up here' },
+    ],
+  },
+  {
+    name: 'MacBook',
+    kind: 'MacBook Air · macOS 15',
+    status: 'Updates waiting · 3 hours ago',
+    tone: 'amber',
+    rows: [
+      { a: 'Skills', b: '30 of 31 approved' },
+      { a: 'Projects', b: '7 of 9 on this machine' },
+      { a: 'Memory', b: 'Backed up here' },
+    ],
+  },
+];
+
+function MachinesSection() {
   return (
-    <section
-      id="stacks-proof"
-      className="stak-landing-section"
-      aria-label="Stacks proof"
-      data-reveal
-    >
-      <h2>Stacks</h2>
-      <p className="stak-landing-proof-claim">
-        Inspect exactly what&apos;s included before you apply a Stack - paused
-        Skills stay out, nothing silently added.
-      </p>
-      <StackCompositionProof />
+    <section id="machines" className="stak-landing-section">
+      <div className="stak-landing-section-head">
+        <div>
+          <span className="stak-landing-eyebrow">YOUR MACHINES</span>
+          <h2>Know where each machine left off.</h2>
+        </div>
+        <div className="stak-landing-section-head-copy">
+          <p>
+            When you use STAK on a machine, it reports what it saw. You can
+            see what&apos;s ready, what&apos;s waiting, and how old that
+            picture is.
+          </p>
+          <p className="stak-landing-small">
+            Nothing runs in the background just to keep this page current.
+          </p>
+        </div>
+      </div>
+      <div className="stak-landing-machinepanel">
+        <div className="stak-landing-machinepanel-head">
+          <span className="stak-landing-tone-dim">MACHINES</span>
+          <MachinesPanel cards={MACHINE_CARDS} />
+        </div>
+        <div className="stak-landing-machinepanel-strip">
+          <span className="stak-landing-tone-amber stak-landing-small">
+            ON MACBOOK
+          </span>
+          <span className="stak-landing-strip-cmd">
+            <span className="stak-landing-tone-dim">$ </span>
+            stak skill update
+          </span>
+          <span className="stak-landing-tone-dim">
+            Install the approved Skill versions on this machine.
+          </span>
+        </div>
+      </div>
     </section>
   );
 }
 
-function MoveToNewMachine() {
+function CloseSection() {
   return (
-    <section id="move" className="stak-landing-section" data-reveal>
-      <h2>Move to a new machine</h2>
-      <MachineMoveFlow />
-      {/* Real fresh-machine sequence (contract: "install CLI -> stak login
-          (approve) -> stak memory recover -> stak memory restore -> stak
-          project map <unavailable projects>", plus `stak scan` to detect
-          agents/existing setup and `stak skill update` to install approved
-          Skill versions - both verified directly against
-          packages/cli/src/commands/scan.ts and skill.ts). `stak memory
-          restore` moves the private STAK store into native agent Memory
-          files; it has nothing to do with Skills, which is a previously-
-          mislabeled step this rebuilds. */}
-      <ol className="stak-landing-steps">
-        <li>
-          <span className="step-name">Install the CLI</span>
-          <code>npm install -g @usestak/cli</code>
-        </li>
-        <li>
-          <span className="step-name">Log in</span>
-          <code>stak login</code>
-        </li>
-        <li>
-          <span className="step-name">Scan your setup</span>
-          <code>stak scan</code>
-        </li>
-        <li>
-          <span className="step-name">Recover your Memory</span>
-          <code>stak memory recover</code>
-        </li>
-        <li>
-          <span className="step-name">Restore it to your agents</span>
-          <code>stak memory restore</code>
-        </li>
-        <li>
-          <span className="step-name">Install your Skills</span>
-          <code>stak skill update</code>
-        </li>
-        <li>
-          <span className="step-name">Map your projects</span>
-          <code>stak project map &lt;project&gt; &lt;directory&gt;</code>
-        </li>
-      </ol>
-      <p className="stak-landing-caption">
-        Protected Memory needs your passkey or recovery file during{' '}
-        <code>stak memory recover</code>.
-      </p>
+    <section id="install-cta" className="stak-landing-close">
+      <h2>Change the laptop. Keep your STAK.</h2>
+      <p>Install STAK, sign in, and keep working the way you already do.</p>
+      <div className="stak-landing-close-cmds">
+        <CopyRow command="npm install -g @usestak/cli" prefix="1 " />
+        <CopyRow command="stak login" prefix="2 " />
+      </div>
     </section>
   );
 }
+
+const FOOTER_GROUPS = [
+  {
+    h: 'PRODUCT',
+    l: [
+      { t: 'How it works', u: '#how' },
+      { t: 'Memory & privacy', u: '#privacy' },
+      { t: 'Install STAK', u: '#install' },
+    ],
+  },
+  {
+    h: 'ACCOUNT',
+    l: [{ t: 'Sign in', u: '/auth/login?next=/onboarding' }],
+  },
+  {
+    h: 'OPEN SOURCE',
+    l: [
+      { t: 'GitHub', u: 'https://github.com/usestak/stak' },
+      { t: 'Report an issue', u: 'https://github.com/usestak/stak/issues' },
+    ],
+  },
+  {
+    h: 'RESOURCES',
+    l: [{ t: 'CLI reference', u: 'https://github.com/usestak/stak#readme' }],
+  },
+];
 
 /**
- * Real site footer (P9 Task S6), replacing the old closing reassurance bar
- * - the page no longer ends on a disclaimer. Every link here is a
- * confirmed-real destination:
- * - PRODUCT reuses the exact same same-page anchors as `LandingNav`.
- * - ACCOUNT reuses the exact same real hrefs as `LandingNav`.
- * - PROJECT links to STAK's real public GitHub repo (confirmed in
- *   packages/cli/package.json's repository/bugs/homepage fields and
- *   README.md), opened in a new tab since it leaves the site.
- * A LEGAL group (Privacy/Terms) is deliberately omitted - no such
- * page/route exists anywhere in this app yet, and this footer never
- * invents a URL. See the task report for this as a launch requirement.
+ * Footer. The design's ACCOUNT group also lists "Control center" -> `/app`,
+ * which doesn't exist in this app (the real signed-in landing is
+ * `/overview`, and it requires auth - there's no safe public link to it for
+ * a signed-out visitor). Per the task brief this link is omitted rather
+ * than invented; see the task report for the full mismatch writeup.
  */
 function SiteFooter() {
   return (
-    <footer className="stak-landing-footer" data-reveal>
-      <div className="stak-landing-footer-top">
+    <footer className="stak-landing-footer">
+      <div className="stak-landing-footer-grid">
         <div className="stak-landing-footer-brand">
-          <span className="stak-landing-footer-wordmark">STAK</span>
-          <p className="stak-landing-footer-thesis">
-            The control plane for portable AI agent environments.
-          </p>
+          <span className="stak-landing-wordmark">STAK</span>
+          <span className="stak-landing-footer-thesis">
+            Portable Skills, Memory, and setup for AI coding agents.
+          </span>
         </div>
-        <nav className="stak-landing-footer-groups" aria-label="Footer">
-          <div className="stak-landing-footer-group">
-            <span className="stak-landing-footer-heading">Product</span>
-            <a href="#how-it-works">How it works</a>
-            <a href="#memory-privacy">Memory &amp; privacy</a>
-            <a href="#stacks">Stacks</a>
-            <a href="#install">CLI</a>
+        {FOOTER_GROUPS.map((g) => (
+          <div key={g.h} className="stak-landing-footer-group">
+            <span className="stak-landing-footer-heading">{g.h}</span>
+            {g.l.map((l) => (
+              <a key={l.t} href={l.u}>
+                {l.t}
+              </a>
+            ))}
           </div>
-          <div className="stak-landing-footer-group">
-            <span className="stak-landing-footer-heading">Account</span>
-            <a href="/auth/login?next=/onboarding">Sign in</a>
-            <a href="#install">Install the CLI</a>
-          </div>
-          <div className="stak-landing-footer-group">
-            <span className="stak-landing-footer-heading">Project</span>
-            <a
-              href="https://github.com/usestak/stak"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              GitHub
-            </a>
-          </div>
-        </nav>
+        ))}
       </div>
-      <div className="stak-landing-footer-bottom">
+      <div className="stak-landing-footer-wm" aria-hidden="true">
         <span>STAK</span>
       </div>
     </footer>
