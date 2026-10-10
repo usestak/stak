@@ -730,3 +730,65 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* P9 Task 2 (desktop persistent shell): at >=1024px, .stak-frame becomes a fixed-viewport
+   row — not just min-height:100dvh as above, but an exact height:100dvh with its own
+   overflow hidden — so cross-axis stretch (the flex row's default align-items: stretch)
+   gives both .stak-side and .stak-main a genuine, definite viewport-height box instead of
+   growing to match whichever child's content is tallest. .stak-side then never scrolls with
+   page content; .stak-main becomes the one scrolling region (overflow-y: auto), and
+   .stak-dock is pulled out of that column's normal flow with position: fixed so it reads as
+   a persistent bottom bar that page content passes underneath while scrolling, rather than
+   merely being the last thing you reach at the bottom of the document — the previous
+   (pre-Task-2) behavior, inherited from .stak-frame's unconstrained height, scrolled
+   .stak-side away with the page and only ever revealed .stak-dock once you scrolled to the
+   literal end. This block only takes effect >=1024px so the mobile/tablet overlay-nav fix
+   above (commit b535c35) is untouched: below 1024px .stak-frame stays column-direction and
+   auto-height, and .stak-dock keeps its normal in-flow, wrapping behavior. */
+@media (min-width: 1024px) {
+  .stak-frame {
+    height: 100dvh;
+    overflow: hidden;
+  }
+  .stak-side {
+    height: 100%;
+    overflow-y: auto;
+  }
+  .stak-main {
+    height: 100%;
+    overflow-y: auto;
+    /* Reserves room below the real last in-flow content (SkillsTable's last row, the
+       overview rail's last machine card, etc.) so the fixed-position dock below never
+       permanently covers it. The dock's real measured height is 49px (verified via a
+       faithful static repro of this exact markup rendered in real Chromium at 1440x900 —
+       see Task 2 report); 80px leaves a comfortable double-digit-pixel gap even after
+       accounting for the last content element's own margin/padding. */
+    padding-bottom: 80px;
+  }
+  /* Pinned with position: fixed, not sticky or absolute — verified by measurement against a
+     faithful static repro of this exact markup (see Task 2 report) that the obvious-looking
+     alternatives don't actually produce an always-visible dock here:
+       - position: sticky; bottom: 0 only "sticks" once scrolling has carried the dock's own
+         flow position up to the scrollport's bottom edge — since .stak-dock is the LAST
+         flow child of .stak-main, that only happens in the final screenful of scrolling, so
+         for most of the page the dock would simply be off-screen below the fold, not pinned.
+       - position: absolute; bottom: 0 (even with .stak-main as position: relative) still
+         scrolls with .stak-main's content: an absolutely positioned descendant is laid out
+         against its containing block's padding edges, but it is still part of that same
+         element's scrolled content, so it translates by the exact scroll offset instead of
+         staying glued to the viewport (confirmed: scrolling .stak-main's repro by 1448px
+         moved the measured dock rect by exactly -1448px).
+     position: fixed escapes ALL scrolling ancestors (including .stak-main), anchoring to the
+     browser viewport itself, which is what "stays pinned while content scrolls beneath it"
+     actually requires. `left: 216px` matches .stak-side's fixed desktop width exactly, so the
+     dock spans only .stak-main's width, never covering the sidebar. This never fights the
+     mobile overlay-nav fix (commit b535c35): that logic only runs <1024px, this only >=1024px,
+     and .stak-nav-panel/.stak-backdrop's own `position: fixed` usage there is untouched. */
+  .stak-dock {
+    position: fixed;
+    left: 216px;
+    right: 0;
+    bottom: 0;
+    z-index: 5;
+  }
+}
