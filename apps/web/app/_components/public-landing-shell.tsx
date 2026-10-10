@@ -5,6 +5,13 @@ import './public-landing-shell.css';
 
 import { CopyCommand } from './copy-command';
 import { LandingScrollReveal } from './landing-scroll-reveal';
+import {
+  MachineCheckInProof,
+  MachineMoveFlow,
+  MemoryModeProof,
+  SkillDiffProof,
+  StackCompositionProof,
+} from './landing-proof-visuals';
 
 /**
  * Public, signed-out landing page shell (P9 Task 2). Replaces the narrow
@@ -47,8 +54,11 @@ export function PublicLandingShell() {
         <main id="main-content" className="stak-landing-main">
           <Hero />
           <FeatureStrip />
+          <SkillsProof />
           <HowItWorks />
           <MemoryAndPrivacy />
+          <MachinesProof />
+          <StacksProof />
           <MoveToNewMachine />
           <ClosingBar />
         </main>
@@ -254,6 +264,24 @@ function FeatureStrip() {
   );
 }
 
+function SkillsProof() {
+  return (
+    <section
+      id="skills"
+      className="stak-landing-section"
+      aria-label="Skills proof"
+      data-reveal
+    >
+      <h2>Skills</h2>
+      <p className="stak-landing-proof-claim">
+        Every Skill update shows you the exact diff before you approve it -
+        never a silent change.
+      </p>
+      <SkillDiffProof />
+    </section>
+  );
+}
+
 function HowItWorks() {
   return (
     <section id="how-it-works" className="stak-landing-section" data-reveal>
@@ -304,6 +332,43 @@ function MemoryAndPrivacy() {
           </span>
         </div>
       </div>
+      <MemoryModeProof />
+    </section>
+  );
+}
+
+function MachinesProof() {
+  return (
+    <section
+      id="machines"
+      className="stak-landing-section"
+      aria-label="Machines proof"
+      data-reveal
+    >
+      <h2>Machines</h2>
+      <p className="stak-landing-proof-claim">
+        See what you approved, and what each machine actually reported at
+        its last check-in - not a live connection.
+      </p>
+      <MachineCheckInProof />
+    </section>
+  );
+}
+
+function StacksProof() {
+  return (
+    <section
+      id="stacks-proof"
+      className="stak-landing-section"
+      aria-label="Stacks proof"
+      data-reveal
+    >
+      <h2>Stacks</h2>
+      <p className="stak-landing-proof-claim">
+        Inspect exactly what&apos;s included before you apply a Stack -
+        paused Skills stay out, nothing silently added.
+      </p>
+      <StackCompositionProof />
     </section>
   );
 }
@@ -312,6 +377,7 @@ function MoveToNewMachine() {
   return (
     <section id="move" className="stak-landing-section" data-reveal>
       <h2>Move to a new machine</h2>
+      <MachineMoveFlow />
       {/* Real fresh-machine sequence (contract: "install CLI -> stak login
           (approve) -> stak memory recover -> stak memory restore -> stak
           project map <unavailable projects>", plus `stak scan` to detect

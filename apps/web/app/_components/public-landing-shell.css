@@ -631,6 +631,242 @@
   line-height: 1.55;
 }
 
+/* ---- Product-proof visuals (P9 Task 4) ----
+   Small cropped-UI treatments styled to echo the real signed-in Skills/
+   Memory/Machines/Stacks surfaces (see landing-proof-visuals.tsx for the
+   exact source grammar each one is modeled on). All .stak tokens, no new
+   colors. */
+.stak-landing-proof-claim {
+  margin: 0 0 18px;
+  max-width: 640px;
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.stak-landing-proof-card {
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  max-width: 640px;
+  overflow: hidden;
+}
+.stak-landing-proof-note {
+  margin: 0;
+  padding: 10px 16px;
+  font-size: 11.5px;
+  color: var(--dim);
+  border-top: 1px solid var(--line);
+}
+
+/* Skills diff crop */
+.stak-landing-proof-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.stak-landing-proof-name {
+  font: 500 14px var(--mono);
+  color: var(--ink);
+}
+.stak-landing-proof-source {
+  font-size: 12.5px;
+  color: var(--faint);
+  flex: 1;
+}
+.stak-landing-proof-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.stak-landing-proof-diff-head {
+  padding: 10px 16px 0;
+  font: 500 11.5px var(--mono);
+  color: var(--faint);
+}
+.stak-landing-proof-diff {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 8px 16px 14px;
+}
+.stak-landing-proof-diff pre {
+  margin: 0;
+  font: 11.5px var(--mono);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--panel);
+}
+.stak-landing-proof-diff .before {
+  color: var(--faint);
+}
+.stak-landing-proof-diff .after {
+  color: var(--ink);
+}
+
+/* Memory mode comparison */
+.stak-landing-proof-modes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+.stak-landing-proof-modes .stak-landing-proof-note {
+  grid-column: 1 / -1;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  border-top: 1px solid var(--line-2);
+}
+.stak-landing-proof-mode {
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.stak-landing-proof-mode .k {
+  font: 500 10.5px var(--mono);
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+.stak-landing-proof-mode .v {
+  font-size: 17px;
+  font-weight: 600;
+}
+.stak-landing-proof-mode .d {
+  font-size: 12.5px;
+  color: var(--faint);
+  line-height: 1.5;
+}
+
+/* Machines desired-vs-reported card */
+.stak-landing-proof-machine-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.stak-landing-proof-machine-name {
+  font-size: 16px;
+  font-weight: 600;
+  margin-right: 10px;
+}
+.stak-landing-proof-machine-meta {
+  font-size: 12.5px;
+  color: var(--faint);
+}
+.stak-landing-proof-facts {
+  display: flex;
+  flex-direction: column;
+}
+.stak-landing-proof-facts-head,
+.stak-landing-proof-facts-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 1fr;
+  gap: 12px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line);
+  align-items: baseline;
+}
+.stak-landing-proof-facts-row:last-child {
+  border-bottom: none;
+}
+.stak-landing-proof-facts-head {
+  font: 500 10px var(--mono);
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+.stak-landing-proof-facts-head span:empty {
+  display: none;
+}
+.stak-landing-proof-facts-row {
+  font-size: 13px;
+}
+.stak-landing-proof-facts-row .k {
+  font: 500 11px var(--mono);
+  color: var(--dim);
+}
+
+/* Stacks composition crop - mirrors stacks.css's own grammar at a smaller
+   scale (same column split, same border rhythm, no new pattern). */
+.stak-landing-proof-stack-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.stak-landing-proof-stack-name {
+  font-size: 16px;
+  font-weight: 600;
+  margin-right: 10px;
+}
+.stak-landing-proof-stack-comp-head {
+  display: grid;
+  grid-template-columns: 1fr 100px;
+  gap: 12px;
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--line);
+  font: 500 10px var(--mono);
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+.stak-landing-proof-stack-comp-row {
+  display: grid;
+  grid-template-columns: 1fr 100px;
+  gap: 12px;
+  align-items: center;
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.stak-landing-proof-stack-skill {
+  font-family: var(--mono);
+}
+
+/* Move-to-new-machine flow */
+.stak-landing-proof-flow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.stak-landing-proof-flow-node {
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 10px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 128px;
+}
+.stak-landing-proof-flow-node .n {
+  font: 600 13px var(--mono);
+  color: var(--ink);
+}
+.stak-landing-proof-flow-node .s {
+  font-size: 11.5px;
+  color: var(--faint);
+}
+.stak-landing-proof-flow-arrow {
+  color: var(--dim);
+  font-size: 16px;
+  flex: none;
+}
+
 /* ---- Closing reassurance bar ---- */
 .stak-landing-closing {
   margin: 32px 48px 64px;
@@ -689,6 +925,9 @@
   }
   .stak-landing-closing {
     margin: 28px 28px 48px;
+  }
+  .stak-landing-proof-diff {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -768,6 +1007,51 @@
     margin: 24px 16px 40px;
     flex-direction: column;
     gap: 6px;
+  }
+
+  /* Proof visuals: simplify to a single stacked column and drop the
+     before/after side-by-side diff to one block, so narrow widths get a
+     short vertical card, not a cramped wall of mini-UI. */
+  .stak-landing-proof-diff {
+    grid-template-columns: 1fr;
+    padding: 8px 14px 12px;
+  }
+  .stak-landing-proof-row,
+  .stak-landing-proof-machine-head,
+  .stak-landing-proof-stack-head {
+    padding: 12px 14px;
+  }
+  .stak-landing-proof-diff-head {
+    padding: 10px 14px 0;
+  }
+  .stak-landing-proof-note {
+    padding: 10px 14px;
+  }
+  .stak-landing-proof-modes {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .stak-landing-proof-facts-head,
+  .stak-landing-proof-facts-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+    padding: 10px 14px;
+  }
+  .stak-landing-proof-stack-comp-head,
+  .stak-landing-proof-stack-comp-row {
+    grid-template-columns: 1fr auto;
+    padding: 9px 14px;
+  }
+  .stak-landing-proof-flow {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .stak-landing-proof-flow-node {
+    min-width: 0;
+  }
+  .stak-landing-proof-flow-arrow {
+    display: none;
   }
 }
 
