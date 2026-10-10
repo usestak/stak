@@ -1,0 +1,270 @@
+/* apps/web/app/_components/cli-approval-shell.css — the CLI device-authorization
+   screen (S.02 recomposition, P9 Task 4). Split layout: a dark terminal-context pane
+   (what the person sees in their own terminal) next to a centered approval card.
+   Built on the same .stak token scope as every other shell (overview/shell.css) —
+   no new raw color values. Two rows the Final Contract mock showed ("Machine: Atlas",
+   "System: macOS 15.1 arm64") do not exist on the real CliAuthSessionRecord — see
+   cli-approval-shell.tsx's doc comment for the fields-that-exist decision; this file
+   only ever renders a "Code" row (always) and a "Label" row (only when present). */
+
+.stak-cli {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 440px 1fr;
+
+  /* Shared motion vocabulary, same 3 tiers/ease as public-landing-shell.css —
+     deliberately not re-deriving a fourth timing value for this screen. */
+  --stak-motion-fast: 120ms;
+  --stak-motion-standard: 220ms;
+  --stak-motion-reveal: 360ms;
+  --stak-motion-ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 899px (not 767px): at a 768px tablet-portrait width, 440px fixed for the left
+   pane leaves only ~328px for the right pane, which wraps "Code in your terminal"
+   and the code value awkwardly — stack instead, matching the 390/360/768 responsive
+   pass this screen is verified at. */
+@media (max-width: 899px) {
+  .stak-cli {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------------- Left pane: terminal context ---------------- */
+.stak-cli-term {
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  padding: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  font: 13.5px/1.8 var(--mono);
+  color: var(--muted);
+}
+@media (max-width: 899px) {
+  .stak-cli-term {
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    padding: 28px 24px;
+  }
+}
+
+.stak-cli-term-brand {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.18em;
+  font-family: var(--sans);
+  color: var(--ink);
+  margin-bottom: 12px;
+}
+.stak-cli-term-eyebrow {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+.stak-cli-term-cmd {
+  color: var(--muted);
+}
+.stak-cli-term-cmd span {
+  color: var(--dim);
+}
+.stak-cli-term-status {
+  color: var(--faint);
+}
+.stak-cli-term-code {
+  color: var(--ink);
+}
+.stak-cli-cursor {
+  color: var(--orange);
+  display: inline-block;
+  animation: stak-cli-blink 1s steps(1, end) infinite;
+}
+
+@keyframes stak-cli-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ---------------- Right pane: approval card ---------------- */
+.stak-cli-main {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+}
+
+.stak-cli-card {
+  width: 100%;
+  max-width: 500px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  animation: stak-cli-rise var(--stak-motion-reveal) var(--stak-motion-ease)
+    both;
+}
+
+@keyframes stak-cli-rise {
+  from {
+    transform: translateY(8px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.stak-cli-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.stak-cli-head h1 {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.stak-cli-sub {
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--faint);
+  margin: 0;
+}
+/* globals.css defines a bare `code { background: var(--panel-subtle) }` rule for the
+   light-theme prose system; .stak forces a dark surface regardless of OS color-scheme
+   preference, so every inline <code> on this screen needs an explicit override instead
+   of inheriting a near-white chip (same fix as public-landing-shell.css's steps code). */
+.stak-cli-sub code,
+.stak-cli-safety code,
+.stak-cli-error code {
+  font-family: var(--mono);
+  color: var(--ink);
+  background: none;
+}
+
+.stak-cli-facts {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  font-size: 14px;
+}
+.stak-cli-facts-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+}
+.stak-cli-facts-row + .stak-cli-facts-row {
+  border-top: 1px solid var(--line);
+}
+.stak-cli-facts-row span:first-child {
+  color: var(--faint);
+}
+.stak-cli-facts-code {
+  font: 600 20px var(--mono);
+  letter-spacing: 0.1em;
+}
+.stak-cli-facts-label {
+  font-weight: 600;
+}
+
+.stak-cli-actions {
+  display: flex;
+  gap: 10px;
+}
+.stak-cli-approve {
+  flex: 1;
+  text-align: center;
+  background: var(--ink);
+  color: var(--bg);
+  font-weight: 600;
+  font-size: 14.5px;
+  padding: 11px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    transform var(--stak-motion-fast) var(--stak-motion-ease),
+    opacity var(--stak-motion-fast) var(--stak-motion-ease);
+}
+.stak-cli-approve:hover:not(:disabled) {
+  opacity: 0.92;
+}
+.stak-cli-approve:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.stak-cli-approve:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.stak-cli-decline {
+  flex: 1;
+  text-align: center;
+  border: 1px solid var(--chip);
+  background: none;
+  color: var(--ink);
+  font-size: 14.5px;
+  padding: 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color var(--stak-motion-fast) var(--stak-motion-ease);
+}
+.stak-cli-decline:hover {
+  border-color: var(--faint);
+}
+
+.stak-cli-safety {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--dim);
+  margin: 0;
+}
+
+.stak-cli-error {
+  color: var(--red);
+  margin: 0;
+}
+.stak-cli-success {
+  color: var(--green);
+  margin: 0;
+  animation: stak-cli-pop var(--stak-motion-standard) var(--stak-motion-ease)
+    both;
+}
+
+@keyframes stak-cli-pop {
+  from {
+    transform: scale(0.97);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stak-cli-cursor {
+    animation: none;
+    opacity: 1;
+  }
+  .stak-cli-card,
+  .stak-cli-success {
+    animation: none;
+    transform: none;
+  }
+  .stak-cli-approve,
+  .stak-cli-decline {
+    transition: none;
+  }
+  .stak-cli-approve:active:not(:disabled) {
+    transform: none;
+  }
+}

@@ -1,5 +1,9 @@
 import type { Metadata } from 'next';
 
+import {
+  CliApprovalCard,
+  CliApprovalShell,
+} from '@/app/_components/cli-approval-shell';
 import { FocusedShell } from '@/app/_components/focused-shell';
 import { getCloudService } from '@/lib/cloud-service';
 import { supabaseServerClient } from '@/lib/supabase-server';
@@ -36,41 +40,48 @@ export default async function CliPage({
 
   if (!session)
     return (
-      <FocusedShell eyebrow="Verification code" title="Authorize the STAK CLI">
-        <p className="stak-focus-code">{code}</p>
-        <p className="stak-focus-error">
-          We don&rsquo;t recognize this code. It may have been mistyped.
-        </p>
-        <p>
-          Run <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>{' '}
-          again in your terminal for a new code.
-        </p>
-      </FocusedShell>
+      <CliApprovalShell code={code}>
+        <CliApprovalCard heading="Authorize the STAK CLI">
+          <p className="stak-cli-error">
+            We don&rsquo;t recognize this code. It may have been mistyped.
+          </p>
+          <p className="stak-cli-safety">
+            Run <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>{' '}
+            again in your terminal for a new code.
+          </p>
+        </CliApprovalCard>
+      </CliApprovalShell>
     );
 
   if (session.status === 'expired')
     return (
-      <FocusedShell eyebrow="Verification code" title="Authorize the STAK CLI">
-        <p className="stak-focus-code">{code}</p>
-        <p className="stak-focus-error">This code has expired.</p>
-        <p>
-          Run <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>{' '}
-          again in your terminal for a new code.
-        </p>
-      </FocusedShell>
+      <CliApprovalShell code={code}>
+        <CliApprovalCard heading="Authorize the STAK CLI">
+          <p className="stak-cli-error">
+            This authorization code has expired.
+          </p>
+          <p className="stak-cli-safety">
+            Run <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>{' '}
+            again in your terminal for a new code.
+          </p>
+        </CliApprovalCard>
+      </CliApprovalShell>
     );
 
   if (session.status !== 'pending')
     return (
-      <FocusedShell eyebrow="Verification code" title="Authorize the STAK CLI">
-        <p className="stak-focus-code">{code}</p>
-        <p>This authorization request is no longer pending.</p>
-        <p>
-          If you&rsquo;re trying to sign the CLI in again, run{' '}
-          <code style={{ fontFamily: 'var(--mono)' }}>stak login</code> for a
-          new code.
-        </p>
-      </FocusedShell>
+      <CliApprovalShell code={code}>
+        <CliApprovalCard heading="Authorize the STAK CLI">
+          <p className="stak-cli-sub">
+            This authorization request is no longer pending.
+          </p>
+          <p className="stak-cli-safety">
+            If you&rsquo;re trying to sign the CLI in again, run{' '}
+            <code style={{ fontFamily: 'var(--mono)' }}>stak login</code> for
+            a new code.
+          </p>
+        </CliApprovalCard>
+      </CliApprovalShell>
     );
 
   const supabase = await supabaseServerClient();
@@ -81,35 +92,55 @@ export default async function CliPage({
   if (!user) {
     const next = `/cli?code=${encodeURIComponent(code)}`;
     return (
-      <FocusedShell eyebrow="Verification code" title="Authorize the STAK CLI">
-        <p className="stak-focus-code">{code}</p>
-        {session.label ? (
-          <p>
-            Device: <strong>{session.label}</strong>
+      <CliApprovalShell code={code} waiting>
+        <CliApprovalCard
+          heading="Authorize the STAK CLI"
+          sub="Sign in to confirm it's you before this machine connects."
+          code={code}
+          label={session.label}
+        >
+          <div className="stak-cli-actions">
+            <a
+              className="stak-cli-approve"
+              href={`/auth/login?next=${encodeURIComponent(next)}`}
+            >
+              Sign in with GitHub
+            </a>
+            <a className="stak-cli-decline" href="/">
+              This wasn&rsquo;t me
+            </a>
+          </div>
+          <p className="stak-cli-safety">
+            Only continue if you just ran{' '}
+            <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>.
+            &ldquo;This wasn&rsquo;t me&rdquo; just leaves this page &mdash;
+            it doesn&rsquo;t notify anyone.
           </p>
-        ) : null}
-        <div className="stak-focus-actions">
-          <a
-            className="stak-btn"
-            href={`/auth/login?next=${encodeURIComponent(next)}`}
-          >
-            Sign in with GitHub
-          </a>
-        </div>
-      </FocusedShell>
+        </CliApprovalCard>
+      </CliApprovalShell>
     );
   }
 
+  const metadata = (user.user_metadata ?? {}) as Record<string, string>;
+  const displayName = metadata.full_name ?? metadata.name ?? metadata.user_name;
+
   return (
-    <FocusedShell title="Authorize the STAK CLI">
-      <p>Confirm this matches the code shown in your terminal:</p>
-      <p className="stak-focus-code">{code}</p>
-      {session.label ? (
-        <p>
-          Device: <strong>{session.label}</strong>
-        </p>
-      ) : null}
-      <AuthorizeButton userCode={code} />
-    </FocusedShell>
+    <CliApprovalShell code={code} waiting>
+      <CliApprovalCard
+        heading="Approve this machine?"
+        sub={
+          <>
+            A terminal asked to connect to{' '}
+            {displayName ? <>{displayName}&rsquo;s</> : 'your'} STAK. Only
+            approve if you just ran{' '}
+            <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>.
+          </>
+        }
+        code={code}
+        label={session.label}
+      >
+        <AuthorizeButton userCode={code} />
+      </CliApprovalCard>
+    </CliApprovalShell>
   );
 }
