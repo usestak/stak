@@ -477,15 +477,20 @@ function PrivacySection() {
   return (
     <section id="privacy" className="stak-landing-section">
       <div className="stak-landing-privacy-grid">
-        <div className="stak-landing-privacy-copy">
-          <span className="stak-landing-eyebrow">PRIVACY IS A CHOICE</span>
-          <h2>Choose who can read your Memory.</h2>
-          <p>
-            Memory mode applies to your whole account. Standard keeps
-            recovery simple. Protected keeps your Memory unreadable to STAK.
-          </p>
-          <PrivacyPanel modes={PRIVACY_MODES} />
-        </div>
+        <PrivacyPanel
+          intro={
+            <>
+              <span className="stak-landing-eyebrow">PRIVACY IS A CHOICE</span>
+              <h2>Choose who can read your Memory.</h2>
+              <p>
+                Memory mode applies to your whole account. Standard keeps
+                recovery simple. Protected keeps your Memory unreadable to
+                STAK.
+              </p>
+            </>
+          }
+          modes={PRIVACY_MODES}
+        />
       </div>
     </section>
   );

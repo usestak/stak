@@ -887,13 +887,18 @@
 /* ---- Privacy section ---- */
 .stak-landing-privacy-grid {
   display: grid;
+  grid-template-columns: 1fr;
   gap: clamp(32px, 5cqi, 72px);
-  align-items: start;
+  align-items: center;
 }
 .stak-landing-privacy-copy {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+.stak-landing-privacy-panels {
+  display: flex;
+  flex-direction: column;
 }
 .stak-landing-pvtabs {
   display: flex;
@@ -950,7 +955,6 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
   gap: 14px;
-  margin-top: 8px;
 }
 .stak-landing-pvcard {
   border: 1px solid var(--line);
@@ -984,14 +988,17 @@
 }
 
 @container stak-landing (min-width: 640px) {
-  .stak-landing-privacy-grid {
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
-  }
   .stak-landing-pvtabs {
     align-self: flex-start;
   }
   .stak-landing-pvtab {
     flex: none;
+  }
+}
+
+@container stak-landing (min-width: 1024px) {
+  .stak-landing-privacy-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
   }
 }
 

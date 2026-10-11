@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 
 /**
  * Interactive leaf components for the public landing page (P9 "Task 1":
@@ -215,60 +215,81 @@ export type PrivacyMode = {
 
 /** Standard/Protected privacy tabs (design: `setStd`/`setPro`, `pv`). The
  * "ON DELL" panel never changes; only the "IN STAK CLOUD" panel and the
- * copy block beside the tabs swap with mode. */
-export function PrivacyPanel({ modes }: { modes: [PrivacyMode, PrivacyMode] }) {
+ * copy block beside the tabs swap with mode.
+ *
+ * Design source (`STAK-Landing-Layered.dc.html:187`) makes `#privacy` a
+ * top-level 2-column grid with two SIBLING children: the copy+tabs column
+ * and a separate comparison-cards column. Both need the same mode state, so
+ * this single client component renders a Fragment of the two sibling grid
+ * items directly (no extra wrapper DOM node), letting the parent's
+ * `.stak-landing-privacy-grid` lay them out as real grid siblings - at
+ * <1024px container width the grid is a single column (copy row, then the
+ * panels row beneath it, per the Responsive doc's tablet note), and at
+ * >=1024px it becomes the original side-by-side 2-column layout. */
+export function PrivacyPanel({
+  intro,
+  modes,
+}: {
+  intro: ReactNode;
+  modes: [PrivacyMode, PrivacyMode];
+}) {
   const [modeKey, setModeKey] = useState<PrivacyMode['key']>('standard');
   const mode = modes.find((m) => m.key === modeKey) ?? modes[0];
 
   return (
     <>
-      <div role="tablist" aria-label="Memory mode" className="stak-landing-pvtabs">
-        {modes.map((m) => (
-          <button
-            key={m.key}
-            role="tab"
-            type="button"
-            aria-selected={modeKey === m.key}
-            onClick={() => setModeKey(m.key)}
-            className={
-              modeKey === m.key
-                ? 'stak-landing-pvtab stak-landing-pvtab--active'
-                : 'stak-landing-pvtab'
-            }
-          >
-            {m.label}
-          </button>
-        ))}
-      </div>
-      <div className="stak-landing-pvcopy">
-        <span className="stak-landing-pvcopy-title">{mode.title}</span>
-        <span className="stak-landing-pvcopy-desc">{mode.desc}</span>
-      </div>
-      <span className="stak-landing-pvcopy-rec">{mode.rec}</span>
-      <div className="stak-landing-pvgrid">
-        <div className="stak-landing-pvcard">
-          <span className="stak-landing-pvcard-k">ON DELL</span>
-          <span className="stak-landing-pvcard-text">
-            Migrations must run inside a transaction. CI uses Postgres 15.
-          </span>
+      <div className="stak-landing-privacy-copy">
+        {intro}
+        <div role="tablist" aria-label="Memory mode" className="stak-landing-pvtabs">
+          {modes.map((m) => (
+            <button
+              key={m.key}
+              role="tab"
+              type="button"
+              aria-selected={modeKey === m.key}
+              onClick={() => setModeKey(m.key)}
+              className={
+                modeKey === m.key
+                  ? 'stak-landing-pvtab stak-landing-pvtab--active'
+                  : 'stak-landing-pvtab'
+              }
+            >
+              {m.label}
+            </button>
+          ))}
         </div>
-        <div
-          className="stak-landing-pvcard"
-          data-protected={mode.key === 'protected'}
-        >
-          <span
-            className={
-              mode.tone === 'green'
-                ? 'stak-landing-pvcard-k stak-landing-tone-green'
-                : 'stak-landing-pvcard-k'
-            }
+        <div className="stak-landing-pvcopy">
+          <span className="stak-landing-pvcopy-title">{mode.title}</span>
+          <span className="stak-landing-pvcopy-desc">{mode.desc}</span>
+        </div>
+        <span className="stak-landing-pvcopy-rec">{mode.rec}</span>
+      </div>
+      <div className="stak-landing-privacy-panels">
+        <div className="stak-landing-pvgrid">
+          <div className="stak-landing-pvcard">
+            <span className="stak-landing-pvcard-k">ON DELL</span>
+            <span className="stak-landing-pvcard-text">
+              Migrations must run inside a transaction. CI uses Postgres 15.
+            </span>
+          </div>
+          <div
+            className="stak-landing-pvcard"
+            data-protected={mode.key === 'protected'}
           >
-            IN STAK CLOUD
-          </span>
-          <span className="stak-landing-pvcard-text stak-landing-pvcard-text--mono">
-            {mode.cloudText}
-          </span>
-          <span className="stak-landing-pvcard-who">{mode.cloudWho}</span>
+            <span
+              className={
+                mode.tone === 'green'
+                  ? 'stak-landing-pvcard-k stak-landing-tone-green'
+                  : 'stak-landing-pvcard-k'
+              }
+            >
+              IN STAK CLOUD
+            </span>
+            <span className="stak-landing-pvcard-text stak-landing-pvcard-text--mono">
+              {mode.cloudText}
+            </span>
+            <span className="stak-landing-pvcard-who">{mode.cloudWho}</span>
+          </div>
         </div>
       </div>
     </>
