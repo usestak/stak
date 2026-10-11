@@ -167,13 +167,21 @@
   border-radius: 6px;
   transition: transform 150ms ease;
 }
-.stak-landing-install-cta:hover,
 .stak-landing-install-cta:focus-visible {
   text-decoration: none;
   transform: translateY(-1px);
 }
 .stak-landing-install-cta:active {
   transform: scale(0.97);
+}
+/* Hover lift only for pointer devices that actually hover (mouse/trackpad);
+   touch gets press-scale (:active above) instead - design/Responsive note:
+   "Hover lifts (pointer devices only, 1-2px); press-scale on tap." */
+@media (hover: hover) and (pointer: fine) {
+  .stak-landing-install-cta:hover {
+    text-decoration: none;
+    transform: translateY(-1px);
+  }
 }
 .stak-landing-install-cta-mobile {
   min-height: 40px;
@@ -411,24 +419,143 @@
   color: var(--green);
 }
 
-/* Scroll-story container stub (P9 Task 2 fills the pinned animation in).
-   Static "frame 0" rendering + the layout track Task 2 needs. */
-.stak-landing-story {
+/* ---- Rotating hero word (HeroWord leaf) ----
+   Keyframes copied verbatim from the design's own <style> block. */
+@keyframes stkIn {
+  0% {
+    opacity: 0;
+    transform: translateY(0.42em) rotateX(-80deg);
+    filter: blur(10px);
+  }
+  60% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+@keyframes stkOut {
+  0% {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-0.38em) rotateX(70deg);
+    filter: blur(10px);
+  }
+}
+@keyframes stkLine {
+  0% {
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+  45% {
+    transform: scaleX(1);
+    transform-origin: left;
+  }
+  55% {
+    transform: scaleX(1);
+    transform-origin: right;
+  }
+  100% {
+    transform: scaleX(0);
+    transform-origin: right;
+  }
+}
+.stak-word {
+  position: relative;
+  display: inline-flex;
+  justify-content: flex-start;
+  flex: none;
+  padding-bottom: 0.06em;
+}
+.stak-landing-h1-word-row {
+  display: flex;
+  justify-content: center;
+  padding: 0.04em 0;
+}
+.stak-word-sizer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: pre;
+  display: flex;
+}
+.stak-word-sizer-item {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: inline-flex;
+}
+.stak-word-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+.stak-word-letters {
+  display: inline-flex;
+  white-space: pre;
+  top: 0;
+  pointer-events: none;
+}
+.stak-word-letter {
+  display: inline-block;
+  backface-visibility: hidden;
+}
+.stak-word-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -0.02em;
+  height: 0.045em;
+  background: var(--orange);
+  border-radius: 2px;
+  transform: scaleX(0);
+}
+
+/* ---- Scroll-driven portability story (ScrollStory leaf) ----
+   `trackH` is the tall scroll region (420vh desktop/tablet, 380vh mobile);
+   the inner `.stak-landing-story-stage` is `position: sticky`, pinned under
+   the nav at mobile/tablet (`top: 61px`/`69px`), full viewport height at
+   desktop. */
+.stak-landing-story-track {
   width: 100%;
-  max-width: 1200px;
   margin-top: clamp(12px, 2cqi, 28px);
+}
+.stak-landing-story-stage {
+  position: sticky;
+  max-height: 960px;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   align-items: center;
   gap: clamp(16px, 2.4cqi, 28px);
+  box-sizing: border-box;
   padding: clamp(16px, 3vh, 40px) 0;
 }
+.stak-landing-story-captions {
+  position: relative;
+  width: 100%;
+  max-width: 1200px;
+  display: grid;
+  text-align: left;
+}
 .stak-landing-story-caption {
+  grid-area: 1 / 1;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  text-align: left;
-  width: 100%;
+  min-width: 0;
+  pointer-events: none;
 }
 .stak-landing-story-cap {
   font-size: clamp(22px, 2.6cqi, 36px);
@@ -436,43 +563,205 @@
   font-weight: 600;
   letter-spacing: -0.02em;
   color: var(--ink);
+  text-wrap: balance;
 }
 .stak-landing-story-sub {
   font-size: clamp(15px, 1.3cqi, 17px);
   line-height: 1.5;
   color: var(--faint);
+  text-wrap: pretty;
+  max-width: 720px;
+}
+.stak-landing-story-cmdlines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
 }
 .stak-landing-story-cmd {
-  font: clamp(12.5px, 1cqi, 14px) var(--mono);
+  font: clamp(12.5px, 1cqi, 14px) / 1.6 var(--mono);
   color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .stak-landing-story-m {
   color: var(--dim);
 }
-.stak-landing-story-stage {
+
+.stak-landing-story-deck {
   position: relative;
   width: 100%;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  max-width: 1200px;
+  flex: none;
+}
+.stak-landing-story-deck--mobile {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.stak-landing-story-deck--desktop {
+  display: none;
+  height: clamp(320px, 34cqi, 440px);
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  padding: 24px 0;
+}
+.stak-landing-story-zonerow {
+  position: absolute;
+  bottom: 14px;
+  left: 0;
+  right: 0;
 }
 .stak-landing-story-zone {
+  position: absolute;
+  bottom: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  text-align: center;
 }
 .stak-landing-story-zone-n {
   font-size: 14px;
   font-weight: 600;
-  color: var(--ink);
+  transition: color 0.4s;
 }
 .stak-landing-story-zone-s {
   font: 11px var(--mono);
   color: var(--dim);
+  white-space: nowrap;
+}
+.stak-landing-story-cardsgroup {
+  position: absolute;
+  top: 46%;
+  width: 0;
+  height: 0;
+}
+.stak-landing-story-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: min(220px, 26cqi);
+  height: 178px;
+  margin: -89px 0 0 calc(min(220px, 26cqi) / -2);
+  box-sizing: border-box;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--bg);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  transform-origin: 50% 140%;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+.stak-landing-story-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.stak-landing-story-card-t {
+  font: 500 10.5px var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--orange);
+}
+.stak-landing-story-card-n {
+  font: 11px var(--mono);
+  color: var(--dim);
+}
+.stak-landing-story-card-role {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--faint);
+  margin-top: -2px;
+}
+.stak-landing-story-card-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+.stak-landing-story-card-row span:first-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Mobile route strip: 3 zone dots + an orange progress-fill line. */
+.stak-landing-story-routestrip {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.stak-landing-story-routeline {
+  position: absolute;
+  top: 4px;
+  left: 16.66%;
+  right: 16.66%;
+  height: 1px;
+  background: var(--line-2);
+}
+.stak-landing-story-routefill {
+  position: absolute;
+  top: 4px;
+  left: 16.66%;
+  height: 1px;
+  width: 0;
+  background: var(--orange);
+}
+.stak-landing-story-routezone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  padding: 0 4px;
+}
+.stak-landing-story-routedot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  border: 1px solid var(--line-2);
+  transition: background 0.4s, border-color 0.4s;
+}
+.stak-landing-story-mobiledeck {
+  position: relative;
+}
+.stak-landing-story-card--mobile {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  margin: 0 auto;
+  max-width: 380px;
+  width: auto;
+  height: 140px;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 12px 14px;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.45);
+}
+.stak-landing-story-card--mobile .stak-landing-story-card-role {
+  font-size: 12.5px;
+  line-height: 1.3;
+  margin-top: 0;
+}
+.stak-landing-story-card--mobile .stak-landing-story-card-row {
+  font-size: 13px;
+  padding-top: 4px;
+}
+
+@container stak-landing (min-width: 640px) {
+  .stak-landing-story-deck--mobile {
+    display: none;
+  }
+  .stak-landing-story-deck--desktop {
+    display: block;
+  }
 }
 
 /* ---- Shared section shell ---- */
@@ -858,9 +1147,14 @@
     gap: 12px;
     transition: border-color 250ms ease, transform 250ms ease;
   }
-  .stak-landing-move:hover {
-    border-color: var(--chip);
-    transform: translateY(-2px);
+  .stak-landing-move:active {
+    transform: scale(0.98);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .stak-landing-move:hover {
+      border-color: var(--chip);
+      transform: translateY(-2px);
+    }
   }
   .stak-landing-move-rail {
     display: none;
@@ -1278,5 +1572,11 @@
   .stak-landing * {
     transition-duration: 1ms !important;
     animation-duration: 1ms !important;
+  }
+  /* Responsive doc's motion table (§0): hover lifts -> "None." under
+     reduced motion, not merely instant - the translateY must not happen. */
+  .stak-landing-install-cta:hover,
+  .stak-landing-move:hover {
+    transform: none !important;
   }
 }

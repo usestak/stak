@@ -13,6 +13,7 @@ import {
   type ObjCard,
   type PrivacyMode,
 } from './landing-interactive';
+import { HeroWord, ScrollStory } from './landing-scroll-story';
 
 /**
  * Public, signed-out landing page shell - P9 "Task 1" (structure, copy, and
@@ -122,9 +123,7 @@ function Hero() {
         <span className="stak-landing-h1-row" aria-hidden="true">
           <span className="stak-landing-h1-your">Your</span>
           <span className="stak-landing-h1-wordrow">
-            {/* Rotating word stub - Task 2 implements the letter-flip
-                rotation through STAK / SKILLS / MEMORY / AGENT. */}
-            <span className="stak-landing-h1-word">STAK</span>
+            <HeroWord />
             <span>should</span>
           </span>
         </span>
@@ -139,8 +138,8 @@ function Hero() {
         <span className="stak-landing-h1-line" aria-hidden="true">
           Your
         </span>
-        <span className="stak-landing-h1-word" aria-hidden="true">
-          STAK
+        <span aria-hidden="true" className="stak-landing-h1-word-row">
+          <HeroWord />
         </span>
         <span className="stak-landing-h1-line" aria-hidden="true">
           should survive
@@ -155,38 +154,11 @@ function Hero() {
       </p>
       <div id="install" className="stak-landing-install-anchor" />
       <CopyRow command="npm install -g @usestak/cli" />
-      {/* Scroll-story container stub (P9 Task 2 fills this with the pinned
-          DELL -> Your STAK -> MacBook card-fan animation across 7 steps).
-          Rendered here as a static "frame 0" so the layout this later work
-          needs already exists. */}
-      <div className="stak-landing-story" aria-hidden="true">
-        <div className="stak-landing-story-caption">
-          <span className="stak-landing-story-cap">
-            Your agent setup starts on DELL.
-          </span>
-          <span className="stak-landing-story-sub">
-            Skills, Memory and local setup accumulate as you work.
-          </span>
-          <div className="stak-landing-story-cmd">
-            <span className="stak-landing-story-m">DELL $ </span>
-            stak scan
-          </div>
-        </div>
-        <div className="stak-landing-story-stage">
-          <div className="stak-landing-story-zone">
-            <span className="stak-landing-story-zone-n">DELL</span>
-            <span className="stak-landing-story-zone-s">working copy</span>
-          </div>
-          <div className="stak-landing-story-zone">
-            <span className="stak-landing-story-zone-n">Your STAK</span>
-            <span className="stak-landing-story-zone-s">empty</span>
-          </div>
-          <div className="stak-landing-story-zone">
-            <span className="stak-landing-story-zone-n">MacBook</span>
-            <span className="stak-landing-story-zone-s">not set up yet</span>
-          </div>
-        </div>
-      </div>
+      {/* Pinned, scroll-scrubbed DELL -> Your STAK -> MacBook portability
+          story across 7 steps (P9 Task 2). See landing-scroll-story.tsx for
+          the scroll-to-step formula and the exact per-step data/transforms,
+          ported faithfully from the design source. */}
+      <ScrollStory />
     </section>
   );
 }

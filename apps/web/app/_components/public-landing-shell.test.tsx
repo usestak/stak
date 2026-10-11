@@ -99,8 +99,11 @@ test('This Is Your STAK shows a 4-way tab control and all 4 object cards with th
   const tabs = screen.getAllByRole('tab', { name: /SKILLS|MEMORY|PROJECTS|STACK/ });
   expect(tabs.length).toBe(4);
 
-  expect(screen.getByText('review-pr')).toBeInTheDocument();
-  expect(screen.getByText('Update available')).toBeInTheDocument();
+  // The hero's scroll-story SKILLS card (rendered in both its mobile and
+  // desktop/tablet deck markup, with CSS - not JS - choosing which shows)
+  // also has a "review-pr" row, so these appear more than once too.
+  expect(screen.getAllByText('review-pr').length).toBeGreaterThan(0);
+  expect(screen.getAllByText('Update available').length).toBeGreaterThan(0);
   expect(screen.getAllByText(/stak scan/).length).toBeGreaterThan(0);
 
   // Switching tabs changes which card is marked active (structural, not
@@ -116,14 +119,17 @@ test('Move to another machine lists the 4 real steps with the real CLI commands,
   expect(
     screen.getByRole('heading', { name: 'Bring your STAK to a new machine.' }),
   ).toBeInTheDocument();
+  // The hero's scroll-story also renders "stak login"/"stak pull"/"stak
+  // memory recover"/"stak memory restore" among its 7 (always-mounted, CSS-
+  // driven) steps, so these also appear more than once in the document.
   expect(screen.getAllByText(/stak login/).length).toBeGreaterThan(0);
-  expect(screen.getByText(/stak pull/)).toBeInTheDocument();
-  expect(screen.getByText(/stak memory recover/)).toBeInTheDocument();
-  expect(screen.getByText(/stak memory restore/)).toBeInTheDocument();
+  expect(screen.getAllByText(/stak pull/).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/stak memory recover/).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/stak memory restore/).length).toBeGreaterThan(0);
 
   // The design's bare, nonexistent `stak run` is corrected to the real
   // `run <agent>` CLI form (packages/cli/src/commands/run.ts).
-  expect(screen.getByText(/stak run claude/)).toBeInTheDocument();
+  expect(screen.getAllByText(/stak run claude/).length).toBeGreaterThan(0);
   expect(screen.queryByText(/stak run$/)).not.toBeInTheDocument();
 });
 
