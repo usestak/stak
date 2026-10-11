@@ -11,6 +11,7 @@ import { relative } from '../../../lib/machine-context';
 
 import { loadSkillDetail, type SkillDetailView } from '../skill-detail-data';
 import { SkillActions } from '../_components/skill-actions';
+import { SkillShareSection } from '../_components/skill-share-section';
 import '../skills.css';
 
 export const dynamic = 'force-dynamic';
@@ -466,6 +467,8 @@ export default async function SkillDetailPage({
                 </span>
               )}
             </section>
+
+            <SkillShareSection skillId={view.skillId} share={view.share} />
 
             <section
               style={{ display: 'flex', flexDirection: 'column', gap: 8 }}

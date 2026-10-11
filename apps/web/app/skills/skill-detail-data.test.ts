@@ -77,6 +77,10 @@ const service = (
       throw new CloudServiceError('skill-not-found', 404, 'No such Skill.');
     return skill;
   },
+  getSkillShareStatus: async (_auth, skillId) => ({
+    skillId,
+    share: { status: 'not-shareable', reason: 'Not shareable in this test.' },
+  }),
 });
 
 describe('loadSkillDetail', () => {

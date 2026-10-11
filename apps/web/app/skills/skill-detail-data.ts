@@ -1,5 +1,9 @@
 import { CloudServiceError, type CloudService } from '@stack/cloud-server';
-import type { SkillDetail, SkillVersionHistoryEntry } from '@stack/spec';
+import type {
+  SkillDetail,
+  SkillShareStatus,
+  SkillVersionHistoryEntry,
+} from '@stack/spec';
 
 import {
   machineOption,
@@ -22,7 +26,10 @@ import type { WebUser } from '../../lib/session.js';
 
 export type SkillDetailService = Pick<
   CloudService,
-  'getMachinesReadModel' | 'getSkillsReadModel' | 'getSkillDetail'
+  | 'getMachinesReadModel'
+  | 'getSkillsReadModel'
+  | 'getSkillDetail'
+  | 'getSkillShareStatus'
 >;
 
 const webAuth = (userId: string) => ({ userId, tokenId: 'web-session' });
@@ -114,6 +121,7 @@ export type SkillDetailView =
         candidateRevision?: string;
         trackedRef?: string;
       };
+      share: SkillShareStatus;
     };
 
 const capabilityList = (
@@ -160,16 +168,19 @@ export const loadSkillDetail = async (
 
   let skill: SkillDetail;
   let allSkills: { skillId: string; name: string }[];
+  let share: SkillShareStatus;
   try {
-    const [detail, skillsModel] = await Promise.all([
+    const [detail, skillsModel, shareStatus] = await Promise.all([
       service.getSkillDetail(auth, skillId),
       service.getSkillsReadModel(auth),
+      service.getSkillShareStatus(auth, skillId),
     ]);
     skill = detail;
     allSkills = skillsModel.skills.map((s) => ({
       skillId: s.skillId,
       name: s.name,
     }));
+    share = shareStatus.share;
   } catch (error) {
     if (error instanceof CloudServiceError && error.code === 'skill-not-found')
       return { kind: 'not-found' };
@@ -308,5 +319,6 @@ export const loadSkillDetail = async (
         ? { trackedRef: skill.source.trackedRef }
         : {}),
     },
+    share,
   };
 };

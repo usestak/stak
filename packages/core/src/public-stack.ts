@@ -93,6 +93,7 @@ export const buildPublicStackBundle = (
     name: version.name,
     description: version.description,
     versionHash,
+    kind: 'stack' as const,
   };
   const digest = sha256CanonicalJson(
     publicBundleDigestInput({ stack, requirements, inheritedStackMetadata }),

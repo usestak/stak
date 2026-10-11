@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { entryIdSchema } from './environment.js';
 import { skillMetadataSchema, skillSourceSchema } from './scanner.js';
 import { contentHashSchema, referenceRestorationSchema } from './storage.js';
 
@@ -170,6 +171,14 @@ export const publicStackBundleSchema = z.object({
     name: z.string().min(1),
     description: z.string().min(1),
     versionHash: contentHashSchema,
+    // Discriminates a Skill shared through this pipeline from an authored Stack with
+    // incidentally one requirement. Additive/back-compat: absent on every bundle committed
+    // before this field existed, which were all authored Stacks, so the default is 'stack'.
+    kind: z.enum(['stack', 'skill']).default('stack'),
+    // Present only when kind === 'skill': the originating Skill's entry id in the owner's
+    // environment, used solely to answer "has this Skill already been shared?" — never
+    // rendered to a consumer, never resolvable by a non-owner to anything else.
+    originSkillId: entryIdSchema.optional(),
   }),
   requirements: z.array(publicStackRequirementSchema),
   inheritedStackMetadata: z.array(
@@ -220,6 +229,7 @@ export const publicProfileResponseSchema = z.object({
       description: z.string(),
       latestVersionNumber: z.number().int().positive().nullable(),
       updatedAt: z.iso.datetime({ offset: true }),
+      kind: z.enum(['stack', 'skill']).default('stack'),
     }),
   ),
 });

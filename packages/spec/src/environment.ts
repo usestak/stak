@@ -21,7 +21,7 @@ import {
 } from './stack.js';
 
 const timestampSchema = z.iso.datetime({ offset: true });
-const entryIdSchema = z.string().regex(/^skill_[A-Za-z0-9_-]{8,}$/);
+export const entryIdSchema = z.string().regex(/^skill_[A-Za-z0-9_-]{8,}$/);
 
 export const machineIdentitySchema = z.object({
   schemaVersion: z.literal(1),

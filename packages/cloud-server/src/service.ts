@@ -43,6 +43,7 @@ import type {
   PublicStackRepository,
 } from './repository.js';
 import { createPublicStackService } from './public-service.js';
+import { createSkillShareService } from './skill-share-service.js';
 import { createMemoryMethods } from './memory-service.js';
 import {
   createProductMethods,
@@ -185,6 +186,16 @@ export const createCloudService = (config: CloudServiceConfig) => {
     appUrl,
   });
 
+  // Reuses the public-Stack publish pipeline as-is (§3) — the only new logic is building a
+  // one-item bundle from a private Skill; the commit path, eligibility re-check, and
+  // immutability guarantees are exactly `publicMethods.publishPublicStackVersion`'s.
+  const skillShareMethods = createSkillShareService({
+    repository: config.repository,
+    newId,
+    resolveHandle: publicMethods.resolveHandle,
+    publishPublicStackVersion: publicMethods.publishPublicStackVersion,
+  });
+
   const memoryMethods = createMemoryMethods({
     ...(config.memoryBackendFor
       ? { memoryBackendFor: config.memoryBackendFor }
@@ -217,6 +228,7 @@ export const createCloudService = (config: CloudServiceConfig) => {
     ...publicMethods,
     ...memoryMethods,
     ...productMethods,
+    ...skillShareMethods,
     /** Bearer-token authentication. Derives identity server-side; never trusts the client. */
     authenticate: async (
       authorizationHeader: string | undefined,

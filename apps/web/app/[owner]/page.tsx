@@ -45,10 +45,23 @@ export async function generateMetadata({
     ? `${profile.displayName} (@${profile.owner}) | STAK`
     : `@${profile.owner} | STAK`;
   const count = profile.stacks.length;
+  const skillCountOnProfile = profile.stacks.filter(
+    (stack) => stack.kind === 'skill',
+  ).length;
+  const stackCountOnProfile = count - skillCountOnProfile;
   const description =
     count > 0
-      ? `${count} public Stack${count === 1 ? '' : 's'} shared by @${profile.owner} on STAK.`
-      : `@${profile.owner} has not shared any public Stacks yet.`;
+      ? `${[
+          stackCountOnProfile > 0
+            ? `${stackCountOnProfile} public Stack${stackCountOnProfile === 1 ? '' : 's'}`
+            : null,
+          skillCountOnProfile > 0
+            ? `${skillCountOnProfile} shared Skill${skillCountOnProfile === 1 ? '' : 's'}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(' and ')} from @${profile.owner} on STAK.`
+      : `@${profile.owner} has not shared anything yet.`;
   const index = profile.stacks.length > 0;
 
   return {
@@ -82,9 +95,9 @@ export default async function ProfilePage({
         <p className="stak-public-muted">{profile.displayName}</p>
       ) : null}
 
-      <h2>Public Stacks</h2>
+      <h2>Public Stacks &amp; Skills</h2>
       {profile.stacks.length === 0 ? (
-        <p className="stak-public-muted">No public Stacks yet.</p>
+        <p className="stak-public-muted">Nothing public yet.</p>
       ) : (
         profile.stacks.map((stack) => (
           <Link
@@ -92,7 +105,12 @@ export default async function ProfilePage({
             className="stak-public-card"
             href={`/@${profile.owner}/${stack.slug}`}
           >
-            <div className="stak-public-card-title">{stack.displayName}</div>
+            <div className="stak-public-card-title">
+              {stack.displayName}
+              {stack.kind === 'skill' ? (
+                <span className="stak-public-badge"> Skill</span>
+              ) : null}
+            </div>
             <div className="stak-public-meta">
               <span className="stak-public-ref">
                 @{profile.owner}/{stack.slug}

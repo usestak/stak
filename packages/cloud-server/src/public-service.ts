@@ -284,6 +284,7 @@ export const createPublicStackService = (ctx: PublicServiceContext) => {
             description: stack.description,
             latestVersionNumber: latest?.versionNumber ?? null,
             updatedAt: stack.updatedAt,
+            kind: latest?.bundle.stack.kind ?? 'stack',
           };
         }),
       );

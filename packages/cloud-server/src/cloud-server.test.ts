@@ -489,6 +489,7 @@ const makePublicBundle = (options: {
     name: 'frontend',
     description: 'Frontend Stack',
     versionHash: options.versionHash,
+    kind: 'stack' as const,
   };
   const inheritedStackMetadata: { name: string; versionHash: string }[] = [];
   return {
