@@ -226,7 +226,6 @@
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  left: 0;
   width: max(260px, 100vw - 32px);
   max-width: calc(100vw - 32px);
   display: flex;
