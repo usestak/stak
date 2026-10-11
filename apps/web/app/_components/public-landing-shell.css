@@ -298,7 +298,8 @@
 
 /* ---- Hero ---- */
 .stak-landing-hero {
-  padding: clamp(48px, 7cqi, 96px) clamp(20px, 4cqi, 56px) clamp(32px, 4cqi, 56px);
+  padding: clamp(48px, 7cqi, 96px) clamp(20px, 4cqi, 56px)
+    clamp(32px, 4cqi, 56px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -726,7 +727,9 @@
   border-radius: 50%;
   box-sizing: border-box;
   border: 1px solid var(--line-2);
-  transition: background 0.4s, border-color 0.4s;
+  transition:
+    background 0.4s,
+    border-color 0.4s;
 }
 .stak-landing-story-mobiledeck {
   position: relative;
@@ -934,7 +937,9 @@
   font: 500 11px var(--mono);
   letter-spacing: 0.06em;
   cursor: pointer;
-  transition: background 250ms ease, color 250ms ease;
+  transition:
+    background 250ms ease,
+    color 250ms ease;
 }
 .stak-landing-objtab--active {
   background: var(--ink);
@@ -1145,7 +1150,9 @@
     background: var(--panel);
     padding: 18px;
     gap: 12px;
-    transition: border-color 250ms ease, transform 250ms ease;
+    transition:
+      border-color 250ms ease,
+      transform 250ms ease;
   }
   .stak-landing-move:active {
     transform: scale(0.98);
@@ -1216,7 +1223,9 @@
   cursor: pointer;
   background: transparent;
   color: var(--faint);
-  transition: background 250ms ease, color 250ms ease;
+  transition:
+    background 250ms ease,
+    color 250ms ease;
 }
 .stak-landing-pvtab--active {
   background: var(--ink);
@@ -1330,7 +1339,9 @@
   border: 1px solid var(--line-2);
   background: transparent;
   color: var(--faint);
-  transition: border-color 200ms ease, color 200ms ease;
+  transition:
+    border-color 200ms ease,
+    color 200ms ease;
 }
 .stak-landing-viewas-btn--active {
   border-color: var(--ink);

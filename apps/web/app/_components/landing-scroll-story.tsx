@@ -20,7 +20,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
  * implement it) - guard rather than assume it exists, same spirit as the
  * design's own `window.matchMedia && window.matchMedia(...).matches`. */
 function prefersReducedMotion(): boolean {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+  if (
+    typeof window === 'undefined' ||
+    typeof window.matchMedia !== 'function'
+  ) {
     return false;
   }
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -100,7 +103,11 @@ export function HeroWord() {
   const wCur = widthsRef.current[cur];
   const wPrev = prev != null ? widthsRef.current[prev] : undefined;
   const boxW =
-    wCur == null ? undefined : hold && wPrev != null ? Math.max(wPrev, wCur) : wCur;
+    wCur == null
+      ? undefined
+      : hold && wPrev != null
+        ? Math.max(wPrev, wCur)
+        : wCur;
 
   const letters = (word: string, anim: 'none' | 'in' | 'out', key: string) => (
     <span
@@ -163,21 +170,63 @@ export function HeroWord() {
 
 // ---- Scroll-driven portability story ----------------------------------
 
-type Step = [machine: string, cmd: string, output: string, cap: string, sub: string];
+type Step = [
+  machine: string,
+  cmd: string,
+  output: string,
+  cap: string,
+  sub: string,
+];
 
 const STEPS: Step[] = [
-  ['DELL', 'stak scan', '', 'Your agent setup starts on DELL.', 'Skills, Memory and local setup accumulate as you work.'],
+  [
+    'DELL',
+    'stak scan',
+    '',
+    'Your agent setup starts on DELL.',
+    'Skills, Memory and local setup accumulate as you work.',
+  ],
   ['DELL', 'stak status', '', 'STAK makes the portable parts visible.', ''],
-  ['DELL', 'stak push\nstak memory backup', '', 'You choose what goes to STAK Cloud, and when.', 'Your Stack and Memory move only when you tell STAK to move them.'],
-  ['DELL', 'stak skill check review-pr', '', 'Check a Skill locally. Review the update on the web.', ''],
-  ['MACBOOK', 'stak login\nstak pull\nstak memory recover', '', 'On MacBook, pull your Stack and recover your Memory.', ''],
-  ['MACBOOK', 'stak memory restore', '', 'Restore Memory into the agents that use it.', 'Recover brings the backup to this machine. Restore puts it back into native agent Memory.'],
+  [
+    'DELL',
+    'stak push\nstak memory backup',
+    '',
+    'You choose what goes to STAK Cloud, and when.',
+    'Your Stack and Memory move only when you tell STAK to move them.',
+  ],
+  [
+    'DELL',
+    'stak skill check review-pr',
+    '',
+    'Check a Skill locally. Review the update on the web.',
+    '',
+  ],
+  [
+    'MACBOOK',
+    'stak login\nstak pull\nstak memory recover',
+    '',
+    'On MacBook, pull your Stack and recover your Memory.',
+    '',
+  ],
+  [
+    'MACBOOK',
+    'stak memory restore',
+    '',
+    'Restore Memory into the agents that use it.',
+    'Recover brings the backup to this machine. Restore puts it back into native agent Memory.',
+  ],
   // Design source's step 7 command is the bare `stak run`, which the real
   // CLI doesn't accept (packages/cli/src/commands/run.ts: `run <agent>` is
   // required) - corrected the same way Task 1 corrected the identical
   // phrase in the "Move to another machine" section, rather than
   // reproducing a command that would fail if actually typed.
-  ['MACBOOK', 'stak run claude', '', 'When you’re ready to work, STAK applies the approved setup on MacBook.', ''],
+  [
+    'MACBOOK',
+    'stak run claude',
+    '',
+    'When you’re ready to work, STAK applies the approved setup on MacBook.',
+    '',
+  ],
 ];
 
 const ORANGE = 'var(--orange)';
@@ -229,7 +278,10 @@ export function ScrollStory() {
       onScroll();
     };
 
-    document.addEventListener('scroll', onScroll, { capture: true, passive: true });
+    document.addEventListener('scroll', onScroll, {
+      capture: true,
+      passive: true,
+    });
     window.addEventListener('resize', onResize);
     const raf = requestAnimationFrame(onScroll);
 
@@ -248,23 +300,58 @@ export function ScrollStory() {
     ? 'none'
     : 'opacity .55s cubic-bezier(.16,1,.3,1),transform .7s cubic-bezier(.16,1,.3,1),filter .55s';
   const trX = reduced ? 'none' : 'left 1.1s cubic-bezier(.65,0,.35,1)';
-  const trCard = reduced ? 'none' : 'transform .8s cubic-bezier(.2,.8,.2,1),border-color .4s';
+  const trCard = reduced
+    ? 'none'
+    : 'transform .8s cubic-bezier(.2,.8,.2,1),border-color .4s';
   const trFill = reduced ? 'none' : 'width 1.1s cubic-bezier(.65,0,.35,1)';
 
   const fanned = [1, 3, 5, 6].includes(s);
-  const zx = mob ? ['35%', '50%', '65%'] : tab ? ['24%', '50%', '76%'] : ['18%', '50%', '82%'];
+  const zx = mob
+    ? ['35%', '50%', '65%']
+    : tab
+      ? ['24%', '50%', '76%']
+      : ['18%', '50%', '82%'];
   const cx = s < 3 ? zx[0] : s === 3 ? zx[1] : zx[2];
   const ang = mob ? 7 : tab ? 10 : 16;
   const tfF = mob
-    ? ['rotate(-4deg) translateY(-4px)', 'translateY(-12px)', 'rotate(4deg) translateY(-4px)']
-    : [`rotate(-${ang}deg) translateY(-6px)`, 'translateY(-14px)', `rotate(${ang}deg) translateY(-6px)`];
+    ? [
+        'rotate(-4deg) translateY(-4px)',
+        'translateY(-12px)',
+        'rotate(4deg) translateY(-4px)',
+      ]
+    : [
+        `rotate(-${ang}deg) translateY(-6px)`,
+        'translateY(-14px)',
+        `rotate(${ang}deg) translateY(-6px)`,
+      ];
   const tfS = ['translate(-8px,8px)', 'translate(0,0)', 'translate(8px,-8px)'];
-  const mem = s < 4 ? 'on DELL' : s < 5 ? 'local STAK store' : 'Claude Code · Codex';
+  const mem =
+    s < 4 ? 'on DELL' : s < 5 ? 'local STAK store' : 'Claude Code · Codex';
 
   const zones = [
-    { n: 'DELL', s: s < 6 ? 'working copy' : 'last reported earlier', x: mob ? '14%' : '18%', c: s < 3 ? INK : DIM },
-    { n: 'Your STAK', s: s < 2 ? 'empty' : s < 6 ? 'backed up' : 'portable', x: '50%', c: s === 3 || s === 2 ? ORANGE : DIM },
-    { n: 'MacBook', s: s < 4 ? 'not set up yet' : s < 6 ? 'setup recovered' : 'Up to date · just now', x: mob ? '86%' : '82%', c: s >= 4 ? INK : DIM },
+    {
+      n: 'DELL',
+      s: s < 6 ? 'working copy' : 'last reported earlier',
+      x: mob ? '14%' : '18%',
+      c: s < 3 ? INK : DIM,
+    },
+    {
+      n: 'Your STAK',
+      s: s < 2 ? 'empty' : s < 6 ? 'backed up' : 'portable',
+      x: '50%',
+      c: s === 3 || s === 2 ? ORANGE : DIM,
+    },
+    {
+      n: 'MacBook',
+      s:
+        s < 4
+          ? 'not set up yet'
+          : s < 6
+            ? 'setup recovered'
+            : 'Up to date · just now',
+      x: mob ? '86%' : '82%',
+      c: s >= 4 ? INK : DIM,
+    },
   ];
   const pos = s < 3 ? 0 : s === 3 ? 1 : 2;
   const zonesWithDots = zones.map((z, i) => ({
@@ -299,7 +386,11 @@ export function ScrollStory() {
       rows: [
         { a: 'Included', b: '30 skills', c: GREEN },
         { a: 'Paused', b: '1 skill', c: DIM },
-        { a: 'Applied', b: s === 6 ? 'on MacBook' : s >= 4 ? 'pulled' : 'on DELL', c: s === 6 ? GREEN : FAINT },
+        {
+          a: 'Applied',
+          b: s === 6 ? 'on MacBook' : s >= 4 ? 'pulled' : 'on DELL',
+          c: s === 6 ? GREEN : FAINT,
+        },
       ],
     },
     {
@@ -311,7 +402,11 @@ export function ScrollStory() {
       z: 3,
       ro: 1,
       rows: [
-        { a: 'review-pr', b: s === 3 ? 'Update available' : 'Ready', c: s === 3 ? ORANGE : GREEN },
+        {
+          a: 'review-pr',
+          b: s === 3 ? 'Update available' : 'Ready',
+          c: s === 3 ? ORANGE : GREEN,
+        },
         { a: 'test-first', b: 'Ready', c: GREEN },
         { a: 'debug-flaky', b: 'Paused', c: DIM },
       ],
@@ -329,10 +424,18 @@ export function ScrollStory() {
 
   const trackH = mob ? '380vh' : '420vh';
   const stTop = mob ? '61px' : tab ? '69px' : '0';
-  const stH = mob ? 'calc(100svh - 61px)' : tab ? 'calc(100vh - 69px)' : '100vh';
+  const stH = mob
+    ? 'calc(100svh - 61px)'
+    : tab
+      ? 'calc(100vh - 69px)'
+      : '100vh';
 
   return (
-    <div ref={trackRef} className="stak-landing-story-track" style={{ height: trackH }}>
+    <div
+      ref={trackRef}
+      className="stak-landing-story-track"
+      style={{ height: trackH }}
+    >
       <div
         className="stak-landing-story-stage"
         style={{ top: stTop, height: stH }}
@@ -341,21 +444,33 @@ export function ScrollStory() {
           {STEPS.map((x, i) => {
             const active = i === s;
             const op = active ? 1 : 0;
-            const tf = active || reduced ? 'none' : i < s ? 'translateY(-18px)' : 'translateY(18px)';
+            const tf =
+              active || reduced
+                ? 'none'
+                : i < s
+                  ? 'translateY(-18px)'
+                  : 'translateY(18px)';
             const bl = active || reduced ? 'none' : 'blur(6px)';
             return (
               <div
                 key={i}
                 className="stak-landing-story-caption"
-                style={{ opacity: op, transform: tf, filter: bl, transition: trCap }}
+                style={{
+                  opacity: op,
+                  transform: tf,
+                  filter: bl,
+                  transition: trCap,
+                }}
                 aria-hidden={!active}
               >
                 <span className="stak-landing-story-cap">{x[3]}</span>
-                {x[4] ? <span className="stak-landing-story-sub">{x[4]}</span> : null}
+                {x[4] ? (
+                  <span className="stak-landing-story-sub">{x[4]}</span>
+                ) : null}
                 <div className="stak-landing-story-cmdlines">
                   {x[1].split('\n').map((cm, ci) => (
                     <span key={ci} className="stak-landing-story-cmd">
-                      <span className="stak-landing-story-m">{x[0]}  $ </span>
+                      <span className="stak-landing-story-m">{x[0]} $ </span>
                       {cm}
                     </span>
                   ))}
@@ -375,14 +490,20 @@ export function ScrollStory() {
                 className="stak-landing-story-zone"
                 style={{ left: z.x, transform: 'translateX(-50%)' }}
               >
-                <span className="stak-landing-story-zone-n" style={{ color: z.c }}>
+                <span
+                  className="stak-landing-story-zone-n"
+                  style={{ color: z.c }}
+                >
                   {z.n}
                 </span>
                 <span className="stak-landing-story-zone-s">{z.s}</span>
               </div>
             ))}
           </div>
-          <div className="stak-landing-story-cardsgroup" style={{ left: cx, transition: trX }}>
+          <div
+            className="stak-landing-story-cardsgroup"
+            style={{ left: cx, transition: trX }}
+          >
             {cards.map((k) => (
               <div
                 key={k.t}
@@ -429,14 +550,20 @@ export function ScrollStory() {
                   className="stak-landing-story-routedot"
                   style={{ background: z.dot, borderColor: z.dbd }}
                 />
-                <span className="stak-landing-story-zone-n" style={{ color: z.c }}>
+                <span
+                  className="stak-landing-story-zone-n"
+                  style={{ color: z.c }}
+                >
                   {z.n}
                 </span>
                 <span className="stak-landing-story-zone-s">{z.s}</span>
               </div>
             ))}
           </div>
-          <div className="stak-landing-story-mobiledeck" style={{ height: deckH }}>
+          <div
+            className="stak-landing-story-mobiledeck"
+            style={{ height: deckH }}
+          >
             {cards.map((k, i) => (
               <div
                 key={k.t}

@@ -1,5 +1,11 @@
 import { afterEach, expect, test } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from '@testing-library/react';
 
 import { PublicLandingShell } from './public-landing-shell';
 
@@ -32,9 +38,10 @@ test('nav renders the wordmark, the 4 in-page/external links, sign-in, install C
     expect(link).toHaveAttribute('href', href);
   }
 
-  expect(
-    within(nav).getByRole('link', { name: 'Sign in' }),
-  ).toHaveAttribute('href', '/auth/login?next=/onboarding');
+  expect(within(nav).getByRole('link', { name: 'Sign in' })).toHaveAttribute(
+    'href',
+    '/auth/login?next=/onboarding',
+  );
   expect(
     within(nav).getAllByRole('link', { name: 'Install the CLI' })[0],
   ).toHaveAttribute('href', '#install');
@@ -96,7 +103,9 @@ test('This Is Your STAK shows a 4-way tab control and all 4 object cards with th
     }),
   ).toBeInTheDocument();
 
-  const tabs = screen.getAllByRole('tab', { name: /SKILLS|MEMORY|PROJECTS|STACK/ });
+  const tabs = screen.getAllByRole('tab', {
+    name: /SKILLS|MEMORY|PROJECTS|STACK/,
+  });
   expect(tabs.length).toBe(4);
 
   // The hero's scroll-story SKILLS card (rendered in both its mobile and
@@ -194,13 +203,15 @@ test('footer omits the nonexistent /app link and keeps only real destinations', 
     'href',
     '#how',
   );
-  expect(
-    within(footer).getByText('Sign in').closest('a'),
-  ).toHaveAttribute('href', '/auth/login?next=/onboarding');
+  expect(within(footer).getByText('Sign in').closest('a')).toHaveAttribute(
+    'href',
+    '/auth/login?next=/onboarding',
+  );
   expect(within(footer).queryByText('Control center')).not.toBeInTheDocument();
   expect(within(footer).queryByText(/\/app\b/)).not.toBeInTheDocument();
   expect(footer.querySelector('a[href="/app"]')).toBeNull();
-  expect(
-    within(footer).getByText('GitHub').closest('a'),
-  ).toHaveAttribute('href', 'https://github.com/usestak/stak');
+  expect(within(footer).getByText('GitHub').closest('a')).toHaveAttribute(
+    'href',
+    'https://github.com/usestak/stak',
+  );
 });

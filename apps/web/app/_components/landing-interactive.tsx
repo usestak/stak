@@ -48,9 +48,7 @@ export function CopyRow({
   return (
     <div
       className={
-        className
-          ? `stak-landing-cmdrow ${className}`
-          : 'stak-landing-cmdrow'
+        className ? `stak-landing-cmdrow ${className}` : 'stak-landing-cmdrow'
       }
       role="button"
       tabIndex={0}
@@ -64,7 +62,9 @@ export function CopyRow({
       aria-label={`Copy command: ${command}`}
     >
       <span className="stak-landing-cmdrow-cmd">
-        {prefix ? <span className="stak-landing-cmdrow-n">{prefix}</span> : null}
+        {prefix ? (
+          <span className="stak-landing-cmdrow-n">{prefix}</span>
+        ) : null}
         <span className="stak-landing-cmdrow-p">$ </span>
         {command}
       </span>
@@ -240,7 +240,11 @@ export function PrivacyPanel({
     <>
       <div className="stak-landing-privacy-copy">
         {intro}
-        <div role="tablist" aria-label="Memory mode" className="stak-landing-pvtabs">
+        <div
+          role="tablist"
+          aria-label="Memory mode"
+          className="stak-landing-pvtabs"
+        >
           {modes.map((m) => (
             <button
               key={m.key}
@@ -309,7 +313,11 @@ export type MachineCard = {
  * side per the Responsive notes); the toggle only highlights which one is
  * "being viewed", it never hides the other - the design's own `card()`
  * helper only changes background/the "· viewing" suffix, not visibility. */
-export function MachinesPanel({ cards }: { cards: [MachineCard, MachineCard] }) {
+export function MachinesPanel({
+  cards,
+}: {
+  cards: [MachineCard, MachineCard];
+}) {
   const [viewing, setViewing] = useState<'DELL' | 'MacBook'>('DELL');
 
   return (

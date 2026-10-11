@@ -149,8 +149,8 @@ function Hero() {
         </span>
       </h1>
       <p className="stak-landing-lead">
-        Carry your Skills, Memory, and setup as one portable STAK. Inspect it
-        on one machine, bring it back on the next.
+        Carry your Skills, Memory, and setup as one portable STAK. Inspect it on
+        one machine, bring it back on the next.
       </p>
       <div id="install" className="stak-landing-install-anchor" />
       <CopyRow command="npm install -g @usestak/cli" />
@@ -172,9 +172,8 @@ function ProblemSection() {
           <h2>Your agent setup is stuck on this machine.</h2>
           <p>
             Every week your agents get better. You add Skills, they build
-            Memory, and your workflow starts to feel like yours. Move to a
-            new machine, and too much of that setup doesn&apos;t come with
-            you.
+            Memory, and your workflow starts to feel like yours. Move to a new
+            machine, and too much of that setup doesn&apos;t come with you.
           </p>
           <div className="stak-landing-problem-rule">
             <span>New laptop</span>
@@ -231,20 +230,10 @@ function DellRow({
   );
 }
 
-function DellLine({
-  a,
-  b,
-  faint,
-}: {
-  a: string;
-  b: string;
-  faint?: boolean;
-}) {
+function DellLine({ a, b, faint }: { a: string; b: string; faint?: boolean }) {
   return (
     <div className="stak-landing-dellline">
-      <span className={faint ? 'stak-landing-tone-faint' : undefined}>
-        {a}
-      </span>
+      <span className={faint ? 'stak-landing-tone-faint' : undefined}>{a}</span>
       <span
         className={
           faint
@@ -318,8 +307,8 @@ function YourStakSection() {
           <h2>The parts of your agent setup, in one place.</h2>
         </div>
         <p>
-          STAK gives you one view of the Skills, Memory, Projects, and setup
-          you want to carry with you.
+          STAK gives you one view of the Skills, Memory, Projects, and setup you
+          want to carry with you.
         </p>
       </div>
       <ObjectsGrid objs={OBJS} />
@@ -364,7 +353,10 @@ const MOVES = [
 
 function MoveSection() {
   return (
-    <section id="how" className="stak-landing-section stak-landing-section--panel">
+    <section
+      id="how"
+      className="stak-landing-section stak-landing-section--panel"
+    >
       <div className="stak-landing-section-head stak-landing-section-head--narrow">
         <div>
           <span className="stak-landing-eyebrow">MOVE TO ANOTHER MACHINE</span>
@@ -411,8 +403,8 @@ function MoveSection() {
             stak run claude
           </span>
           <span>
-            Set up Claude Code (or Codex / Cursor) with your approved setup
-            and launch it on this machine.
+            Set up Claude Code (or Codex / Cursor) with your approved setup and
+            launch it on this machine.
           </span>
         </div>
       </div>
@@ -456,8 +448,7 @@ function PrivacySection() {
               <h2>Choose who can read your Memory.</h2>
               <p>
                 Memory mode applies to your whole account. Standard keeps
-                recovery simple. Protected keeps your Memory unreadable to
-                STAK.
+                recovery simple. Protected keeps your Memory unreadable to STAK.
               </p>
             </>
           }
@@ -503,9 +494,8 @@ function MachinesSection() {
         </div>
         <div className="stak-landing-section-head-copy">
           <p>
-            When you use STAK on a machine, it reports what it saw. You can
-            see what&apos;s ready, what&apos;s waiting, and how old that
-            picture is.
+            When you use STAK on a machine, it reports what it saw. You can see
+            what&apos;s ready, what&apos;s waiting, and how old that picture is.
           </p>
           <p className="stak-landing-small">
             Nothing runs in the background just to keep this page current.
