@@ -26,7 +26,8 @@ export type SkillShareEligibility = z.infer<typeof skillShareEligibilitySchema>;
  * raw hash, path, or remote — only the Skill's name is ever interpolated by the caller.
  */
 const SNAPSHOT_REASON_COPY: Record<SnapshotReason, string> = {
-  local: "This Skill comes from a local source, so STAK can't publish a safe public reference for it.",
+  local:
+    "This Skill comes from a local source, so STAK can't publish a safe public reference for it.",
   'unknown-source':
     "STAK couldn't determine a safe, public source for this Skill, so it can't be shared.",
   'ambiguous-source':
@@ -52,7 +53,8 @@ export const assessSkillShareEligibility = (
   if (restoration.strategy === 'snapshot')
     return {
       eligible: false,
-      reason: SNAPSHOT_REASON_COPY[restoration.reason] ?? SNAPSHOT_REASON_COPY.local,
+      reason:
+        SNAPSHOT_REASON_COPY[restoration.reason] ?? SNAPSHOT_REASON_COPY.local,
     };
   const verdict = inspectPublicSourceRemote(restoration.reference.remote);
   if (!verdict.safe) return { eligible: false, reason: verdict.reason };

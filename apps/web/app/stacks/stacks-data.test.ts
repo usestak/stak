@@ -6,6 +6,7 @@ import type {
   OwnedStackSummary,
   SkillSummary,
   SkillsReadModel,
+  UserStackSummary,
 } from '@stack/spec';
 
 import { loadStacksView, type StacksService } from './stacks-data.js';
@@ -57,6 +58,7 @@ const service = (opts: {
   machines?: MachineSummary[];
   owned?: OwnedStackSummary[];
   skills?: SkillSummary[];
+  userStacks?: UserStackSummary[];
   throwMachines?: boolean;
   throwStacks?: boolean;
 }): StacksService => ({
@@ -72,6 +74,7 @@ const service = (opts: {
     environmentExists: true,
     skills: opts.skills ?? [skill()],
   }),
+  listUserStacks: async () => ({ stacks: opts.userStacks ?? [] }),
 });
 
 const ready = (view: Awaited<ReturnType<typeof loadStacksView>>) => {
@@ -253,5 +256,72 @@ describe('loadStacksView', () => {
       ),
     );
     expect(viewingHealthy.owned?.skills).toEqual(viewingBehind.owned?.skills);
+  });
+
+  it('lists saved (named) Stacks separately from the main Stack', async () => {
+    const view = ready(
+      await loadStacksView(
+        service({
+          userStacks: [
+            {
+              stackId: 'stack_1',
+              name: 'frontend',
+              description: '',
+              skillCount: 2,
+              updatedAt: nowIso(10),
+              versionNumber: 1,
+            },
+          ],
+        }),
+        USER,
+        A1,
+      ),
+    );
+    expect(view.savedStacks).toEqual([
+      {
+        stackId: 'stack_1',
+        name: 'frontend',
+        skillCount: 2,
+        versionLabel: 'Version 1',
+        updatedAtLabel: expect.any(String),
+      },
+    ]);
+  });
+
+  it('renders an empty saved-Stacks list truthfully, never fabricating a row', async () => {
+    const view = ready(
+      await loadStacksView(service({ userStacks: [] }), USER, A1),
+    );
+    expect(view.savedStacks).toEqual([]);
+  });
+
+  it('sorts saved Stacks by name', async () => {
+    const view = ready(
+      await loadStacksView(
+        service({
+          userStacks: [
+            {
+              stackId: 'stack_2',
+              name: 'zeta',
+              description: '',
+              skillCount: 1,
+              updatedAt: null,
+              versionNumber: 1,
+            },
+            {
+              stackId: 'stack_1',
+              name: 'alpha',
+              description: '',
+              skillCount: 1,
+              updatedAt: null,
+              versionNumber: 1,
+            },
+          ],
+        }),
+        USER,
+        A1,
+      ),
+    );
+    expect(view.savedStacks.map((s) => s.name)).toEqual(['alpha', 'zeta']);
   });
 });

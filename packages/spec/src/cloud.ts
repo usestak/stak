@@ -312,6 +312,10 @@ export const cloudErrorCodeSchema = z.enum([
   'memory-session-expired',
   'memory-no-envelope',
   'memory-not-configured',
+  // P10B named Stacks.
+  'user-stack-not-found',
+  'user-stack-conflict',
+  'user-stack-name-conflict',
 ]);
 export const cloudErrorResponseSchema = z.object({
   error: z.object({

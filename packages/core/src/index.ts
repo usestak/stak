@@ -121,6 +121,10 @@ export {
 export type { ResolvedPublicStackSource } from './remote-source.js';
 export { applyRemoteStackUse, prepareRemoteStackUse } from './composition.js';
 export type { StackRemoteUseProposal } from './composition.js';
+export { resolveOwnedStackSource } from './owned-stack-source.js';
+export type { ResolvedOwnedStackSource } from './owned-stack-source.js';
+export { applyOwnedStackUse, prepareOwnedStackUse } from './composition.js';
+export type { StackOwnedUseProposal } from './composition.js';
 export { applyPublish, preparePublish } from './cloud-publish.js';
 export type { PublishClient, PublishPlan } from './cloud-publish.js';
 export { preserveRemoteTrialStack, resolveRemoteTrialStack } from './trial.js';

@@ -41,6 +41,12 @@ export const invalidSlug = (message: string) =>
   new CloudServiceError('invalid-slug', 400, message);
 export const handleUnavailable = (message: string) =>
   new CloudServiceError('handle-unavailable', 409, message);
+export const userStackNotFound = (message = 'No such Stack.') =>
+  new CloudServiceError('user-stack-not-found', 404, message);
+export const userStackConflict = (message: string) =>
+  new CloudServiceError('user-stack-conflict', 409, message);
+export const userStackNameConflict = (message: string) =>
+  new CloudServiceError('user-stack-name-conflict', 409, message);
 
 // --- remote Memory ---
 export const memoryNotConfigured = (

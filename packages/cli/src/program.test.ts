@@ -19,7 +19,12 @@ import {
   type CloudClient,
 } from '@stack/cloud-client';
 
-import { createProgram, type ProgramDependencies } from './program.js';
+import {
+  createProgram,
+  isOwnedUseProposal,
+  isRemoteUseProposal,
+  type ProgramDependencies,
+} from './program.js';
 import { gatherCheckinInputs, reportCheckin } from './cloud/checkin.js';
 import type { PullPlan, PushPlan, TrialStackResolution } from '@stack/core';
 import type { DiscoveredMemoryItem } from '@stack/memory';
@@ -370,6 +375,62 @@ const runProgram = async (
   }
   return { exit, output };
 };
+
+describe('applyUse proposal discrimination (P10B)', () => {
+  // These exercise the exact shapes prepareStackUse/prepareRemoteStackUse/prepareOwnedStackUse
+  // produce. Regression: the discriminator once checked `'kind' in proposal.source`, which is
+  // false for BOTH remote and owned sources (neither carries a `kind` field — `kind` only
+  // lives one level down, on the persisted manifest layer), so every owned-Stack `stak use`
+  // silently misrouted through the remote-Stack apply path.
+  const local = { loaded: {} } as unknown;
+  const remote = { source: { owner: 'alice', slug: 'frontend' } } as unknown;
+  const owned = { source: { stackId: 'stack_1', name: 'frontend' } } as unknown;
+
+  it('identifies a local Stack proposal as neither owned nor remote', () => {
+    expect(isOwnedUseProposal(local as never)).toBe(false);
+    expect(isRemoteUseProposal(local as never)).toBe(false);
+  });
+
+  it('identifies a remote (public @owner/slug) Stack proposal', () => {
+    expect(isRemoteUseProposal(remote as never)).toBe(true);
+    expect(isOwnedUseProposal(remote as never)).toBe(false);
+  });
+
+  it('identifies an owned (private named) Stack proposal', () => {
+    expect(isOwnedUseProposal(owned as never)).toBe(true);
+    expect(isRemoteUseProposal(owned as never)).toBe(false);
+  });
+});
+
+describe('`stak use` renders the right proposal kind (P10B)', () => {
+  const ownedProposal = {
+    source: {
+      stackId: 'stack_1',
+      name: 'frontend',
+      versionHash: `sha256:${'a'.repeat(64)}`,
+      version: { requirements: [] },
+    },
+    layer: { id: 'layer_1', stackId: 'stack_1', name: 'frontend' },
+    resolved: { skills: [], skipped: [], conflicts: [] },
+    summary: {
+      alreadySatisfied: 0,
+      newSkills: 0,
+      optionalSkipped: 0,
+      hardConflicts: 0,
+      stackLayers: 1,
+      resolvedSkills: 0,
+      references: 0,
+    },
+  } as unknown as Awaited<ReturnType<ProgramDependencies['prepareUse']>>;
+
+  it('renders an owned (private named) Stack proposal via the owned path, not the remote path', async () => {
+    const result = await runProgram(['use', 'frontend', '--dry-run'], {
+      prepareUse: async () => ownedProposal,
+    });
+    expect(result.output).toContain('your Stack: frontend');
+    expect(result.output).not.toContain('public Stack');
+  });
+});
 
 describe('STAK CLI', () => {
   it('prints root help with cloud commands but without deferred commands', async () => {

@@ -64,7 +64,11 @@ export const createSkillShareService = (ctx: SkillShareServiceContext) => {
   /** Scan the owner's own public Stacks for one whose bundle is a Skill-share of `skillId`.
    *  Linear over the owner's published-Stack count (same pattern `getPublicProfile` already
    *  uses) — no new table, no new index; V0-bounded by how many things one account publishes. */
-  const findExistingShare = async (userId: string, handle: string, skillId: string) => {
+  const findExistingShare = async (
+    userId: string,
+    handle: string,
+    skillId: string,
+  ) => {
     const owned = await ctx.repository.listPublicStacksByHandle(handle);
     for (const stack of owned) {
       if (stack.ownerUserId !== userId || !stack.latestVersionId) continue;
@@ -87,9 +91,7 @@ export const createSkillShareService = (ctx: SkillShareServiceContext) => {
       skillId: string,
     ): Promise<GetSkillShareStatusResponse> => {
       const skill = await requireSkill(user.userId, skillId);
-      const existingHandle = await ctx.repository.getHandleForUser(
-        user.userId,
-      );
+      const existingHandle = await ctx.repository.getHandleForUser(user.userId);
       if (existingHandle) {
         const existing = await findExistingShare(
           user.userId,
@@ -137,7 +139,9 @@ export const createSkillShareService = (ctx: SkillShareServiceContext) => {
       const skill = await requireSkill(user.userId, request.skillId);
       const eligibility = assessSkillShareEligibility(skill.restoration);
       if (!eligibility.eligible || skill.restoration.strategy !== 'reference')
-        throw publicationNotEligible(eligibility.eligible ? 'Not shareable.' : eligibility.reason);
+        throw publicationNotEligible(
+          eligibility.eligible ? 'Not shareable.' : eligibility.reason,
+        );
 
       const handle = await ctx.resolveHandle(user.userId);
       const existing = await findExistingShare(

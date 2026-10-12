@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { AppSidebar } from '../_components/app-sidebar';
@@ -9,6 +10,7 @@ import { displayNameOf, getSessionUser } from '../../lib/session';
 
 import { loadStacksView } from './stacks-data';
 import { StackCard } from './_components/stack-card';
+import { SavedStacksSection } from './_components/saved-stacks-section';
 import './stacks.css';
 
 export const metadata: Metadata = {
@@ -91,20 +93,51 @@ export default async function StacksPage({
             padding: '22px 32px',
             display: 'flex',
             flexDirection: 'column',
-            gap: 24,
+            gap: 32,
           }}
         >
-          {view.owned ? (
-            <StackCard stack={view.owned} />
-          ) : (
-            <div className="stak-stacks-empty-state">
-              <h2>No Stack yet</h2>
-              <p>
-                Your Stack is created the first time you approve a Skill or run
-                a Memory backup. There&apos;s nothing to compose yet.
-              </p>
+          <section
+            style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
+          >
+            <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
+              Main Stack
+            </h2>
+            <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
+              Your always-active desired environment — what every machine
+              reconciles to.
+            </span>
+            {view.owned ? (
+              <StackCard stack={view.owned} />
+            ) : (
+              <div className="stak-stacks-empty-state">
+                <h2>No Stack yet</h2>
+                <p>
+                  Your Stack is created the first time you approve a Skill or
+                  run a Memory backup. There&apos;s nothing to compose yet.
+                </p>
+              </div>
+            )}
+          </section>
+
+          <section>
+            <div className="stak-saved-stacks-head">
+              <div>
+                <h2>Saved Stacks</h2>
+                <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
+                  Named, private compositions of your approved Skills — separate
+                  from Main. Editing one never changes Main.
+                </span>
+              </div>
+              <Link
+                href="/stacks/new"
+                className="stak-pill"
+                style={{ cursor: 'pointer' }}
+              >
+                New Stack
+              </Link>
             </div>
-          )}
+            <SavedStacksSection stacks={view.savedStacks} />
+          </section>
         </div>
       </main>
     </div>

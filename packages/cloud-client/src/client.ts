@@ -6,6 +6,11 @@ import {
   getEnvironmentResponseSchema,
   getPublicStackResponseSchema,
   getPublicStackVersionResponseSchema,
+  getUserStackResponseSchema,
+  listUserStacksResponseSchema,
+  userStackDetailSchema,
+  createUserStackResponseSchema,
+  updateUserStackResponseSchema,
   listMachinesResponseSchema,
   machineCheckinResponseSchema,
   meResponseSchema,
@@ -28,6 +33,14 @@ import type {
   GetEnvironmentResponse,
   GetPublicStackResponse,
   GetPublicStackVersionResponse,
+  GetUserStackResponse,
+  ListUserStacksResponse,
+  UserStackDetail,
+  CreateUserStackRequest,
+  CreateUserStackResponse,
+  UpdateUserStackRequest,
+  UpdateUserStackResponse,
+  PublishUserStackRequest,
   ListMachinesResponse,
   MachineCheckinRequest,
   MachineCheckinResponse,
@@ -173,6 +186,27 @@ export interface PublicStackClient {
   ): Promise<PublishPublicStackVersionResponse>;
 }
 
+export interface UserStackClient {
+  /** Owner-authenticated fetch-by-name for `stak use <name>` (§14); resolves to null when the
+   *  caller has no named Stack with that name. Never resolves anything not owned by the
+   *  caller — the server derives ownership from the bearer token, never from the request. */
+  getUserStack(name: string): Promise<GetUserStackResponse | null>;
+  /** All of the caller's own named Stacks (for the web `/stacks` Saved Stacks list). */
+  listUserStacks(): Promise<ListUserStacksResponse>;
+  /** Full composition of one owned named Stack, by id. */
+  getUserStackDetail(stackId: string): Promise<UserStackDetail>;
+  createUserStack(
+    request: CreateUserStackRequest,
+  ): Promise<CreateUserStackResponse>;
+  /** Saving an edit always commits a new immutable version server-side; `main` is untouched. */
+  updateUserStack(
+    request: UpdateUserStackRequest,
+  ): Promise<UpdateUserStackResponse>;
+  publishUserStack(
+    request: PublishUserStackRequest,
+  ): Promise<PublishPublicStackVersionResponse>;
+}
+
 export type FetchLike = (
   input: string,
   init: {
@@ -229,7 +263,11 @@ const isLocalhost = (url: URL) =>
 
 export const createCloudClient = (
   options: CreateCloudClientOptions,
-): CloudClient & CloudAuthClient & PublicStackClient & CloudMemoryClient => {
+): CloudClient &
+  CloudAuthClient &
+  PublicStackClient &
+  UserStackClient &
+  CloudMemoryClient => {
   const base = options.baseUrl.replace(/\/+$/, '');
   const parsedBase = new URL(base);
   if (
@@ -589,6 +627,58 @@ export const createCloudClient = (
           auth: true,
           json: body,
         }),
+      ),
+    getUserStack: async (name) => {
+      try {
+        return json(
+          getUserStackResponseSchema,
+          await request('GET', `user-stacks/${encodeURIComponent(name)}`, {
+            auth: true,
+          }),
+        );
+      } catch (error) {
+        if (
+          error instanceof StackCloudError &&
+          error.code === 'user-stack-not-found'
+        )
+          return null;
+        throw error;
+      }
+    },
+    listUserStacks: async () =>
+      json(
+        listUserStacksResponseSchema,
+        await request('GET', 'user-stacks', { auth: true }),
+      ),
+    getUserStackDetail: async (stackId) =>
+      json(
+        userStackDetailSchema,
+        await request('GET', `user-stacks/id/${encodeURIComponent(stackId)}`, {
+          auth: true,
+        }),
+      ),
+    createUserStack: async (body) =>
+      json(
+        createUserStackResponseSchema,
+        await request('POST', 'user-stacks', { auth: true, json: body }),
+      ),
+    updateUserStack: async (body) =>
+      json(
+        updateUserStackResponseSchema,
+        await request(
+          'PATCH',
+          `user-stacks/id/${encodeURIComponent(body.stackId)}`,
+          { auth: true, json: body },
+        ),
+      ),
+    publishUserStack: async (body) =>
+      json(
+        publishPublicStackVersionResponseSchema,
+        await request(
+          'POST',
+          `user-stacks/id/${encodeURIComponent(body.stackId)}/publish`,
+          { auth: true, json: body },
+        ),
       ),
   };
 };

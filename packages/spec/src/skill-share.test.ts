@@ -14,7 +14,12 @@ const reference = (remote: string): PortableRestorationStrategy => ({
 });
 
 const snapshot = (
-  reason: 'local' | 'unknown-source' | 'ambiguous-source' | 'modified-source' | 'non-portable-source',
+  reason:
+    | 'local'
+    | 'unknown-source'
+    | 'ambiguous-source'
+    | 'modified-source'
+    | 'non-portable-source',
 ): PortableRestorationStrategy => ({
   strategy: 'snapshot',
   contentHash: `sha256:${'a'.repeat(64)}`,
@@ -30,7 +35,9 @@ describe('assessSkillShareEligibility (spec P10A §4)', () => {
 
   it('an exact-pinned reference (no tracked ref) is still eligible — immutable revision is the ideal case', () => {
     const pinned = reference('https://github.com/a/b.git');
-    expect('ref' in pinned.reference ? pinned.reference.ref : undefined).toBeUndefined();
+    expect(
+      pinned.strategy === 'reference' ? pinned.reference.ref : undefined,
+    ).toBeUndefined();
     expect(assessSkillShareEligibility(pinned)).toEqual({ eligible: true });
   });
 
@@ -67,8 +74,7 @@ describe('assessSkillShareEligibility (spec P10A §4)', () => {
       assessSkillShareEligibility(reference('/home/user/repo')).eligible,
     ).toBe(false);
     expect(
-      assessSkillShareEligibility(reference('file:///home/user/repo'))
-        .eligible,
+      assessSkillShareEligibility(reference('file:///home/user/repo')).eligible,
     ).toBe(false);
   });
 

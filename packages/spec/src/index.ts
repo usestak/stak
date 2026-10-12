@@ -5,6 +5,7 @@ export * from './memory.js';
 export * from './product.js';
 export * from './public.js';
 export * from './skill-share.js';
+export * from './user-stack.js';
 export * from './scanner.js';
 export * from './stack.js';
 export * from './trial.js';

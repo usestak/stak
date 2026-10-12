@@ -2,9 +2,9 @@ import type { ReactNode } from 'react';
 
 import '../overview/shell.css';
 
-/** No nested routes exist under `/stacks`, same shape as `apps/web/app/machines/layout.tsx` —
- *  a sibling of `/overview`, so it needs its own copy of the font-link markup to pick up
- *  `.stak`'s CSS custom properties. */
+/** `/stacks` (and its nested `/stacks/new`, `/stacks/[stackId]` named-Stack routes) is a
+ *  sibling of `/overview`, same shape as `apps/web/app/machines/layout.tsx` — it needs its
+ *  own copy of the font-link markup to pick up `.stak`'s CSS custom properties. */
 export default function StacksLayout({ children }: { children: ReactNode }) {
   return (
     <>

@@ -82,6 +82,91 @@
   line-height: 1.6;
 }
 
+/* Saved Stacks (P10B §11) — named, private compositions, independent of `main` above them.
+   Dense rows, matching the Skills list's vocabulary — never a SaaS card grid. */
+.stak-saved-stacks-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 0 10px;
+}
+.stak-saved-stacks-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.stak-saved-stack-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 14px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid #1c1b19;
+  color: inherit;
+  text-decoration: none;
+}
+.stak-saved-stack-row:hover {
+  background: #171615;
+  text-decoration: none;
+}
+.stak-saved-stacks-head-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 14px;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--line);
+  font: 500 10.5px var(--mono);
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+.stak-saved-stack-name {
+  font: 500 13px var(--mono);
+}
+.stak-saved-stacks-empty {
+  padding: 18px 0;
+  color: var(--faint);
+  font-size: 13.5px;
+}
+
+/* Create/edit named-Stack forms — a reusable step shell. */
+.stak-stack-form-step {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 560px;
+}
+.stak-stack-form-picker {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.stak-stack-form-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid #1c1b19;
+  font-size: 13px;
+}
+.stak-stack-form-picker-row:last-child {
+  border-bottom: none;
+}
+.stak-stack-form-picker-row.paused {
+  color: var(--faint);
+}
+.stak-stack-edit-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 0;
+  border-bottom: 1px solid #1c1b19;
+  font-size: 13px;
+}
+
 @media (max-width: 767.98px) {
   .stak-stack-card-head,
   .stak-stack-composition-head,
@@ -95,5 +180,13 @@
   .stak-stack-composition-row {
     grid-template-columns: 1fr 90px;
     gap: 10px;
+  }
+  .stak-saved-stack-row,
+  .stak-saved-stacks-head-row {
+    grid-template-columns: 1.4fr 1fr;
+  }
+  .stak-saved-stack-row span:last-child,
+  .stak-saved-stacks-head-row span:last-child {
+    display: none;
   }
 }

@@ -18,7 +18,10 @@ import type { SidebarCounts } from '../overview/overview-data.js';
 
 export type StacksService = Pick<
   CloudService,
-  'getMachinesReadModel' | 'getStacksReadModel' | 'getSkillsReadModel'
+  | 'getMachinesReadModel'
+  | 'getStacksReadModel'
+  | 'getSkillsReadModel'
+  | 'listUserStacks'
 >;
 
 /**
@@ -42,6 +45,20 @@ export type StackCard = {
   skillCount: number;
   updatedAtLabel: string;
   skills: StackSkillRow[];
+};
+
+/**
+ * One row in the "Saved Stacks" list (P10B §11) — a named, private, reusable composition of
+ * approved Skills, independent of `main` (the always-active desired environment above it).
+ * Deliberately carries no machine-installed/reconciliation state (contract §6/§17, same rule
+ * as {@link StackSkillRow}): a saved Stack's row is composition facts only.
+ */
+export type SavedStackRow = {
+  stackId: string;
+  name: string;
+  skillCount: number;
+  versionLabel: string;
+  updatedAtLabel: string;
 };
 
 const toStackCard = (
@@ -82,6 +99,7 @@ export type StacksView =
       sidebar: SidebarCounts;
       statusSentence: string;
       owned: StackCard | null;
+      savedStacks: SavedStackRow[];
     };
 
 export const loadStacksView = async (
@@ -112,13 +130,27 @@ export const loadStacksView = async (
 
   let ownedSummaries: OwnedStackSummary[];
   let skills: SkillSummary[];
+  let savedStacks: SavedStackRow[];
   try {
-    const [stacksModel, skillsModel] = await Promise.all([
+    const [stacksModel, skillsModel, userStacksModel] = await Promise.all([
       service.getStacksReadModel(auth),
       service.getSkillsReadModel(auth),
+      service.listUserStacks(auth),
     ]);
     ownedSummaries = stacksModel.owned;
     skills = skillsModel.skills;
+    savedStacks = [...userStacksModel.stacks]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((s) => ({
+        stackId: s.stackId,
+        name: s.name,
+        skillCount: s.skillCount,
+        versionLabel:
+          s.versionNumber === 0
+            ? 'No version yet'
+            : `Version ${s.versionNumber}`,
+        updatedAtLabel: s.updatedAt === null ? 'Never' : relative(s.updatedAt),
+      }));
   } catch {
     return { kind: 'error' };
   }
@@ -152,5 +184,6 @@ export const loadStacksView = async (
     },
     statusSentence,
     owned,
+    savedStacks,
   };
 };

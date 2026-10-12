@@ -28,6 +28,7 @@ import { loadMainEnvironment, statePaths } from './state.js';
 import type { LoadedEnvironmentState } from './state.js';
 import { restoreReference, type GitExecutor } from './git-reference.js';
 import type { ResolvedPublicStackSource } from './remote-source.js';
+import type { ResolvedOwnedStackSource } from './owned-stack-source.js';
 
 const versionDirectory = (
   stackHome: string,
@@ -712,6 +713,172 @@ export const applyRemoteStackUse = async (
         throw new StackCompositionError(
           'remote-reference-missing',
           `No reference is available for ${requirement.name}.`,
+        );
+      await restoreReference({
+        stackHome: proposal.stackHome,
+        reference,
+        ...(options.gitExecutor ? { gitExecutor: options.gitExecutor } : {}),
+        ...(options.now ? { now: options.now } : {}),
+      });
+    }
+    await persistVersion(
+      proposal.stackHome,
+      proposal.layer.stackId,
+      proposal.source.version,
+    );
+    const manifest = {
+      ...proposal.current.manifest,
+      stacks: [...proposal.current.manifest.stacks, proposal.layer],
+    };
+    await persistMainState(
+      proposal.stackHome,
+      buildState(
+        proposal.current,
+        manifest,
+        proposal.resolved,
+        (options.now ?? (() => new Date()))().toISOString(),
+      ),
+    );
+  });
+  return proposal;
+};
+
+/* -------------------------------------------------------------------------- */
+/* Owned (private, named) Stack use — P10B §14                                */
+/* -------------------------------------------------------------------------- */
+
+export type StackOwnedUseProposal = {
+  stackHome: string;
+  current: LoadedEnvironmentState;
+  source: ResolvedOwnedStackSource;
+  layer: EnvironmentStackLayer;
+  resolved: ResolvedEnvironment;
+  summary: {
+    alreadySatisfied: number;
+    newSkills: number;
+    optionalSkipped: number;
+    hardConflicts: number;
+    stackLayers: number;
+    resolvedSkills: number;
+    references: number;
+  };
+};
+
+/**
+ * Prepare `stak use <name>` against the caller's own Cloud named Stack (not a local file,
+ * not a public `@owner/slug`) — the owned-Stack analog of {@link prepareRemoteStackUse}. The
+ * persisted layer source is `{kind: 'owned', ...}`, never `'public'`: this Stack was never
+ * published, and must never be represented as if it had been.
+ */
+export const prepareOwnedStackUse = async (options: {
+  stackHome: string;
+  source: ResolvedOwnedStackSource;
+  idFactory?: () => string;
+}): Promise<StackOwnedUseProposal> => {
+  const current = await loadMainEnvironment({ stackHome: options.stackHome });
+  const byStack = current.manifest.stacks.find(
+    (item) =>
+      item.source?.kind === 'owned' &&
+      item.source.stackId === options.source.stackId,
+  );
+  if (byStack)
+    throw new StackCompositionError(
+      byStack.versionHash === options.source.versionHash
+        ? 'stack-already-active'
+        : 'stack-version-conflict',
+      byStack.versionHash === options.source.versionHash
+        ? `${options.source.name} is already active in main.`
+        : `${options.source.name} is active with a different version; explicit updates are not implemented.`,
+    );
+  const sameName = current.manifest.stacks.find(
+    (item) => item.name === options.source.version.name,
+  );
+  if (sameName)
+    throw new StackCompositionError(
+      sameName.versionHash === options.source.versionHash
+        ? 'stack-already-active'
+        : 'stack-version-conflict',
+      sameName.versionHash === options.source.versionHash
+        ? `${options.source.version.name} is already active in main.`
+        : `${options.source.version.name} is active with a different version; explicit updates are not implemented.`,
+    );
+  const id = options.idFactory ?? randomUUID;
+  const stackId = `stack_${id()}`;
+  const layer: EnvironmentStackLayer = {
+    id: `layer_${id()}`,
+    stackId,
+    name: options.source.version.name,
+    versionHash: options.source.versionHash,
+    source: {
+      kind: 'owned',
+      stackId: options.source.stackId,
+      name: options.source.name,
+      versionHash: options.source.versionHash,
+    },
+  };
+  const manifest = {
+    ...current.manifest,
+    stacks: [...current.manifest.stacks, layer],
+  };
+  const versions = await loadVersions(
+    options.stackHome,
+    current.manifest.stacks,
+  );
+  versions.set(importedVersionKey(layer), options.source.version);
+  const resolved = resolveEnvironment({
+    manifest,
+    lock: current.lock,
+    versions,
+    idFactory: id,
+  });
+  const existing = new Set(
+    Object.values(current.lock.skills).map(
+      (item) => `${item.name}\0${item.contentHash}`,
+    ),
+  );
+  return {
+    stackHome: options.stackHome,
+    current,
+    source: options.source,
+    layer,
+    resolved,
+    summary: {
+      alreadySatisfied: resolved.skills.filter((item) =>
+        existing.has(`${item.name}\0${item.contentHash}`),
+      ).length,
+      newSkills: resolved.skills.filter(
+        (item) => !existing.has(`${item.name}\0${item.contentHash}`),
+      ).length,
+      optionalSkipped: resolved.skipped.length,
+      hardConflicts: resolved.conflicts.length,
+      stackLayers: manifest.stacks.length,
+      resolvedSkills: resolved.skills.length,
+      references: options.source.references.size,
+    },
+  };
+};
+
+export const applyOwnedStackUse = async (
+  proposal: StackOwnedUseProposal,
+  options: { gitExecutor?: GitExecutor; now?: () => Date } = {},
+): Promise<StackOwnedUseProposal> => {
+  if (proposal.resolved.conflicts.length)
+    throw new StackCompositionError(
+      'stack-resolution-conflict',
+      'Stack has required Skill conflicts.',
+    );
+  await withMainMutationLock(proposal.stackHome, proposal.current, async () => {
+    for (const requirement of proposal.source.version.requirements) {
+      const verification = await verifyStoredSkill({
+        stackHome: proposal.stackHome,
+        contentHash: requirement.contentHash,
+      });
+      if (verification.state === 'available') continue;
+      const reference = proposal.source.references.get(requirement.id);
+      if (!reference)
+        throw new StackCompositionError(
+          'owned-reference-missing',
+          `${requirement.name} isn't available on this machine and has no Git reference to restore it from.`,
         );
       await restoreReference({
         stackHome: proposal.stackHome,

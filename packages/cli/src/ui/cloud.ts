@@ -4,6 +4,7 @@ import type {
   PublishPlan,
   PullPlan,
   PushPlan,
+  StackOwnedUseProposal,
   StackRemoteUseProposal,
 } from '@stack/core';
 import type { PublishPublicStackVersionResponse } from '@stack/spec';
@@ -314,6 +315,40 @@ export const remoteUseJson = (proposal: StackRemoteUseProposal) => ({
     ref: proposal.source.ref,
     owner: proposal.source.owner,
     slug: proposal.source.slug,
+    versionHash: proposal.source.versionHash,
+  },
+});
+
+/** `stak use <name>` against the caller's own Cloud named Stack (P10B §14) — never says
+ *  "public", this Stack was never published. */
+export const renderOwnedStackUse = (
+  proposal: StackOwnedUseProposal,
+  dryRun = false,
+): string =>
+  [
+    `${dryRun ? 'Previewing' : 'Using'} your Stack: ${proposal.source.name}`,
+    '',
+    row('Stack Skills', proposal.source.version.requirements.length).trimEnd(),
+    row('Already satisfied', proposal.summary.alreadySatisfied).trimEnd(),
+    row('New desired Skills', proposal.summary.newSkills).trimEnd(),
+    row('References to restore', proposal.summary.references).trimEnd(),
+    row('Hard conflicts', proposal.summary.hardConflicts).trimEnd(),
+    '',
+    'main will become:',
+    row('Stack layers', proposal.summary.stackLayers).trimEnd(),
+    row('Resolved Skills', proposal.summary.resolvedSkills).trimEnd(),
+    '',
+  ].join('\n');
+
+export const ownedUseJson = (proposal: StackOwnedUseProposal) => ({
+  dryRun: true,
+  stack: proposal.source.version,
+  layer: proposal.layer,
+  resolution: proposal.resolved,
+  summary: proposal.summary,
+  source: {
+    stackId: proposal.source.stackId,
+    name: proposal.source.name,
     versionHash: proposal.source.versionHash,
   },
 });

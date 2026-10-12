@@ -19,6 +19,13 @@ import {
   type PublicStackRepository,
   type PublicStackVersionRecord,
   type SkillReviewCheckRecord,
+  type CommitUserStackVersionInput,
+  type CommitUserStackVersionOutcome,
+  type UserStackRecord,
+  type UserStackRepository,
+  type UserStackVersionRecord,
+  UserStackConflict,
+  UserStackNameConflict,
 } from '@stack/cloud-server';
 
 import { serviceClient } from './supabase';
@@ -95,6 +102,25 @@ const mapEnvironment = (row: any): CloudEnvironmentRecord => ({
   createdAt: row.created_at,
 });
 
+const mapUserStack = (row: any): UserStackRecord => ({
+  stackId: row.stack_id,
+  userId: row.user_id,
+  name: row.name,
+  latestVersionId: row.latest_version_id ?? null,
+  createdAt: row.created_at,
+});
+
+const mapUserStackVersion = (row: any): UserStackVersionRecord => ({
+  versionId: row.version_id,
+  stackId: row.stack_id,
+  userId: row.user_id,
+  versionNumber: row.version_number,
+  digest: row.digest,
+  bundle: row.bundle,
+  ...(row.idempotency_key ? { idempotencyKey: row.idempotency_key } : {}),
+  createdAt: row.created_at,
+});
+
 const mapVersion = (row: any): CloudEnvironmentVersionRecord => ({
   versionId: row.version_id,
   environmentId: row.environment_id,
@@ -150,7 +176,8 @@ const mapSkillReviewCheck = (row: any): SkillReviewCheckRecord => ({
 
 /** Production repository backed by Supabase Postgres. */
 export const supabaseRepository = (): CloudRepository &
-  PublicStackRepository => {
+  PublicStackRepository &
+  UserStackRepository => {
   const db = () => serviceClient();
   return {
     getProfile: async (userId) => {
@@ -700,6 +727,95 @@ export const supabaseRepository = (): CloudRepository &
         .eq('owner_handle', handle)
         .order('slug', { ascending: true });
       return ((data as any[]) ?? []).map(mapPublicStack);
+    },
+
+    /* ------------------------------ Phase P10B ------------------------------ */
+    listUserStacks: async (userId) => {
+      const { data } = await db()
+        .from('user_stacks')
+        .select('*')
+        .eq('user_id', userId)
+        .order('name', { ascending: true });
+      return ((data as any[] | null) ?? []).map(mapUserStack);
+    },
+    getUserStackByName: async (userId, name) => {
+      const { data } = await db()
+        .from('user_stacks')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('name', name)
+        .maybeSingle();
+      return data ? mapUserStack(data) : null;
+    },
+    getUserStackById: async (userId, stackId) => {
+      const { data } = await db()
+        .from('user_stacks')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('stack_id', stackId)
+        .maybeSingle();
+      return data ? mapUserStack(data) : null;
+    },
+    getUserStackVersion: async (versionId) => {
+      const { data } = await db()
+        .from('user_stack_versions')
+        .select('*')
+        .eq('version_id', versionId)
+        .maybeSingle();
+      return data ? mapUserStackVersion(data) : null;
+    },
+    findUserStackVersionByIdempotencyKey: async (userId, idempotencyKey) => {
+      const { data } = await db()
+        .from('user_stack_versions')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('idempotency_key', idempotencyKey)
+        .maybeSingle();
+      return data ? mapUserStackVersion(data) : null;
+    },
+    commitUserStackVersion: async (
+      input: CommitUserStackVersionInput,
+    ): Promise<CommitUserStackVersionOutcome> => {
+      const { data, error } = await db().rpc('commit_user_stack_version', {
+        p_user_id: input.userId,
+        p_name: input.name,
+        p_bundle: input.bundle,
+        p_digest: input.digest,
+        p_expected_latest_version_id: input.expectedLatestVersionId,
+        p_idempotency_key: input.idempotencyKey ?? null,
+        p_stack_id: input.ids.stackId,
+        p_version_id: input.ids.versionId,
+        p_now: input.now,
+      });
+      if (error) {
+        if (error.message.includes('STACK_REMOTE_CONFLICT'))
+          throw new UserStackConflict('Named Stack version changed.');
+        throw new Error(`Named Stack version commit failed: ${error.message}`);
+      }
+      const result = data as any;
+      return {
+        stack: mapUserStack(result.stack),
+        version: mapUserStackVersion(result.version),
+        createdNew: result.created_new,
+      };
+    },
+    renameUserStack: async (userId, stackId, name) => {
+      const { data, error } = await db()
+        .from('user_stacks')
+        .update({ name })
+        .eq('user_id', userId)
+        .eq('stack_id', stackId)
+        .select('*')
+        .maybeSingle();
+      if (error) {
+        // Postgres unique_violation on (user_id, name).
+        if ((error as { code?: string }).code === '23505')
+          throw new UserStackNameConflict(
+            `A Stack named "${name}" already exists.`,
+          );
+        throw new Error(`Named Stack rename failed: ${error.message}`);
+      }
+      return data ? mapUserStack(data) : null;
     },
   };
 };

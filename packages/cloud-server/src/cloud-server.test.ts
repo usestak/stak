@@ -710,3 +710,130 @@ describe('public stacks', () => {
     }
   });
 });
+
+describe('named Stacks HTTP routes (P10B §11-14)', () => {
+  const SKILL_ID = 'skill_design0001';
+  const CONTENT_HASH = `sha256:${'a'.repeat(64)}`;
+
+  const pushMain = async (
+    call: ReturnType<typeof setup>['call'],
+    token: string,
+  ) => {
+    const bundle: CloudEnvironmentBundle = {
+      schemaVersion: 1,
+      environment: {
+        schemaVersion: 1,
+        name: 'main',
+        skills: [{ id: SKILL_ID, name: 'design', requirement: 'required' }],
+        stacks: [],
+        overrides: {},
+      },
+      resolved: {
+        schemaVersion: 1,
+        skills: {
+          [SKILL_ID]: {
+            name: 'design',
+            description: 'Design engineering',
+            contentHash: CONTENT_HASH,
+            metadata: { name: 'design', description: 'Design engineering' },
+            observedSources: [],
+            restoration: {
+              strategy: 'reference',
+              reference: {
+                remote: 'https://example.com/example/design.git',
+                revision: 'a'.repeat(40),
+                path: 'skills/design',
+                expectedContentHash: CONTENT_HASH,
+              },
+            },
+          },
+        },
+      },
+      importedStackVersions: [],
+      snapshotRequirements: [],
+      digest: `sha256:${'0'.repeat(64)}`,
+    };
+    await call('POST', 'environments/main/versions', {
+      token,
+      body: { bundle, expectedLatestVersionId: null },
+    });
+  };
+
+  it('creates, lists, fetches, updates, and publishes through HTTP only — never touching another user', async () => {
+    const { call, signIn } = setup();
+    const token = await signIn(USER_A, 'alice');
+    await pushMain(call, token);
+
+    const create = await call('POST', 'user-stacks', {
+      token,
+      body: { name: 'frontend', skillIds: [SKILL_ID] },
+    });
+    expect(create.status).toBe(200);
+    const created = create.jsonBody as {
+      stackId: string;
+      version: { versionId: string };
+    };
+
+    const list = await call('GET', 'user-stacks', { token });
+    expect(list.status).toBe(200);
+    expect(
+      (list.jsonBody as { stacks: { name: string }[] }).stacks.map(
+        (s) => s.name,
+      ),
+    ).toEqual(['frontend']);
+
+    const detail = await call('GET', `user-stacks/id/${created.stackId}`, {
+      token,
+    });
+    expect(detail.status).toBe(200);
+    expect((detail.jsonBody as { skills: unknown[] }).skills).toHaveLength(1);
+
+    // stackId mismatch between route and body is rejected, never silently routed by body alone.
+    const mismatched = await call(
+      'PATCH',
+      `user-stacks/id/${created.stackId}`,
+      {
+        token,
+        body: {
+          stackId: '00000000-0000-4000-8000-000000000000',
+          expectedLatestVersionId: created.version.versionId,
+          description: 'nope',
+        },
+      },
+    );
+    expect(mismatched.status).toBe(400);
+
+    const update = await call('PATCH', `user-stacks/id/${created.stackId}`, {
+      token,
+      body: {
+        stackId: created.stackId,
+        expectedLatestVersionId: created.version.versionId,
+        description: 'Frontend tools',
+      },
+    });
+    expect(update.status).toBe(200);
+
+    const publish = await call(
+      'POST',
+      `user-stacks/id/${created.stackId}/publish`,
+      {
+        token,
+        body: { stackId: created.stackId, slug: 'frontend' },
+      },
+    );
+    expect(publish.status).toBe(200);
+
+    // A second user's token can neither list nor reach the first user's Stack by id.
+    const tokenB = await signIn(USER_B, 'bob');
+    expect(
+      (await call('GET', 'user-stacks', { token: tokenB })).jsonBody,
+    ).toEqual({ stacks: [] });
+    expect(
+      (
+        await call('GET', `user-stacks/id/${created.stackId}`, {
+          token: tokenB,
+        })
+      ).status,
+    ).toBe(404);
+  });
+});

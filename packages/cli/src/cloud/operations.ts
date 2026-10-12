@@ -8,6 +8,7 @@ import {
   type CloudAuthClient,
   type CloudClient,
   type PublicStackClient,
+  type UserStackClient,
 } from '@stack/cloud-client';
 import {
   applyPublish,
@@ -31,7 +32,10 @@ import type {
 import { resolveCloudBaseUrl } from './config.js';
 import type { CredentialStore } from './credentials.js';
 
-export type FullCloudClient = CloudClient & CloudAuthClient & PublicStackClient;
+export type FullCloudClient = CloudClient &
+  CloudAuthClient &
+  PublicStackClient &
+  UserStackClient;
 export type CloudClientFactory = (options: {
   baseUrl: string;
   token?: string;
@@ -228,7 +232,7 @@ export const performWhoami = async (
   }
 };
 
-const authenticatedClient = async (
+export const authenticatedClient = async (
   deps: CloudOperationsDeps,
 ): Promise<FullCloudClient> => {
   const credential = await deps.credentials.read();

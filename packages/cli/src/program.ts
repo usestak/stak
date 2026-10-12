@@ -8,23 +8,27 @@ import { Command } from 'commander';
 
 import {
   diffMainEnvironment,
+  applyOwnedStackUse,
   applyRemoteStackUse,
   applyStackRemove,
   applyStackUse,
   getOrCreateMachineIdentity,
   initializeMainEnvironment,
   loadMainEnvironment,
+  prepareOwnedStackUse,
   prepareRemoteStackUse,
   prepareStackRemove,
   prepareStackUse,
   preserveRemoteTrialStack,
   projectedLocalEnvironment,
+  resolveOwnedStackSource,
   resolvePublicStackSource,
   resolveRemoteTrialStack,
   resolveSkillSelector,
   resolveStackHome,
   setSkillPaused,
   spawnGit,
+  StackCompositionError,
   StackStateError,
   statusMainEnvironment,
   preserveTrialStack,
@@ -44,6 +48,7 @@ import type { InitializeMainEnvironmentResult } from '@stack/core';
 import type {
   RemoteTrialResolution,
   SetSkillPausedResult,
+  StackOwnedUseProposal,
   StackRemoteUseProposal,
   StackRemoveProposal,
   StackUseProposal,
@@ -161,6 +166,7 @@ import {
 } from './memory/project-ops.js';
 import { fileCredentialStore } from './cloud/credentials.js';
 import {
+  authenticatedClient,
   cloudApplyPublish,
   cloudApplyPull,
   cloudApplyPush,
@@ -186,9 +192,11 @@ export type ProgramDependencies = {
   status(scanResult: ScanResult): Promise<EnvironmentStatus>;
   detectAgents?(): Promise<Array<{ agent: AgentId; ready: boolean }>>;
   diff(scanResult: ScanResult): Promise<EnvironmentDiff>;
-  prepareUse(input: string): Promise<StackUseProposal | StackRemoteUseProposal>;
+  prepareUse(
+    input: string,
+  ): Promise<StackUseProposal | StackRemoteUseProposal | StackOwnedUseProposal>;
   applyUse(
-    proposal: StackUseProposal | StackRemoteUseProposal,
+    proposal: StackUseProposal | StackRemoteUseProposal | StackOwnedUseProposal,
   ): Promise<unknown>;
   prepareRemove(identifier: string): Promise<StackRemoveProposal>;
   applyRemove(proposal: StackRemoveProposal): Promise<unknown>;
@@ -463,6 +471,22 @@ const launchBrowser = async (url: string): Promise<void> => {
   child.unref();
 };
 
+// Neither ResolvedOwnedStackSource nor ResolvedPublicStackSource carries a `kind` field, so
+// the discriminator uses a field unique to each: `stackId` only exists on the owned source,
+// `owner` only exists on the public-ref source (and StackUseProposal has neither — it carries
+// `loaded`, not `source`, so it never matches either check below).
+// Exported for direct unit testing (see program.test.ts) — this exact discrimination
+// previously used a `'kind' in proposal.source` check that could never be true for either
+// variant, silently misrouting every owned-Stack `applyUse` through the remote-Stack path.
+export const isOwnedUseProposal = (
+  proposal: StackUseProposal | StackRemoteUseProposal | StackOwnedUseProposal,
+): proposal is StackOwnedUseProposal =>
+  'source' in proposal && 'stackId' in proposal.source;
+export const isRemoteUseProposal = (
+  proposal: StackUseProposal | StackRemoteUseProposal | StackOwnedUseProposal,
+): proposal is StackRemoteUseProposal =>
+  'source' in proposal && 'owner' in proposal.source;
+
 const defaultDependencies: ProgramDependencies = {
   scan: async ({ project }) =>
     scanSkills({ roots: resolveScanRoots({ includeProject: project }) }),
@@ -485,17 +509,37 @@ const defaultDependencies: ProgramDependencies = {
   },
   diff: async (scanResult) => diffMainEnvironment({ stackHome, scanResult }),
   prepareUse: async (input) => {
-    if (!isPublicStackRef(input)) return prepareStackUse({ stackHome, input });
-    const source = await resolvePublicStackSource({
-      client: await publicReadClient(cloudDeps),
-      ref: input,
-    });
-    return prepareRemoteStackUse({ stackHome, source });
+    if (isPublicStackRef(input)) {
+      const source = await resolvePublicStackSource({
+        client: await publicReadClient(cloudDeps),
+        ref: input,
+      });
+      return prepareRemoteStackUse({ stackHome, source });
+    }
+    try {
+      return await prepareStackUse({ stackHome, input });
+    } catch (error) {
+      // Fall back to the caller's own Cloud named Stack (§14) only when no local Stack
+      // manifest exists at this path — any other local error (cycle, invalid manifest,
+      // already-active conflict) must surface as-is, never masked by a Cloud lookup.
+      if (!(
+        error instanceof StackCompositionError &&
+        error.code === 'stack-manifest-not-found'
+      ))
+        throw error;
+      const source = await resolveOwnedStackSource({
+        client: await authenticatedClient(cloudDeps),
+        name: input,
+      });
+      return prepareOwnedStackUse({ stackHome, source });
+    }
   },
   applyUse: (proposal) =>
-    'source' in proposal
-      ? applyRemoteStackUse(proposal, { gitExecutor: spawnGit })
-      : applyStackUse(proposal),
+    isOwnedUseProposal(proposal)
+      ? applyOwnedStackUse(proposal, { gitExecutor: spawnGit })
+      : isRemoteUseProposal(proposal)
+        ? applyRemoteStackUse(proposal, { gitExecutor: spawnGit })
+        : applyStackUse(proposal),
   prepareRemove: (identifier) => prepareStackRemove({ stackHome, identifier }),
   applyRemove: (proposal) => applyStackRemove(proposal),
   // `stak run` projects through the same paused-aware helper as `stak skill update`, so a

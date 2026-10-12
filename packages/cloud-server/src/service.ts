@@ -41,9 +41,11 @@ import type {
   CloudProfile,
   CloudRepository,
   PublicStackRepository,
+  UserStackRepository,
 } from './repository.js';
 import { createPublicStackService } from './public-service.js';
 import { createSkillShareService } from './skill-share-service.js';
+import { createUserStackService } from './user-stack-service.js';
 import { createMemoryMethods } from './memory-service.js';
 import {
   createProductMethods,
@@ -94,7 +96,7 @@ export type PendingCliAuthSessionView = {
 };
 
 export type CloudServiceConfig = {
-  repository: CloudRepository & PublicStackRepository;
+  repository: CloudRepository & PublicStackRepository & UserStackRepository;
   blobStore: CloudBlobStore;
   appUrl: string;
   ticketSecret: string;
@@ -196,6 +198,15 @@ export const createCloudService = (config: CloudServiceConfig) => {
     publishPublicStackVersion: publicMethods.publishPublicStackVersion,
   });
 
+  // Named Stacks (P10B) — publishing one reuses the same public-Stack pipeline (§15).
+  const userStackMethods = createUserStackService({
+    repository: config.repository,
+    newId,
+    nowIso,
+    resolveHandle: publicMethods.resolveHandle,
+    publishPublicStackVersion: publicMethods.publishPublicStackVersion,
+  });
+
   const memoryMethods = createMemoryMethods({
     ...(config.memoryBackendFor
       ? { memoryBackendFor: config.memoryBackendFor }
@@ -229,6 +240,7 @@ export const createCloudService = (config: CloudServiceConfig) => {
     ...memoryMethods,
     ...productMethods,
     ...skillShareMethods,
+    ...userStackMethods,
     /** Bearer-token authentication. Derives identity server-side; never trusts the client. */
     authenticate: async (
       authorizationHeader: string | undefined,

@@ -60,6 +60,15 @@ export const environmentStackLayerSourceSchema = z.discriminatedUnion('kind', [
     publicVersionId: z.uuid(),
     versionHash: contentHashSchema,
   }),
+  // A private, account-owned named Stack fetched from Cloud (P10B §14) — distinct from
+  // 'public' (world-readable by slug) and 'local' (hand-authored manifest file). Never
+  // confused with 'public' downstream: a layer imported this way was never published.
+  z.object({
+    kind: z.literal('owned'),
+    stackId: z.uuid(),
+    name: z.string().min(1),
+    versionHash: contentHashSchema,
+  }),
 ]);
 export const environmentStackLayerSchema = z.object({
   id: z.string().regex(/^layer_[A-Za-z0-9_-]{8,}$/),

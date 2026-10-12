@@ -28,12 +28,20 @@ import {
   type PublicStackRepository,
   type PublicStackVersionRecord,
   type SkillReviewCheckRecord,
+  type CommitUserStackVersionInput,
+  type CommitUserStackVersionOutcome,
+  type UserStackRecord,
+  type UserStackRepository,
+  type UserStackVersionRecord,
+  UserStackConflict,
+  UserStackNameConflict,
 } from './repository.js';
 
 const key = (userId: string, value: string) => `${userId} ${value}`;
 
 export const createInMemoryRepository = (): CloudRepository &
-  PublicStackRepository & {
+  PublicStackRepository &
+  UserStackRepository & {
     snapshots: Map<string, CloudSnapshotRecord>;
     publicStacks: Map<string, PublicStackRecord>;
   } => {
@@ -52,8 +60,11 @@ export const createInMemoryRepository = (): CloudRepository &
   const publicStacks = new Map<string, PublicStackRecord>();
   const publicVersions = new Map<string, PublicStackVersionRecord>();
   const skillReviewChecks = new Map<string, SkillReviewCheckRecord>();
+  const userStacks = new Map<string, UserStackRecord>();
+  const userStackVersions = new Map<string, UserStackVersionRecord>();
 
   const envKey = (userId: string, name: string) => key(userId, name);
+  const userStackKey = (userId: string, name: string) => key(userId, name);
   const stackKey = (ownerUserId: string, slug: string) =>
     key(ownerUserId, slug);
   const checkKey = (userId: string, skillId: string) => `${userId}:${skillId}`;
@@ -378,6 +389,81 @@ export const createInMemoryRepository = (): CloudRepository &
     },
     deleteSkillReviewCheck: async (userId, skillId) => {
       skillReviewChecks.delete(checkKey(userId, skillId));
+    },
+
+    /* ------------------------------ Phase P10B ------------------------------ */
+    listUserStacks: async (userId) =>
+      [...userStacks.values()]
+        .filter((stack) => stack.userId === userId)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    getUserStackByName: async (userId, name) =>
+      userStacks.get(userStackKey(userId, name)) ?? null,
+    getUserStackById: async (userId, stackId) =>
+      [...userStacks.values()].find(
+        (stack) => stack.userId === userId && stack.stackId === stackId,
+      ) ?? null,
+    getUserStackVersion: async (versionId) =>
+      userStackVersions.get(versionId) ?? null,
+    findUserStackVersionByIdempotencyKey: async (userId, idempotencyKey) =>
+      [...userStackVersions.values()].find(
+        (version) =>
+          version.userId === userId &&
+          version.idempotencyKey === idempotencyKey,
+      ) ?? null,
+    commitUserStackVersion: async (
+      input: CommitUserStackVersionInput,
+    ): Promise<CommitUserStackVersionOutcome> => {
+      const existing = userStacks.get(userStackKey(input.userId, input.name));
+      const currentLatest = existing?.latestVersionId ?? null;
+      if (currentLatest !== input.expectedLatestVersionId)
+        throw new UserStackConflict(
+          `Expected latest version ${input.expectedLatestVersionId ?? 'none'}, but it is ${currentLatest ?? 'none'}.`,
+        );
+      const stack: UserStackRecord = existing ?? {
+        stackId: input.ids.stackId,
+        userId: input.userId,
+        name: input.name,
+        latestVersionId: null,
+        createdAt: input.now,
+      };
+      const previousNumber = currentLatest
+        ? (userStackVersions.get(currentLatest)?.versionNumber ?? 0)
+        : 0;
+      const version: UserStackVersionRecord = {
+        versionId: input.ids.versionId,
+        stackId: stack.stackId,
+        userId: input.userId,
+        versionNumber: previousNumber + 1,
+        digest: input.digest,
+        bundle: input.bundle,
+        ...(input.idempotencyKey
+          ? { idempotencyKey: input.idempotencyKey }
+          : {}),
+        createdAt: input.now,
+      };
+      userStackVersions.set(version.versionId, version);
+      const updated: UserStackRecord = {
+        ...stack,
+        latestVersionId: version.versionId,
+      };
+      userStacks.set(userStackKey(input.userId, input.name), updated);
+      return { stack: updated, version, createdNew: !existing };
+    },
+    renameUserStack: async (userId, stackId, name) => {
+      const existing = [...userStacks.values()].find(
+        (stack) => stack.userId === userId && stack.stackId === stackId,
+      );
+      if (!existing) return null;
+      if (existing.name === name) return existing;
+      const collision = userStacks.get(userStackKey(userId, name));
+      if (collision)
+        throw new UserStackNameConflict(
+          `A Stack named "${name}" already exists.`,
+        );
+      userStacks.delete(userStackKey(userId, existing.name));
+      const renamed: UserStackRecord = { ...existing, name };
+      userStacks.set(userStackKey(userId, name), renamed);
+      return renamed;
     },
   };
 };

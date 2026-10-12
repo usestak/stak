@@ -57,7 +57,8 @@ const skillBundle = (
           : {
               strategy: 'reference',
               reference: {
-                remote: overrides.remote ?? 'https://github.com/example/design.git',
+                remote:
+                  overrides.remote ?? 'https://github.com/example/design.git',
                 revision: overrides.revision ?? 'a'.repeat(40),
                 path: 'skills/design-helper',
                 expectedContentHash: CONTENT_HASH,
@@ -206,9 +207,9 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
     expect(published.latest?.bundle.stack.kind).toBe('skill');
     expect(published.latest?.bundle.stack.originSkillId).toBe(skillId);
     expect(published.latest?.bundle.requirements).toHaveLength(1);
-    expect(
-      published.latest?.bundle.requirements[0]?.restoration,
-    ).toMatchObject({ strategy: 'reference' });
+    expect(published.latest?.bundle.requirements[0]?.restoration).toMatchObject(
+      { strategy: 'reference' },
+    );
 
     // Already-shared detection now reports the existing link, not "shareable" again.
     const after = await service.getSkillShareStatus(auth, skillId);
@@ -223,9 +224,15 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
     const { service, signIn, pushEnvironment, auth } = setup();
     const skillId = 'skill_pin00001';
     const token = await signIn(USER_A, 'temi');
-    await pushEnvironment(token, skillBundle(skillId, { revision: 'a'.repeat(40) }));
+    await pushEnvironment(
+      token,
+      skillBundle(skillId, { revision: 'a'.repeat(40) }),
+    );
     await service.shareSkill(auth, { skillId, slug: 'design-helper' });
-    const publishedBefore = await service.getPublicStack('temi', 'design-helper');
+    const publishedBefore = await service.getPublicStack(
+      'temi',
+      'design-helper',
+    );
     const revisionBefore =
       publishedBefore.latest?.bundle.requirements[0]?.restoration.strategy ===
       'reference'
@@ -235,8 +242,14 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
 
     // Simulate the local source moving to a new revision and re-pushing the environment —
     // the already-published Skill version must stay exactly what it was at publish time.
-    await pushEnvironment(token, skillBundle(skillId, { revision: 'b'.repeat(40) }));
-    const publishedAfter = await service.getPublicStack('temi', 'design-helper');
+    await pushEnvironment(
+      token,
+      skillBundle(skillId, { revision: 'b'.repeat(40) }),
+    );
+    const publishedAfter = await service.getPublicStack(
+      'temi',
+      'design-helper',
+    );
     const revisionAfter =
       publishedAfter.latest?.bundle.requirements[0]?.restoration.strategy ===
       'reference'

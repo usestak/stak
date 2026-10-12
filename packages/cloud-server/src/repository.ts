@@ -1,4 +1,8 @@
-import type { CloudEnvironmentBundle, PublicStackBundle } from '@stack/spec';
+import type {
+  CloudEnvironmentBundle,
+  PublicStackBundle,
+  UserStackBundle,
+} from '@stack/spec';
 
 export type CloudProfile = {
   userId: string;
@@ -401,6 +405,93 @@ export interface PublicStackRepository {
     input: CommitPublicVersionInput,
   ): Promise<CommitPublicVersionOutcome>;
   listPublicStacksByHandle(handle: string): Promise<PublicStackRecord[]>;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Named Stacks (private, account-owned — P10B)                               */
+/* -------------------------------------------------------------------------- */
+
+export type UserStackRecord = {
+  stackId: string;
+  userId: string;
+  name: string;
+  latestVersionId: string | null;
+  createdAt: string;
+};
+
+export type UserStackVersionRecord = {
+  versionId: string;
+  stackId: string;
+  userId: string;
+  versionNumber: number;
+  digest: string;
+  bundle: UserStackBundle;
+  idempotencyKey?: string;
+  createdAt: string;
+};
+
+export type CommitUserStackVersionInput = {
+  userId: string;
+  name: string;
+  bundle: UserStackBundle;
+  digest: string;
+  expectedLatestVersionId: string | null;
+  idempotencyKey?: string;
+  ids: { stackId: string; versionId: string };
+  now: string;
+};
+export type CommitUserStackVersionOutcome = {
+  stack: UserStackRecord;
+  version: UserStackVersionRecord;
+  createdNew: boolean;
+};
+
+/** Thrown by {@link UserStackRepository.commitUserStackVersion} on a stale base — same role
+ *  as {@link RemoteConflict} for environments, kept distinct so callers can tell which
+ *  resource the optimistic conflict is about. */
+export class UserStackConflict extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UserStackConflict';
+  }
+}
+/** Thrown by {@link UserStackRepository.renameUserStack} when the new name collides with
+ *  another of the same user's named Stacks. */
+export class UserStackNameConflict extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UserStackNameConflict';
+  }
+}
+
+export interface UserStackRepository {
+  listUserStacks(userId: string): Promise<UserStackRecord[]>;
+  getUserStackByName(
+    userId: string,
+    name: string,
+  ): Promise<UserStackRecord | null>;
+  getUserStackById(
+    userId: string,
+    stackId: string,
+  ): Promise<UserStackRecord | null>;
+  getUserStackVersion(
+    versionId: string,
+  ): Promise<UserStackVersionRecord | null>;
+  findUserStackVersionByIdempotencyKey(
+    userId: string,
+    idempotencyKey: string,
+  ): Promise<UserStackVersionRecord | null>;
+  /** Atomic optimistic commit — identical contract to commitEnvironmentVersion. */
+  commitUserStackVersion(
+    input: CommitUserStackVersionInput,
+  ): Promise<CommitUserStackVersionOutcome>;
+  /** Pure rename (no new version): throws {@link UserStackNameConflict} on collision, returns
+   *  null when the Stack doesn't exist or isn't owned by this user. */
+  renameUserStack(
+    userId: string,
+    stackId: string,
+    name: string,
+  ): Promise<UserStackRecord | null>;
 }
 
 export interface CloudBlobStore {

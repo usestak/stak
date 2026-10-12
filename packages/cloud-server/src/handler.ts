@@ -18,6 +18,9 @@ import {
   setSkillPausedRequestSchema,
   syncProjectsRequestSchema,
   uploadSkillReviewArtifactRequestSchema,
+  createUserStackRequestSchema,
+  updateUserStackRequestSchema,
+  publishUserStackRequestSchema,
 } from '@stack/spec';
 
 import { CloudServiceError, invalidRequest } from './errors.js';
@@ -258,6 +261,75 @@ export const handleCloudRequest = async (
         200,
         await service.getEnvironment(await authenticate(), segments[1] ?? ''),
       );
+
+    // --- Named Stacks (P10B §11-15): private, account-owned Stack CRUD + §14 use-by-name ---
+    if (
+      method === 'GET' &&
+      segments.length === 1 &&
+      segments[0] === 'user-stacks'
+    )
+      return json(200, await service.listUserStacks(await authenticate()));
+    if (
+      method === 'POST' &&
+      segments.length === 1 &&
+      segments[0] === 'user-stacks'
+    ) {
+      const user = await authenticate();
+      const body = createUserStackRequestSchema.parse(request.jsonBody ?? {});
+      return json(200, await service.createUserStack(user, body));
+    }
+    if (
+      method === 'GET' &&
+      segments.length === 3 &&
+      segments[0] === 'user-stacks' &&
+      segments[1] === 'id'
+    ) {
+      const user = await authenticate();
+      return json(200, await service.getUserStack(user, segments[2] ?? ''));
+    }
+    if (
+      method === 'PATCH' &&
+      segments.length === 3 &&
+      segments[0] === 'user-stacks' &&
+      segments[1] === 'id'
+    ) {
+      const user = await authenticate();
+      const body = updateUserStackRequestSchema.parse(request.jsonBody ?? {});
+      if (body.stackId !== segments[2])
+        return errorResponse(
+          400,
+          'invalid-request',
+          'Request stackId does not match the route.',
+        );
+      return json(200, await service.updateUserStack(user, body));
+    }
+    if (
+      method === 'POST' &&
+      segments.length === 4 &&
+      segments[0] === 'user-stacks' &&
+      segments[1] === 'id' &&
+      segments[3] === 'publish'
+    ) {
+      const user = await authenticate();
+      const body = publishUserStackRequestSchema.parse(request.jsonBody ?? {});
+      if (body.stackId !== segments[2])
+        return errorResponse(
+          400,
+          'invalid-request',
+          'Request stackId does not match the route.',
+        );
+      return json(200, await service.publishUserStack(user, body));
+    }
+    // owner-authenticated fetch-by-name for `stak use <name>` (§14)
+    if (
+      method === 'GET' &&
+      segments.length === 2 &&
+      segments[0] === 'user-stacks'
+    ) {
+      const user = await authenticate();
+      const name = decodeURIComponent(segments[1] ?? '');
+      return json(200, await service.getUserStackByName(user, name));
+    }
     if (
       method === 'POST' &&
       segments.length === 3 &&
