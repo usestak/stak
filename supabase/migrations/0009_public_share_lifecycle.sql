@@ -3,31 +3,12 @@
 -- `public_stacks`/`public_stack_versions` (0002_public_stacks.sql). 0002 is ALREADY APPLIED
 -- to real dev/prod and is never edited — every change here is additive, in this new file.
 --
--- Part A: privilege hardening for EXISTING SECURITY DEFINER functions (0001, 0002).
---
--- Audit finding: `commit_environment_version` (0001) and `commit_public_stack_version`
--- (0002) are SECURITY DEFINER with no REVOKE statement anywhere in their migrations. A plain
--- `create function` grants EXECUTE to PUBLIC by default — in Supabase this means `anon` and
--- `authenticated` (both members of PUBLIC) could call them directly as
--- `rpc/commit_environment_version` / `rpc/commit_public_stack_version` via PostgREST, passing
--- an ARBITRARY `p_user_id`/`p_owner_user_id` and writing environment or public-Stack data
--- attributed to any account — a full cross-account write, bypassing every application-layer
--- ownership check and RLS (SECURITY DEFINER runs as the function owner, not the caller). This
--- is the exact gap the correction pass already closed for the new `commit_user_stack_version`
--- (0007); 0001/0002 shipped before that pattern existed and never got the same treatment.
--- Fixed here by restricting EXECUTE to `service_role` only — semantics are untouched, only
--- privileges change. The trigger functions (`forbid_version_update`,
--- `forbid_public_version_update`) are not reachable via PostgREST RPC (they return `trigger`,
--- not a normal type), but are revoked too for defense-in-depth/consistency.
-revoke all on function public.commit_environment_version from public, anon, authenticated;
-grant execute on function public.commit_environment_version to service_role;
-revoke all on function public.forbid_version_update from public, anon, authenticated;
-
-revoke all on function public.commit_public_stack_version from public, anon, authenticated;
-grant execute on function public.commit_public_stack_version to service_role;
-revoke all on function public.forbid_public_version_update from public, anon, authenticated;
-
--- Part B: reversible public sharing.
+-- Privilege hardening for the PRE-EXISTING `commit_environment_version`/
+-- `commit_public_stack_version`/`commit_memory_generation` functions now lives in
+-- 0007_security_definer_hardening.sql, applicable independently of this file and of any P10
+-- feature schema. This migration only hardens privileges for the two NEW functions it itself
+-- creates below (`unpublish_public_stack`, `reactivate_public_stack`), which are service-role
+-- only from the moment they're created, same as 0008's `commit_user_stack_version`.
 --
 -- One authoritative "active public share" signal, additive to the existing table: a row is
 -- an ACTIVE public share iff `unpublished_at is null`. Every read path (the public owner/slug

@@ -31,7 +31,7 @@ create table if not exists public.user_stacks (
   -- been published — a stable IDENTITY binding, kept forever once set (spec P10 final
   -- lifecycle pass §9/§11: unpublishing must not release a slug for reuse by a different
   -- Stack, and reactivating must reuse the same slug/history). This column is deliberately
-  -- NOT "is this currently public" — once unpublish exists (0008_public_share_lifecycle.sql),
+  -- NOT "is this currently public" — once unpublish exists (0009_public_share_lifecycle.sql),
   -- a non-null value here only means "bound to this public identity"; whether that identity
   -- is currently ACTIVE is derived from the associated `public_stacks.unpublished_at` row,
   -- never from this column alone. Set by the server after a successful publish; never set
