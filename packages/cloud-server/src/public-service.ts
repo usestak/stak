@@ -18,6 +18,7 @@ import {
   bundleInvalid,
   handleUnavailable,
   invalidSlug,
+  publicSlugTaken,
   publicStackConflict,
   publicStackNotFound,
   publicationNotEligible,
@@ -141,7 +142,15 @@ export const createPublicStackService = (ctx: PublicServiceContext) => {
           user.userId,
           request.idempotencyKey,
         );
-        if (existing)
+        if (existing) {
+          // Reactivate (spec final lifecycle pass §10): an idempotent retry of a publish
+          // must also restore visibility if the share had been unpublished in the meantime —
+          // a no-op when already active.
+          await ctx.repository.reactivatePublicStack(
+            user.userId,
+            slug,
+            ctx.nowIso(),
+          );
           return {
             owner: handle,
             slug,
@@ -150,9 +159,12 @@ export const createPublicStackService = (ctx: PublicServiceContext) => {
             url: url(handle, slug),
             createdNew: false,
           };
+        }
       }
 
-      // No-op: latest already carries this exact version hash.
+      // No-op: latest already carries this exact version hash. Still reactivates (§10) —
+      // publishing byte-identical content after an unpublish is how the owner says "turn
+      // this back on," and must not be rejected just because nothing in the bundle changed.
       const current = await ctx.repository.getPublicStackByOwner(
         user.userId,
         slug,
@@ -164,7 +176,12 @@ export const createPublicStackService = (ctx: PublicServiceContext) => {
         const latest = await ctx.repository.getPublicStackVersionById(
           current.latestVersionId,
         );
-        if (latest && latest.versionHash === bundle.stack.versionHash)
+        if (latest && latest.versionHash === bundle.stack.versionHash) {
+          await ctx.repository.reactivatePublicStack(
+            user.userId,
+            slug,
+            ctx.nowIso(),
+          );
           return {
             owner: handle,
             slug,
@@ -173,6 +190,7 @@ export const createPublicStackService = (ctx: PublicServiceContext) => {
             url: url(handle, slug),
             createdNew: false,
           };
+        }
       }
 
       let outcome;
@@ -200,6 +218,13 @@ export const createPublicStackService = (ctx: PublicServiceContext) => {
           );
         throw error;
       }
+      // Reactivate (§10): a changed-content republish (version 2+) must also turn the share
+      // back on if it had been unpublished — no-op when already active.
+      await ctx.repository.reactivatePublicStack(
+        user.userId,
+        slug,
+        ctx.nowIso(),
+      );
       return {
         owner: handle,
         slug,
@@ -208,6 +233,20 @@ export const createPublicStackService = (ctx: PublicServiceContext) => {
         url: url(handle, slug),
         createdNew: outcome.createdNew,
       };
+    },
+
+    /** Owner-only, idempotent (§6): deactivates the public share at `slug`. Never deletes or
+     *  mutates any version; the private source (named Stack/Skill) and `main` are untouched —
+     *  this function only ever writes to `public_stacks.unpublished_at`. */
+    unpublishPublicStack: async (
+      user: AuthenticatedUser,
+      request: { slug: string },
+    ): Promise<void> => {
+      await ctx.repository.unpublishPublicStack(
+        user.userId,
+        request.slug,
+        ctx.nowIso(),
+      );
     },
 
     getPublicStack: async (
@@ -223,7 +262,9 @@ export const createPublicStackService = (ctx: PublicServiceContext) => {
         owner,
         slug,
       );
-      if (!stack) throw publicStackNotFound();
+      // Active-share rule (§5): an unpublished share behaves exactly like one that never
+      // existed — same not-found response, no leak of "this was once published."
+      if (!stack || stack.unpublishedAt !== null) throw publicStackNotFound();
       const latest = stack.latestVersionId
         ? await ctx.repository.getPublicStackVersionById(stack.latestVersionId)
         : null;
@@ -249,7 +290,7 @@ export const createPublicStackService = (ctx: PublicServiceContext) => {
         owner,
         slug,
       );
-      if (!stack) throw publicStackNotFound();
+      if (!stack || stack.unpublishedAt !== null) throw publicStackNotFound();
       const version = await ctx.repository.getPublicStackVersionByNumber(
         stack.stackId,
         versionNumber,
@@ -270,7 +311,12 @@ export const createPublicStackService = (ctx: PublicServiceContext) => {
       const ownerUserId = await ctx.repository.findHandleOwner(owner);
       if (!ownerUserId) throw publicStackNotFound('Unknown profile.');
       const profile = await ctx.repository.getProfileByHandle(owner);
-      const stacks = await ctx.repository.listPublicStacksByHandle(owner);
+      // Active-share rule (§5): the public listing/discovery surface excludes anything
+      // unpublished — `listPublicStacksByHandle` itself stays unfiltered because internal
+      // bookkeeping (re-share/re-publish identity lookup) needs to find an inactive share too.
+      const stacks = (
+        await ctx.repository.listPublicStacksByHandle(owner)
+      ).filter((stack) => stack.unpublishedAt === null);
       const listed = await Promise.all(
         stacks.map(async (stack) => {
           const latest = stack.latestVersionId
@@ -299,6 +345,36 @@ export const createPublicStackService = (ctx: PublicServiceContext) => {
 };
 
 export type PublicStackService = ReturnType<typeof createPublicStackService>;
+
+/**
+ * Slug-ownership invariant (spec P10 final lifecycle pass §11/§12), shared by named-Stack and
+ * Skill publishing so there is exactly one place this is enforced: a public slug stays bound
+ * to whichever private source first claimed it, forever — unpublishing never frees it for a
+ * DIFFERENT source belonging to the same owner, and a source that already has a bound slug
+ * can never change it (slug stability once published). `currentlyBoundSlug` is whatever the
+ * CALLER already knows is its own binding (`user_stacks.publishedSlug`, or the Skill-share
+ * lookup's existing match) — null means "this source has never published."
+ */
+export const guardPublicSlugClaim = async (
+  repository: PublicStackRepository,
+  userId: string,
+  requestedSlug: string,
+  currentlyBoundSlug: string | null,
+): Promise<void> => {
+  if (currentlyBoundSlug === requestedSlug) return; // continuing its own identity
+  if (currentlyBoundSlug !== null)
+    throw publicSlugTaken(
+      "This can't be republished under a different public link once published — unpublish it first if you need a different one.",
+    );
+  const existing = await repository.getPublicStackByOwner(
+    userId,
+    requestedSlug,
+  );
+  if (existing)
+    throw publicSlugTaken(
+      `The public link "${requestedSlug}" is already used by another shared Skill or Stack in your account.`,
+    );
+};
 
 // Re-exported for symmetry with @owner/name formatting on the client.
 export { formatPublicStackRef };

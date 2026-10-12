@@ -47,6 +47,8 @@ export const userStackConflict = (message: string) =>
   new CloudServiceError('user-stack-conflict', 409, message);
 export const userStackNameConflict = (message: string) =>
   new CloudServiceError('user-stack-name-conflict', 409, message);
+export const publicSlugTaken = (message: string) =>
+  new CloudServiceError('public-slug-taken', 409, message);
 
 // --- remote Memory ---
 export const memoryNotConfigured = (

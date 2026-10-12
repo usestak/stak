@@ -40,6 +40,7 @@ const mapPublicStack = (row: any): PublicStackRecord => ({
   latestVersionId: row.latest_version_id ?? null,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
+  unpublishedAt: row.unpublished_at ?? null,
 });
 
 const mapPublicVersion = (row: any): PublicStackVersionRecord => ({
@@ -727,6 +728,26 @@ export const supabaseRepository = (): CloudRepository &
         .eq('owner_handle', handle)
         .order('slug', { ascending: true });
       return ((data as any[]) ?? []).map(mapPublicStack);
+    },
+    unpublishPublicStack: async (ownerUserId, slug, now) => {
+      const { data, error } = await db().rpc('unpublish_public_stack', {
+        p_owner_user_id: ownerUserId,
+        p_slug: slug,
+        p_now: now,
+      });
+      if (error)
+        throw new Error(`Could not unpublish this share: ${error.message}`);
+      return data ? mapPublicStack(data as any) : null;
+    },
+    reactivatePublicStack: async (ownerUserId, slug, now) => {
+      const { data, error } = await db().rpc('reactivate_public_stack', {
+        p_owner_user_id: ownerUserId,
+        p_slug: slug,
+        p_now: now,
+      });
+      if (error)
+        throw new Error(`Could not reactivate this share: ${error.message}`);
+      return data ? mapPublicStack(data as any) : null;
     },
 
     /* ------------------------------ Phase P10B ------------------------------ */

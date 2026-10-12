@@ -356,4 +356,164 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
     expect(JSON.stringify(published)).not.toContain('reviewArtifact');
     expect(JSON.stringify(published)).not.toContain('SKILL.md');
   });
+
+  describe('unshare/re-share lifecycle (spec P10 final lifecycle pass §7/§10/§11)', () => {
+    it('unshare deactivates the public share; the URL 404s; the local Skill is untouched', async () => {
+      const { service, signIn, pushEnvironment, auth } = setup();
+      const skillId = 'skill_unshare01';
+      const token = await signIn(USER_A, 'temi');
+      await pushEnvironment(token, skillBundle(skillId));
+      await service.shareSkill(auth, { skillId, slug: 'design-helper' });
+
+      await service.unshareSkill(auth, skillId);
+
+      await expect(
+        service.getPublicStack('temi', 'design-helper'),
+      ).rejects.toMatchObject({ code: 'public-stack-not-found' });
+      const status = await service.getSkillShareStatus(auth, skillId);
+      expect(status.share.status).toBe('shareable');
+    });
+
+    it('unshare is idempotent — calling it twice (or on a never-shared Skill) is a safe no-op', async () => {
+      const { service, signIn, pushEnvironment, auth } = setup();
+      const skillId = 'skill_unshare02';
+      const token = await signIn(USER_A, 'temi');
+      await pushEnvironment(token, skillBundle(skillId));
+      // Never shared at all.
+      await expect(
+        service.unshareSkill(auth, skillId),
+      ).resolves.toBeUndefined();
+
+      await service.shareSkill(auth, { skillId, slug: 'design-helper' });
+      await service.unshareSkill(auth, skillId);
+      await expect(
+        service.unshareSkill(auth, skillId),
+      ).resolves.toBeUndefined();
+    });
+
+    it('share -> unshare -> share again reactivates the SAME slug/history (identical content: no new version)', async () => {
+      const { service, signIn, pushEnvironment, auth } = setup();
+      const skillId = 'skill_reshare01';
+      const token = await signIn(USER_A, 'temi');
+      await pushEnvironment(token, skillBundle(skillId));
+      const first = await service.shareSkill(auth, {
+        skillId,
+        slug: 'design-helper',
+      });
+      await service.unshareSkill(auth, skillId);
+      const second = await service.shareSkill(auth, {
+        skillId,
+        slug: 'design-helper',
+      });
+      expect(second.createdNew).toBe(false);
+      expect(second.version.versionId).toBe(first.version.versionId);
+      const published = await service.getPublicStack('temi', 'design-helper');
+      expect(published.latest?.version.versionId).toBe(first.version.versionId);
+    });
+
+    it('share -> unshare -> newer approved revision -> share again creates a new version and reactivates', async () => {
+      const { service, signIn, pushEnvironment, auth } = setup();
+      const skillId = 'skill_reshare02';
+      const token = await signIn(USER_A, 'temi');
+      await pushEnvironment(
+        token,
+        skillBundle(skillId, { revision: 'a'.repeat(40) }),
+      );
+      const first = await service.shareSkill(auth, {
+        skillId,
+        slug: 'design-helper',
+      });
+      await service.unshareSkill(auth, skillId);
+      await pushEnvironment(
+        token,
+        skillBundle(skillId, { revision: 'b'.repeat(40) }),
+      );
+      const statusAfterRevision = await service.getSkillShareStatus(
+        auth,
+        skillId,
+      );
+      // Unpublished — reads back as 'shareable', not a stale 'already-shared'/
+      // 'update-available' (§5/§9: unpublishedAt gates the status, not slug/row existence).
+      expect(statusAfterRevision.share.status).toBe('shareable');
+      const second = await service.shareSkill(auth, {
+        skillId,
+        slug: 'design-helper',
+      });
+      expect(second.version.versionId).not.toBe(first.version.versionId);
+      const published = await service.getPublicStack('temi', 'design-helper');
+      expect(
+        published.latest?.bundle.requirements[0]?.restoration.strategy ===
+          'reference'
+          ? published.latest.bundle.requirements[0].restoration.reference
+              .revision
+          : null,
+      ).toBe('b'.repeat(40));
+    });
+
+    it('unshare never mutates public_stack_versions; only the active-state flag changes', async () => {
+      const { service, signIn, pushEnvironment, auth, repository } = setup();
+      const skillId = 'skill_unshare03';
+      const token = await signIn(USER_A, 'temi');
+      await pushEnvironment(token, skillBundle(skillId));
+      const shared = await service.shareSkill(auth, {
+        skillId,
+        slug: 'design-helper',
+      });
+      const versionBefore = await repository.getPublicStackVersionById(
+        shared.version.versionId,
+      );
+      await service.unshareSkill(auth, skillId);
+      const versionAfter = await repository.getPublicStackVersionById(
+        shared.version.versionId,
+      );
+      expect(versionAfter).toEqual(versionBefore);
+      const stackRow = await repository.getPublicStackByOwner(
+        USER_A,
+        'design-helper',
+      );
+      expect(stackRow?.unpublishedAt).not.toBeNull();
+    });
+
+    it('user B cannot unshare user A Skill, and B publishing the same slug text is an independent identity', async () => {
+      const { service, signIn, pushEnvironment, auth, repository } = setup();
+      const skillId = 'skill_crossacct1';
+      const token = await signIn(USER_A, 'temi');
+      await pushEnvironment(token, skillBundle(skillId));
+      await service.shareSkill(auth, { skillId, slug: 'design-helper' });
+
+      const USER_B = '00000000-0000-4000-8000-00000000000b';
+      await signIn(USER_B, 'other');
+      const otherAuth = { userId: USER_B, tokenId: 'test' };
+      // `pushEnvironment` is closed over USER_A's `auth` for its no-op-conflict lookup, so
+      // push B's own environment directly against B's own identity instead.
+      await service.commitEnvironmentVersion(otherAuth, 'main', {
+        bundle: skillBundle(skillId),
+        expectedLatestVersionId: null,
+      });
+
+      // B has no share of their own for this skillId — unshareSkill resolves via B's OWN
+      // handle's shares only, so this is a structural no-op, never touching A's share.
+      await expect(
+        service.unshareSkill(otherAuth, skillId),
+      ).resolves.toBeUndefined();
+      const stillShared = await service.getPublicStack('temi', 'design-helper');
+      expect(stillShared.latest).not.toBeNull();
+
+      // B sharing their OWN copy of the same skillId under the same slug TEXT is not a
+      // collision — public_stacks is unique per (owner_user_id, slug).
+      const bShare = await service.shareSkill(otherAuth, {
+        skillId,
+        slug: 'design-helper',
+      });
+      expect(bShare.owner).toBe('other');
+      const stillSharedAfter = await service.getPublicStack(
+        'temi',
+        'design-helper',
+      );
+      expect(stillSharedAfter.latest?.version.versionId).toBe(
+        (await repository.getPublicStackByOwner(USER_A, 'design-helper'))
+          ?.latestVersionId,
+      );
+    });
+  });
 });

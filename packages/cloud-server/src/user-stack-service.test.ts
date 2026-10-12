@@ -681,4 +681,399 @@ describe('Named Stacks (P10B §11-15)', () => {
       expect(ownerRead).not.toBeNull();
     });
   });
+
+  describe('unpublish/reactivate lifecycle (spec P10 final lifecycle pass §8/§9/§10/§11/§12)', () => {
+    it('unpublish deactivates the public share; the URL 404s; the private Stack and main are untouched', async () => {
+      const { service, repository, auth } = setup();
+      await repository.upsertProfile({
+        userId: USER_A,
+        githubUsername: 'alice',
+      });
+      await pushMain(service, {
+        [SKILL_ID]: {
+          name: 'design',
+          contentHash: CONTENT_HASH,
+          strategy: 'reference',
+        },
+      });
+      const created = await service.createUserStack(auth, {
+        name: 'frontend',
+        skillIds: [SKILL_ID],
+      });
+      await service.publishUserStack(auth, {
+        stackId: created.stackId,
+        slug: 'frontend',
+      });
+      const mainBefore = await service.getEnvironment(auth, 'main');
+
+      await service.unpublishUserStack(auth, created.stackId);
+
+      await expect(
+        service.getPublicStack('alice', 'frontend'),
+      ).rejects.toMatchObject({ code: 'public-stack-not-found' });
+      const status = await service.getUserStackPublicationStatus(
+        auth,
+        created.stackId,
+      );
+      expect(status.publication.status).toBe('private');
+      const stillPrivate = await service.getUserStack(auth, created.stackId);
+      expect(stillPrivate.skills).toHaveLength(1); // private Stack untouched
+      const mainAfter = await service.getEnvironment(auth, 'main');
+      expect(mainAfter.latest?.version.versionId).toBe(
+        mainBefore.latest?.version.versionId,
+      );
+    });
+
+    it('unpublish is idempotent — calling it twice is a safe no-op', async () => {
+      const { service, repository, auth } = setup();
+      await repository.upsertProfile({
+        userId: USER_A,
+        githubUsername: 'alice',
+      });
+      await pushMain(service, {
+        [SKILL_ID]: {
+          name: 'design',
+          contentHash: CONTENT_HASH,
+          strategy: 'reference',
+        },
+      });
+      const created = await service.createUserStack(auth, {
+        name: 'frontend',
+        skillIds: [SKILL_ID],
+      });
+      await service.publishUserStack(auth, {
+        stackId: created.stackId,
+        slug: 'frontend',
+      });
+      await service.unpublishUserStack(auth, created.stackId);
+      await expect(
+        service.unpublishUserStack(auth, created.stackId),
+      ).resolves.toMatchObject({ publication: { status: 'private' } });
+    });
+
+    it('publish -> unpublish -> publish again reactivates the SAME identity/slug and preserves history (identical content: no new version)', async () => {
+      const { service, repository, auth } = setup();
+      await repository.upsertProfile({
+        userId: USER_A,
+        githubUsername: 'alice',
+      });
+      await pushMain(service, {
+        [SKILL_ID]: {
+          name: 'design',
+          contentHash: CONTENT_HASH,
+          strategy: 'reference',
+        },
+      });
+      const created = await service.createUserStack(auth, {
+        name: 'frontend',
+        skillIds: [SKILL_ID],
+      });
+      const first = await service.publishUserStack(auth, {
+        stackId: created.stackId,
+        slug: 'frontend',
+      });
+      await service.unpublishUserStack(auth, created.stackId);
+      const second = await service.publishUserStack(auth, {
+        stackId: created.stackId,
+        slug: 'frontend',
+      });
+      expect(second.createdNew).toBe(false); // reactivation, not a new version
+      expect(second.version.versionId).toBe(first.version.versionId);
+      const published = await service.getPublicStack('alice', 'frontend');
+      expect(published.latest?.version.versionId).toBe(first.version.versionId);
+    });
+
+    it('publish -> unpublish -> edit composition -> publish again creates a new version and reactivates', async () => {
+      const { service, repository, auth } = setup();
+      await repository.upsertProfile({
+        userId: USER_A,
+        githubUsername: 'alice',
+      });
+      await pushMain(service, {
+        [SKILL_ID]: {
+          name: 'design',
+          contentHash: CONTENT_HASH,
+          strategy: 'reference',
+        },
+        [SKILL_ID_2]: {
+          name: 'notes',
+          contentHash: CONTENT_HASH_2,
+          strategy: 'reference',
+        },
+      });
+      const created = await service.createUserStack(auth, {
+        name: 'frontend',
+        skillIds: [SKILL_ID],
+      });
+      const first = await service.publishUserStack(auth, {
+        stackId: created.stackId,
+        slug: 'frontend',
+      });
+      await service.unpublishUserStack(auth, created.stackId);
+      const edited = await service.updateUserStack(auth, {
+        stackId: created.stackId,
+        expectedLatestVersionId: created.version.versionId,
+        skills: [{ skillId: SKILL_ID }, { skillId: SKILL_ID_2 }],
+      });
+      const second = await service.publishUserStack(auth, {
+        stackId: created.stackId,
+        slug: 'frontend',
+      });
+      expect(second.createdNew).toBe(false); // the public_stacks row itself is not new
+      expect(second.version.versionId).not.toBe(first.version.versionId);
+      const published = await service.getPublicStack('alice', 'frontend');
+      expect(published.latest?.bundle.requirements).toHaveLength(2);
+      expect(edited.version?.versionNumber).toBe(2);
+    });
+
+    it('unpublishing does not release the slug for a DIFFERENT Stack in the same account', async () => {
+      const { service, repository, auth } = setup();
+      await repository.upsertProfile({
+        userId: USER_A,
+        githubUsername: 'alice',
+      });
+      await pushMain(service, {
+        [SKILL_ID]: {
+          name: 'design',
+          contentHash: CONTENT_HASH,
+          strategy: 'reference',
+        },
+        [SKILL_ID_2]: {
+          name: 'notes',
+          contentHash: CONTENT_HASH_2,
+          strategy: 'reference',
+        },
+      });
+      const stackA = await service.createUserStack(auth, {
+        name: 'frontend',
+        skillIds: [SKILL_ID],
+      });
+      await service.publishUserStack(auth, {
+        stackId: stackA.stackId,
+        slug: 'frontend',
+      });
+      await service.unpublishUserStack(auth, stackA.stackId);
+
+      const stackB = await service.createUserStack(auth, {
+        name: 'web',
+        skillIds: [SKILL_ID_2],
+      });
+      await expect(
+        service.publishUserStack(auth, {
+          stackId: stackB.stackId,
+          slug: 'frontend',
+        }),
+      ).rejects.toMatchObject({ code: 'public-slug-taken' });
+    });
+
+    it('slug stability: a Stack already published cannot silently change its public slug', async () => {
+      const { service, repository, auth } = setup();
+      await repository.upsertProfile({
+        userId: USER_A,
+        githubUsername: 'alice',
+      });
+      await pushMain(service, {
+        [SKILL_ID]: {
+          name: 'design',
+          contentHash: CONTENT_HASH,
+          strategy: 'reference',
+        },
+      });
+      const created = await service.createUserStack(auth, {
+        name: 'frontend',
+        skillIds: [SKILL_ID],
+      });
+      await service.publishUserStack(auth, {
+        stackId: created.stackId,
+        slug: 'frontend',
+      });
+      await expect(
+        service.publishUserStack(auth, {
+          stackId: created.stackId,
+          slug: 'web',
+        }),
+      ).rejects.toMatchObject({ code: 'public-slug-taken' });
+    });
+
+    it('renaming the private Stack after publish does not change the public slug; republish after unpublish+rename keeps the original slug', async () => {
+      const { service, repository, auth } = setup();
+      await repository.upsertProfile({
+        userId: USER_A,
+        githubUsername: 'alice',
+      });
+      await pushMain(service, {
+        [SKILL_ID]: {
+          name: 'design',
+          contentHash: CONTENT_HASH,
+          strategy: 'reference',
+        },
+      });
+      const created = await service.createUserStack(auth, {
+        name: 'frontend',
+        skillIds: [SKILL_ID],
+      });
+      await service.publishUserStack(auth, {
+        stackId: created.stackId,
+        slug: 'frontend',
+      });
+      await service.updateUserStack(auth, {
+        stackId: created.stackId,
+        expectedLatestVersionId: created.version.versionId,
+        name: 'web',
+      });
+      const statusAfterRename = await service.getUserStackPublicationStatus(
+        auth,
+        created.stackId,
+      );
+      expect(statusAfterRename.publication).toMatchObject({ slug: 'frontend' });
+
+      await service.unpublishUserStack(auth, created.stackId);
+      const republished = await service.publishUserStack(auth, {
+        stackId: created.stackId,
+        slug: 'frontend',
+      });
+      expect(republished.slug).toBe('frontend');
+    });
+
+    it('unpublish never mutates public_stack_versions rows; only the active-state flag changes', async () => {
+      const { service, repository, auth } = setup();
+      await repository.upsertProfile({
+        userId: USER_A,
+        githubUsername: 'alice',
+      });
+      await pushMain(service, {
+        [SKILL_ID]: {
+          name: 'design',
+          contentHash: CONTENT_HASH,
+          strategy: 'reference',
+        },
+      });
+      const created = await service.createUserStack(auth, {
+        name: 'frontend',
+        skillIds: [SKILL_ID],
+      });
+      const published = await service.publishUserStack(auth, {
+        stackId: created.stackId,
+        slug: 'frontend',
+      });
+      const versionBefore = await repository.getPublicStackVersionById(
+        published.version.versionId,
+      );
+      await service.unpublishUserStack(auth, created.stackId);
+      const versionAfter = await repository.getPublicStackVersionById(
+        published.version.versionId,
+      );
+      expect(versionAfter).toEqual(versionBefore);
+      const stackRow = await repository.getPublicStackByOwner(
+        USER_A,
+        'frontend',
+      );
+      expect(stackRow?.latestVersionId).toBe(published.version.versionId);
+      expect(stackRow?.unpublishedAt).not.toBeNull();
+    });
+
+    it('republish after unpublish still revalidates CURRENT eligibility', async () => {
+      const { service, repository, auth } = setup();
+      await repository.upsertProfile({
+        userId: USER_A,
+        githubUsername: 'alice',
+      });
+      await pushMain(service, {
+        [SKILL_ID]: {
+          name: 'design',
+          contentHash: CONTENT_HASH,
+          strategy: 'reference',
+        },
+        [SKILL_ID_3]: {
+          name: 'local-only',
+          contentHash: CONTENT_HASH_3,
+          strategy: 'snapshot',
+        },
+      });
+      const created = await service.createUserStack(auth, {
+        name: 'frontend',
+        skillIds: [SKILL_ID],
+      });
+      await service.publishUserStack(auth, {
+        stackId: created.stackId,
+        slug: 'frontend',
+      });
+      await service.unpublishUserStack(auth, created.stackId);
+      await service.updateUserStack(auth, {
+        stackId: created.stackId,
+        expectedLatestVersionId: created.version.versionId,
+        skills: [{ skillId: SKILL_ID }, { skillId: SKILL_ID_3 }],
+      });
+      await expect(
+        service.publishUserStack(auth, {
+          stackId: created.stackId,
+          slug: 'frontend',
+        }),
+      ).rejects.toMatchObject({ code: 'publication-not-eligible' });
+    });
+
+    it('user B cannot unpublish, reactivate, or publish onto user A public identity', async () => {
+      const { service, repository, auth, authB } = setup();
+      await repository.upsertProfile({
+        userId: USER_A,
+        githubUsername: 'alice',
+      });
+      await repository.upsertProfile({ userId: USER_B, githubUsername: 'bob' });
+      await pushMain(service, {
+        [SKILL_ID]: {
+          name: 'design',
+          contentHash: CONTENT_HASH,
+          strategy: 'reference',
+        },
+      });
+      await pushMainFor(service, USER_B, {
+        [SKILL_ID]: {
+          name: 'design',
+          contentHash: CONTENT_HASH,
+          strategy: 'reference',
+        },
+      });
+      const created = await service.createUserStack(auth, {
+        name: 'frontend',
+        skillIds: [SKILL_ID],
+      });
+      await service.publishUserStack(auth, {
+        stackId: created.stackId,
+        slug: 'frontend',
+      });
+
+      // B has no Stack of their own named/pointing at this — unpublishUserStack is scoped to
+      // B's OWN owned Stacks, so B cannot even address A's stackId.
+      await expect(
+        service.unpublishUserStack(authB, created.stackId),
+      ).rejects.toMatchObject({ code: 'user-stack-not-found' });
+
+      // B publishing their OWN Stack under the same slug TEXT is not a collision at all —
+      // public_stacks is unique per (owner_user_id, slug), so @alice/frontend and
+      // @bob/frontend are structurally independent identities. This proves isolation, not a
+      // guard: B's publish succeeds, and it never touches A's row/version history.
+      const bStack = await service.createUserStack(authB, {
+        name: 'frontend',
+        skillIds: [SKILL_ID],
+      });
+      const bPublished = await service.publishUserStack(authB, {
+        stackId: bStack.stackId,
+        slug: 'frontend',
+      });
+      expect(bPublished.owner).toBe('bob');
+
+      // A's share remains fully active and untouched throughout.
+      const stillPublished = await service.getPublicStack('alice', 'frontend');
+      expect(stillPublished.latest).not.toBeNull();
+
+      // Even the raw primitive (scoped purely by caller's own derived userId + slug) cannot
+      // reach A's row: B's own userId never matches A's row, so this is a structural no-op.
+      await service.unpublishPublicStack(authB, { slug: 'frontend' });
+      const stillPublishedAfter = await service.getPublicStack(
+        'alice',
+        'frontend',
+      );
+      expect(stillPublishedAfter.latest).not.toBeNull();
+    });
+  });
 });

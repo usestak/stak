@@ -316,6 +316,8 @@ export const cloudErrorCodeSchema = z.enum([
   'user-stack-not-found',
   'user-stack-conflict',
   'user-stack-name-conflict',
+  // P10 final lifecycle pass: public sharing identity collisions + unpublish.
+  'public-slug-taken',
 ]);
 export const cloudErrorResponseSchema = z.object({
   error: z.object({

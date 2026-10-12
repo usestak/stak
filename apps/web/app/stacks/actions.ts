@@ -168,3 +168,25 @@ export async function publishUserStackAction(
     };
   }
 }
+
+/** Reversible: stops the public share only — the private Stack, its versions, and `main`
+ *  are untouched; publishing again later reactivates the same public link (spec P10 final
+ *  lifecycle pass §8). */
+export async function unpublishUserStackAction(
+  stackId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await getSessionUser();
+  if (!user) return notSignedIn;
+  try {
+    await getCloudService().unpublishUserStack(
+      { userId: user.id, tokenId: 'web-session' },
+      stackId,
+    );
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: messageOf(error, 'Could not stop publishing this Stack.'),
+    };
+  }
+}

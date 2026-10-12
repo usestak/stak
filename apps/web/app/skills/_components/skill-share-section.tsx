@@ -5,7 +5,7 @@ import { useState } from 'react';
 
 import type { SkillShareStatus } from '@stack/spec';
 
-import { shareSkillAction } from '../actions';
+import { shareSkillAction, unshareSkillAction } from '../actions';
 
 /**
  * Sharing section for `/skills/[skillId]` (spec §5): three explicit, pre-computed states —
@@ -26,11 +26,29 @@ export function SkillShareSection({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sharedUrl, setSharedUrl] = useState<string | null>(null);
+  const [confirmingUnshare, setConfirmingUnshare] = useState(false);
+  const [unshared, setUnshared] = useState(false);
+
+  const unshare = async () => {
+    if (pending) return;
+    setPending(true);
+    setError(null);
+    const result = await unshareSkillAction(skillId);
+    setPending(false);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setConfirmingUnshare(false);
+    setUnshared(true);
+    router.refresh();
+  };
 
   if (
-    share.status === 'already-shared' ||
-    share.status === 'update-available' ||
-    sharedUrl
+    !unshared &&
+    (share.status === 'already-shared' ||
+      share.status === 'update-available' ||
+      sharedUrl)
   ) {
     const resolvedUrl =
       sharedUrl ??
@@ -87,6 +105,41 @@ export function SkillShareSection({
               {pending ? 'Updating…' : 'Update shared version'}
             </button>
           </>
+        )}
+        {confirmingUnshare ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
+              Stop sharing this Skill? The public link will stop working. Your
+              Skill and its history stay unchanged.
+            </span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                className="stak-pill"
+                onClick={unshare}
+                disabled={pending}
+              >
+                {pending ? 'Stopping…' : 'Stop sharing'}
+              </button>
+              <button
+                type="button"
+                className="stak-pill"
+                onClick={() => setConfirmingUnshare(false)}
+                disabled={pending}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="stak-pill"
+            onClick={() => setConfirmingUnshare(true)}
+            style={{ alignSelf: 'flex-start' }}
+          >
+            Unshare
+          </button>
         )}
         <span
           role="status"

@@ -343,6 +343,7 @@ export const createInMemoryRepository = (): CloudRepository &
         latestVersionId: null,
         createdAt: input.now,
         updatedAt: input.now,
+        unpublishedAt: null,
       };
       const previousNumber = currentLatest
         ? (publicVersions.get(currentLatest)?.versionNumber ?? 0)
@@ -379,6 +380,29 @@ export const createInMemoryRepository = (): CloudRepository &
       return [...publicStacks.values()]
         .filter((stack) => stack.ownerUserId === userId)
         .sort((a, b) => a.slug.localeCompare(b.slug));
+    },
+    unpublishPublicStack: async (ownerUserId, slug, now) => {
+      const key = stackKey(ownerUserId, slug);
+      const existing = publicStacks.get(key);
+      if (!existing) return null;
+      const updated: PublicStackRecord = {
+        ...existing,
+        unpublishedAt: existing.unpublishedAt ?? now,
+      };
+      publicStacks.set(key, updated);
+      return updated;
+    },
+    reactivatePublicStack: async (ownerUserId, slug, now) => {
+      const key = stackKey(ownerUserId, slug);
+      const existing = publicStacks.get(key);
+      if (!existing) return null;
+      const updated: PublicStackRecord = {
+        ...existing,
+        unpublishedAt: null,
+        updatedAt: now,
+      };
+      publicStacks.set(key, updated);
+      return updated;
     },
 
     /* ------------------------------ Phase P5a ------------------------------ */

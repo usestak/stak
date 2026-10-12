@@ -19,6 +19,7 @@ import {
 } from '@stack/spec';
 
 import { invalidRequest, notFound, publicationNotEligible } from './errors.js';
+import { guardPublicSlugClaim } from './public-service.js';
 import {
   UserStackConflict,
   UserStackNameConflict,
@@ -45,6 +46,10 @@ export type UserStackServiceContext = {
       expectedLatestVersionId: string | null;
     },
   ) => Promise<PublishPublicStackVersionResponse>;
+  unpublishPublicStack: (
+    user: AuthenticatedUser,
+    request: { slug: string },
+  ) => Promise<void>;
 };
 
 /** The ONE place a named-Stack name is canonicalized/validated server-side (spec P10
@@ -431,6 +436,17 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
         request.description,
       );
       if (!candidate.eligible) throw publicationNotEligible(candidate.reason);
+      // Slug-ownership invariant (spec final lifecycle pass §11/§12): this Stack's OWN bound
+      // slug (if any) is the only slug it may ever publish/republish under; a slug it does
+      // not already own must not already belong to a different Skill/Stack in this account —
+      // guards against unpublishing silently freeing a slug for a different source to claim,
+      // and against a slug silently changing after first publish.
+      await guardPublicSlugClaim(
+        ctx.repository,
+        user.userId,
+        request.slug,
+        stack.publishedSlug,
+      );
       // Republish fix (spec P10 correction §2): the server — never the caller — resolves the
       // CURRENT public Stack latest-version id for this (owner, slug). First publish has no
       // existing row, so `expectedLatestVersionId` is correctly null; every later publish
@@ -485,7 +501,14 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
         user.userId,
         stack.publishedSlug,
       );
-      if (!published || !published.latestVersionId)
+      // Active-share rule (§5/§9): `publishedSlug` is a stable identity binding, NOT an
+      // activity flag — an unpublished share (unpublishedAt set) reads back as 'private' here
+      // even though the slug binding is retained internally for a future republish/reactivate.
+      if (
+        !published ||
+        !published.latestVersionId ||
+        published.unpublishedAt !== null
+      )
         return { stackId: stack.stackId, publication: { status: 'private' } };
       const publishedVersion = await ctx.repository.getPublicStackVersionById(
         published.latestVersionId,
@@ -507,6 +530,20 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
           versionNumber: publishedVersion?.versionNumber ?? 0,
         },
       };
+    },
+
+    /** Owner-only, idempotent unpublish (spec final lifecycle pass §8): deactivates the
+     *  public share only — `user_stacks`/every `user_stack_versions` row, `main`, and the
+     *  slug binding itself are all untouched, so a later publish reactivates the SAME public
+     *  identity and history (§10/§11) rather than creating something new. */
+    unpublishUserStack: async (
+      user: AuthenticatedUser,
+      stackId: string,
+    ): Promise<{ stackId: string; publication: { status: 'private' } }> => {
+      const stack = await requireOwnedStack(user.userId, stackId);
+      if (stack.publishedSlug)
+        await ctx.unpublishPublicStack(user, { slug: stack.publishedSlug });
+      return { stackId: stack.stackId, publication: { status: 'private' } };
     },
   };
 };

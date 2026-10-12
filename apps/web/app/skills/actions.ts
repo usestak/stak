@@ -73,9 +73,7 @@ export async function shareSkillAction(input: {
   slug: string;
   displayName?: string;
   description?: string;
-}): Promise<
-  { ok: true; url: string } | { ok: false; error: string }
-> {
+}): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
   const user = await getSessionUser();
   if (!user) return notSignedIn;
   try {
@@ -89,6 +87,31 @@ export async function shareSkillAction(input: {
       ok: false,
       error:
         error instanceof Error ? error.message : 'Could not share this Skill.',
+    };
+  }
+}
+
+/** Reversible: stops the public share only — the local Skill, its approved revision, and
+ *  `main` are untouched; sharing again later reactivates the same public link (spec P10
+ *  final lifecycle pass §7). */
+export async function unshareSkillAction(
+  skillId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await getSessionUser();
+  if (!user) return notSignedIn;
+  try {
+    await getCloudService().unshareSkill(
+      { userId: user.id, tokenId: 'web-session' },
+      skillId,
+    );
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Could not stop sharing this Skill.',
     };
   }
 }

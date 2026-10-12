@@ -11,6 +11,7 @@ import type {
 import {
   getUserStackPublicationStatusAction,
   publishUserStackAction,
+  unpublishUserStackAction,
   updateUserStackAction,
 } from '../actions';
 
@@ -120,6 +121,22 @@ export function EditStackForm({
     const status = await getUserStackPublicationStatusAction(detail.stackId);
     setPublishing(false);
     if (status.ok) setPublication(status.status);
+    router.refresh();
+  };
+
+  const [confirmingUnpublish, setConfirmingUnpublish] = useState(false);
+  const unpublish = async () => {
+    if (publishing) return;
+    setPublishing(true);
+    setPublishError(null);
+    const result = await unpublishUserStackAction(detail.stackId);
+    setPublishing(false);
+    if (!result.ok) {
+      setPublishError(result.error);
+      return;
+    }
+    setConfirmingUnpublish(false);
+    setPublication({ status: 'private' });
     router.refresh();
   };
 
@@ -283,6 +300,41 @@ export function EditStackForm({
                   {publishing ? 'Updating…' : 'Update published version'}
                 </button>
               </>
+            )}
+            {confirmingUnpublish ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
+                  Stop publishing this Stack? The public link will stop working.
+                  Your saved Stack stays unchanged.
+                </span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    type="button"
+                    className="stak-pill"
+                    onClick={unpublish}
+                    disabled={publishing}
+                  >
+                    {publishing ? 'Stopping…' : 'Stop publishing'}
+                  </button>
+                  <button
+                    type="button"
+                    className="stak-pill"
+                    onClick={() => setConfirmingUnpublish(false)}
+                    disabled={publishing}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="stak-pill"
+                style={{ alignSelf: 'flex-start' }}
+                onClick={() => setConfirmingUnpublish(true)}
+              >
+                Unpublish
+              </button>
             )}
           </>
         ) : (

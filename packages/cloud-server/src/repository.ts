@@ -332,6 +332,12 @@ export type PublicStackRecord = {
   latestVersionId: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Null while actively published; set to the unpublish timestamp once the owner stops
+   *  sharing (spec P10 final lifecycle pass §5) — this, not slug/row EXISTENCE, is the one
+   *  authoritative "is this an active public share" signal every read path must honor. The
+   *  row and its version history are retained; only this flag and `public_stacks_read`'s RLS
+   *  policy gate public visibility. */
+  unpublishedAt: string | null;
 };
 
 export type PublicStackVersionRecord = {
@@ -404,7 +410,29 @@ export interface PublicStackRepository {
   commitPublicStackVersion(
     input: CommitPublicVersionInput,
   ): Promise<CommitPublicVersionOutcome>;
+  /** Returns EVERY public Stack/Skill-share the handle owns, active or not — callers that
+   *  need only the publicly-visible subset (e.g. a public profile listing) filter on
+   *  `unpublishedAt === null` themselves; internal bookkeeping (status checks, re-share/
+   *  re-publish identity lookup) needs the unfiltered set so a previously-unpublished share
+   *  can still be found and reactivated under its original slug. */
   listPublicStacksByHandle(handle: string): Promise<PublicStackRecord[]>;
+  /** Owner-only, idempotent (spec P10 final lifecycle pass §6): deactivates the public share
+   *  at (ownerUserId, slug) by stamping `unpublishedAt`, never deleting or mutating any
+   *  version row. Returns null when there is nothing to unpublish for this owner/slug (never
+   *  found, or already unpublished) — the caller treats that as a safe no-op, not an error. */
+  unpublishPublicStack(
+    ownerUserId: string,
+    slug: string,
+    now: string,
+  ): Promise<PublicStackRecord | null>;
+  /** Owner-only: clears `unpublishedAt` to restore public visibility of the SAME identity/
+   *  slug/version-history (spec §10/§11) — never creates a new public_stacks row. A no-op if
+   *  already active. Returns null when there is nothing at this owner/slug to reactivate. */
+  reactivatePublicStack(
+    ownerUserId: string,
+    slug: string,
+    now: string,
+  ): Promise<PublicStackRecord | null>;
 }
 
 /* -------------------------------------------------------------------------- */

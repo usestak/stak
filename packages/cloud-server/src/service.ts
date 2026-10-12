@@ -196,6 +196,7 @@ export const createCloudService = (config: CloudServiceConfig) => {
     newId,
     resolveHandle: publicMethods.resolveHandle,
     publishPublicStackVersion: publicMethods.publishPublicStackVersion,
+    unpublishPublicStack: publicMethods.unpublishPublicStack,
   });
 
   // Named Stacks (P10B) — publishing one reuses the same public-Stack pipeline (§15).
@@ -205,6 +206,7 @@ export const createCloudService = (config: CloudServiceConfig) => {
     nowIso,
     resolveHandle: publicMethods.resolveHandle,
     publishPublicStackVersion: publicMethods.publishPublicStackVersion,
+    unpublishPublicStack: publicMethods.unpublishPublicStack,
   });
 
   const memoryMethods = createMemoryMethods({

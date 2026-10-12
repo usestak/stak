@@ -10,6 +10,7 @@ import {
 } from '@stack/spec';
 
 import { notFound, publicationNotEligible } from './errors.js';
+import { guardPublicSlugClaim } from './public-service.js';
 import type { CloudRepository, PublicStackRepository } from './repository.js';
 import type { AuthenticatedUser } from './service.js';
 
@@ -28,6 +29,10 @@ export type SkillShareServiceContext = {
       idempotencyKey?: string;
     },
   ) => Promise<PublishPublicStackVersionResponse>;
+  unpublishPublicStack: (
+    user: AuthenticatedUser,
+    request: { slug: string },
+  ) => Promise<void>;
 };
 
 /** Suggest a slug-safe default from a Skill's display name; falls back to the entry id. */
@@ -98,7 +103,11 @@ export const createSkillShareService = (ctx: SkillShareServiceContext) => {
           existingHandle,
           skillId,
         );
-        if (existing) {
+        // Active-share rule (§5/§9): an unpublished share reads back as not-currently-shared
+        // here — it falls through to the eligibility check below, so the UI shows
+        // "Shareable" again — even though `findExistingShare` (deliberately unfiltered) can
+        // still find it internally so re-sharing reactivates the SAME slug/history (§10/§11).
+        if (existing && existing.stack.unpublishedAt === null) {
           // Truthful lifecycle (spec P10 correction §3): "already-shared" is only true while
           // the published requirement's restoration still matches the CURRENTLY approved
           // Skill's — contentHash alone isn't enough, since a pinned Git revision can move
@@ -217,6 +226,16 @@ export const createSkillShareService = (ctx: SkillShareServiceContext) => {
         inheritedStackMetadata,
         digest,
       };
+      // Slug-ownership invariant (§11/§12) — same guard, same reasoning as the named-Stack
+      // publish path: this Skill's own previously-used slug (if any) is the only one it may
+      // keep publishing under, and a slug it doesn't already own must not belong to another
+      // Skill/Stack in this account.
+      await guardPublicSlugClaim(
+        ctx.repository,
+        user.userId,
+        request.slug,
+        existing?.stack.slug ?? null,
+      );
       return ctx.publishPublicStackVersion(user, {
         slug: request.slug,
         displayName: name,
@@ -224,6 +243,25 @@ export const createSkillShareService = (ctx: SkillShareServiceContext) => {
         bundle,
         expectedLatestVersionId: existing?.stack.latestVersionId ?? null,
       });
+    },
+
+    /** Owner-only, idempotent unshare (spec final lifecycle pass §7): deactivates the public
+     *  share only — the local Skill, its approved revision, and `main` are all untouched, and
+     *  history is retained so sharing again reactivates the SAME slug/history. A no-op when
+     *  the Skill was never shared or is already unshared. */
+    unshareSkill: async (
+      user: AuthenticatedUser,
+      skillId: string,
+    ): Promise<void> => {
+      const existingHandle = await ctx.repository.getHandleForUser(user.userId);
+      if (!existingHandle) return;
+      const existing = await findExistingShare(
+        user.userId,
+        existingHandle,
+        skillId,
+      );
+      if (!existing) return;
+      await ctx.unpublishPublicStack(user, { slug: existing.stack.slug });
     },
   };
 };

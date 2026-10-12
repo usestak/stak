@@ -27,10 +27,15 @@ create table if not exists public.user_stacks (
   user_id uuid not null references auth.users (id) on delete cascade,
   name text not null,
   latest_version_id uuid,
-  -- The public Stack slug this named Stack was last published under, or null while private
-  -- (spec P10 correction §13) — lets the server resolve a truthful publication status
-  -- (published / changed-since-published) on reload instead of relying on ephemeral UI
-  -- state. Set by the server after a successful publish; never set by/trusted from a client.
+  -- The public Stack slug this named Stack was last published under, or null if it has NEVER
+  -- been published — a stable IDENTITY binding, kept forever once set (spec P10 final
+  -- lifecycle pass §9/§11: unpublishing must not release a slug for reuse by a different
+  -- Stack, and reactivating must reuse the same slug/history). This column is deliberately
+  -- NOT "is this currently public" — once unpublish exists (0008_public_share_lifecycle.sql),
+  -- a non-null value here only means "bound to this public identity"; whether that identity
+  -- is currently ACTIVE is derived from the associated `public_stacks.unpublished_at` row,
+  -- never from this column alone. Set by the server after a successful publish; never set
+  -- by/trusted from a client; never cleared by unpublish.
   published_slug text,
   created_at timestamptz not null default now(),
   unique (user_id, name)
