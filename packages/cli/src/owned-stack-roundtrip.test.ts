@@ -236,6 +236,31 @@ describe('owned named Stack — `stak use <name>` (P10B §14)', () => {
     expect(result).toBeNull();
   });
 
+  it('404 (no such owned Stack) resolves to an honest "not found" error', async () => {
+    const cloud = makeCloud();
+    const token = await mintToken(cloud.service, cloud.createClient);
+    const authed = cloud.createClient({ baseUrl: 'http://localhost', token });
+    await expect(
+      resolveOwnedStackSource({ client: authed, name: 'nonexistent' }),
+    ).rejects.toMatchObject({ code: 'owned-stack-not-found' });
+  });
+
+  it('a network/auth failure is never relabeled as "not found" (spec P10 correction §10)', async () => {
+    // A stub client simulating connectivity/auth failure — NOT the 404 "no such Stack" case
+    // `getUserStack` itself returns `null` for. `resolveOwnedStackSource` must propagate this
+    // exactly as thrown, never translate it into the misleading "No Cloud Stack named..."
+    // message a genuine 404 gets.
+    const networkFailure = new Error('fetch failed: ENOTFOUND');
+    const failingClient = {
+      getUserStack: async () => {
+        throw networkFailure;
+      },
+    };
+    await expect(
+      resolveOwnedStackSource({ client: failingClient, name: 'frontend' }),
+    ).rejects.toBe(networkFailure);
+  });
+
   it('does not silently update an already-active owned Stack', async () => {
     const root = await temp();
     const cloud = makeCloud();

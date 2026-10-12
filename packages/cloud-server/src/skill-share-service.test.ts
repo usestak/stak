@@ -119,15 +119,27 @@ const setup = () => {
     });
     return (token.jsonBody as { token: string }).token;
   };
+  const auth = { userId: USER_A, tokenId: 'test' };
+  // Resolves the CURRENT latest version first (spec P10 correction §3 test fix): a hardcoded
+  // `expectedLatestVersionId: null` only works for the first push to `main` — a second push
+  // without this would hit the real optimistic-lock conflict and silently no-op (the HTTP
+  // call helper doesn't throw on a non-2xx response), which would make any "re-approve at a
+  // newer revision" test pass for the wrong reason (the second push never actually happened).
   const pushEnvironment = async (
     token: string,
     bundle: CloudEnvironmentBundle,
-  ) =>
-    call('POST', 'environments/main/versions', {
+  ) => {
+    const current = await service
+      .getEnvironment(auth, 'main')
+      .catch(() => null);
+    return call('POST', 'environments/main/versions', {
       token,
-      body: { bundle, expectedLatestVersionId: null },
+      body: {
+        bundle,
+        expectedLatestVersionId: current?.latest?.version.versionId ?? null,
+      },
     });
-  const auth = { userId: USER_A, tokenId: 'test' };
+  };
   return { repository, service, call, signIn, pushEnvironment, auth };
 };
 
@@ -258,6 +270,48 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
         : null;
     expect(revisionAfter).toBe(revisionBefore);
     expect(revisionAfter).toBe('a'.repeat(40));
+  });
+
+  it('a newer approved revision flips status to update-available, then re-sharing updates the published version (spec P10 correction §3)', async () => {
+    const { service, signIn, pushEnvironment, auth } = setup();
+    const skillId = 'skill_upd00001';
+    const token = await signIn(USER_A, 'temi');
+    await pushEnvironment(
+      token,
+      skillBundle(skillId, { revision: 'a'.repeat(40) }),
+    );
+    await service.shareSkill(auth, { skillId, slug: 'design-helper' });
+
+    const stillCurrent = await service.getSkillShareStatus(auth, skillId);
+    expect(stillCurrent.share.status).toBe('already-shared');
+
+    // The user re-approves the Skill at a newer revision in `main` — this is a truthful
+    // lifecycle transition, not a terminal "already-shared" forever.
+    await pushEnvironment(
+      token,
+      skillBundle(skillId, { revision: 'b'.repeat(40) }),
+    );
+    const afterNewRevision = await service.getSkillShareStatus(auth, skillId);
+    expect(afterNewRevision.share.status).toBe('update-available');
+
+    const updated = await service.shareSkill(auth, {
+      skillId,
+      slug: 'design-helper',
+    });
+    expect(updated.createdNew).toBe(false); // same public Skill share, new version
+    expect(updated.version.versionNumber).toBe(2);
+
+    const republished = await service.getPublicStack('temi', 'design-helper');
+    const revision =
+      republished.latest?.bundle.requirements[0]?.restoration.strategy ===
+      'reference'
+        ? republished.latest.bundle.requirements[0].restoration.reference
+            .revision
+        : null;
+    expect(revision).toBe('b'.repeat(40));
+
+    const afterUpdate = await service.getSkillShareStatus(auth, skillId);
+    expect(afterUpdate.share.status).toBe('already-shared');
   });
 
   it('owner/consumer identity separation: another user cannot see this Skill as "already shared" for themselves', async () => {

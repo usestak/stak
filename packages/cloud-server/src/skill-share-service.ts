@@ -98,17 +98,30 @@ export const createSkillShareService = (ctx: SkillShareServiceContext) => {
           existingHandle,
           skillId,
         );
-        if (existing)
+        if (existing) {
+          // Truthful lifecycle (spec P10 correction §3): "already-shared" is only true while
+          // the published requirement's restoration still matches the CURRENTLY approved
+          // Skill's — contentHash alone isn't enough, since a pinned Git revision can move
+          // (a newly approved revision) without the declared contentHash changing in every
+          // caller's bookkeeping. A newer approved revision flips this to "update-available"
+          // rather than staying silently stale forever — re-sharing (shareSkill) is the same
+          // call either way.
+          const publishedRequirement = existing.latest.bundle.requirements[0];
+          const upToDate =
+            publishedRequirement?.contentHash === skill.contentHash &&
+            JSON.stringify(publishedRequirement?.restoration) ===
+              JSON.stringify(skill.restoration);
           return {
             skillId,
             share: {
-              status: 'already-shared',
+              status: upToDate ? 'already-shared' : 'update-available',
               owner: existingHandle,
               slug: existing.stack.slug,
               url: `/@${existingHandle}/${existing.stack.slug}`,
               versionNumber: existing.latest.versionNumber,
             },
           };
+        }
       }
       const eligibility = assessSkillShareEligibility(skill.restoration);
       if (!eligibility.eligible)
@@ -149,7 +162,10 @@ export const createSkillShareService = (ctx: SkillShareServiceContext) => {
         handle,
         request.skillId,
       );
-      const requirementId = `req_${ctx.newId().replace(/-/g, '')}`;
+      // Deterministic, not `ctx.newId()` (correction pass fix — same bug as the named-Stack
+      // publish path): a random id made the bundle hash non-reproducible between calls,
+      // breaking the identical-content no-op shortcut on re-share.
+      const requirementId = `req_${request.skillId.replace(/^skill_/, '')}`;
       const name = request.displayName ?? skill.name;
       const description =
         request.description ?? skill.metadata?.description ?? skill.description;

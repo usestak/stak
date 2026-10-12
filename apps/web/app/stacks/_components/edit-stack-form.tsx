@@ -3,13 +3,22 @@
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 
-import type { UserStackDetail } from '@stack/spec';
+import type {
+  GetUserStackPublicationStatusResponse,
+  UserStackDetail,
+} from '@stack/spec';
 
-import { publishUserStackAction, updateUserStackAction } from '../actions';
+import {
+  getUserStackPublicationStatusAction,
+  publishUserStackAction,
+  updateUserStackAction,
+} from '../actions';
 
 type ApprovedSkill = { skillId: string; name: string; paused: boolean };
 
 type Row = { skillId: string; name: string; inStack: boolean; paused: boolean };
+
+type Publication = GetUserStackPublicationStatusResponse['publication'];
 
 /**
  * `/stacks/[stackId]` — add Skill, remove Skill, pause/resume within the Stack, rename,
@@ -20,9 +29,11 @@ type Row = { skillId: string; name: string; inStack: boolean; paused: boolean };
 export function EditStackForm({
   detail,
   approvedSkills,
+  initialPublication,
 }: {
   detail: UserStackDetail;
   approvedSkills: ApprovedSkill[];
+  initialPublication: Publication;
 }) {
   const router = useRouter();
   const [name, setName] = useState(detail.name);
@@ -42,10 +53,19 @@ export function EditStackForm({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<number | null>(null);
 
+  // Server-resolved, not ephemeral (spec P10 correction §13): starts from what the page
+  // loader actually fetched, and every publish/republish re-fetches it from the server so a
+  // reload never shows a false "private" after a real publish, or a false "published" after
+  // the source composition changed.
+  const [publication, setPublication] =
+    useState<Publication>(initialPublication);
   const [publishing, setPublishing] = useState(false);
-  const [publishSlug, setPublishSlug] = useState(detail.name);
+  const [publishSlug, setPublishSlug] = useState(
+    initialPublication.status === 'private'
+      ? detail.name
+      : initialPublication.slug,
+  );
   const [publishError, setPublishError] = useState<string | null>(null);
-  const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
 
   const included = useMemo(() => rows.filter((r) => r.inStack), [rows]);
 
@@ -90,12 +110,17 @@ export function EditStackForm({
       stackId: detail.stackId,
       slug: publishSlug.trim(),
     });
-    setPublishing(false);
     if (!result.ok) {
+      setPublishing(false);
       setPublishError(result.error);
       return;
     }
-    setPublishedUrl(result.result.url);
+    // Re-resolve from the server rather than constructing the new state locally — the
+    // server is the single source of truth for whether the composition is now up to date.
+    const status = await getUserStackPublicationStatusAction(detail.stackId);
+    setPublishing(false);
+    if (status.ok) setPublication(status.status);
+    router.refresh();
   };
 
   if (reviewing)
@@ -228,15 +253,37 @@ export function EditStackForm({
 
       <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <h2 style={{ margin: 0, fontSize: 14 }}>Publish</h2>
-        {publishedUrl ? (
+        {publication.status === 'published' ||
+        publication.status === 'changed-since-published' ? (
           <>
-            <span style={{ fontSize: 13 }}>Published</span>
+            <span style={{ fontSize: 13 }}>
+              {publication.status === 'published'
+                ? 'Published'
+                : 'Changed since published'}
+            </span>
             <a
-              href={publishedUrl}
+              href={publication.url}
               style={{ fontSize: 12.5, fontFamily: 'var(--mono)' }}
             >
-              {publishedUrl}
+              {publication.url}
             </a>
+            {publication.status === 'changed-since-published' && (
+              <>
+                <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
+                  This Stack&apos;s composition has changed since that version
+                  was published.
+                </span>
+                <button
+                  type="button"
+                  className="stak-pill"
+                  style={{ alignSelf: 'flex-start', cursor: 'pointer' }}
+                  onClick={publish}
+                  disabled={publishing}
+                >
+                  {publishing ? 'Updating…' : 'Update published version'}
+                </button>
+              </>
+            )}
           </>
         ) : (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

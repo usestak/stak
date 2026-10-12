@@ -107,6 +107,7 @@ const mapUserStack = (row: any): UserStackRecord => ({
   userId: row.user_id,
   name: row.name,
   latestVersionId: row.latest_version_id ?? null,
+  publishedSlug: row.published_slug ?? null,
   createdAt: row.created_at,
 });
 
@@ -117,7 +118,6 @@ const mapUserStackVersion = (row: any): UserStackVersionRecord => ({
   versionNumber: row.version_number,
   digest: row.digest,
   bundle: row.bundle,
-  ...(row.idempotency_key ? { idempotencyKey: row.idempotency_key } : {}),
   createdAt: row.created_at,
 });
 
@@ -756,20 +756,14 @@ export const supabaseRepository = (): CloudRepository &
         .maybeSingle();
       return data ? mapUserStack(data) : null;
     },
-    getUserStackVersion: async (versionId) => {
-      const { data } = await db()
-        .from('user_stack_versions')
-        .select('*')
-        .eq('version_id', versionId)
-        .maybeSingle();
-      return data ? mapUserStackVersion(data) : null;
-    },
-    findUserStackVersionByIdempotencyKey: async (userId, idempotencyKey) => {
+    // Owner-scoped by design (spec P10 correction §8) — filters by user_id in addition to
+    // version_id, so a guessed/known version id can never resolve another account's version.
+    getUserStackVersion: async (userId, versionId) => {
       const { data } = await db()
         .from('user_stack_versions')
         .select('*')
         .eq('user_id', userId)
-        .eq('idempotency_key', idempotencyKey)
+        .eq('version_id', versionId)
         .maybeSingle();
       return data ? mapUserStackVersion(data) : null;
     },
@@ -782,7 +776,6 @@ export const supabaseRepository = (): CloudRepository &
         p_bundle: input.bundle,
         p_digest: input.digest,
         p_expected_latest_version_id: input.expectedLatestVersionId,
-        p_idempotency_key: input.idempotencyKey ?? null,
         p_stack_id: input.ids.stackId,
         p_version_id: input.ids.versionId,
         p_now: input.now,
@@ -815,6 +808,20 @@ export const supabaseRepository = (): CloudRepository &
           );
         throw new Error(`Named Stack rename failed: ${error.message}`);
       }
+      return data ? mapUserStack(data) : null;
+    },
+    markUserStackPublished: async (userId, stackId, slug) => {
+      const { data, error } = await db()
+        .from('user_stacks')
+        .update({ published_slug: slug })
+        .eq('user_id', userId)
+        .eq('stack_id', stackId)
+        .select('*')
+        .maybeSingle();
+      if (error)
+        throw new Error(
+          `Could not record named-Stack publication: ${error.message}`,
+        );
       return data ? mapUserStack(data) : null;
     },
   };

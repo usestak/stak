@@ -8,12 +8,30 @@
 -- only semantic difference is what a row represents (a Stack-recipe bundle, not environment
 -- desired state). Server code authenticates the opaque CLI/web token and derives the user
 -- before using the service role; RLS below is defense-in-depth for any browser-scoped access.
+--
+-- Corrections (acceptance pass, never applied before this edit — see docs audit):
+--  * `name` is stored already-canonicalized (trimmed, lowercased, slug-shaped, `main`
+--    rejected) by the authoritative Zod schema (`userStackNameSchema`) before it ever reaches
+--    this table — the unique(user_id, name) constraint below is enforcing an already-canonical
+--    value, not inventing a second normalization scheme in SQL.
+--  * No `idempotency_key` column: nothing in the named-Stack commit path threads a
+--    client-generated key end-to-end (unlike environment_versions/public_stack_versions, whose
+--    CLI callers genuinely retry-with-idempotency), so it was removed rather than shipped
+--    unused.
+--  * `commit_user_stack_version` is SECURITY DEFINER; EXECUTE is explicitly restricted to the
+--    service role below so no anon/authenticated PostgREST caller can invoke it with an
+--    arbitrary p_user_id.
 
 create table if not exists public.user_stacks (
   stack_id uuid primary key,
   user_id uuid not null references auth.users (id) on delete cascade,
   name text not null,
   latest_version_id uuid,
+  -- The public Stack slug this named Stack was last published under, or null while private
+  -- (spec P10 correction §13) — lets the server resolve a truthful publication status
+  -- (published / changed-since-published) on reload instead of relying on ephemeral UI
+  -- state. Set by the server after a successful publish; never set by/trusted from a client.
+  published_slug text,
   created_at timestamptz not null default now(),
   unique (user_id, name)
 );
@@ -25,13 +43,9 @@ create table if not exists public.user_stack_versions (
   version_number integer not null,
   digest text not null,
   bundle jsonb not null,
-  idempotency_key uuid,
   created_at timestamptz not null default now(),
   unique (stack_id, version_number)
 );
-create unique index if not exists user_stack_versions_idempotency_idx
-  on public.user_stack_versions (user_id, idempotency_key)
-  where idempotency_key is not null;
 
 alter table public.user_stacks
   add constraint user_stacks_latest_version_fk
@@ -63,7 +77,6 @@ create or replace function public.commit_user_stack_version(
   p_bundle jsonb,
   p_digest text,
   p_expected_latest_version_id uuid,
-  p_idempotency_key uuid,
   p_stack_id uuid,
   p_version_id uuid,
   p_now timestamptz
@@ -104,11 +117,10 @@ begin
   end if;
 
   insert into public.user_stack_versions (
-    version_id, stack_id, user_id, version_number, digest, bundle,
-    idempotency_key, created_at
+    version_id, stack_id, user_id, version_number, digest, bundle, created_at
   ) values (
     p_version_id, v_stack.stack_id, p_user_id, v_previous_number + 1,
-    p_digest, p_bundle, p_idempotency_key, p_now
+    p_digest, p_bundle, p_now
   ) returning * into v_version;
 
   update public.user_stacks set latest_version_id = v_version.version_id
@@ -122,6 +134,21 @@ begin
   );
 end;
 $$;
+
+-- Privilege hardening: a plain `create function` grants EXECUTE to PUBLIC by default, which
+-- (via PostgREST) would let an anon/authenticated client call this SECURITY DEFINER function
+-- directly as `rpc/commit_user_stack_version` with an arbitrary p_user_id — a full cross-
+-- account write bypassing every application-layer ownership check, RLS included (SECURITY
+-- DEFINER runs as the function owner, not the caller). Only the trusted server/service-role
+-- path may ever call this function.
+revoke all on function public.commit_user_stack_version from public;
+revoke all on function public.commit_user_stack_version from anon;
+revoke all on function public.commit_user_stack_version from authenticated;
+grant execute on function public.commit_user_stack_version to service_role;
+
+revoke all on function public.forbid_user_stack_version_update from public;
+revoke all on function public.forbid_user_stack_version_update from anon;
+revoke all on function public.forbid_user_stack_version_update from authenticated;
 
 -- Row Level Security — private by default, owner-only, same posture as environments.
 alter table public.user_stacks enable row level security;

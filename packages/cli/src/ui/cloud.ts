@@ -326,7 +326,10 @@ export const renderOwnedStackUse = (
   dryRun = false,
 ): string =>
   [
-    `${dryRun ? 'Previewing' : 'Using'} your Stack: ${proposal.source.name}`,
+    // Explicitly "Cloud" (spec P10 correction §1) — local always wins silently over a
+    // same-named owned Cloud Stack, so when this path IS taken, the source must say so
+    // plainly rather than leaving "your Stack" ambiguous with the local-manifest case.
+    `${dryRun ? 'Previewing' : 'Using'} your Cloud Stack: ${proposal.source.name}`,
     '',
     row('Stack Skills', proposal.source.version.requirements.length).trimEnd(),
     row('Already satisfied', proposal.summary.alreadySatisfied).trimEnd(),

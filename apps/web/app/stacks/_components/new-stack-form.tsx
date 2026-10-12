@@ -3,6 +3,8 @@
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 
+import { canonicalizeUserStackName } from '@stack/spec';
+
 import { createUserStackAction } from '../actions';
 
 type ApprovedSkill = { skillId: string; name: string; paused: boolean };
@@ -29,6 +31,10 @@ export function NewStackForm({
     () => approvedSkills.filter((s) => selected.has(s.skillId)),
     [approvedSkills, selected],
   );
+  // Canonical name preview (spec P10 correction §5): the server trims/lowercases/validates
+  // this exact same way, so showing it here means the name the user sees on later steps is
+  // the one that will actually be stored, not a display illusion.
+  const canonicalName = canonicalizeUserStackName(name);
 
   const toggle = (skillId: string) =>
     setSelected((prev) => {
@@ -43,7 +49,7 @@ export function NewStackForm({
     setPending(true);
     setError(null);
     const result = await createUserStackAction({
-      name: name.trim(),
+      name: canonicalName,
       ...(description.trim() ? { description: description.trim() } : {}),
       skillIds: [...selected],
     });
@@ -75,6 +81,17 @@ export function NewStackForm({
               color: 'var(--ink)',
             }}
           />
+          {name.trim() ? (
+            <span style={{ fontSize: 12, color: 'var(--faint)' }}>
+              Saved as{' '}
+              <span style={{ fontFamily: 'var(--mono)' }}>
+                {canonicalName || '(empty)'}
+              </span>
+              {canonicalName === 'main'
+                ? ' — "main" is reserved and cannot be used.'
+                : ''}
+            </span>
+          ) : null}
         </label>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span style={{ fontSize: 13, fontWeight: 500 }}>
@@ -99,7 +116,7 @@ export function NewStackForm({
             type="button"
             className="stak-pill"
             style={{ cursor: 'pointer' }}
-            disabled={name.trim().length === 0}
+            disabled={canonicalName.length === 0 || canonicalName === 'main'}
             onClick={() => setStep('skills')}
           >
             Next: choose Skills
@@ -112,7 +129,7 @@ export function NewStackForm({
     return (
       <div className="stak-stack-form-step">
         <span style={{ fontSize: 13 }}>
-          Choose Skills for <strong>{name}</strong>
+          Choose Skills for <strong>{canonicalName}</strong>
         </span>
         <div
           className="stak-stack-form-picker"
@@ -163,7 +180,7 @@ export function NewStackForm({
   return (
     <div className="stak-stack-form-step">
       <span style={{ fontSize: 13 }}>
-        Review <strong>{name}</strong>
+        Review <strong>{canonicalName}</strong>
       </span>
       {description ? (
         <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>

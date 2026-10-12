@@ -427,7 +427,7 @@ describe('`stak use` renders the right proposal kind (P10B)', () => {
     const result = await runProgram(['use', 'frontend', '--dry-run'], {
       prepareUse: async () => ownedProposal,
     });
-    expect(result.output).toContain('your Stack: frontend');
+    expect(result.output).toContain('your Cloud Stack: frontend');
     expect(result.output).not.toContain('public Stack');
   });
 });

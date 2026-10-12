@@ -74,6 +74,16 @@ export const skillShareStatusSchema = z.discriminatedUnion('status', [
     url: z.string().min(1),
     versionNumber: z.number().int().positive(),
   }),
+  // The approved Skill's current revision differs from what's published — a truthful
+  // lifecycle state (spec P10 correction §3), not a terminal one: calling shareSkill again
+  // commits the newly-approved revision as the next immutable public version.
+  z.object({
+    status: z.literal('update-available'),
+    owner: publicHandleSchema,
+    slug: publicSlugSchema,
+    url: z.string().min(1),
+    versionNumber: z.number().int().positive(),
+  }),
   z.object({ status: z.literal('not-shareable'), reason: z.string().min(1) }),
 ]);
 export type SkillShareStatus = z.infer<typeof skillShareStatusSchema>;

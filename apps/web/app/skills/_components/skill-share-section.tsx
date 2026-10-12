@@ -27,22 +27,74 @@ export function SkillShareSection({
   const [error, setError] = useState<string | null>(null);
   const [sharedUrl, setSharedUrl] = useState<string | null>(null);
 
-  if (share.status === 'already-shared' || sharedUrl) {
+  if (
+    share.status === 'already-shared' ||
+    share.status === 'update-available' ||
+    sharedUrl
+  ) {
     const resolvedUrl =
-      sharedUrl ?? (share.status === 'already-shared' ? share.url : '');
+      sharedUrl ??
+      (share.status === 'already-shared' || share.status === 'update-available'
+        ? share.url
+        : '');
+    // sharedUrl means we just updated it in this session — re-rendering with a fresh
+    // router.refresh() will re-resolve status server-side, but show the up-to-date state
+    // immediately rather than a stale "update available" until that refresh lands.
+    const showUpdateAvailable =
+      !sharedUrl && share.status === 'update-available';
+    const updateNow = async () => {
+      if (pending || share.status !== 'update-available') return;
+      setPending(true);
+      setError(null);
+      const result = await shareSkillAction({ skillId, slug: share.slug });
+      setPending(false);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setSharedUrl(result.url);
+      router.refresh();
+    };
     return (
       <section
         style={{ display: 'flex', flexDirection: 'column', gap: 5 }}
         aria-label="Sharing"
       >
         <h2>Sharing</h2>
-        <span style={{ fontSize: 13 }}>Already shared</span>
+        <span style={{ fontSize: 13 }}>
+          {showUpdateAvailable
+            ? 'Update available to the shared version'
+            : 'Shared'}
+        </span>
         <a
           href={resolvedUrl}
           style={{ fontSize: 12.5, fontFamily: 'var(--mono)' }}
         >
           {resolvedUrl}
         </a>
+        {showUpdateAvailable && (
+          <>
+            <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
+              The approved Skill has a newer revision than what's published.
+            </span>
+            <button
+              type="button"
+              className="stak-pill"
+              onClick={updateNow}
+              disabled={pending}
+              style={{ alignSelf: 'flex-start' }}
+            >
+              {pending ? 'Updating…' : 'Update shared version'}
+            </button>
+          </>
+        )}
+        <span
+          role="status"
+          aria-live="polite"
+          style={{ fontSize: 12.5, color: error ? '#e5776a' : 'transparent' }}
+        >
+          {error ?? ''}
+        </span>
       </section>
     );
   }

@@ -416,6 +416,9 @@ export type UserStackRecord = {
   userId: string;
   name: string;
   latestVersionId: string | null;
+  /** The public Stack slug this named Stack was last published under, or null while private
+   *  (spec P10 correction §13) — server-set only, see {@link UserStackRepository.markUserStackPublished}. */
+  publishedSlug: string | null;
   createdAt: string;
 };
 
@@ -426,7 +429,6 @@ export type UserStackVersionRecord = {
   versionNumber: number;
   digest: string;
   bundle: UserStackBundle;
-  idempotencyKey?: string;
   createdAt: string;
 };
 
@@ -436,7 +438,6 @@ export type CommitUserStackVersionInput = {
   bundle: UserStackBundle;
   digest: string;
   expectedLatestVersionId: string | null;
-  idempotencyKey?: string;
   ids: { stackId: string; versionId: string };
   now: string;
 };
@@ -474,12 +475,12 @@ export interface UserStackRepository {
     userId: string,
     stackId: string,
   ): Promise<UserStackRecord | null>;
+  /** Owner-scoped by design (spec P10 correction §8): a private Stack version can only ever
+   *  be looked up by its OWNER, never by version id alone — unlike the older, unscoped
+   *  `getEnvironmentVersion`, which this new code intentionally does not mirror. */
   getUserStackVersion(
-    versionId: string,
-  ): Promise<UserStackVersionRecord | null>;
-  findUserStackVersionByIdempotencyKey(
     userId: string,
-    idempotencyKey: string,
+    versionId: string,
   ): Promise<UserStackVersionRecord | null>;
   /** Atomic optimistic commit — identical contract to commitEnvironmentVersion. */
   commitUserStackVersion(
@@ -491,6 +492,15 @@ export interface UserStackRepository {
     userId: string,
     stackId: string,
     name: string,
+  ): Promise<UserStackRecord | null>;
+  /** Server-only bookkeeping after a successful publish (spec P10 correction §13) — records
+   *  which public slug this named Stack is currently published under, so publication status
+   *  survives a reload instead of living only in ephemeral UI state. Returns null when the
+   *  Stack doesn't exist or isn't owned by this user. */
+  markUserStackPublished(
+    userId: string,
+    stackId: string,
+    slug: string,
   ): Promise<UserStackRecord | null>;
 }
 

@@ -402,14 +402,10 @@ export const createInMemoryRepository = (): CloudRepository &
       [...userStacks.values()].find(
         (stack) => stack.userId === userId && stack.stackId === stackId,
       ) ?? null,
-    getUserStackVersion: async (versionId) =>
-      userStackVersions.get(versionId) ?? null,
-    findUserStackVersionByIdempotencyKey: async (userId, idempotencyKey) =>
-      [...userStackVersions.values()].find(
-        (version) =>
-          version.userId === userId &&
-          version.idempotencyKey === idempotencyKey,
-      ) ?? null,
+    getUserStackVersion: async (userId, versionId) => {
+      const version = userStackVersions.get(versionId);
+      return version && version.userId === userId ? version : null;
+    },
     commitUserStackVersion: async (
       input: CommitUserStackVersionInput,
     ): Promise<CommitUserStackVersionOutcome> => {
@@ -424,6 +420,7 @@ export const createInMemoryRepository = (): CloudRepository &
         userId: input.userId,
         name: input.name,
         latestVersionId: null,
+        publishedSlug: null,
         createdAt: input.now,
       };
       const previousNumber = currentLatest
@@ -436,9 +433,6 @@ export const createInMemoryRepository = (): CloudRepository &
         versionNumber: previousNumber + 1,
         digest: input.digest,
         bundle: input.bundle,
-        ...(input.idempotencyKey
-          ? { idempotencyKey: input.idempotencyKey }
-          : {}),
         createdAt: input.now,
       };
       userStackVersions.set(version.versionId, version);
@@ -464,6 +458,15 @@ export const createInMemoryRepository = (): CloudRepository &
       const renamed: UserStackRecord = { ...existing, name };
       userStacks.set(userStackKey(userId, name), renamed);
       return renamed;
+    },
+    markUserStackPublished: async (userId, stackId, slug) => {
+      const existing = [...userStacks.values()].find(
+        (stack) => stack.userId === userId && stack.stackId === stackId,
+      );
+      if (!existing) return null;
+      const updated: UserStackRecord = { ...existing, publishedSlug: slug };
+      userStacks.set(userStackKey(userId, existing.name), updated);
+      return updated;
     },
   };
 };

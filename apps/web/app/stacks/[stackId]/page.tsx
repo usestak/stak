@@ -8,6 +8,7 @@ import { displayNameOf, getSessionUser } from '../../../lib/session';
 
 import {
   getUserStackDetailAction,
+  getUserStackPublicationStatusAction,
   listApprovedSkillsForPickerAction,
 } from '../actions';
 import { EditStackForm } from '../_components/edit-stack-form';
@@ -38,9 +39,10 @@ export default async function EditStackPage({
   const { stackId } = await params;
   const handle = user.githubUsername ?? displayNameOf(user);
 
-  const [detailResult, skillsResult] = await Promise.all([
+  const [detailResult, skillsResult, publicationResult] = await Promise.all([
     getUserStackDetailAction(stackId),
     listApprovedSkillsForPickerAction(),
+    getUserStackPublicationStatusAction(stackId),
   ]);
 
   if (!detailResult.ok)
@@ -86,7 +88,15 @@ export default async function EditStackPage({
           </span>
         </div>
         <div style={{ padding: '22px 32px' }}>
-          <EditStackForm detail={detail} approvedSkills={skillsResult.skills} />
+          <EditStackForm
+            detail={detail}
+            approvedSkills={skillsResult.skills}
+            initialPublication={
+              publicationResult.ok
+                ? publicationResult.status
+                : { status: 'private' }
+            }
+          />
         </div>
       </main>
     </div>

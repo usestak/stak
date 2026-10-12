@@ -3,6 +3,7 @@
 import { CloudServiceError } from '@stack/cloud-server';
 import type {
   CreateUserStackRequest,
+  GetUserStackPublicationStatusResponse,
   PublishPublicStackVersionResponse,
   PublishUserStackRequest,
   UpdateUserStackRequest,
@@ -115,6 +116,30 @@ export async function updateUserStackAction(
     return {
       ok: false,
       error: messageOf(error, 'Could not save this Stack.'),
+    };
+  }
+}
+
+/** Truthful publication lifecycle, resolved server-side on every call (spec P10 correction
+ *  §13) — never cached in component state, so a reload always reflects reality. */
+export async function getUserStackPublicationStatusAction(
+  stackId: string,
+): Promise<
+  | { ok: true; status: GetUserStackPublicationStatusResponse['publication'] }
+  | { ok: false; error: string }
+> {
+  const user = await getSessionUser();
+  if (!user) return notSignedIn;
+  try {
+    const result = await getCloudService().getUserStackPublicationStatus(
+      { userId: user.id, tokenId: 'web-session' },
+      stackId,
+    );
+    return { ok: true, status: result.publication };
+  } catch (error) {
+    return {
+      ok: false,
+      error: messageOf(error, 'Could not load publication status.'),
     };
   }
 }

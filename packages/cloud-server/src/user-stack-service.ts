@@ -1,6 +1,7 @@
 import { sha256CanonicalJson } from '@stack/shared';
 import {
   assessSkillShareEligibility,
+  userStackNameSchema,
   type CreateUserStackRequest,
   type CreateUserStackResponse,
   type GetUserStackResponse,
@@ -17,11 +18,12 @@ import {
   type UserStackSkill,
 } from '@stack/spec';
 
-import { notFound, publicationNotEligible } from './errors.js';
+import { invalidRequest, notFound, publicationNotEligible } from './errors.js';
 import {
   UserStackConflict,
   UserStackNameConflict,
   type CloudRepository,
+  type PublicStackRepository,
   type UserStackRepository,
   type UserStackRecord,
   type UserStackVersionRecord,
@@ -29,7 +31,7 @@ import {
 import type { AuthenticatedUser } from './service.js';
 
 export type UserStackServiceContext = {
-  repository: CloudRepository & UserStackRepository;
+  repository: CloudRepository & UserStackRepository & PublicStackRepository;
   newId: () => string;
   nowIso: () => string;
   resolveHandle: (userId: string) => Promise<string>;
@@ -43,6 +45,21 @@ export type UserStackServiceContext = {
       expectedLatestVersionId: string | null;
     },
   ) => Promise<PublishPublicStackVersionResponse>;
+};
+
+/** The ONE place a named-Stack name is canonicalized/validated server-side (spec P10
+ *  correction §1/§5) — called directly by the service so a caller that reaches this code
+ *  without going through the HTTP handler's schema `.parse()` (the web app calls these
+ *  methods in-process, not over HTTP) still can't create/rename to an invalid or reserved
+ *  name. Trim + lowercase, reject `main`, reject `@`-prefixed, reject invalid characters. */
+const canonicalName = (raw: string): string => {
+  const result = userStackNameSchema.safeParse(raw);
+  if (!result.success)
+    throw invalidRequest(
+      result.error.issues[0]?.message ??
+        'Stack names must be lowercase letters, numbers, hyphens, and underscores, and may not be "main".',
+    );
+  return result.data;
 };
 
 const versionSummary = (version: UserStackVersionRecord) => ({
@@ -118,7 +135,7 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
     stack: UserStackRecord,
   ): Promise<UserStackVersionRecord | null> =>
     stack.latestVersionId
-      ? ctx.repository.getUserStackVersion(stack.latestVersionId)
+      ? ctx.repository.getUserStackVersion(stack.userId, stack.latestVersionId)
       : null;
 
   const commitVersion = async (
@@ -147,6 +164,106 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
         );
       throw error;
     }
+  };
+
+  /**
+   * Build the reference-only public bundle a named Stack WOULD publish as, re-validating
+   * eligibility against the composition passed in — never cached from a prior publish (spec
+   * P10 correction §12: republish must revalidate current eligibility, a Stack that was
+   * publishable at version 1 is not assumed publishable forever). Shared by `publishUserStack`
+   * (which throws on ineligibility) and `getUserStackPublicationStatus` (which only needs to
+   * know eligible-or-not to compare version hashes) so there is exactly one place this logic
+   * lives.
+   */
+  const buildCandidateBundle = (
+    stack: UserStackRecord,
+    version: UserStackVersionRecord | null,
+    displayNameOverride?: string,
+    descriptionOverride?: string,
+  ):
+    | {
+        eligible: true;
+        bundle: PublicStackBundle;
+        displayName: string;
+        description: string;
+      }
+    | { eligible: false; reason: string } => {
+    if (!version || version.bundle.skills.length === 0)
+      return {
+        eligible: false,
+        reason: `"${stack.name}" has no Skills yet — nothing to publish.`,
+      };
+    const ineligible: string[] = [];
+    for (const skill of version.bundle.skills) {
+      const verdict = assessSkillShareEligibility(skill.restoration);
+      if (!verdict.eligible)
+        ineligible.push(`${skill.name} (${verdict.reason})`);
+    }
+    if (ineligible.length > 0)
+      return {
+        eligible: false,
+        reason: `Cannot publish "${stack.name}". ${ineligible.length} Skill(s) can't be published: ${ineligible.join('; ')}.`,
+      };
+
+    const displayName = displayNameOverride ?? stack.name;
+    const description = descriptionOverride ?? version.bundle.description;
+    const requirements: PublicStackRequirement[] = version.bundle.skills.map(
+      (skill) => {
+        // Safe: every skill above passed assessSkillShareEligibility, which only accepts
+        // reference-strategy restorations — this narrows the type the same runtime fact
+        // already guarantees.
+        if (skill.restoration.strategy !== 'reference')
+          throw publicationNotEligible(
+            `Cannot publish "${stack.name}". ${skill.name} is not reference-backed.`,
+          );
+        return {
+          // Deterministic, not `ctx.newId()` (bug fixed by this correction pass): a random
+          // id made the published bundle's hash non-reproducible between calls, which broke
+          // both the identical-republish no-op shortcut and publication-status comparison —
+          // every rebuild of "the same" composition hashed differently. Matches the existing
+          // deterministic pattern in `owned-stack-source.ts`.
+          id: `req_${skill.skillId.replace(/^skill_/, '')}`,
+          name: skill.name,
+          requirement: 'required' as const,
+          contentHash: skill.contentHash,
+          metadata: skill.metadata,
+          restoration: skill.restoration,
+          observedSources: skill.observedSources,
+          ...(skill.preferredSource
+            ? { preferredSource: skill.preferredSource }
+            : {}),
+          originStackName: stack.name,
+        };
+      },
+    );
+    const inheritedStackMetadata: PublicStackBundle['inheritedStackMetadata'] =
+      [];
+    const versionHash = sha256CanonicalJson({
+      name: displayName,
+      description,
+      requirements,
+      inheritedStacks: inheritedStackMetadata,
+      skippedOptional: [],
+    });
+    const stackField: PublicStackBundle['stack'] = {
+      name: displayName,
+      description,
+      versionHash,
+      kind: 'stack',
+    };
+    const digest = sha256CanonicalJson({
+      stack: stackField,
+      requirements,
+      inheritedStackMetadata,
+    });
+    const bundle: PublicStackBundle = {
+      schemaVersion: 1,
+      stack: stackField,
+      requirements,
+      inheritedStackMetadata,
+      digest,
+    };
+    return { eligible: true, bundle, displayName, description };
   };
 
   return {
@@ -211,30 +328,26 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
       user: AuthenticatedUser,
       request: CreateUserStackRequest,
     ): Promise<CreateUserStackResponse> => {
+      const name = canonicalName(request.name);
       const existing = await ctx.repository.getUserStackByName(
         user.userId,
-        request.name,
+        name,
       );
       if (existing)
         throw notFound(
           'user-stack-name-conflict',
-          `A Stack named "${request.name}" already exists.`,
+          `A Stack named "${name}" already exists.`,
         );
       const approved = await loadApprovedSkills(user.userId, request.skillIds);
       const bundle: UserStackBundle = {
         schemaVersion: 1,
-        name: request.name,
+        name,
         description: request.description ?? '',
         skills: [...approved.entries()].map(([skillId, skill]) =>
           toBundleSkill(skillId, skill),
         ),
       };
-      const outcome = await commitVersion(
-        user.userId,
-        request.name,
-        bundle,
-        null,
-      );
+      const outcome = await commitVersion(user.userId, name, bundle, null);
       return {
         stackId: outcome.stack.stackId,
         name: outcome.stack.name,
@@ -248,21 +361,23 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
     ): Promise<UpdateUserStackResponse> => {
       let stack = await requireOwnedStack(user.userId, request.stackId);
 
-      if (request.name !== undefined && request.name !== stack.name) {
-        try {
-          const renamed = await ctx.repository.renameUserStack(
-            user.userId,
-            stack.stackId,
-            request.name,
-          );
-          if (renamed) stack = renamed;
-        } catch (error) {
-          if (error instanceof UserStackNameConflict)
-            throw notFound('user-stack-name-conflict', error.message);
-          throw error;
+      if (request.name !== undefined) {
+        const name = canonicalName(request.name);
+        if (name !== stack.name) {
+          try {
+            const renamed = await ctx.repository.renameUserStack(
+              user.userId,
+              stack.stackId,
+              name,
+            );
+            if (renamed) stack = renamed;
+          } catch (error) {
+            if (error instanceof UserStackNameConflict)
+              throw notFound('user-stack-name-conflict', error.message);
+            throw error;
+          }
         }
       }
-
       const current = await latestVersionOf(stack);
       if (request.skills === undefined && request.description === undefined)
         return {
@@ -303,93 +418,95 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
       };
     },
 
-    /**
-     * Publish a named Stack publicly (§15) — reuses the existing public-Stack pipeline exactly
-     * like Skill-sharing (§3): builds a reference-only bundle and hands it to the same
-     * `publishPublicStackVersion`. Fails closed, never partially, if ANY Skill in the Stack
-     * isn't eligible — never silently drops an ineligible Skill from the published bundle.
-     */
     publishUserStack: async (
       user: AuthenticatedUser,
       request: PublishUserStackRequest,
     ): Promise<PublishPublicStackVersionResponse> => {
       const stack = await requireOwnedStack(user.userId, request.stackId);
       const version = await latestVersionOf(stack);
-      if (!version || version.bundle.skills.length === 0)
-        throw publicationNotEligible(
-          `"${stack.name}" has no Skills yet — nothing to publish.`,
-        );
-      const ineligible: string[] = [];
-      for (const skill of version.bundle.skills) {
-        const verdict = assessSkillShareEligibility(skill.restoration);
-        if (!verdict.eligible)
-          ineligible.push(`${skill.name} (${verdict.reason})`);
-      }
-      if (ineligible.length > 0)
-        throw publicationNotEligible(
-          `Cannot publish "${stack.name}". ${ineligible.length} Skill(s) can't be published: ${ineligible.join('; ')}.`,
-        );
-
-      const name = request.displayName ?? stack.name;
-      const description = request.description ?? version.bundle.description;
-      const requirements: PublicStackRequirement[] = version.bundle.skills.map(
-        (skill) => {
-          // Safe: every skill above passed assessSkillShareEligibility, which only accepts
-          // reference-strategy restorations — this narrows the type the same runtime fact
-          // already guarantees.
-          if (skill.restoration.strategy !== 'reference')
-            throw publicationNotEligible(
-              `Cannot publish "${stack.name}". ${skill.name} is not reference-backed.`,
-            );
-          return {
-            id: `req_${ctx.newId().replace(/-/g, '')}`,
-            name: skill.name,
-            requirement: 'required' as const,
-            contentHash: skill.contentHash,
-            metadata: skill.metadata,
-            restoration: skill.restoration,
-            observedSources: skill.observedSources,
-            ...(skill.preferredSource
-              ? { preferredSource: skill.preferredSource }
-              : {}),
-            originStackName: stack.name,
-          };
-        },
+      const candidate = buildCandidateBundle(
+        stack,
+        version,
+        request.displayName,
+        request.description,
       );
-      const inheritedStackMetadata: PublicStackBundle['inheritedStackMetadata'] =
-        [];
-      const versionHash = sha256CanonicalJson({
-        name,
-        description,
-        requirements,
-        inheritedStacks: inheritedStackMetadata,
-        skippedOptional: [],
-      });
-      const stackField: PublicStackBundle['stack'] = {
-        name,
-        description,
-        versionHash,
-        kind: 'stack',
-      };
-      const digest = sha256CanonicalJson({
-        stack: stackField,
-        requirements,
-        inheritedStackMetadata,
-      });
-      const bundle: PublicStackBundle = {
-        schemaVersion: 1,
-        stack: stackField,
-        requirements,
-        inheritedStackMetadata,
-        digest,
-      };
-      return ctx.publishPublicStackVersion(user, {
+      if (!candidate.eligible) throw publicationNotEligible(candidate.reason);
+      // Republish fix (spec P10 correction §2): the server — never the caller — resolves the
+      // CURRENT public Stack latest-version id for this (owner, slug). First publish has no
+      // existing row, so `expectedLatestVersionId` is correctly null; every later publish
+      // commits optimistically against the real current version, so `publishPublicStackVersion`
+      // can both no-op cleanly on identical content and reject a genuinely stale/concurrent
+      // writer with STACK_PUBLIC_CONFLICT — exactly like `shareSkill`'s existing
+      // `findExistingShare(...)?.stack.latestVersionId` already does for one-Skill shares.
+      const existingPublication = await ctx.repository.getPublicStackByOwner(
+        user.userId,
+        request.slug,
+      );
+      const result = await ctx.publishPublicStackVersion(user, {
         slug: request.slug,
-        displayName: name,
-        description,
-        bundle,
-        expectedLatestVersionId: null,
+        displayName: candidate.displayName,
+        description: candidate.description,
+        bundle: candidate.bundle,
+        expectedLatestVersionId: existingPublication?.latestVersionId ?? null,
       });
+      // Record WHICH slug this named Stack is published under so `getUserStackPublicationStatus`
+      // can resolve a truthful status on reload (§13) — best-effort bookkeeping; the publish
+      // itself already succeeded above, so a failure here would be a bug worth surfacing, not
+      // swallowing, but it must never roll back a publish that genuinely happened.
+      await ctx.repository.markUserStackPublished(
+        user.userId,
+        stack.stackId,
+        request.slug,
+      );
+      return result;
+    },
+
+    /** Truthful publication lifecycle (spec P10 correction §13) — resolved server-side on
+     *  every call, never cached client-side, so a reload always shows the real state. */
+    getUserStackPublicationStatus: async (
+      user: AuthenticatedUser,
+      stackId: string,
+    ): Promise<{
+      stackId: string;
+      publication:
+        | { status: 'private' }
+        | {
+            status: 'published' | 'changed-since-published';
+            owner: string;
+            slug: string;
+            url: string;
+            versionNumber: number;
+          };
+    }> => {
+      const stack = await requireOwnedStack(user.userId, stackId);
+      if (!stack.publishedSlug)
+        return { stackId: stack.stackId, publication: { status: 'private' } };
+      const published = await ctx.repository.getPublicStackByOwner(
+        user.userId,
+        stack.publishedSlug,
+      );
+      if (!published || !published.latestVersionId)
+        return { stackId: stack.stackId, publication: { status: 'private' } };
+      const publishedVersion = await ctx.repository.getPublicStackVersionById(
+        published.latestVersionId,
+      );
+      const handle = await ctx.resolveHandle(user.userId);
+      const url = `/@${handle}/${stack.publishedSlug}`;
+      const version = await latestVersionOf(stack);
+      const candidate = buildCandidateBundle(stack, version);
+      const upToDate =
+        candidate.eligible &&
+        publishedVersion?.versionHash === candidate.bundle.stack.versionHash;
+      return {
+        stackId: stack.stackId,
+        publication: {
+          status: upToDate ? 'published' : 'changed-since-published',
+          owner: handle,
+          slug: stack.publishedSlug,
+          url,
+          versionNumber: publishedVersion?.versionNumber ?? 0,
+        },
+      };
     },
   };
 };

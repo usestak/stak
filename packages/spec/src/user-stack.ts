@@ -2,9 +2,39 @@ import { z } from 'zod';
 
 import { portableRestorationStrategySchema } from './cloud.js';
 import { entryIdSchema } from './environment.js';
-import { publicSlugSchema } from './public.js';
+import { publicHandleSchema, publicSlugSchema } from './public.js';
 import { skillMetadataSchema, skillSourceSchema } from './scanner.js';
 import { contentHashSchema } from './storage.js';
+
+/* -------------------------------------------------------------------------- */
+/* Named Stack name — one canonical identifier (spec P10 correction §1/§5)    */
+/* -------------------------------------------------------------------------- */
+
+/** `main` is the special active desired environment — never usable as a saved Stack name,
+ *  in any case variant, so `stak use main` can never be ambiguous between the two. */
+const RESERVED_USER_STACK_NAMES = new Set(['main']);
+
+/** Trim + lowercase — the ONE normalization step every caller (web/CLI/server) must apply
+ *  before a name reaches validation or storage, so `Frontend`/`frontend`/` frontend ` are
+ *  provably the same identity rather than three independently-creatable rows. */
+export const canonicalizeUserStackName = (raw: string): string =>
+  raw.trim().toLowerCase();
+
+/**
+ * Canonical named-Stack name: reuses the existing public Stack/Skill slug convention
+ * (`publicSlugSchema`'s character class) rather than inventing a second syntax, plus the
+ * two product-frozen rejections: `main` (reserved, see above) and a leading `@` (which
+ * `stak use` always treats as a public `@owner/slug` reference — see spec P10 §9 — so a
+ * Stack named that way would be permanently unreachable by name).
+ */
+export const userStackNameSchema = z
+  .string()
+  .transform(canonicalizeUserStackName)
+  .pipe(
+    publicSlugSchema.refine((name) => !RESERVED_USER_STACK_NAMES.has(name), {
+      message: '"main" is reserved and cannot be used as a saved Stack name.',
+    }),
+  );
 
 /* -------------------------------------------------------------------------- */
 /* Named Stack bundle (private, account-owned — P10B)                         */
@@ -63,7 +93,7 @@ export const userStackDetailSchema = z.object({
 });
 
 export const createUserStackRequestSchema = z.object({
-  name: z.string().min(1).max(80),
+  name: userStackNameSchema,
   description: z.string().max(2000).optional(),
   skillIds: z.array(entryIdSchema).min(1),
 });
@@ -76,7 +106,7 @@ export const createUserStackResponseSchema = z.object({
 export const updateUserStackRequestSchema = z.object({
   stackId: z.uuid(),
   expectedLatestVersionId: z.uuid().nullable(),
-  name: z.string().min(1).max(80).optional(),
+  name: userStackNameSchema.optional(),
   description: z.string().max(2000).optional(),
   // Full desired composition when present (immutable new version); omitted = composition
   // unchanged, this call is a pure rename/description edit (no new version).
@@ -96,6 +126,39 @@ export const publishUserStackRequestSchema = z.object({
   displayName: z.string().min(1).max(120).optional(),
   description: z.string().max(2000).optional(),
 });
+
+/** Truthful publication lifecycle for a named Stack (spec P10 correction §13) — a server-
+ *  resolved status, not ephemeral UI state, so a page reload shows the real current state
+ *  instead of silently reverting to "private". No `unpublished`/tombstone state yet: §4 of
+ *  the correction pass found that genuinely needs new schema and stopped short of adding it
+ *  (see migration audit report) — only create/update/no-op-republish are supported today. */
+export const userStackPublicationStatusSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('private') }),
+  z.object({
+    status: z.literal('published'),
+    owner: publicHandleSchema,
+    slug: publicSlugSchema,
+    url: z.string().min(1),
+    versionNumber: z.number().int().positive(),
+  }),
+  z.object({
+    status: z.literal('changed-since-published'),
+    owner: publicHandleSchema,
+    slug: publicSlugSchema,
+    url: z.string().min(1),
+    versionNumber: z.number().int().positive(),
+  }),
+]);
+export type UserStackPublicationStatus = z.infer<
+  typeof userStackPublicationStatusSchema
+>;
+export const getUserStackPublicationStatusResponseSchema = z.object({
+  stackId: z.uuid(),
+  publication: userStackPublicationStatusSchema,
+});
+export type GetUserStackPublicationStatusResponse = z.infer<
+  typeof getUserStackPublicationStatusResponseSchema
+>;
 
 /* -------------------------------------------------------------------------- */
 /* CLI: fetch an owned named Stack by name (`stak use <name>`, spec §14)      */
