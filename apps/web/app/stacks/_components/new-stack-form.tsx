@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 
-import { canonicalizeUserStackName } from '@stack/spec';
+import { canonicalizeUserStackName, userStackNameSchema } from '@stack/spec';
 
 import { createUserStackAction } from '../actions';
 
@@ -35,6 +35,20 @@ export function NewStackForm({
   // this exact same way, so showing it here means the name the user sees on later steps is
   // the one that will actually be stored, not a display illusion.
   const canonicalName = canonicalizeUserStackName(name);
+  // Run the SAME schema the server validates against (not a hand-picked subset of its
+  // rules) so every rejection reason — reserved `main`, leading `@`, invalid characters —
+  // is caught here before the user can progress, not just at the final Create click.
+  const nameValid =
+    name.trim().length > 0 && userStackNameSchema.safeParse(name).success;
+  const nameError = !name.trim()
+    ? null
+    : canonicalName === 'main'
+      ? '"main" is reserved and cannot be used.'
+      : canonicalName.startsWith('@')
+        ? 'Names can’t start with "@" — that prefix is reserved for public references.'
+        : !nameValid
+          ? 'Use lowercase letters, numbers, - or _, starting with a letter or number.'
+          : null;
 
   const toggle = (skillId: string) =>
     setSelected((prev) => {
@@ -87,11 +101,19 @@ export function NewStackForm({
               <span style={{ fontFamily: 'var(--mono)' }}>
                 {canonicalName || '(empty)'}
               </span>
-              {canonicalName === 'main'
-                ? ' — "main" is reserved and cannot be used.'
-                : ''}
             </span>
           ) : null}
+          <span
+            role="alert"
+            style={{
+              fontSize: 12,
+              color: '#e5776a',
+              minHeight: nameError ? undefined : 0,
+              visibility: nameError ? 'visible' : 'hidden',
+            }}
+          >
+            {nameError ?? ' '}
+          </span>
         </label>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <span style={{ fontSize: 13, fontWeight: 500 }}>
@@ -116,7 +138,7 @@ export function NewStackForm({
             type="button"
             className="stak-pill"
             style={{ cursor: 'pointer' }}
-            disabled={canonicalName.length === 0 || canonicalName === 'main'}
+            disabled={!nameValid}
             onClick={() => setStep('skills')}
           >
             Next: choose Skills
