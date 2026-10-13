@@ -130,9 +130,9 @@ export default async function StackPage({
           · {reference.path}
         </div>
         <p className="stak-public-muted" style={{ marginTop: '0.3rem' }}>
-          Pinned to an immutable revision ({reference.revision.slice(0, 12)}
-          ) at the time this Skill was shared. If the source later moves,
-          this published version does not change.
+          Pinned to an immutable revision ({reference.revision.slice(0, 12)}) at
+          the time this Skill was shared. If the source later moves, this
+          published version does not change.
         </p>
 
         <h2>Declared capabilities</h2>
@@ -161,10 +161,10 @@ export default async function StackPage({
           className="stak-public-muted"
           style={{ fontSize: '0.82rem', marginTop: '1rem' }}
         >
-          STAK shows this Skill&apos;s name, description, declared
-          capabilities, and where it comes from — not its file contents.
-          Source references are provided by the author; repository
-          accessibility is not verified by STAK.
+          STAK shows this Skill&apos;s name, description, declared capabilities,
+          and where it comes from — not its file contents. Source references are
+          provided by the author; repository accessibility is not verified by
+          STAK.
         </p>
       </PublicShell>
     );
