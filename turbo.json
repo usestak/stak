@@ -3,7 +3,14 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**"],
+      "env": [
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "STACK_APP_URL",
+        "STACK_TICKET_SECRET",
+        "STACK_SNAPSHOT_BUCKET",
+        "STACK_MAX_SNAPSHOT_BYTES"
+      ]
     },
     "lint": {
       "dependsOn": ["^lint"],
