@@ -1,8 +1,8 @@
-# STAK
+# Memory STAK
 
 **The control plane for portable AI agent environments.**
 
-STAK discovers the Agent Skills you have accumulated across Codex, Cursor, and
+Memory STAK discovers the Agent Skills you have accumulated across Codex, Cursor, and
 Claude Code, captures them as a portable **Environment**, restores them on any
 machine, safely composes additional **stacks**, backs up your private agent
 **Memory**, and lets you try someone else's stack without disturbing your

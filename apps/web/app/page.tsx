@@ -6,21 +6,21 @@ import { siteOrigin } from '@/lib/site-origin';
 import { getSessionUser } from '@/lib/session';
 
 const description =
-  'STAK is the control plane for portable AI agent environments: back up the Memory your coding agents rely on, carry Skills between machines, and bring your whole setup with you — any agent, any machine.';
+  'Memory STAK is the control plane for portable AI agent environments: back up the Memory your coding agents rely on, carry Skills between machines, and bring your whole setup with you — any agent, any machine.';
 
 export const metadata: Metadata = {
   // Next.js only threads a layout's title template down to a page when at
   // least one intermediate layout separates them (see
   // resolve-metadata.js: `accumulateMetadata` skips the template-update step
   // for "the leaf layout and leaf page", which is exactly `app/layout.tsx` +
-  // `app/page.tsx` here). The root layout's `template: 'STAK — %s'` never
-  // reaches this page, so the brand prefix is spelled out explicitly to
+  // `app/page.tsx` here). The root layout's `template: 'Memory STAK — %s'`
+  // never reaches this page, so the brand prefix is spelled out explicitly to
   // match what actually renders in `<title>` and in Open Graph below.
-  title: 'STAK — Portable AI agent environments',
+  title: 'Memory STAK — Portable AI agent environments',
   description,
   alternates: { canonical: siteOrigin() },
   openGraph: {
-    title: 'STAK — Portable AI agent environments',
+    title: 'Memory STAK — Portable AI agent environments',
     description,
     url: siteOrigin(),
   },

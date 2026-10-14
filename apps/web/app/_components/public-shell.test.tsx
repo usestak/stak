@@ -29,14 +29,14 @@ describe('PublicShell', () => {
     ).not.toBeInTheDocument();
   });
 
-  test('renders a nav landmark with a link back to the STAK homepage', () => {
+  test('renders a nav landmark with a link back to the Memory STAK homepage', () => {
     render(
       <PublicShell title="demo-stack by alice">
         <p>content</p>
       </PublicShell>,
     );
     const nav = screen.getByRole('navigation');
-    const link = screen.getByRole('link', { name: 'STAK' });
+    const link = screen.getByRole('link', { name: 'Memory STAK' });
     expect(nav).toContainElement(link);
     expect(link).toHaveAttribute('href', '/');
   });

@@ -2,7 +2,7 @@
   "name": "@usestak/cli",
   "version": "0.1.0",
   "type": "module",
-  "description": "STAK — the control plane for portable AI agent environments.",
+  "description": "Memory STAK — the control plane for portable AI agent environments.",
   "license": "MIT",
   "repository": {
     "type": "git",

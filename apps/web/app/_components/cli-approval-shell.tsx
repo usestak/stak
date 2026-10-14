@@ -48,7 +48,7 @@ export function CliApprovalShell({
       />
       <div className="stak stak-cli">
         <div className="stak-cli-term">
-          <div className="stak-cli-term-brand">STAK</div>
+          <div className="stak-cli-term-brand">Memory STAK</div>
           <div className="stak-cli-term-eyebrow">IN YOUR TERMINAL</div>
           <div className="stak-cli-term-cmd">
             <span>$ </span>stak login
@@ -57,8 +57,7 @@ export function CliApprovalShell({
             <div className="stak-cli-term-status">
               Approve this machine in your browser.
               <br />
-              Code:{' '}
-              <span className="stak-cli-term-code">{code}</span>
+              Code: <span className="stak-cli-term-code">{code}</span>
               {waiting ? (
                 <>
                   <br />

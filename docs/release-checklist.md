@@ -41,7 +41,9 @@ is automatically verified from what requires an owner decision.
 ## Human action required before release (still open)
 
 - [ ] Enable **GitHub Private Vulnerability Reporting** in `usestak/stak` settings.
-- [ ] Purchase/configure the **`usestak.app`** domain (and any subdomains).
+- [ ] Configure DNS/Vercel for the **`www.memstk.com`** domain (canonical
+      production origin), plus `memstk.com`, `memorystak.com`, and
+      `www.memorystak.com` redirecting permanently to it.
 - [ ] Stand up a **production Supabase** project and apply
       `supabase/migrations/0001` → `0002` → `0003` in order.
 - [ ] **Production web deployment** of `apps/web` with production env vars.

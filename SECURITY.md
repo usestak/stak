@@ -26,10 +26,10 @@ contents) in a report. Redact them.
 
 ## Scope
 
-Stack's security model and boundaries are documented in
+Memory STAK's security model and boundaries are documented in
 [docs/security.md](docs/security.md), including the child-process execution
 audit, path fencing, content verification, cloud authorization, and the list of
-data Stack never uploads.
+data Memory STAK never uploads.
 
 ## Supported versions
 

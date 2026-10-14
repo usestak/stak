@@ -32,9 +32,9 @@ export function PublicShell({
         href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
       />
       <div className="stak stak-public">
-        <nav className="stak-public-nav" aria-label="STAK">
+        <nav className="stak-public-nav" aria-label="Memory STAK">
           <Link href="/" className="stak-public-wordmark">
-            STAK
+            Memory STAK
           </Link>
         </nav>
         <main id="main-content" className="stak-public-main">
@@ -42,7 +42,7 @@ export function PublicShell({
           {children}
         </main>
         <footer className="stak-public-footer">
-          Reference only. Source availability is not verified by STAK.
+          Reference only. Source availability is not verified by Memory STAK.
         </footer>
       </div>
     </>

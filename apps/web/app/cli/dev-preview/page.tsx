@@ -38,8 +38,8 @@ const FIXTURES = {
           heading="Approve this machine?"
           sub={
             <>
-              A terminal asked to connect to Dana&rsquo;s STAK. Only approve
-              if you just ran{' '}
+              A terminal asked to connect to Dana&rsquo;s STAK. Only approve if
+              you just ran{' '}
               <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>.
             </>
           }
@@ -54,8 +54,8 @@ const FIXTURES = {
           </div>
           <p className="stak-cli-safety">
             Approving lets the CLI pull your skills and back up Memory.
-            &ldquo;This wasn&rsquo;t me&rdquo; just leaves this page &mdash;
-            it doesn&rsquo;t notify anyone.
+            &ldquo;This wasn&rsquo;t me&rdquo; just leaves this page &mdash; it
+            doesn&rsquo;t notify anyone.
           </p>
         </CliApprovalCard>
       </CliApprovalShell>
@@ -70,9 +70,8 @@ const FIXTURES = {
           heading="Approve this machine?"
           sub={
             <>
-              A terminal asked to connect to your STAK. Only approve if you
-              just ran{' '}
-              <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>.
+              A terminal asked to connect to your STAK. Only approve if you just
+              ran <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>.
             </>
           }
           code="VPXN-7703"
@@ -85,8 +84,8 @@ const FIXTURES = {
           </div>
           <p className="stak-cli-safety">
             Approving lets the CLI pull your skills and back up Memory.
-            &ldquo;This wasn&rsquo;t me&rdquo; just leaves this page &mdash;
-            it doesn&rsquo;t notify anyone.
+            &ldquo;This wasn&rsquo;t me&rdquo; just leaves this page &mdash; it
+            doesn&rsquo;t notify anyone.
           </p>
         </CliApprovalCard>
       </CliApprovalShell>
@@ -97,10 +96,8 @@ const FIXTURES = {
     code: 'FXQP-0019',
     ui: (
       <CliApprovalShell code="FXQP-0019">
-        <CliApprovalCard heading="Authorize the STAK CLI">
-          <p className="stak-cli-error">
-            This authorization code has expired.
-          </p>
+        <CliApprovalCard heading="Authorize the Memory STAK CLI">
+          <p className="stak-cli-error">This authorization code has expired.</p>
           <p className="stak-cli-safety">
             Run <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>{' '}
             again in your terminal for a new code.
@@ -114,7 +111,7 @@ const FIXTURES = {
     code: '0000-0000',
     ui: (
       <CliApprovalShell code="0000-0000">
-        <CliApprovalCard heading="Authorize the STAK CLI">
+        <CliApprovalCard heading="Authorize the Memory STAK CLI">
           <p className="stak-cli-error">
             We don&rsquo;t recognize this code. It may have been mistyped.
           </p>
@@ -135,8 +132,8 @@ const FIXTURES = {
           heading="Approve this machine?"
           sub={
             <>
-              A terminal asked to connect to Dana&rsquo;s STAK. Only approve
-              if you just ran{' '}
+              A terminal asked to connect to Dana&rsquo;s STAK. Only approve if
+              you just ran{' '}
               <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>.
             </>
           }
@@ -160,8 +157,8 @@ const FIXTURES = {
           heading="Approve this machine?"
           sub={
             <>
-              A terminal asked to connect to Dana&rsquo;s STAK. Only approve
-              if you just ran{' '}
+              A terminal asked to connect to Dana&rsquo;s STAK. Only approve if
+              you just ran{' '}
               <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>.
             </>
           }
@@ -198,6 +195,8 @@ export default async function CliDevPreviewPage({
   if (process.env.NODE_ENV === 'production') notFound();
 
   const { state } = await searchParams;
-  const key = (state && state in FIXTURES ? state : 'pending-labeled') as FixtureKey;
+  const key = (
+    state && state in FIXTURES ? state : 'pending-labeled'
+  ) as FixtureKey;
   return FIXTURES[key].ui;
 }

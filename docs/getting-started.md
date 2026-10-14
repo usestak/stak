@@ -26,7 +26,7 @@ node packages/cli/dist/bin.js --help
 ```
 
 > The public npm package name is being finalized. `npx stack` runs an unrelated
-> package and is **not** STAK. Installation via `npm install -g @usestak/cli`
+> package and is **not** Memory STAK. Installation via `npm install -g @usestak/cli`
 > will be documented once the name is chosen (see the release checklist).
 
 ## Your first Environment

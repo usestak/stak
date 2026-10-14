@@ -33,7 +33,7 @@ describe('web product branding is STAK (R4)', () => {
     // per-page titles (e.g. the landing page's) are prefixed with the brand;
     // the fallback `default` title remains the literal product name.
     expect(read('layout.tsx')).toContain("default: 'STAK Cloud'");
-    expect(read('layout.tsx')).toContain("template: 'STAK — %s'");
+    expect(read('layout.tsx')).toContain("template: 'Memory STAK — %s'");
   });
 
   it('signed-in shell and public shell wordmarks, and landing hero, use STAK', () => {
@@ -57,7 +57,7 @@ describe('web product branding is STAK (R4)', () => {
   });
 
   it('CLI authorization uses STAK CLI', () => {
-    expect(read('cli/page.tsx')).toContain('Authorize the STAK CLI');
+    expect(read('cli/page.tsx')).toContain('Authorize the Memory STAK CLI');
   });
 
   it('Memory protect/recover visible copy uses STAK Memory', () => {

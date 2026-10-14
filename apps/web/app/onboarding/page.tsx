@@ -84,7 +84,7 @@ export default async function OnboardingPage() {
     <FocusedShell
       title={
         isNewAccount
-          ? `Welcome to STAK, ${handle}.`
+          ? `Welcome to Memory STAK, ${handle}.`
           : 'Bring your STAK to this machine.'
       }
     >

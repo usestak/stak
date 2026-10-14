@@ -42,8 +42,8 @@ export async function generateMetadata({
 
   const url = `${siteOrigin()}/@${profile.owner}`;
   const title = profile.displayName
-    ? `${profile.displayName} (@${profile.owner}) | STAK`
-    : `@${profile.owner} | STAK`;
+    ? `${profile.displayName} (@${profile.owner}) | Memory STAK`
+    : `@${profile.owner} | Memory STAK`;
   const count = profile.stacks.length;
   const skillCountOnProfile = profile.stacks.filter(
     (stack) => stack.kind === 'skill',
@@ -60,7 +60,7 @@ export async function generateMetadata({
             : null,
         ]
           .filter(Boolean)
-          .join(' and ')} from @${profile.owner} on STAK.`
+          .join(' and ')} from @${profile.owner} on Memory STAK.`
       : `@${profile.owner} has not shared anything yet.`;
   const index = profile.stacks.length > 0;
 

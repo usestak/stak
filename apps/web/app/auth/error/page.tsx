@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 const REASONS: Record<string, { title: string; body: string }> = {
   'missing-code': {
     title: "That sign-in link didn't work",
-    body: "GitHub didn't send back the information STAK needed to finish signing you in. Nothing was changed on your account.",
+    body: "GitHub didn't send back the information Memory STAK needed to finish signing you in. Nothing was changed on your account.",
   },
   'exchange-failed': {
     title: "We couldn't finish signing you in",

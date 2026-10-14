@@ -41,7 +41,7 @@ export default async function CliPage({
   if (!session)
     return (
       <CliApprovalShell code={code}>
-        <CliApprovalCard heading="Authorize the STAK CLI">
+        <CliApprovalCard heading="Authorize the Memory STAK CLI">
           <p className="stak-cli-error">
             We don&rsquo;t recognize this code. It may have been mistyped.
           </p>
@@ -56,10 +56,8 @@ export default async function CliPage({
   if (session.status === 'expired')
     return (
       <CliApprovalShell code={code}>
-        <CliApprovalCard heading="Authorize the STAK CLI">
-          <p className="stak-cli-error">
-            This authorization code has expired.
-          </p>
+        <CliApprovalCard heading="Authorize the Memory STAK CLI">
+          <p className="stak-cli-error">This authorization code has expired.</p>
           <p className="stak-cli-safety">
             Run <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>{' '}
             again in your terminal for a new code.
@@ -71,14 +69,14 @@ export default async function CliPage({
   if (session.status !== 'pending')
     return (
       <CliApprovalShell code={code}>
-        <CliApprovalCard heading="Authorize the STAK CLI">
+        <CliApprovalCard heading="Authorize the Memory STAK CLI">
           <p className="stak-cli-sub">
             This authorization request is no longer pending.
           </p>
           <p className="stak-cli-safety">
             If you&rsquo;re trying to sign the CLI in again, run{' '}
-            <code style={{ fontFamily: 'var(--mono)' }}>stak login</code> for
-            a new code.
+            <code style={{ fontFamily: 'var(--mono)' }}>stak login</code> for a
+            new code.
           </p>
         </CliApprovalCard>
       </CliApprovalShell>
@@ -94,7 +92,7 @@ export default async function CliPage({
     return (
       <CliApprovalShell code={code} waiting>
         <CliApprovalCard
-          heading="Authorize the STAK CLI"
+          heading="Authorize the Memory STAK CLI"
           sub="Sign in to confirm it's you before this machine connects."
           code={code}
           label={session.label}
@@ -113,8 +111,8 @@ export default async function CliPage({
           <p className="stak-cli-safety">
             Only continue if you just ran{' '}
             <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>.
-            &ldquo;This wasn&rsquo;t me&rdquo; just leaves this page &mdash;
-            it doesn&rsquo;t notify anyone.
+            &ldquo;This wasn&rsquo;t me&rdquo; just leaves this page &mdash; it
+            doesn&rsquo;t notify anyone.
           </p>
         </CliApprovalCard>
       </CliApprovalShell>

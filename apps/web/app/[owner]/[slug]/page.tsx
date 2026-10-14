@@ -41,15 +41,15 @@ export async function generateMetadata({
   }
 
   const url = `${siteOrigin()}/@${stack.owner}/${stack.slug}`;
-  const title = `${stack.displayName} by @${stack.owner} | STAK`;
+  const title = `${stack.displayName} by @${stack.owner} | Memory STAK`;
   const requirementCount = stack.latest?.bundle.requirements.length ?? 0;
   const isSkill = stack.latest?.bundle.stack.kind === 'skill';
   const description = stack.description
     ? stack.description
     : stack.latest
       ? isSkill
-        ? `A Skill shared by @${stack.owner} on STAK.`
-        : `A STAK Stack with ${skillCount(requirementCount)}, shared by @${stack.owner}.`
+        ? `A Skill shared by @${stack.owner} on Memory STAK.`
+        : `A Memory STAK Stack with ${skillCount(requirementCount)}, shared by @${stack.owner}.`
       : `@${stack.owner} has not published a version of this ${isSkill ? 'Skill' : 'Stack'} yet.`;
   // Indexable only once the Stack has a real published version — an empty
   // Stack ("no published versions yet") is thin content and stays noindex.
@@ -161,10 +161,10 @@ export default async function StackPage({
           className="stak-public-muted"
           style={{ fontSize: '0.82rem', marginTop: '1rem' }}
         >
-          STAK shows this Skill&apos;s name, description, declared capabilities,
-          and where it comes from — not its file contents. Source references are
-          provided by the author; repository accessibility is not verified by
-          STAK.
+          Memory STAK shows this Skill&apos;s name, description, declared
+          capabilities, and where it comes from — not its file contents. Source
+          references are provided by the author; repository accessibility is not
+          verified by Memory STAK.
         </p>
       </PublicShell>
     );
@@ -235,7 +235,7 @@ export default async function StackPage({
         style={{ fontSize: '0.82rem', marginTop: '1rem' }}
       >
         Source references are provided by the author. Repository accessibility
-        is not verified by STAK.
+        is not verified by Memory STAK.
       </p>
     </PublicShell>
   );

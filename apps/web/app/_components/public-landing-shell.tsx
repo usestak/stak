@@ -82,9 +82,9 @@ const NAV_LINKS = [
 
 function LandingNav() {
   return (
-    <nav className="stak-landing-nav" aria-label="STAK">
+    <nav className="stak-landing-nav" aria-label="Memory STAK">
       <Link href="/" className="stak-landing-wordmark">
-        STAK
+        Memory STAK
       </Link>
       <div className="stak-landing-nav-links">
         <a href="#how">How it works</a>
@@ -110,7 +110,7 @@ function LandingNav() {
 
 function Hero() {
   return (
-    <section className="stak-landing-hero" aria-label="STAK">
+    <section className="stak-landing-hero" aria-label="Memory STAK">
       {/* Two distinct compositions (design: separate `mob`/`notMob` markup,
           not just a reflow of the same lines) - desktop groups "Your [WORD]
           should" on one line and "survive your laptop." on the next; mobile
@@ -307,8 +307,8 @@ function YourStakSection() {
           <h2>The parts of your agent setup, in one place.</h2>
         </div>
         <p>
-          STAK gives you one view of the Skills, Memory, Projects, and setup you
-          want to carry with you.
+          Memory STAK gives you one view of the Skills, Memory, Projects, and
+          setup you want to carry with you.
         </p>
       </div>
       <ObjectsGrid objs={OBJS} />
@@ -317,7 +317,7 @@ function YourStakSection() {
           <span className="stak-landing-tone-dim">$ </span>stak scan
         </span>
         <span className="stak-landing-strip-note">
-          Start by seeing what STAK can carry.
+          Start by seeing what Memory STAK can carry.
         </span>
       </div>
     </section>
@@ -421,18 +421,18 @@ const PRIVACY_MODES: [PrivacyMode, PrivacyMode] = [
     rec: 'On Standard, sign in on a new machine and recover.',
     cloudLabel: 'IN STAK CLOUD',
     cloudText: 'Migrations must run inside a transaction. CI uses Postgres 15.',
-    cloudWho: 'Readable by STAK to recover it for you.',
+    cloudWho: 'Readable by Memory STAK to recover it for you.',
     tone: 'muted',
   },
   {
     key: 'protected',
     label: 'Protected',
     title: 'Only you can unlock it',
-    desc: "STAK can store your backup, but can't read it. You'll need your passkey or recovery file on a new machine.",
+    desc: "Memory STAK can store your backup, but can't read it. You'll need your passkey or recovery file on a new machine.",
     rec: 'On Protected, use your passkey or recovery file to unlock it.',
     cloudLabel: 'IN STAK CLOUD',
     cloudText: 'b64:9QeX2kT0vR+aLw7mYc1Zp4Hs…Nf8uE3jQ0bD6tVyK2oPq==',
-    cloudWho: 'Encrypted before it leaves DELL. STAK can’t read it.',
+    cloudWho: 'Encrypted before it leaves DELL. Memory STAK can’t read it.',
     tone: 'green',
   },
 ];
@@ -448,7 +448,8 @@ function PrivacySection() {
               <h2>Choose who can read your Memory.</h2>
               <p>
                 Memory mode applies to your whole account. Standard keeps
-                recovery simple. Protected keeps your Memory unreadable to STAK.
+                recovery simple. Protected keeps your Memory unreadable to
+                Memory STAK.
               </p>
             </>
           }
@@ -494,8 +495,9 @@ function MachinesSection() {
         </div>
         <div className="stak-landing-section-head-copy">
           <p>
-            When you use STAK on a machine, it reports what it saw. You can see
-            what&apos;s ready, what&apos;s waiting, and how old that picture is.
+            When you use Memory STAK on a machine, it reports what it saw. You
+            can see what&apos;s ready, what&apos;s waiting, and how old that
+            picture is.
           </p>
           <p className="stak-landing-small">
             Nothing runs in the background just to keep this page current.
@@ -528,7 +530,9 @@ function CloseSection() {
   return (
     <section id="install-cta" className="stak-landing-close">
       <h2>Change the laptop. Keep your STAK.</h2>
-      <p>Install STAK, sign in, and keep working the way you already do.</p>
+      <p>
+        Install Memory STAK, sign in, and keep working the way you already do.
+      </p>
       <div className="stak-landing-close-cmds">
         <CopyRow command="npm install -g @usestak/cli" prefix="1 " />
         <CopyRow command="stak login" prefix="2 " />
@@ -543,7 +547,7 @@ const FOOTER_GROUPS = [
     l: [
       { t: 'How it works', u: '#how' },
       { t: 'Memory & privacy', u: '#privacy' },
-      { t: 'Install STAK', u: '#install' },
+      { t: 'Install Memory STAK', u: '#install' },
     ],
   },
   {
@@ -575,7 +579,7 @@ function SiteFooter() {
     <footer className="stak-landing-footer">
       <div className="stak-landing-footer-grid">
         <div className="stak-landing-footer-brand">
-          <span className="stak-landing-wordmark">STAK</span>
+          <span className="stak-landing-wordmark">Memory STAK</span>
           <span className="stak-landing-footer-thesis">
             Portable Skills, Memory, and setup for AI coding agents.
           </span>

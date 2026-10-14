@@ -21,11 +21,10 @@ afterEach(cleanup);
 test('nav renders the wordmark, the 4 in-page/external links, sign-in, install CTA, and a mobile menu toggle', () => {
   render(<PublicLandingShell />);
 
-  const nav = screen.getByRole('navigation', { name: 'STAK' });
-  expect(within(nav).getByRole('link', { name: 'STAK' })).toHaveAttribute(
-    'href',
-    '/',
-  );
+  const nav = screen.getByRole('navigation', { name: 'Memory STAK' });
+  expect(
+    within(nav).getByRole('link', { name: 'Memory STAK' }),
+  ).toHaveAttribute('href', '/');
 
   const expectedLinks = [
     { name: 'How it works', href: '#how' },
