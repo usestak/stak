@@ -8,7 +8,7 @@ export const PLACEHOLDER_COUNTS = {
   memory: { n: '', tone: 'neutral' as const },
   projects: '',
   machines: '',
-  stacks: '',
+  staks: '',
 };
 
 /** Shared error/empty-state wrapper (P4 §Notice): keeps the full signed-in shell/sidebar

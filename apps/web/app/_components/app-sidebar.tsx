@@ -14,7 +14,7 @@ const DOT: Record<string, string> = {
 };
 
 type NavKey =
-  'overview' | 'skills' | 'memory' | 'projects' | 'machines' | 'stacks';
+  'overview' | 'skills' | 'memory' | 'projects' | 'machines' | 'staks';
 
 export type SidebarActiveKey = NavKey | 'settings';
 
@@ -24,7 +24,7 @@ const HREF: Record<NavKey, string> = {
   memory: '/memory',
   projects: '/projects',
   machines: '/machines',
-  stacks: '/stacks',
+  staks: '/staks',
 };
 
 const NAV_PANEL_ID = 'stak-nav-panel';
@@ -32,7 +32,7 @@ const NAV_PANEL_ID = 'stak-nav-panel';
 /**
  * The signed-in application frame (STAK Final Contract): labelled sidebar of six places,
  * "Viewing as <machine>", account handle, Settings + Docs. All six primary destinations —
- * Overview, Skills, Memory, Projects, Machines, Stacks — are real links as of P7.
+ * Overview, Skills, Memory, Projects, Machines, STAKs — are real links as of P7.
  * Primary nav is labelled, never icon-only.
  *
  * Renders as a full 216px rail at desktop widths (≥1024px). Below that it collapses to a
@@ -89,7 +89,7 @@ export function AppSidebar({
     },
     { key: 'projects', label: 'Projects', n: counts.projects, tone: 'neutral' },
     { key: 'machines', label: 'Machines', n: counts.machines, tone: 'neutral' },
-    { key: 'stacks', label: 'Stacks', n: counts.stacks, tone: 'neutral' },
+    { key: 'staks', label: 'STAKs', n: counts.staks, tone: 'neutral' },
   ];
   return (
     <nav className="stak-side" aria-label="Primary">

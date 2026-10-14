@@ -30,9 +30,9 @@ export const registerTryCommand = (
   dependencies: TryCommandDependencies,
 ) => {
   program
-    .command('try <stack> [agent]')
+    .command('try <stak> [agent]')
     .description(
-      'Run a local or public (@owner/name) Stack in an isolated scratch Codex session',
+      'Run a local or public (@owner/name) STAK in an isolated scratch Codex session',
     )
     .option(
       '--dry-run',
@@ -46,8 +46,7 @@ export const registerTryCommand = (
         agent: string | undefined,
         options: { dryRun?: boolean; json?: boolean; verbose?: boolean },
       ) => {
-        if (agent !== 'codex')
-          throw new Error('Use: stak try <stack> -- codex');
+        if (agent !== 'codex') throw new Error('Use: stak try <stak> -- codex');
         const verbose = options.verbose === true;
         const detection = await dependencies.detectCodex();
         if (!detection.installed) throw new AgentNotInstalledError();

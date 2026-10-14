@@ -1,11 +1,11 @@
-import type { StackCard as StackCardData } from '../stacks-data';
+import type { StackCard as StackCardData } from '../staks-data';
 
-export function StackCard({ stack }: { stack: StackCardData }) {
+export function StakCard({ stack }: { stack: StackCardData }) {
   return (
     <div className="stak-stack-card">
       <div className="stak-stack-card-head">
         <div>
-          <div className="stak-stack-card-name">Your {stack.name} Stack</div>
+          <div className="stak-stack-card-name">Your {stack.name} STAK</div>
           <div className="stak-stack-card-meta">
             {stack.versionLabel} · updated {stack.updatedAtLabel}
           </div>
@@ -17,13 +17,13 @@ export function StackCard({ stack }: { stack: StackCardData }) {
 
       {stack.skills.length === 0 ? (
         <p className="stak-stack-composition-empty">
-          This Stack has no Skills yet.
+          This STAK has no Skills yet.
         </p>
       ) : (
         <>
           <div className="stak-stack-composition-head">
             <span>SKILL</span>
-            <span>IN STACK</span>
+            <span>IN STAK</span>
           </div>
           {stack.skills.map((s) => (
             <div key={s.skillId} className="stak-stack-composition-row">

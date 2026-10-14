@@ -16,7 +16,7 @@ export const registerDiffCommand = (
 ): void => {
   program
     .command('diff')
-    .description('Show what changed from the desired main Stack')
+    .description('Show what changed from the desired main STAK')
     .option('--json', 'emit structured JSON only')
     .option('--verbose', 'show detailed per-Skill differences')
     .action(async (options: { json?: boolean; verbose?: boolean }) => {

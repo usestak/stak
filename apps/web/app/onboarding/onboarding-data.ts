@@ -90,7 +90,7 @@ export const deriveOnboardingChecklist = (input: {
       key: 'second-machine',
       label: 'Add a second machine',
       detail:
-        'Sign in on another machine later to bring your Stack and Memory with you.',
+        'Sign in on another machine later to bring your STAK and Memory with you.',
       done: secondMachine,
       optional: true,
     },

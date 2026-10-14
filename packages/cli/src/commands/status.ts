@@ -17,7 +17,7 @@ export const registerStatusCommand = (
 ): void => {
   program
     .command('status')
-    .description('Show whether your Stack is ready on this machine')
+    .description('Show whether your STAK is ready on this machine')
     .option('--json', 'emit structured JSON only')
     .option('--verbose', 'show detailed internal state')
     .action(async (options: { json?: boolean; verbose?: boolean }) => {

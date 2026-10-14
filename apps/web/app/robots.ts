@@ -15,7 +15,7 @@ export default function robots(): MetadataRoute.Robots {
         '/memory',
         '/projects',
         '/machines',
-        '/stacks',
+        '/staks',
         '/settings',
         '/onboarding',
         '/auth',

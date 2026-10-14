@@ -2,10 +2,10 @@ import type { ReactNode } from 'react';
 
 import '../overview/shell.css';
 
-/** `/stacks` (and its nested `/stacks/new`, `/stacks/[stackId]` named-Stack routes) is a
+/** `/staks` (and its nested `/staks/new`, `/staks/[stakId]` named-STAK routes) is a
  *  sibling of `/overview`, same shape as `apps/web/app/machines/layout.tsx` — it needs its
  *  own copy of the font-link markup to pick up `.stak`'s CSS custom properties. */
-export default function StacksLayout({ children }: { children: ReactNode }) {
+export default function StaksLayout({ children }: { children: ReactNode }) {
   return (
     <>
       <link rel="preconnect" href="https://fonts.googleapis.com" />

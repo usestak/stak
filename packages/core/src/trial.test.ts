@@ -22,7 +22,7 @@ afterEach(async () => {
   );
 });
 const fixture = (...parts: string[]) =>
-  path.resolve(process.cwd(), '..', '..', 'fixtures', 'stacks', ...parts);
+  path.resolve(process.cwd(), '..', '..', 'fixtures', 'staks', ...parts);
 
 describe('trial Stack resolution', () => {
   it('resolves a directory or direct manifest without requiring main', async () => {
@@ -32,7 +32,7 @@ describe('trial Stack resolution', () => {
       idFactory: ids,
     });
     const manifest = await resolveTrialStack({
-      input: fixture('frontend', 'stack.yaml'),
+      input: fixture('frontend', 'stak.yaml'),
       idFactory: ids,
     });
     expect(directory.resolved.stackVersionHash).toBe(
@@ -53,7 +53,7 @@ describe('trial Stack resolution', () => {
     const bundle = path.join(root, 'conflict');
     await mkdir(bundle, { recursive: true });
     await writeFile(
-      path.join(bundle, 'stack.yaml'),
+      path.join(bundle, 'stak.yaml'),
       `schemaVersion: 1\nname: conflict\ndescription: conflict\nextends:\n  - ${JSON.stringify(fixture('base'))}\n  - ${JSON.stringify(fixture('required-conflict'))}\nskills: []\n`,
     );
     await expect(resolveTrialStack({ input: bundle })).rejects.toMatchObject({

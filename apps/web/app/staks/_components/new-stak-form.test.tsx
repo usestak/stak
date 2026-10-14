@@ -5,7 +5,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-import { NewStackForm } from './new-stack-form';
+import { NewStakForm } from './new-stak-form';
 
 afterEach(cleanup);
 
@@ -18,7 +18,7 @@ const approvedSkills = [
  *  subset — `main` was already blocked, but a leading `@` was not, letting the user
  *  progress to Skill selection with a name that would always be rejected on Create. */
 test('the name step blocks "main" and "@"-prefixed names, and allows a normal name', () => {
-  render(<NewStackForm approvedSkills={approvedSkills} />);
+  render(<NewStakForm approvedSkills={approvedSkills} />);
 
   const input = screen.getByPlaceholderText('e.g. frontend');
   const next = screen.getByRole('button', { name: /next: choose skills/i });
@@ -48,7 +48,7 @@ test('the name step blocks "main" and "@"-prefixed names, and allows a normal na
  *  blocking), not just dimmed via CSS — clicking it while invalid must never advance
  *  the step. */
 test('a disabled "Next" button cannot be clicked past', () => {
-  render(<NewStackForm approvedSkills={approvedSkills} />);
+  render(<NewStakForm approvedSkills={approvedSkills} />);
 
   const input = screen.getByPlaceholderText('e.g. frontend');
   fireEvent.change(input, { target: { value: '@frontend' } });

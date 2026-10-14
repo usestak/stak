@@ -49,7 +49,7 @@ and the safe next step. Below are common situations.
 - **"source remote contains embedded credentials" / unsafe remote** — remove the
   credential from the remote URL; publish from a clean https/ssh remote.
 - **Invalid slug** — pass `--slug <slug>` matching `[a-z0-9][a-z0-9-_]{0,62}`.
-- **Public Stack conflict** — someone/another machine published a newer version;
+- **Public STAK conflict** — someone/another machine published a newer version;
   fetch and retry.
 
 ## Cloud

@@ -172,7 +172,7 @@ export const loadMemoryView = async (
         : { n: '', tone: 'neutral' },
       projects: '',
       machines: String(active.length),
-      stacks: '',
+      staks: '',
     },
     mode: memory.mode,
     backedUp,

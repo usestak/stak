@@ -109,7 +109,7 @@ test('renders all primary routes and account identity', () => {
     /memory/i,
     /projects/i,
     /machines/i,
-    /stacks/i,
+    /staks/i,
     /settings/i,
   ]) {
     expect(screen.getByRole('link', { name })).toBeInTheDocument();

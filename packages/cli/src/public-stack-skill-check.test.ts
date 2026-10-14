@@ -33,7 +33,7 @@ import { runSkillCheck } from './skill-check-runner.js';
 
 /**
  * P5a final micro-gate §3 — direct regression proving the public-stack audit finding (a Skill
- * imported via `stak use <stack>` carries its requirement's `restoration` field VERBATIM, see
+ * imported via `stak use <stak>` carries its requirement's `restoration` field VERBATIM, see
  * packages/core/src/public-stack.ts) holds end-to-end: synthetic public Stack -> `stak use` ->
  * resulting locked Skill -> restoration reference preserved -> `stak skill check` -> exact
  * candidate materialized -> normalized source-check/review result. This is NOT a new

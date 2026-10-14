@@ -152,7 +152,7 @@ export const loadProjectsList = async (
       memory: { n: '', tone: 'neutral' },
       projects: String(rows.length),
       machines: String(active.length),
-      stacks: '',
+      staks: '',
     },
     statusSentence,
     rows,

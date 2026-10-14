@@ -18,7 +18,7 @@ export const registerPullCommand = (
 ): void => {
   program
     .command('pull')
-    .description('Download your main Stack from the Cloud')
+    .description('Download your main STAK from the Cloud')
     .option(
       '--dry-run',
       'preview the pull without downloading or mutating main',

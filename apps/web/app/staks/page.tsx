@@ -9,10 +9,10 @@ import { ShellNotice } from '../_components/shell-notice';
 import { getCloudService } from '../../lib/cloud-service';
 import { displayNameOf, getSessionUser } from '../../lib/session';
 
-import { loadStacksView } from './stacks-data';
-import { StackCard } from './_components/stack-card';
-import { SavedStacksSection } from './_components/saved-stacks-section';
-import './stacks.css';
+import { loadStacksView } from './staks-data';
+import { StakCard } from './_components/stak-card';
+import { SavedStaksSection } from './_components/saved-staks-section';
+import './staks.css';
 
 export const metadata: Metadata = {
   robots: { index: false, follow: false },
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
 
 export const dynamic = 'force-dynamic';
 
-export default async function StacksPage({
+export default async function StaksPage({
   searchParams,
 }: {
   searchParams: Promise<{ machine?: string }>;
@@ -34,9 +34,9 @@ export default async function StacksPage({
   if (view.kind === 'error')
     return (
       <ShellNotice
-        active="stacks"
+        active="staks"
         handle={handle}
-        title="Couldn't load your Stacks"
+        title="Couldn't load your STAKs"
       >
         <p>
           STAK Cloud didn&apos;t respond. This is a temporary problem, not a
@@ -46,7 +46,7 @@ export default async function StacksPage({
     );
   if (view.kind === 'no-machines')
     return (
-      <ShellNotice active="stacks" handle={handle} title="No machines yet">
+      <ShellNotice active="staks" handle={handle} title="No machines yet">
         <p>
           Connect this computer to your account first. In your terminal, run{' '}
           <InlineCommand command="stak login" />, then{' '}
@@ -56,7 +56,7 @@ export default async function StacksPage({
     );
   if (view.kind === 'choose-machine')
     return (
-      <ShellNotice active="stacks" handle={handle} title="Choose a machine">
+      <ShellNotice active="staks" handle={handle} title="Choose a machine">
         <p>Pick the machine you want this sidebar to follow.</p>
         {!view.anyCheckedIn ? (
           <p>
@@ -65,14 +65,14 @@ export default async function StacksPage({
             then pick it here.
           </p>
         ) : null}
-        <MachineChooser options={view.machines} basePath="/stacks" />
+        <MachineChooser options={view.machines} basePath="/staks" />
       </ShellNotice>
     );
 
   return (
     <div className="stak-frame">
       <AppSidebar
-        active="stacks"
+        active="staks"
         handle={handle}
         counts={view.sidebar}
         viewing={view.viewing}
@@ -84,9 +84,9 @@ export default async function StacksPage({
             <h1>{view.statusSentence}</h1>
           </div>
           <span className="stak-sub">
-            A Stack is the Skills that make up your portable STAK environment.
-            Any machine can bring it down with{' '}
-            <InlineCommand command="stak pull" />.
+            A STAK is the Skills that make up your portable environment. Any
+            machine can bring it down with <InlineCommand command="stak pull" />
+            .
           </span>
         </div>
         <div
@@ -101,20 +101,20 @@ export default async function StacksPage({
             style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
           >
             <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
-              Main Stack
+              Main STAK
             </h2>
             <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
               Your always-active desired environment — what every machine
               reconciles to.
             </span>
             {view.owned ? (
-              <StackCard stack={view.owned} />
+              <StakCard stack={view.owned} />
             ) : (
               <div className="stak-stacks-empty-state">
-                <h2>No Stack yet</h2>
+                <h2>No STAK yet</h2>
                 <p>
-                  Your Stack is created the first time you approve a Skill or
-                  run a Memory backup. There&apos;s nothing to compose yet.
+                  Your STAK is created the first time you approve a Skill or run
+                  a Memory backup. There&apos;s nothing to compose yet.
                 </p>
               </div>
             )}
@@ -123,21 +123,21 @@ export default async function StacksPage({
           <section>
             <div className="stak-saved-stacks-head">
               <div>
-                <h2>Saved Stacks</h2>
+                <h2>Saved STAKs</h2>
                 <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
                   Named, private compositions of your approved Skills — separate
                   from Main. Editing one never changes Main.
                 </span>
               </div>
               <Link
-                href="/stacks/new"
+                href="/staks/new"
                 className="stak-pill"
                 style={{ cursor: 'pointer' }}
               >
-                New Stack
+                New STAK
               </Link>
             </div>
-            <SavedStacksSection stacks={view.savedStacks} />
+            <SavedStaksSection stacks={view.savedStacks} />
           </section>
         </div>
       </main>

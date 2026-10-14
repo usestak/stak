@@ -31,16 +31,16 @@ A Skill is preserved as either:
 - a **snapshot** — a private copy of the content, used when the Skill is local,
   modified, unknown-source, or otherwise not reproducible from a reference.
 
-## Stack
+## STAK
 
 A reusable collection of Skill requirements authored as a directory with a
-`stack.yaml`. Stacks can extend other local Stacks. An imported Stack becomes an
+`stak.yaml`. STAKs can extend other local STAKs. An imported STAK becomes an
 immutable resolved **version** identified by a deterministic version hash.
 
 ## Environment
 
 Your desired local setup. V0.1 exposes exactly one Environment, `main`. It is
-composed of direct Skills plus ordered Stack layers, resolved into a lockfile.
+composed of direct Skills plus ordered STAK layers, resolved into a lockfile.
 `main` is the source of truth for what you want; it is agent-neutral.
 
 > Multiple named persistent Environments remain part of the long-term product
@@ -59,14 +59,14 @@ A physical projection of a desired Skill into an agent's Skill directory,
 recorded in a machine-level registry. `stak run <agent>` reconciles bindings;
 Codex and Cursor share `~/.agents/skills`, while Claude uses `~/.claude/skills`.
 
-## Cloud Environment vs public Stack
+## Cloud Environment vs public STAK
 
 Two separate cloud concepts with separate security domains:
 
 - **Push/pull** back up and restore your **private** portable `main` Environment
   (may include private snapshots).
-- **Publish** creates a **public**, reference-only Stack addressed as
-  `@owner/name`. Public Stacks never carry snapshot bytes, credentials, or
+- **Publish** creates a **public**, reference-only STAK addressed as
+  `@owner/name`. Public STAKs never carry snapshot bytes, credentials, or
   machine paths.
 
 The flow is always: Cloud Environment → local desired `main` → agent

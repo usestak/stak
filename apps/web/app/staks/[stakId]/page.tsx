@@ -11,8 +11,8 @@ import {
   getUserStackPublicationStatusAction,
   listApprovedSkillsForPickerAction,
 } from '../actions';
-import { EditStackForm } from '../_components/edit-stack-form';
-import '../stacks.css';
+import { EditStakForm } from '../_components/edit-stak-form';
+import '../staks.css';
 
 export const metadata: Metadata = {
   robots: { index: false, follow: false },
@@ -26,37 +26,37 @@ const PLACEHOLDER_SIDEBAR = {
   memory: { n: '', tone: 'neutral' as const },
   projects: '',
   machines: '',
-  stacks: '',
+  staks: '',
 };
 
-export default async function EditStackPage({
+export default async function EditStakPage({
   params,
 }: {
-  params: Promise<{ stackId: string }>;
+  params: Promise<{ stakId: string }>;
 }) {
   const user = await getSessionUser();
   if (!user) redirect('/');
-  const { stackId } = await params;
+  const { stakId } = await params;
   const handle = user.githubUsername ?? displayNameOf(user);
 
   const [detailResult, skillsResult, publicationResult] = await Promise.all([
-    getUserStackDetailAction(stackId),
+    getUserStackDetailAction(stakId),
     listApprovedSkillsForPickerAction(),
-    getUserStackPublicationStatusAction(stackId),
+    getUserStackPublicationStatusAction(stakId),
   ]);
 
   if (!detailResult.ok)
     return (
-      <ShellNotice active="stacks" handle={handle} title="Stack not found">
-        <p>This Stack doesn&apos;t exist, or isn&apos;t in your account.</p>
+      <ShellNotice active="staks" handle={handle} title="STAK not found">
+        <p>This STAK doesn&apos;t exist, or isn&apos;t in your account.</p>
         <p>
-          <Link href="/stacks">Back to Stacks</Link>
+          <Link href="/staks">Back to STAKs</Link>
         </p>
       </ShellNotice>
     );
   if (!skillsResult.ok)
     return (
-      <ShellNotice active="stacks" handle={handle} title="Couldn't load Skills">
+      <ShellNotice active="staks" handle={handle} title="Couldn't load Skills">
         <p>{skillsResult.error}</p>
       </ShellNotice>
     );
@@ -66,7 +66,7 @@ export default async function EditStackPage({
   return (
     <div className="stak-frame">
       <AppSidebar
-        active="stacks"
+        active="staks"
         handle={handle}
         counts={PLACEHOLDER_SIDEBAR}
         viewing={null}
@@ -75,8 +75,8 @@ export default async function EditStackPage({
       <main id="main-content" className="stak-main">
         <div className="stak-head">
           <span style={{ fontSize: 12.5, color: 'var(--dim)' }}>
-            <Link href="/stacks" style={{ color: 'inherit' }}>
-              Stacks
+            <Link href="/staks" style={{ color: 'inherit' }}>
+              STAKs
             </Link>{' '}
             / {detail.name}
           </span>
@@ -84,11 +84,11 @@ export default async function EditStackPage({
             <h1>{detail.name}</h1>
           </div>
           <span className="stak-sub">
-            A named, private Stack. Editing it never changes Main.
+            A named, private STAK. Editing it never changes Main.
           </span>
         </div>
         <div style={{ padding: '22px 32px' }}>
-          <EditStackForm
+          <EditStakForm
             detail={detail}
             approvedSkills={skillsResult.skills}
             initialPublication={

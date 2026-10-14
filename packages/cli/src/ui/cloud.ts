@@ -32,7 +32,7 @@ const renderPushPlanVerbose = (plan: PushPlan, dryRun: boolean): string => {
     '',
     'Changes',
     row('Desired Skills', plan.desiredSkills).trimEnd(),
-    row('Stack layers', plan.stackLayers).trimEnd(),
+    row('STAK layers', plan.stackLayers).trimEnd(),
     '',
     'Snapshots',
     row('Already uploaded', plan.snapshotsAlready).trimEnd(),
@@ -146,7 +146,7 @@ const renderPullPlanVerbose = (plan: PullPlan): string => {
       plan.restore?.referenceRestores.length ?? 0,
     ).trimEnd(),
     row(
-      'Imported Stack versions',
+      'Imported STAK versions',
       plan.restore?.importedStackVersions ?? 0,
     ).trimEnd(),
     '',
@@ -206,7 +206,7 @@ export const renderPullResult = (
       'main pulled successfully.',
       '',
       row('Desired Skills', result.desiredSkills).trimEnd(),
-      row('Imported Stack versions', result.importedStackVersions).trimEnd(),
+      row('Imported STAK versions', result.importedStackVersions).trimEnd(),
       row('Snapshots downloaded', result.snapshotsDownloaded).trimEnd(),
       row('References restored', result.referencesRestored).trimEnd(),
       row('Environment digest', shortDigest(result.digest)).trimEnd(),
@@ -226,7 +226,7 @@ const ownerLabel = (owner: string | null) => owner ?? '<you>';
 
 export const renderPublishPreview = (plan: PublishPlan): string => {
   const lines = [
-    `Publishing Stack: ${plan.displayName}`,
+    `Publishing STAK: ${plan.displayName}`,
     '',
     'Public ID',
     `@${ownerLabel(plan.ownerHandle)}/${plan.slug}`,
@@ -247,7 +247,7 @@ export const renderPublishPreview = (plan: PublishPlan): string => {
       ? `@${ownerLabel(plan.ownerHandle)}/${plan.slug} is already up to date.`
       : plan.remoteExists
         ? 'A new public version will be created.'
-        : `Cloud Stack @${ownerLabel(plan.ownerHandle)}/${plan.slug} will be created.`,
+        : `Cloud STAK @${ownerLabel(plan.ownerHandle)}/${plan.slug} will be created.`,
   );
   return `${lines.join('\n')}\n`;
 };
@@ -291,16 +291,16 @@ export const renderRemoteStackUse = (
   dryRun = false,
 ): string =>
   [
-    `${dryRun ? 'Previewing' : 'Using'} public Stack: ${proposal.source.ref}`,
+    `${dryRun ? 'Previewing' : 'Using'} public STAK: ${proposal.source.ref}`,
     '',
-    row('Stack Skills', proposal.source.version.requirements.length).trimEnd(),
+    row('STAK Skills', proposal.source.version.requirements.length).trimEnd(),
     row('Already satisfied', proposal.summary.alreadySatisfied).trimEnd(),
     row('New desired Skills', proposal.summary.newSkills).trimEnd(),
     row('References to restore', proposal.summary.references).trimEnd(),
     row('Hard conflicts', proposal.summary.hardConflicts).trimEnd(),
     '',
     'main will become:',
-    row('Stack layers', proposal.summary.stackLayers).trimEnd(),
+    row('STAK layers', proposal.summary.stackLayers).trimEnd(),
     row('Resolved Skills', proposal.summary.resolvedSkills).trimEnd(),
     '',
   ].join('\n');
@@ -329,16 +329,16 @@ export const renderOwnedStackUse = (
     // Explicitly "Cloud" (spec P10 correction §1) — local always wins silently over a
     // same-named owned Cloud Stack, so when this path IS taken, the source must say so
     // plainly rather than leaving "your Stack" ambiguous with the local-manifest case.
-    `${dryRun ? 'Previewing' : 'Using'} your Cloud Stack: ${proposal.source.name}`,
+    `${dryRun ? 'Previewing' : 'Using'} your Cloud STAK: ${proposal.source.name}`,
     '',
-    row('Stack Skills', proposal.source.version.requirements.length).trimEnd(),
+    row('STAK Skills', proposal.source.version.requirements.length).trimEnd(),
     row('Already satisfied', proposal.summary.alreadySatisfied).trimEnd(),
     row('New desired Skills', proposal.summary.newSkills).trimEnd(),
     row('References to restore', proposal.summary.references).trimEnd(),
     row('Hard conflicts', proposal.summary.hardConflicts).trimEnd(),
     '',
     'main will become:',
-    row('Stack layers', proposal.summary.stackLayers).trimEnd(),
+    row('STAK layers', proposal.summary.stackLayers).trimEnd(),
     row('Resolved Skills', proposal.summary.resolvedSkills).trimEnd(),
     '',
   ].join('\n');

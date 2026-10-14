@@ -324,7 +324,7 @@ describe('pause / resume (P2 §5/§6)', () => {
       '---\nname: shared\ndescription: Shared skill\n---\nbody\n',
     );
     await writeFile(
-      path.join(stackRoot, 'stack.yaml'),
+      path.join(stackRoot, 'stak.yaml'),
       'schemaVersion: 1\nname: layer\ndescription: layer\nextends: []\nskills:\n  - path: ./skills/shared\n    requirement: required\n',
     );
     const proposal = await prepareStackUse({ stackHome, input: stackRoot });

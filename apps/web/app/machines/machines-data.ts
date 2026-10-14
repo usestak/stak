@@ -219,7 +219,7 @@ export const loadMachinesView = async (
       memory: { n: '', tone: 'neutral' },
       projects: '',
       machines: String(active.length),
-      stacks: '',
+      staks: '',
     },
     statusSentence,
     cards,

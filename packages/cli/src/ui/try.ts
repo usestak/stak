@@ -9,10 +9,10 @@ import { block, skills } from './format.js';
 export type RenderOptions = { verbose?: boolean };
 
 export const renderTryDryRun = (trial: TryResolvedEnvironment) =>
-  `Stack: ${trial.stackName}\nAgent: Codex\n\nResolved Skills       ${trial.environment.skills.length}\nRequired              ${trial.required}\nOptional included     ${trial.optionalIncluded}\nOptional skipped      ${trial.skippedOptional}\nConflicts             ${trial.environment.conflicts.length}\n\nIsolation\n\nTemporary HOME        yes\nTemporary CODEX_HOME  yes\nWorkspace Skills      ${trial.environment.skills.length}\n\nmain will not be changed.\nNormal Codex bindings will not be changed.\n\nNo runtime was created.\n`;
+  `STAK: ${trial.stackName}\nAgent: Codex\n\nResolved Skills       ${trial.environment.skills.length}\nRequired              ${trial.required}\nOptional included     ${trial.optionalIncluded}\nOptional skipped      ${trial.skippedOptional}\nConflicts             ${trial.environment.conflicts.length}\n\nIsolation\n\nTemporary HOME        yes\nTemporary CODEX_HOME  yes\nWorkspace Skills      ${trial.environment.skills.length}\n\nmain will not be changed.\nNormal Codex bindings will not be changed.\n\nNo runtime was created.\n`;
 
 const renderTryReadyVerbose = (preparation: TryPreparationResult) =>
-  `Trying Stack: ${preparation.session.source.displayName}\n\n${preparation.session.resolvedSkills.length} Skills resolved\n${preparation.session.resolvedSkills.length} Skills materialized into isolated workspace\n\nIsolation\n+ main unchanged\n+ normal Codex bindings untouched\n+ temporary user home\n+ temporary Codex home\n\nThis trial uses a disposable scratch workspace.\nFiles created here will be removed when the session ends.\n\nLaunching Codex...\n\nNote: Codex built-in/system Skills may still be available.\n`;
+  `Trying STAK: ${preparation.session.source.displayName}\n\n${preparation.session.resolvedSkills.length} Skills resolved\n${preparation.session.resolvedSkills.length} Skills materialized into isolated workspace\n\nIsolation\n+ main unchanged\n+ normal Codex bindings untouched\n+ temporary user home\n+ temporary Codex home\n\nThis trial uses a disposable scratch workspace.\nFiles created here will be removed when the session ends.\n\nLaunching Codex...\n\nNote: Codex built-in/system Skills may still be available.\n`;
 
 export const renderTryReady = (
   preparation: TryPreparationResult,
@@ -24,7 +24,7 @@ export const renderTryReady = (
     `Trying ${session.source.displayName} with Codex...`,
     '',
     `${skills(session.resolvedSkills.length)} loaded in a temporary workspace.`,
-    'Your main Stack will not be changed.',
+    'Your main STAK will not be changed.',
     '',
     'Launching Codex...',
   ]);

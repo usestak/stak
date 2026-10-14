@@ -39,9 +39,9 @@ export const registerUseCommand = (
   dependencies: UseCommandDependencies,
 ) => {
   program
-    .command('use <stack>')
+    .command('use <stak>')
     .description(
-      'Add a local, your own Cloud named, or public (@owner/name) Stack to main',
+      'Add a local, your own Cloud named, or public (@owner/name) STAK to main',
     )
     .option('--dry-run', 'preview without persistent mutation')
     .option('--json', 'emit structured JSON (with --dry-run)')
@@ -82,7 +82,7 @@ export const registerUseCommand = (
               : renderStackUse(proposal, options.dryRun),
         );
         if (proposal.resolved.conflicts.length)
-          throw new Error('Stack has required Skill conflicts.');
+          throw new Error('STAK has required Skill conflicts.');
         if (options.dryRun) return;
         if (!options.yes && !(await dependencies.confirm('Apply to main?'))) {
           dependencies.writeOut('Cancelled. No changes were made.\n');

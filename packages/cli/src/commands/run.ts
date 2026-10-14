@@ -65,9 +65,7 @@ export const registerRunCommand = (
 ): void => {
   program
     .command('run <agent>')
-    .description(
-      'Set up Codex, Cursor, or Claude with your Stack and launch it',
-    )
+    .description('Set up Codex, Cursor, or Claude with your STAK and launch it')
     .option('--dry-run', 'preview changes without setting up or launching')
     .option('--json', 'emit structured JSON for dry-run')
     .option('--yes', 'approve safe changes non-interactively')

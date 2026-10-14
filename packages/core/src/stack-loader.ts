@@ -27,7 +27,7 @@ export class StackCompositionError extends Error {
 }
 export class StackCycleError extends StackCompositionError {
   constructor(chain: string[]) {
-    super('stack-cycle', `Stack extends cycle: ${chain.join(' -> ')}`);
+    super('stack-cycle', `STAK extends cycle: ${chain.join(' -> ')}`);
     this.name = 'StackCycleError';
   }
 }
@@ -63,12 +63,12 @@ const manifestPath = async (input: string) => {
   const resolved = path.resolve(input);
   try {
     return (await stat(resolved)).isDirectory()
-      ? path.join(resolved, 'stack.yaml')
+      ? path.join(resolved, 'stak.yaml')
       : resolved;
   } catch (error) {
     throw new StackCompositionError(
       'stack-manifest-not-found',
-      `Stack manifest was not found: ${resolved}`,
+      `STAK manifest was not found: ${resolved}`,
       { cause: error },
     );
   }
@@ -102,12 +102,12 @@ export const loadLocalStack = async (
       if ((error as NodeJS.ErrnoException).code === 'ENOENT')
         throw new StackCompositionError(
           'stack-manifest-not-found',
-          `Stack manifest was not found: ${canonical}`,
+          `STAK manifest was not found: ${canonical}`,
           { cause: error },
         );
       throw new StackCompositionError(
         'stack-manifest-invalid',
-        `Stack manifest is invalid: ${canonical}`,
+        `STAK manifest is invalid: ${canonical}`,
         { cause: error },
       );
     }

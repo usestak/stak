@@ -1,14 +1,14 @@
 import Link from 'next/link';
 
-import type { SavedStackRow } from '../stacks-data';
+import type { SavedStackRow } from '../staks-data';
 
 /** Dense rows, matching the Skills list's vocabulary (contract: no SaaS card grid). Pure
  *  composition facts — no machine-installed/reconciliation state mixed in (contract §6/§17). */
-export function SavedStacksSection({ stacks }: { stacks: SavedStackRow[] }) {
+export function SavedStaksSection({ stacks }: { stacks: SavedStackRow[] }) {
   if (stacks.length === 0)
     return (
       <p className="stak-saved-stacks-empty">
-        No saved Stacks yet. A saved Stack is a named, reusable composition of
+        No saved STAKs yet. A saved STAK is a named, reusable composition of
         your approved Skills — create one to group Skills for a project or
         client without changing Main.
       </p>
@@ -24,7 +24,7 @@ export function SavedStacksSection({ stacks }: { stacks: SavedStackRow[] }) {
       {stacks.map((s) => (
         <Link
           key={s.stackId}
-          href={`/stacks/${s.stackId}`}
+          href={`/staks/${s.stackId}`}
           className="stak-saved-stack-row"
         >
           <span className="stak-saved-stack-name">{s.name}</span>

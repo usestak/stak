@@ -23,7 +23,7 @@ const PLACEHOLDER_SIDEBAR = {
   memory: { n: '', tone: 'neutral' as const },
   projects: '',
   machines: '',
-  stacks: '',
+  staks: '',
 };
 
 const DOT: Record<'ready' | 'attention' | 'neutral', string> = {

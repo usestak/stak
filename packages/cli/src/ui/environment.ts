@@ -76,7 +76,7 @@ const renderStatusVerbose = (status: EnvironmentStatus): string => {
     `Environment: ${status.environment}`,
     '',
     `Direct Skills    ${status.skills.filter((skill) => skill.origins?.some((origin) => origin.type === 'direct')).length}`,
-    `Stack layers     ${status.stacks?.length ?? 0}`,
+    `STAK layers      ${status.stacks?.length ?? 0}`,
     `Resolved Skills  ${status.desiredCount}`,
     '',
     `Satisfied      ${summary.satisfied}`,
@@ -106,7 +106,7 @@ const renderStatusVerbose = (status: EnvironmentStatus): string => {
       5,
       0,
       '',
-      'Stacks',
+      'STAKs',
       ...status.stacks.map((stack) => `✓ ${stack.name}`),
     );
   if (summary.rootFailures > 0)
@@ -144,7 +144,7 @@ export const renderStatus = (
   const summary = status.summary;
   const problems = summary.modified + summary.missing;
   const lines: Array<string | false> = [
-    `Stack: ${status.environment}`,
+    `STAK: ${status.environment}`,
     '',
     `${skills(summary.satisfied)} ready`,
     summary.modified > 0 && `${skills(summary.modified)} modified`,
@@ -203,7 +203,7 @@ const renderDiffVerbose = (diff: EnvironmentDiff): string => {
         ...entry.origins.map((origin) =>
           origin.type === 'direct'
             ? `Direct: ${origin.entryId}`
-            : `Stack: ${origin.stackName}`,
+            : `STAK: ${origin.stackName}`,
         ),
       );
     lines.push('', 'Desired source', sourceLabel(entry.desiredSource));

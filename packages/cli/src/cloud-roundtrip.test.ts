@@ -153,7 +153,7 @@ const seedStackLayer = async (
 ) => {
   await mkdir(path.join(stackDir, 'skills', skillName), { recursive: true });
   await writeFile(
-    path.join(stackDir, 'stack.yaml'),
+    path.join(stackDir, 'stak.yaml'),
     `schemaVersion: 1\nname: ${stackName}\ndescription: ${stackName} stack\nskills:\n  - path: skills/${skillName}\n    requirement: required\n`,
   );
   await writeFile(

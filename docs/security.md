@@ -1,12 +1,12 @@
 # Security
 
-This document describes Stack's security model and the boundaries it does and
+This document describes STAK's security model and the boundaries it does and
 does not enforce. It makes no absolute claims ("perfectly secure"); it states
 what is actually verified.
 
 ## Ownership and unmanaged content
 
-Stack owns only content it created, recorded in a machine-level binding registry
+STAK owns only content it created, recorded in a machine-level binding registry
 (`$STACK_HOME/state/machines/<id>/bindings.json`) by normalized target path,
 Environment entry id, and installed content hash. Filesystem similarity alone
 never transfers ownership. Unmanaged or externally-modified content is never
@@ -14,17 +14,17 @@ overwritten or deleted without explicit approval; conflicting states block.
 
 ### Vendor-managed Skills
 
-Stack does not own, import, snapshot, back up, or publish Claude account-synced
+STAK does not own, import, snapshot, back up, or publish Claude account-synced
 Skills under `~/.claude/skills/synced/` — these are managed by Claude/claude.ai
 and may be added, updated, or removed independently. The scanner excludes that
-reserved subtree from Skill discovery, so synced Skills never become Stack-owned
-direct Skills and never appear as untracked in `stack status`. Stack does not
+reserved subtree from Skill discovery, so synced Skills never become STAK-owned
+direct Skills and never appear as untracked in `stak status`. STAK does not
 disable or interfere with Claude syncing; it simply ignores the reserved
 location. Claude's `~/.claude/skills/.trash/` is ignored for the same reason — it
 holds inactive/recoverable copies of disabled synced Skills. The Codex `.system/`
 bundled-Skill subtree is excluded on the same principle. Matching is
 case-insensitive and applies only to the reserved directory immediately under
-each Skill root. Stack never deletes or rewrites any of these vendor-managed
+each Skill root. STAK never deletes or rewrites any of these vendor-managed
 files.
 
 ## Content integrity
@@ -37,7 +37,7 @@ expected hash before the content is trusted or committed.
 ## Filesystem path fencing (Phase 6.1)
 
 Trial and controlled test/demo mutations are fenced to explicitly created,
-Stack-owned temporary roots. Paths are normalized, canonically resolved, and
+STAK-owned temporary roots. Paths are normalized, canonically resolved, and
 checked with platform-aware containment before any write or cleanup. Failure to
 prove ownership aborts the operation. Real-home canaries guard against accidental
 writes to the user's actual HOME.
@@ -55,7 +55,7 @@ configuration, and OS keyring access may remain available.
 The trial runtime lives entirely under `$STACK_HOME/runtime/<sessionId>/`
 (`session.json` marker plus `workspace/`, `home/`, and `codex-home/`). Cleanup is
 **marker-last** and component-by-component: after the child process fully closes,
-Stack removes each known owned child individually, verifies nothing unexpected
+STAK removes each known owned child individually, verifies nothing unexpected
 remains, and only then deletes the `session.json` ownership marker and the empty
 session root. The trusted marker is therefore never lost while other owned
 artifacts remain — the state (runtime exists, marker gone) that Phase 6.1 safety
@@ -65,12 +65,12 @@ After the child fully closes, cleanup waits a small bounded settling period
 before the first delete, then retries transient Windows deletion errors (`EPERM`,
 `EBUSY`, `ENOTEMPTY`, …) a bounded number of times — never forever, and never by
 weakening path containment or force-deleting anything whose ownership cannot be
-proven. Stack never terminates descendant processes: it does not kill by PID,
+proven. STAK never terminates descendant processes: it does not kill by PID,
 by command line, or by resemblance to a trial. If a component still cannot be
 removed, the marker is preserved and its status set to `cleanup-failed` with a
 **safe, secret-free diagnostic** (failing component, filesystem error code,
 timestamp — never file contents, config, or auth material). The runtime stays
-provably Stack-owned so it can be retried later.
+provably STAK-owned so it can be retried later.
 
 Because the marker survives, cleanup is genuinely resumable: before creating a
 new runtime, `stack try` conservatively re-scans `$STACK_HOME/runtime` and
@@ -166,7 +166,7 @@ Every private and publish operation derives the user identity from the token; a
 client can never act as another user by changing an id. Public reads are
 anonymous and expose only intentional public metadata.
 
-## What Stack never uploads
+## What STAK never uploads
 
 Portable/public payloads never contain: absolute machine paths, HOME/STACK_HOME/
 CODEX_HOME, binding paths, Machine baseline/placements, local snapshot ids,
@@ -176,7 +176,7 @@ of these strings.
 
 ## Telemetry
 
-Stack sends no product analytics or telemetry. Cloud commands contact only the
+STAK sends no product analytics or telemetry. Cloud commands contact only the
 configured `STACK_API_URL`. External agents/services you run have their own
 independent policies.
 

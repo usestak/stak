@@ -71,7 +71,7 @@ export type SidebarCounts = {
   memory: { n: string; tone: 'ready' | 'neutral' };
   projects: string;
   machines: string;
-  stacks: string;
+  staks: string;
 };
 
 export type OverviewView =
@@ -341,7 +341,7 @@ export const loadOverview = async (
         : { n: '', tone: 'neutral' },
       projects: projectTotal > 0 ? String(projectTotal) : '',
       machines: String(active.length),
-      stacks: '',
+      staks: '',
     },
     backedUp: overview.lastBackupAt !== null,
     checkedIn: isCheckedIn,

@@ -25,9 +25,9 @@ dependencies).
 stak scan                 # discover installed Agent Skills (read-only)
 stak init                 # capture your current setup as the `main` environment
 stak status               # show whether your setup is ready on this machine
-stak use <stack>          # compose a local or public (@owner/name) stack into main
+stak use <stak>           # compose a local or public (@owner/name) STAK into main
 stak run codex            # project your setup into an agent and launch it
-stak try <stack> -- codex # try a stack in an isolated scratch session
+stak try <stak> -- codex  # try a STAK in an isolated scratch session
 stak login                # sign in to STAK Cloud
 stak push / stak pull     # sync your main setup with the Cloud
 stak memory backup        # back up private agent Memory (Standard or Protected)

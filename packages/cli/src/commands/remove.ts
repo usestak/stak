@@ -13,8 +13,8 @@ export const registerRemoveCommand = (
   dependencies: RemoveCommandDependencies,
 ) => {
   program
-    .command('remove <stack>')
-    .description('Remove a Stack layer from main (desired state only)')
+    .command('remove <stak>')
+    .description('Remove a STAK layer from main (desired state only)')
     .option('--yes', 'approve the desired-state change')
     .action(async (identifier: string, options: { yes?: boolean }) => {
       const proposal = await dependencies.prepareRemove(identifier);

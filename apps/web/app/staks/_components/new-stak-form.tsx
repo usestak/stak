@@ -11,10 +11,10 @@ type ApprovedSkill = { skillId: string; name: string; paused: boolean };
 
 type Step = 'name' | 'skills' | 'review';
 
-/** `/stacks/new` — name, choose from approved Skills, review composition, create (P10B §11).
+/** `/staks/new` — name, choose from approved Skills, review composition, create (P10B §11).
  *  Named Stacks are private by default and never affect `main` — creating one only reads the
  *  approved Skills already in `main`, never writes to it. */
-export function NewStackForm({
+export function NewStakForm({
   approvedSkills,
 }: {
   approvedSkills: ApprovedSkill[];
@@ -72,7 +72,7 @@ export function NewStackForm({
       setError(result.error);
       return;
     }
-    router.push(`/stacks/${result.stackId}`);
+    router.push(`/staks/${result.stackId}`);
   };
 
   if (step === 'name')
@@ -120,7 +120,7 @@ export function NewStackForm({
           <input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="What this Stack is for"
+            placeholder="What this STAK is for"
             style={{
               fontSize: 13,
               padding: '8px 10px',
@@ -232,7 +232,7 @@ export function NewStackForm({
           onClick={create}
           disabled={pending}
         >
-          {pending ? 'Creating…' : 'Create Stack'}
+          {pending ? 'Creating…' : 'Create STAK'}
         </button>
       </div>
       <span

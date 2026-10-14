@@ -21,7 +21,7 @@ const PLACEHOLDER_SIDEBAR = {
   memory: { n: '', tone: 'neutral' as const },
   projects: '',
   machines: '',
-  stacks: '',
+  staks: '',
 };
 
 export default async function ProjectDetailPage({

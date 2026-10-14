@@ -26,9 +26,9 @@ export const registerPublishCommand = (
   dependencies: PublishCommandDependencies,
 ): void => {
   program
-    .command('publish <stack>')
-    .description('Publish a reusable public Stack from a local source or layer')
-    .option('--slug <slug>', 'public slug when the Stack name is not slug-safe')
+    .command('publish <stak>')
+    .description('Publish a reusable public STAK from a local source or layer')
+    .option('--slug <slug>', 'public slug when the STAK name is not slug-safe')
     .option('--dry-run', 'preview the publication without creating a version')
     .option('--json', 'emit structured JSON for dry-run')
     .option('--yes', 'publish non-interactively')

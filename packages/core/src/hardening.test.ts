@@ -121,7 +121,7 @@ describe('state hardening', () => {
     const stackDir = path.join(root, 'frontend');
     await mkdir(path.join(stackDir, 'skills', 'design'), { recursive: true });
     await writeFile(
-      path.join(stackDir, 'stack.yaml'),
+      path.join(stackDir, 'stak.yaml'),
       'schemaVersion: 1\nname: frontend\ndescription: Frontend\nskills:\n  - path: skills/design\n    requirement: required\n',
     );
     await writeFile(

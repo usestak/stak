@@ -90,7 +90,7 @@ const seedMain = async (
 const seedLayer = async (stackHome: string, stackDir: string, name: string) => {
   await mkdir(path.join(stackDir, 'skills', name), { recursive: true });
   await writeFile(
-    path.join(stackDir, 'stack.yaml'),
+    path.join(stackDir, 'stak.yaml'),
     `schemaVersion: 1\nname: ${name}-stack\ndescription: ${name} stack\nskills:\n  - path: skills/${name}\n    requirement: required\n`,
   );
   await writeFile(

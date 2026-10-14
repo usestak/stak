@@ -161,9 +161,9 @@ export const loadStacksView = async (
 
   const statusSentence = owned
     ? owned.skillCount === 0
-      ? `Your ${owned.name} Stack is empty.`
-      : `Your ${owned.name} Stack has ${owned.skillCount} Skill${owned.skillCount === 1 ? '' : 's'}.`
-    : "You don't have a Stack yet.";
+      ? `Your ${owned.name} STAK is empty.`
+      : `Your ${owned.name} STAK has ${owned.skillCount} Skill${owned.skillCount === 1 ? '' : 's'}.`
+    : "You don't have a STAK yet.";
 
   return {
     kind: 'ready',
@@ -180,7 +180,7 @@ export const loadStacksView = async (
       memory: { n: '', tone: 'neutral' },
       projects: '',
       machines: '',
-      stacks: owned ? '1' : '0',
+      staks: owned ? '1' : '0',
     },
     statusSentence,
     owned,

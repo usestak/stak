@@ -49,7 +49,7 @@ const makeStack = async (
     `---\nname: shared\ndescription: Shared skill\n---\n${body}\n`,
   );
   await writeFile(
-    path.join(directory, 'stack.yaml'),
+    path.join(directory, 'stak.yaml'),
     `schemaVersion: 1\nname: ${name}\ndescription: ${name} Stack\nextends: []\nskills:\n  - path: ./skills/shared\n    requirement: ${requirement}\n`,
   );
   return directory;
@@ -60,7 +60,7 @@ describe('local Stack loading', () => {
     const root = await temp();
     const directory = await makeStack(root, 'frontend');
     const first = await loadLocalStack(directory);
-    const second = await loadLocalStack(path.join(directory, 'stack.yaml'));
+    const second = await loadLocalStack(path.join(directory, 'stak.yaml'));
     expect(first.version).toEqual(second.version);
     expect(JSON.stringify(first.version)).not.toContain(
       path.resolve(directory),
@@ -79,12 +79,12 @@ describe('local Stack loading', () => {
     const base = await makeStack(root, 'base');
     const child = await makeStack(root, 'child', 'child');
     await writeFile(
-      path.join(child, 'stack.yaml'),
+      path.join(child, 'stak.yaml'),
       'schemaVersion: 1\nname: child\ndescription: Child\nextends:\n  - ../base\nskills: []\n',
     );
     expect((await loadLocalStack(child)).version.requirements).toHaveLength(1);
     await writeFile(
-      path.join(base, 'stack.yaml'),
+      path.join(base, 'stak.yaml'),
       'schemaVersion: 1\nname: base\ndescription: Base\nextends:\n  - ../child\nskills: []\n',
     );
     await expect(loadLocalStack(child)).rejects.toBeInstanceOf(StackCycleError);
@@ -97,14 +97,14 @@ describe('local Stack loading', () => {
       const directory = path.join(root, name);
       await mkdir(directory, { recursive: true });
       await writeFile(
-        path.join(directory, 'stack.yaml'),
+        path.join(directory, 'stak.yaml'),
         `schemaVersion: 1\nname: ${name}\ndescription: ${name}\nextends:\n  - ../base\nskills: []\n`,
       );
     }
     const top = path.join(root, 'top');
     await mkdir(top, { recursive: true });
     await writeFile(
-      path.join(top, 'stack.yaml'),
+      path.join(top, 'stak.yaml'),
       'schemaVersion: 1\nname: top\ndescription: top\nextends:\n  - ../left\n  - ../right\nskills: []\n',
     );
     expect((await loadLocalStack(top)).version.requirements).toHaveLength(1);
@@ -114,14 +114,14 @@ describe('local Stack loading', () => {
     const root = await temp();
     const directory = await makeStack(root, 'optional');
     await writeFile(
-      path.join(directory, 'stack.yaml'),
+      path.join(directory, 'stak.yaml'),
       'schemaVersion: 1\nname: optional\ndescription: Optional\nextends: []\nskills:\n  - path: ./missing\n    requirement: optional\n',
     );
     expect(
       (await loadLocalStack(directory)).version.skippedOptional,
     ).toHaveLength(1);
     await writeFile(
-      path.join(directory, 'stack.yaml'),
+      path.join(directory, 'stak.yaml'),
       'schemaVersion: 1\nname: required\ndescription: Required\nextends: []\nskills:\n  - path: ./missing\n    requirement: required\n',
     );
     await expect(loadLocalStack(directory)).rejects.toMatchObject({

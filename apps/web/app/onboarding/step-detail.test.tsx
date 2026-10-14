@@ -23,12 +23,12 @@ test('renderStepDetail renders plain text unchanged when there are no backticks'
   render(
     <div>
       {renderStepDetail(
-        'Sign in on another machine later to bring your Stack and Memory with you.',
+        'Sign in on another machine later to bring your STAK and Memory with you.',
       )}
     </div>,
   );
   expect(screen.queryByRole('button')).not.toBeInTheDocument();
   expect(
-    screen.getByText(/bring your Stack and Memory with you/),
+    screen.getByText(/bring your STAK and Memory with you/),
   ).toBeInTheDocument();
 });

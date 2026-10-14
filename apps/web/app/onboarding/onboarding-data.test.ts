@@ -208,7 +208,7 @@ describe('deriveOnboardingChecklist', () => {
   });
 
   // The second-machine step must not claim adding a machine removes
-  // dependency on the first - only that the Stack/Memory come along too.
+  // dependency on the first - only that the STAK/Memory come along too.
   it('does not claim a second machine removes dependency on the first', () => {
     const steps = deriveOnboardingChecklist({
       machines: [machine()],
@@ -216,6 +216,6 @@ describe('deriveOnboardingChecklist', () => {
     });
     const detail = steps.find((s) => s.key === 'second-machine')!.detail;
     expect(detail).not.toMatch(/no longer depends/i);
-    expect(detail.toLowerCase()).toContain('bring your stack and memory');
+    expect(detail.toLowerCase()).toContain('bring your stak and memory');
   });
 });

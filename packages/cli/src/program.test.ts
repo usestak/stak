@@ -427,8 +427,8 @@ describe('`stak use` renders the right proposal kind (P10B)', () => {
     const result = await runProgram(['use', 'frontend', '--dry-run'], {
       prepareUse: async () => ownedProposal,
     });
-    expect(result.output).toContain('your Cloud Stack: frontend');
-    expect(result.output).not.toContain('public Stack');
+    expect(result.output).toContain('your Cloud STAK: frontend');
+    expect(result.output).not.toContain('public STAK');
   });
 });
 
@@ -463,9 +463,9 @@ describe('STAK CLI', () => {
     expect(createProgram().name()).toBe('stak');
     const help = await runProgram(['--help']);
     expect(help.output).toContain('Usage: stak');
-    // The reusable domain object stays a "stack": the `use` command still takes a
-    // `<stack>` argument (`stak use <stack>`).
-    expect(help.output).toMatch(/use .*<stack>/);
+    // The reusable domain object's user-visible name is "STAK": the `use` command
+    // takes a `<stak>` argument (`stak use <stak>`).
+    expect(help.output).toMatch(/use .*<stak>/);
     const version = await runProgram(['--version']);
     expect(version.output.trim()).toBe('0.1.0');
   });
@@ -519,7 +519,7 @@ describe('STAK CLI', () => {
     expect(calls).toEqual(['preserve', 'prepare', 'launch', 'cleanup']);
     expect(result.output).toContain('Trying trial with Codex...');
     expect(result.output).toContain('temporary workspace');
-    expect(result.output).toContain('Your main Stack will not be changed.');
+    expect(result.output).toContain('Your main STAK will not be changed.');
     expect(result.output).toContain('Trial finished.');
     expect(result.output).toContain('Temporary files cleaned up.');
     // Internal isolation jargon stays out of default output.
@@ -1068,7 +1068,7 @@ describe('STAK CLI', () => {
   it('renders beginner-friendly status and diff without internal jargon', async () => {
     const status = await runProgram(['status']);
     const diff = await runProgram(['diff']);
-    expect(status.output).toContain('Stack: main');
+    expect(status.output).toContain('STAK: main');
     expect(status.output).toContain('0 skills ready');
     expect(status.output).not.toContain('Local preservation');
     expect(status.output).not.toContain('Restoration strategy');

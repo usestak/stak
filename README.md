@@ -4,8 +4,8 @@
 
 Memory STAK discovers the Agent Skills you have accumulated across Codex, Cursor, and
 Claude Code, captures them as a portable **Environment**, restores them on any
-machine, safely composes additional **stacks**, backs up your private agent
-**Memory**, and lets you try someone else's stack without disturbing your
+machine, safely composes additional **STAKs**, backs up your private agent
+**Memory**, and lets you try someone else's STAK without disturbing your
 existing setup.
 
 > Your STAK should survive your laptop. Your skills, your memory, your setup —
@@ -25,8 +25,8 @@ into each agent's directory — without ever overwriting content it does not own
 ## Concepts in one breath
 
 - **Skill** — an existing Agent Skill directory (a `SKILL.md` plus its files).
-- **stack** — a reusable, named collection of Skill requirements (defined by a
-  `stack.yaml`). The product is STAK; the thing you compose is a stack.
+- **STAK** — a reusable, named collection of Skill requirements (defined by a
+  `stak.yaml`).
 - **Environment** — your desired local setup. V0.1 has one: `main`.
 - **Machine** — a computer with its own bindings and placements; Machine state
   is never uploaded.
@@ -63,9 +63,9 @@ stak status    # see how this machine compares to main
 Then compose and project:
 
 ```bash
-stak use ./frontend-stack       # add a local stack to main
+stak use ./frontend-stak        # add a local STAK to main
 stak run codex                  # reconcile main into Codex's Skill directory
-stak try ./other-stack -- codex # try a stack in an isolated Codex session
+stak try ./other-stak -- codex  # try a STAK in an isolated Codex session
 ```
 
 And carry it across machines or share it:
@@ -74,7 +74,7 @@ And carry it across machines or share it:
 stak login
 stak push                       # back up main to STAK Cloud (private)
 stak pull                       # restore main on another machine
-stak publish ./frontend-stack   # publish a reusable public @owner/name stack
+stak publish ./frontend-stak    # publish a reusable public @owner/name STAK
 ```
 
 Full reference: [docs/commands.md](docs/commands.md).
@@ -86,7 +86,7 @@ Full reference: [docs/commands.md](docs/commands.md).
 - Trials run in an isolated scratch workspace with a temporary HOME.
 - Git references restore the exact revision and hash (`shell:false`, no shell
   interpolation).
-- Private snapshots stay private; public stacks are reference-only.
+- Private snapshots stay private; public STAKs are reference-only.
 
 See [docs/security.md](docs/security.md).
 

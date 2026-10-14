@@ -9,7 +9,7 @@ import type {
   UserStackSummary,
 } from '@stack/spec';
 
-import { loadStacksView, type StacksService } from './stacks-data.js';
+import { loadStacksView, type StacksService } from './staks-data.js';
 
 const USER = { id: 'user-1' };
 const A1 = '00000000-0000-4000-8000-0000000000a1';
@@ -150,7 +150,7 @@ describe('loadStacksView', () => {
   it('renders a deliberate empty state with no owned Stack', async () => {
     const view = ready(await loadStacksView(service({ owned: [] }), USER, A1));
     expect(view.owned).toBeNull();
-    expect(view.statusSentence).toMatch(/don't have a Stack/i);
+    expect(view.statusSentence).toMatch(/don't have a STAK/i);
   });
 
   it('never exposes the raw environment digest as a primary value', async () => {
@@ -194,7 +194,7 @@ describe('loadStacksView', () => {
         A1,
       ),
     );
-    expect(view.statusSentence).toBe('Your main Stack has 1 Skill.');
+    expect(view.statusSentence).toBe('Your main STAK has 1 Skill.');
   });
 
   it('never carries machine-installed/reconciliation state into Stack composition', async () => {

@@ -22,12 +22,12 @@ type Row = { skillId: string; name: string; inStack: boolean; paused: boolean };
 type Publication = GetUserStackPublicationStatusResponse['publication'];
 
 /**
- * `/stacks/[stackId]` — add Skill, remove Skill, pause/resume within the Stack, rename,
+ * `/staks/[stackId]` — add Skill, remove Skill, pause/resume within the Stack, rename,
  * review, save (P10B §12-13). Saving always goes through a single `updateUserStack` call
  * that commits a brand-new immutable version — never an in-place edit, and `main` is never
  * touched (verified server-side in cloud-server's user-stack-service.test.ts).
  */
-export function EditStackForm({
+export function EditStakForm({
   detail,
   approvedSkills,
   initialPublication,
@@ -149,7 +149,7 @@ export function EditStackForm({
         <div style={{ border: '1px solid var(--line-2)', borderRadius: 8 }}>
           {included.length === 0 ? (
             <p style={{ padding: 14, fontSize: 13, color: 'var(--faint)' }}>
-              This Stack would have no Skills.
+              This STAK would have no Skills.
             </p>
           ) : (
             included.map((r) => (
@@ -219,7 +219,7 @@ export function EditStackForm({
         <div
           className="stak-stack-form-picker"
           role="group"
-          aria-label="Skills in this Stack"
+          aria-label="Skills in this STAK"
         >
           {rows.map((r) => (
             <div key={r.skillId} className="stak-stack-form-picker-row">
@@ -241,7 +241,7 @@ export function EditStackForm({
                   }}
                   onClick={() => togglePaused(r.skillId)}
                 >
-                  {r.paused ? 'Resume in Stack' : 'Pause in Stack'}
+                  {r.paused ? 'Resume in STAK' : 'Pause in STAK'}
                 </button>
               ) : null}
             </div>
@@ -287,7 +287,7 @@ export function EditStackForm({
             {publication.status === 'changed-since-published' && (
               <>
                 <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
-                  This Stack&apos;s composition has changed since that version
+                  This STAK&apos;s composition has changed since that version
                   was published.
                 </span>
                 <button
@@ -304,8 +304,8 @@ export function EditStackForm({
             {confirmingUnpublish ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
-                  Stop publishing this Stack? The public link will stop working.
-                  Your saved Stack stays unchanged.
+                  Stop publishing this STAK? The public link will stop working.
+                  Your saved STAK stays unchanged.
                 </span>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button
@@ -359,10 +359,10 @@ export function EditStackForm({
           </div>
         )}
         <span style={{ fontSize: 12, color: 'var(--dim)', maxWidth: 480 }}>
-          Publishing makes a reference-only copy of this Stack&apos;s current
+          Publishing makes a reference-only copy of this STAK&apos;s current
           saved version public at a URL anyone can read. If any Skill in it
           can&apos;t be published (for example, a Local Skill with no Git
-          origin), publishing fails for the whole Stack with a clear reason — it
+          origin), publishing fails for the whole STAK with a clear reason — it
           never publishes a partial composition.
         </span>
         <span

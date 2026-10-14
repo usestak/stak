@@ -126,7 +126,7 @@ const seedAuthoringStack = async (): Promise<string> => {
   git(repo, ['config', 'user.name', 'Test']);
   git(repo, ['remote', 'add', 'origin', 'https://github.com/acme/design.git']);
   await writeFile(
-    path.join(repo, 'stack.yaml'),
+    path.join(repo, 'stak.yaml'),
     'schemaVersion: 1\nname: frontend\ndescription: Frontend Stack\nskills:\n  - path: skills/design\n',
     'utf8',
   );

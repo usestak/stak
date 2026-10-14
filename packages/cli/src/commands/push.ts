@@ -21,7 +21,7 @@ export const registerPushCommand = (
 ): void => {
   program
     .command('push')
-    .description('Upload your main Stack to the Cloud')
+    .description('Upload your main STAK to the Cloud')
     .option('--dry-run', 'preview the push without uploading or committing')
     .option('--json', 'emit structured JSON for dry-run')
     .option('--yes', 'create the cloud version non-interactively')

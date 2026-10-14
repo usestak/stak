@@ -22,16 +22,16 @@ Capture the current global Skills as the desired Environment `main`.
 Compare this machine to `main`: satisfied, modified, missing, uncertain,
 untracked, drift.
 
-### `stak use <stack> [--dry-run] [--json] [--yes]`
+### `stak use <stak> [--dry-run] [--json] [--yes]`
 
-Add a Stack layer to `main`. `<stack>` may be a local path or a public
+Add a STAK layer to `main`. `<stak>` may be a local path or a public
 `@owner/name`. Desired-state only — no agent directories are changed. Remote use
 reacquires exact references, verifies hashes, and persists the imported version
 locally so subsequent `status`/`diff`/`remove` work offline.
 
 ### `stak remove <name|id> [--yes]`
 
-Remove a Stack layer from `main`. Skills still required by other layers are
+Remove a STAK layer from `main`. Skills still required by other layers are
 preserved.
 
 ### `stak run <codex|cursor|claude> [--dry-run] [--json] [--yes]`
@@ -45,10 +45,10 @@ without a shell and with argument-array semantics preserved (see
 [security](./security.md#windows-npm-shims)). `--dry-run` reconciles and previews
 without launching; add `--json` for structured output.
 
-### `stak try <stack> -- codex [--dry-run] [--json]`
+### `stak try <stak> -- codex [--dry-run] [--json]`
 
-Run a Stack in an isolated scratch Codex session (temporary HOME/`CODEX_HOME`).
-`<stack>` may be local or public. `main` and normal bindings are untouched.
+Run a STAK in an isolated scratch Codex session (temporary HOME/`CODEX_HOME`).
+`<stak>` may be local or public. `main` and normal bindings are untouched.
 Isolated `try` is Codex-only in V0.1.
 
 ## Memory (private, local)
@@ -102,17 +102,17 @@ no-op when unchanged. Does not change agent bindings.
 Reconstruct `main` on this machine (reference reacquisition + private snapshot
 download, all verified, then an atomic commit). Does not change agent bindings.
 
-### `stak publish <stack> [--slug <slug>] [--dry-run] [--json] [--yes]`
+### `stak publish <stak> [--slug <slug>] [--dry-run] [--json] [--yes]`
 
-Publish a reference-only public Stack as `@owner/name` from a local source or an
+Publish a reference-only public STAK as `@owner/name` from a local source or an
 active local layer.
 
 ## Current V0.1 restrictions
 
 - One persistent Environment: `main` only. `stak switch` is deferred.
 - Isolated `try` supports Codex only.
-- Public Stacks are reference-only (snapshot-backed Skills cannot be published).
-- No automatic Stack updates; an already-active public Stack is not silently
+- Public STAKs are reference-only (snapshot-backed Skills cannot be published).
+- No automatic STAK updates; an already-active public STAK is not silently
   upgraded.
 - No force override for conflicts (`--force` does not exist); conflicts block
   conservatively.

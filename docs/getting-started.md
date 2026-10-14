@@ -43,7 +43,7 @@ stak diff               # detailed per-Skill differences
 ## Compose and project
 
 ```bash
-stak use ./frontend-stack     # add a local Stack layer to main (desired only)
+stak use ./frontend-stak      # add a local STAK layer to main (desired only)
 stak run codex                # project main into Codex's Skill directory
 stak run cursor
 stak run claude
@@ -61,10 +61,10 @@ shim; STAK launches it safely without a shell (see
 ## Try before you adopt
 
 ```bash
-stak try ./some-stack -- codex
+stak try ./some-stak -- codex
 ```
 
-Runs the Stack in an isolated scratch workspace with a temporary HOME and
+Runs the STAK in an isolated scratch workspace with a temporary HOME and
 `CODEX_HOME`. `main` and your normal bindings are untouched. Isolated `try` is
 Codex-only in V0.1.
 
@@ -79,10 +79,10 @@ stak pull             # reconstruct main with matching Skill hashes
 stak run codex        # then project it into agents
 ```
 
-## Share a Stack publicly
+## Share a STAK publicly
 
 ```bash
-stak publish ./frontend-stack     # -> @you/frontend (reference-only)
+stak publish ./frontend-stak      # -> @you/frontend (reference-only)
 # others:
 stak use @you/frontend
 stak try @you/frontend -- codex

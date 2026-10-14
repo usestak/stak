@@ -60,7 +60,7 @@ export async function createUserStackAction(
   } catch (error) {
     return {
       ok: false,
-      error: messageOf(error, 'Could not create this Stack.'),
+      error: messageOf(error, 'Could not create this STAK.'),
     };
   }
 }
@@ -81,7 +81,7 @@ export async function getUserStackDetailAction(
   } catch (error) {
     return {
       ok: false,
-      error: messageOf(error, 'Could not load this Stack.'),
+      error: messageOf(error, 'Could not load this STAK.'),
     };
   }
 }
@@ -115,7 +115,7 @@ export async function updateUserStackAction(
       };
     return {
       ok: false,
-      error: messageOf(error, 'Could not save this Stack.'),
+      error: messageOf(error, 'Could not save this STAK.'),
     };
   }
 }
@@ -164,7 +164,7 @@ export async function publishUserStackAction(
   } catch (error) {
     return {
       ok: false,
-      error: messageOf(error, 'Could not publish this Stack.'),
+      error: messageOf(error, 'Could not publish this STAK.'),
     };
   }
 }
@@ -186,7 +186,7 @@ export async function unpublishUserStackAction(
   } catch (error) {
     return {
       ok: false,
-      error: messageOf(error, 'Could not stop publishing this Stack.'),
+      error: messageOf(error, 'Could not stop publishing this STAK.'),
     };
   }
 }

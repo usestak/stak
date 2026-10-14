@@ -335,7 +335,7 @@ const MOVES = [
     n: '2',
     t: 'GET YOUR SETUP',
     cmd: 'stak pull',
-    d: 'Pull down the Stack you already approved.',
+    d: 'Pull down the STAK you already approved.',
   },
   {
     n: '3',

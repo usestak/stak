@@ -138,12 +138,12 @@ which drives confidence and is required for anything above `candidate`.
 Confidence is about _identity_, strictly separate from lifecycle. An `archived` project
 may be `verified`; an `active` project may be `unresolved` on this machine.
 
-| Confidence     | Meaning                                                                                                                                                                                                | May authorize automatic write?                   |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
-| **VERIFIED**   | Strong portable evidence establishes identity unambiguously — a single canonical Git remote match, or a Project ID delivered by an authoritative registry/marker.                                      | Yes (subject to lifecycle + availability gates). |
-| **CONFIRMED**  | The user explicitly confirmed a durable identity/mapping relationship earlier.                                                                                                                         | Yes.                                             |
-| **CANDIDATE**  | Weak/heuristic evidence suggests a match: folder name, `package.json`/project metadata, `stack.yaml`, file fingerprints, repository structure, an exact historical path, or an unauthenticated marker. | **No** — requires user confirmation first.       |
-| **UNRESOLVED** | No authorized local destination exists (no strong claim, no confirmed mapping, no accepted candidate).                                                                                                 | No — preserve Memory, do not write.              |
+| Confidence     | Meaning                                                                                                                                                                                               | May authorize automatic write?                   |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| **VERIFIED**   | Strong portable evidence establishes identity unambiguously — a single canonical Git remote match, or a Project ID delivered by an authoritative registry/marker.                                     | Yes (subject to lifecycle + availability gates). |
+| **CONFIRMED**  | The user explicitly confirmed a durable identity/mapping relationship earlier.                                                                                                                        | Yes.                                             |
+| **CANDIDATE**  | Weak/heuristic evidence suggests a match: folder name, `package.json`/project metadata, `stak.yaml`, file fingerprints, repository structure, an exact historical path, or an unauthenticated marker. | **No** — requires user confirmation first.       |
+| **UNRESOLVED** | No authorized local destination exists (no strong claim, no confirmed mapping, no accepted candidate).                                                                                                | No — preserve Memory, do not write.              |
 
 **Heuristics may only produce CANDIDATE.** They rank suggestions; they never authorize a
 write. This is invariant #11.
