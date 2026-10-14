@@ -26,16 +26,38 @@ test('the name step blocks "main" and "@"-prefixed names, and allows a normal na
   fireEvent.change(input, { target: { value: 'main' } });
   expect(next).toBeDisabled();
   expect(screen.getByRole('alert')).toHaveTextContent(/reserved/i);
+  expect(screen.queryByText(/saved as/i)).not.toBeInTheDocument();
 
   fireEvent.change(input, { target: { value: 'MAIN' } });
   expect(next).toBeDisabled();
+  expect(screen.queryByText(/saved as/i)).not.toBeInTheDocument();
 
   fireEvent.change(input, { target: { value: '@frontend' } });
   expect(next).toBeDisabled();
   expect(screen.getByRole('alert')).toHaveTextContent(
     /reserved for public references/i,
   );
+  expect(screen.queryByText(/saved as/i)).not.toBeInTheDocument();
 
   fireEvent.change(input, { target: { value: 'frontend' } });
   expect(next).toBeEnabled();
+  expect(screen.getByText(/saved as/i)).toBeInTheDocument();
+});
+
+/** A disabled "Next" must be an actual disabled <button> (native click/keyboard
+ *  blocking), not just dimmed via CSS — clicking it while invalid must never advance
+ *  the step. */
+test('a disabled "Next" button cannot be clicked past', () => {
+  render(<NewStackForm approvedSkills={approvedSkills} />);
+
+  const input = screen.getByPlaceholderText('e.g. frontend');
+  fireEvent.change(input, { target: { value: '@frontend' } });
+
+  const next = screen.getByRole('button', { name: /next: choose skills/i });
+  expect(next).toHaveAttribute('disabled');
+  fireEvent.click(next);
+  expect(screen.getByPlaceholderText('e.g. frontend')).toBeInTheDocument();
+  expect(
+    screen.queryByRole('group', { name: 'Choose Skills' }),
+  ).not.toBeInTheDocument();
 });

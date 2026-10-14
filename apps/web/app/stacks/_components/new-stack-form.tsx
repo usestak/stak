@@ -95,12 +95,10 @@ export function NewStackForm({
               color: 'var(--ink)',
             }}
           />
-          {name.trim() ? (
+          {nameValid ? (
             <span style={{ fontSize: 12, color: 'var(--faint)' }}>
               Saved as{' '}
-              <span style={{ fontFamily: 'var(--mono)' }}>
-                {canonicalName || '(empty)'}
-              </span>
+              <span style={{ fontFamily: 'var(--mono)' }}>{canonicalName}</span>
             </span>
           ) : null}
           <span
@@ -136,8 +134,7 @@ export function NewStackForm({
         <div>
           <button
             type="button"
-            className="stak-pill"
-            style={{ cursor: 'pointer' }}
+            className="stak-pill stak-stack-form-next"
             disabled={!nameValid}
             onClick={() => setStep('skills')}
           >

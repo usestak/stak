@@ -128,6 +128,19 @@
   font-size: 13.5px;
 }
 
+/* The name-step "Next" control: a real disabled HTML button (native keyboard/click
+   blocking, no JS needed) that also needs to actually LOOK disabled — `.stak-pill` alone
+   has no `:disabled` treatment anywhere, so without this it stayed full-opacity with a
+   pointer cursor even while inert. Scoped to this one button, not `.stak-pill` generally,
+   so no other STAK control's disabled look changes. */
+.stak-stack-form-next {
+  cursor: pointer;
+}
+.stak-stack-form-next:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* Create/edit named-Stack forms — a reusable step shell. */
 .stak-stack-form-step {
   display: flex;
