@@ -214,7 +214,7 @@ export type PrivacyMode = {
 };
 
 /** Standard/Protected privacy tabs (design: `setStd`/`setPro`, `pv`). The
- * "ON DELL" panel never changes; only the "IN STAK CLOUD" panel and the
+ * "ON WINDOWS" panel never changes; only the "IN STAK CLOUD" panel and the
  * copy block beside the tabs swap with mode.
  *
  * Design source (`STAK-Landing-Layered.dc.html:187`) makes `#privacy` a
@@ -271,7 +271,7 @@ export function PrivacyPanel({
       <div className="stak-landing-privacy-panels">
         <div className="stak-landing-pvgrid">
           <div className="stak-landing-pvcard">
-            <span className="stak-landing-pvcard-k">ON DELL</span>
+            <span className="stak-landing-pvcard-k">ON WINDOWS</span>
             <span className="stak-landing-pvcard-text">
               Migrations must run inside a transaction. CI uses Postgres 15.
             </span>

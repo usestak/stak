@@ -432,7 +432,7 @@ const PRIVACY_MODES: [PrivacyMode, PrivacyMode] = [
     rec: 'On Protected, use your passkey or recovery file to unlock it.',
     cloudLabel: 'IN STAK CLOUD',
     cloudText: 'b64:9QeX2kT0vR+aLw7mYc1Zp4Hs…Nf8uE3jQ0bD6tVyK2oPq==',
-    cloudWho: 'Encrypted before it leaves DELL. Memory STAK can’t read it.',
+    cloudWho: 'Encrypted before it leaves Windows. Memory STAK can’t read it.',
     tone: 'green',
   },
 ];
