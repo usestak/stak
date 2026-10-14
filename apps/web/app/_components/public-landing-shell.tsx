@@ -37,7 +37,7 @@ import { HeroWord, ScrollStory } from './landing-scroll-story';
  * this file and all its copy stay a plain Server Component, fully
  * crawlable without JS.
  *
- * The hero's pinned DELL -> STAK -> MacBook scroll story and the rotating
+ * The hero's pinned Windows -> STAK -> macOS scroll story and the rotating
  * hero word are intentionally left as a static "frame 0" stub here - P9
  * Task 2 implements the actual scroll-scrubbing/rotation motion on top of
  * this same markup (design doc's own "STATIC FRAMES" note: "A fixed step
@@ -154,7 +154,7 @@ function Hero() {
       </p>
       <div id="install" className="stak-landing-install-anchor" />
       <CopyRow command="npm install -g @usestak/cli" />
-      {/* Pinned, scroll-scrubbed DELL -> Your STAK -> MacBook portability
+      {/* Pinned, scroll-scrubbed Windows -> Your STAK -> macOS portability
           story across 7 steps (P9 Task 2). See landing-scroll-story.tsx for
           the scroll-to-step formula and the exact per-step data/transforms,
           ported faithfully from the design source. */}
@@ -185,7 +185,7 @@ function ProblemSection() {
         </div>
         <div className="stak-landing-dellcard">
           <div className="stak-landing-dellcard-head">
-            <span className="stak-landing-dellcard-name">DELL</span>
+            <span className="stak-landing-dellcard-name">Windows</span>
             <span className="stak-landing-dellcard-sub">
               What your agents rely on
             </span>
@@ -207,7 +207,7 @@ function ProblemSection() {
           </DellRow>
           <div className="stak-landing-dellcard-foot">
             <span className="stak-landing-dot" data-tone="faint" />
-            Still tied to DELL.
+            Still tied to Windows.
           </div>
         </div>
       </div>
@@ -460,9 +460,9 @@ function PrivacySection() {
   );
 }
 
-const MACHINE_CARDS: [MachineCard, MachineCard] = [
+const MACHINE_CARDS: [MachineCard, MachineCard, MachineCard] = [
   {
-    name: 'DELL',
+    name: 'Windows',
     kind: 'XPS 15 · Windows 11',
     status: 'Up to date · 12 min ago',
     tone: 'green',
@@ -473,13 +473,24 @@ const MACHINE_CARDS: [MachineCard, MachineCard] = [
     ],
   },
   {
-    name: 'MacBook',
+    name: 'macOS',
     kind: 'MacBook Air · macOS 15',
     status: 'Updates waiting · 3 hours ago',
     tone: 'amber',
     rows: [
       { a: 'Skills', b: '30 of 31 approved' },
       { a: 'Projects', b: '7 of 9 on this machine' },
+      { a: 'Memory', b: 'Backed up here' },
+    ],
+  },
+  {
+    name: 'Linux',
+    kind: 'ThinkPad X1 · Ubuntu 24.04',
+    status: 'Last seen 2 days ago',
+    tone: 'faint',
+    rows: [
+      { a: 'Skills', b: '28 of 31 approved' },
+      { a: 'Projects', b: '5 of 9 on this machine' },
       { a: 'Memory', b: 'Backed up here' },
     ],
   },
@@ -511,7 +522,7 @@ function MachinesSection() {
         </div>
         <div className="stak-landing-machinepanel-strip">
           <span className="stak-landing-tone-amber stak-landing-small">
-            ON MACBOOK
+            ON MACOS
           </span>
           <span className="stak-landing-strip-cmd">
             <span className="stak-landing-tone-dim">$ </span>

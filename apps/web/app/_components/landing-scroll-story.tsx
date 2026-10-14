@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 /**
- * Hero scroll-driven portability story (DELL -> Your STAK -> MacBook across
+ * Hero scroll-driven portability story (Windows -> Your STAK -> macOS across
  * 7 steps) + the rotating hero word ("STAK"/"SKILLS"/"MEMORY"/"AGENT").
  *
  * Ported FAITHFULLY from `STAK-Landing-Layered.dc.html`'s `Component` class
@@ -180,36 +180,36 @@ type Step = [
 
 const STEPS: Step[] = [
   [
-    'DELL',
+    'Windows',
     'stak scan',
     '',
-    'Your agent setup starts on DELL.',
+    'Your agent setup starts on Windows.',
     'Skills, Memory and local setup accumulate as you work.',
   ],
-  ['DELL', 'stak status', '', 'STAK makes the portable parts visible.', ''],
+  ['Windows', 'stak status', '', 'STAK makes the portable parts visible.', ''],
   [
-    'DELL',
+    'Windows',
     'stak push\nstak memory backup',
     '',
     'You choose what goes to STAK Cloud, and when.',
     'Your Stack and Memory move only when you tell STAK to move them.',
   ],
   [
-    'DELL',
+    'Windows',
     'stak skill check review-pr',
     '',
     'Check a Skill locally. Review the update on the web.',
     '',
   ],
   [
-    'MACBOOK',
+    'macOS',
     'stak login\nstak pull\nstak memory recover',
     '',
-    'On MacBook, pull your Stack and recover your Memory.',
+    'On macOS, pull your Stack and recover your Memory.',
     '',
   ],
   [
-    'MACBOOK',
+    'macOS',
     'stak memory restore',
     '',
     'Restore Memory into the agents that use it.',
@@ -221,10 +221,10 @@ const STEPS: Step[] = [
   // phrase in the "Move to another machine" section, rather than
   // reproducing a command that would fail if actually typed.
   [
-    'MACBOOK',
+    'macOS',
     'stak run claude',
     '',
-    'When you’re ready to work, STAK applies the approved setup on MacBook.',
+    'When you’re ready to work, STAK applies the approved setup on macOS.',
     '',
   ],
 ];
@@ -326,11 +326,11 @@ export function ScrollStory() {
       ];
   const tfS = ['translate(-8px,8px)', 'translate(0,0)', 'translate(8px,-8px)'];
   const mem =
-    s < 4 ? 'on DELL' : s < 5 ? 'local STAK store' : 'Claude Code · Codex';
+    s < 4 ? 'on Windows' : s < 5 ? 'local STAK store' : 'Claude Code · Codex';
 
   const zones = [
     {
-      n: 'DELL',
+      n: 'Windows',
       s: s < 6 ? 'working copy' : 'last reported earlier',
       x: mob ? '14%' : '18%',
       c: s < 3 ? INK : DIM,
@@ -342,7 +342,7 @@ export function ScrollStory() {
       c: s === 3 || s === 2 ? ORANGE : DIM,
     },
     {
-      n: 'MacBook',
+      n: 'macOS',
       s:
         s < 4
           ? 'not set up yet'
@@ -388,7 +388,7 @@ export function ScrollStory() {
         { a: 'Paused', b: '1 skill', c: DIM },
         {
           a: 'Applied',
-          b: s === 6 ? 'on MacBook' : s >= 4 ? 'pulled' : 'on DELL',
+          b: s === 6 ? 'on macOS' : s >= 4 ? 'pulled' : 'on Windows',
           c: s === 6 ? GREEN : FAINT,
         },
       ],

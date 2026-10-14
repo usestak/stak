@@ -301,42 +301,43 @@ export function PrivacyPanel({
 }
 
 export type MachineCard = {
-  name: 'DELL' | 'MacBook';
+  name: 'Windows' | 'macOS' | 'Linux';
   kind: string;
   status: string;
-  tone: 'green' | 'amber';
+  tone: 'green' | 'amber' | 'faint';
   rows: { a: string; b: string }[];
 };
 
-/** Machines "Viewing as" DELL/MacBook toggle (design: `viewDell`/`viewMac`,
- * `vw`). Both cards are always rendered (desktop/tablet show them side by
- * side per the Responsive notes); the toggle only highlights which one is
- * "being viewed", it never hides the other - the design's own `card()`
- * helper only changes background/the "· viewing" suffix, not visibility. */
+/** Machines "Viewing as" Windows/macOS/Linux toggle (design: `viewDell`/
+ * `viewMac`, `vw`, originally a 2-way DELL/MacBook toggle). All cards are
+ * always rendered (desktop/tablet show them side by side per the
+ * Responsive notes); the toggle only highlights which one is "being
+ * viewed", it never hides the others - the design's own `card()` helper
+ * only changes background/the "· viewing" suffix, not visibility. */
 export function MachinesPanel({
   cards,
 }: {
-  cards: [MachineCard, MachineCard];
+  cards: [MachineCard, MachineCard, MachineCard];
 }) {
-  const [viewing, setViewing] = useState<'DELL' | 'MacBook'>('DELL');
+  const [viewing, setViewing] = useState<MachineCard['name']>(cards[0].name);
 
   return (
     <>
       <div className="stak-landing-viewas">
         <span className="stak-landing-viewas-label">Viewing as</span>
-        {(['DELL', 'MacBook'] as const).map((name) => (
+        {cards.map((c) => (
           <button
-            key={name}
+            key={c.name}
             type="button"
-            onClick={() => setViewing(name)}
-            aria-pressed={viewing === name}
+            onClick={() => setViewing(c.name)}
+            aria-pressed={viewing === c.name}
             className={
-              viewing === name
+              viewing === c.name
                 ? 'stak-landing-viewas-btn stak-landing-viewas-btn--active'
                 : 'stak-landing-viewas-btn'
             }
           >
-            {name}
+            {c.name}
           </button>
         ))}
       </div>

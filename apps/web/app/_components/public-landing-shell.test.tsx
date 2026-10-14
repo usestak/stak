@@ -80,7 +80,7 @@ test('hero renders the exact headline lines, lead copy, and a copy-anywhere inst
   expect(installRow).toHaveTextContent('Copied ✓');
 });
 
-test('Problem section shows the DELL snapshot with the exact synthetic rows', () => {
+test('Problem section shows the Windows snapshot with the exact synthetic rows', () => {
   render(<PublicLandingShell />);
 
   expect(
@@ -90,7 +90,7 @@ test('Problem section shows the DELL snapshot with the exact synthetic rows', ()
   ).toBeInTheDocument();
   expect(screen.getAllByText('Claude Code').length).toBeGreaterThan(0);
   expect(screen.getByText('24')).toBeInTheDocument();
-  expect(screen.getByText('Still tied to DELL.')).toBeInTheDocument();
+  expect(screen.getByText('Still tied to Windows.')).toBeInTheDocument();
 });
 
 test('This Is Your STAK shows a 4-way tab control and all 4 object cards with their rows', () => {
@@ -161,22 +161,25 @@ test('Privacy section has working Standard/Protected tabs with the honest Protec
   ).toBeInTheDocument();
 });
 
-test('Machines section has a working DELL/MacBook viewing-as toggle and both machine cards', () => {
+test('Machines section has a working Windows/macOS/Linux viewing-as toggle and all three machine cards', () => {
   render(<PublicLandingShell />);
 
   expect(
     screen.getByRole('heading', { name: 'Know where each machine left off.' }),
   ).toBeInTheDocument();
 
-  const dellBtn = screen.getByRole('button', { name: 'DELL' });
-  const macBtn = screen.getByRole('button', { name: 'MacBook' });
-  expect(dellBtn).toHaveAttribute('aria-pressed', 'true');
+  const winBtn = screen.getByRole('button', { name: 'Windows' });
+  const macBtn = screen.getByRole('button', { name: 'macOS' });
+  const linuxBtn = screen.getByRole('button', { name: 'Linux' });
+  expect(winBtn).toHaveAttribute('aria-pressed', 'true');
+  expect(linuxBtn).toHaveAttribute('aria-pressed', 'false');
 
   fireEvent.click(macBtn);
   expect(macBtn).toHaveAttribute('aria-pressed', 'true');
-  expect(dellBtn).toHaveAttribute('aria-pressed', 'false');
+  expect(winBtn).toHaveAttribute('aria-pressed', 'false');
 
   expect(screen.getByText('Updates waiting · 3 hours ago')).toBeInTheDocument();
+  expect(screen.getByText('Last seen 2 days ago')).toBeInTheDocument();
   expect(screen.getByText(/stak skill update/)).toBeInTheDocument();
 });
 
