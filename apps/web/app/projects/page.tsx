@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 
 import { AppSidebar } from '../_components/app-sidebar';
 import { CommandDock } from '../_components/command-dock';
+import { InlineCommand } from '../_components/inline-command';
 import { MachineChooser } from '../_components/machine-chooser';
 import { ShellNotice } from '../_components/shell-notice';
 import { getCloudService } from '../../lib/cloud-service';
@@ -42,8 +43,8 @@ export default async function ProjectsPage({
       <ShellNotice active="projects" handle={handle} title="No machines yet">
         <p>
           Connect this computer to your account first. In your terminal, run{' '}
-          <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>, then{' '}
-          <code style={{ fontFamily: 'var(--mono)' }}>stak scan</code>.
+          <InlineCommand command="stak login" />, then{' '}
+          <InlineCommand command="stak scan" />.
         </p>
       </ShellNotice>
     );
@@ -57,8 +58,8 @@ export default async function ProjectsPage({
         {!view.anyCheckedIn ? (
           <p>
             None of your machines has checked in yet. Run{' '}
-            <code style={{ fontFamily: 'var(--mono)' }}>stak status</code> on
-            the machine you want, then pick it here.
+            <InlineCommand command="stak status" /> on the machine you want,
+            then pick it here.
           </p>
         ) : null}
         <MachineChooser options={view.machines} basePath="/projects" />

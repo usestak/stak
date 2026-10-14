@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 
 import { AppSidebar } from '../../_components/app-sidebar';
 import { CommandDock } from '../../_components/command-dock';
+import { InlineCommand } from '../../_components/inline-command';
 import { MachineChooser } from '../../_components/machine-chooser';
 import { ShellNotice } from '../../_components/shell-notice';
 import { getCloudService } from '../../../lib/cloud-service';
@@ -55,8 +56,8 @@ export default async function MemoryPage({
       <ShellNotice active="memory" handle={handle} title="No machines yet">
         <p>
           Connect this computer to your account first. In your terminal, run{' '}
-          <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>, then{' '}
-          <code style={{ fontFamily: 'var(--mono)' }}>stak scan</code>.
+          <InlineCommand command="stak login" />, then{' '}
+          <InlineCommand command="stak scan" />.
         </p>
       </ShellNotice>
     );
@@ -70,8 +71,8 @@ export default async function MemoryPage({
         {!view.anyCheckedIn ? (
           <p>
             None of your machines has checked in yet. Run{' '}
-            <code style={{ fontFamily: 'var(--mono)' }}>stak status</code> on
-            the machine you want, then pick it here.
+            <InlineCommand command="stak status" /> on the machine you want,
+            then pick it here.
           </p>
         ) : null}
         <MachineChooser options={view.machines} basePath="/memory" />
@@ -127,11 +128,8 @@ export default async function MemoryPage({
               {view.needsRecoveryMethod ? (
                 <>
                   Needs attention — without one, a lost device means lost
-                  Memory. Run{' '}
-                  <code style={{ fontFamily: 'var(--mono)' }}>
-                    stak memory protect
-                  </code>{' '}
-                  on a machine that has it.
+                  Memory. Run <InlineCommand command="stak memory protect" /> on
+                  a machine that has it.
                 </>
               ) : view.mode === 'protected' ? (
                 'A passkey or recovery file unlocks your backups.'
@@ -169,11 +167,8 @@ export default async function MemoryPage({
               {view.history.length === 0 ? (
                 <p className="stak-mem-empty">
                   No backups yet — that&apos;s expected until your first one.
-                  Run{' '}
-                  <code style={{ fontFamily: 'var(--mono)' }}>
-                    stak memory backup
-                  </code>{' '}
-                  on {view.viewing.name} to create it.
+                  Run <InlineCommand command="stak memory backup" /> on{' '}
+                  {view.viewing.name} to create it.
                 </p>
               ) : (
                 <ul className="stak-mem-history">

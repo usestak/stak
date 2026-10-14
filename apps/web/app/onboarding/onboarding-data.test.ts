@@ -183,4 +183,39 @@ describe('deriveOnboardingChecklist', () => {
     expect(steps.find((s) => s.key === 'approved')?.done).toBe(false);
     expect(steps.find((s) => s.key === 'agents-found')?.done).toBe(false);
   });
+
+  // Launch-polish command-truth pass: verified from actual CLI command
+  // semantics that the correct first-run sequence is login -> scan -> choose
+  // Memory mode -> first backup (`stak scan` is local/read-only and has no
+  // dependency on being signed in first; it's step 2, never replaced by
+  // `stak memory backup`, which was Overview's previous, incorrect claim).
+  it('teaches the verified first-run sequence in order: login, scan, memory mode, backup', () => {
+    const steps = deriveOnboardingChecklist({
+      machines: [],
+      memory: memory(),
+    });
+    expect(steps.map((s) => s.key)).toEqual([
+      'approved',
+      'agents-found',
+      'memory-mode',
+      'first-backup',
+      'second-machine',
+    ]);
+    expect(steps[0]!.detail).toContain('stak login');
+    expect(steps[1]!.detail).toContain('stak scan');
+    expect(steps[2]!.detail).toContain('stak memory protect');
+    expect(steps[3]!.detail).toContain('stak memory backup');
+  });
+
+  // The second-machine step must not claim adding a machine removes
+  // dependency on the first - only that the Stack/Memory come along too.
+  it('does not claim a second machine removes dependency on the first', () => {
+    const steps = deriveOnboardingChecklist({
+      machines: [machine()],
+      memory: memory(),
+    });
+    const detail = steps.find((s) => s.key === 'second-machine')!.detail;
+    expect(detail).not.toMatch(/no longer depends/i);
+    expect(detail.toLowerCase()).toContain('bring your stack and memory');
+  });
 });

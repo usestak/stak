@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 
 import { FocusedShell } from '@/app/_components/focused-shell';
+import { InlineCommand } from '@/app/_components/inline-command';
 import { getSessionUser } from '@/lib/session';
 
 import { RecoverClient } from './recover-client';
@@ -33,8 +34,8 @@ export default async function MemoryRecoverPage({
           If your Memory is Protected with a passkey, the CLI opens this browser
           with a secure recovery session. Restoring it into your agents&apos;
           files is a separate step —{' '}
-          <code style={{ fontFamily: 'var(--mono)' }}>stak memory restore</code>
-          , run on that machine afterward.
+          <InlineCommand command="stak memory restore" />, run on that machine
+          afterward.
         </p>
       </FocusedShell>
     );

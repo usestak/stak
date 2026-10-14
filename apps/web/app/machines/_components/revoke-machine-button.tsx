@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
+import { InlineCommand } from '../../_components/inline-command';
 import { revokeMachineAction } from '../actions';
 
 /**
@@ -59,7 +60,7 @@ export function RevokeMachineButton({
         <p className="stak-revoke-warn">
           This is your only active machine. After revoking, nothing can check in
           or back up Memory until you approve a new machine with{' '}
-          <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>.
+          <InlineCommand command="stak login" />.
         </p>
       ) : null}
       <div className="stak-revoke-actions">

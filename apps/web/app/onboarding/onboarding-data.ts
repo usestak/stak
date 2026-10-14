@@ -89,7 +89,8 @@ export const deriveOnboardingChecklist = (input: {
     {
       key: 'second-machine',
       label: 'Add a second machine',
-      detail: 'Optional — then your STAK no longer depends on one machine.',
+      detail:
+        'Sign in on another machine later to bring your Stack and Memory with you.',
       done: secondMachine,
       optional: true,
     },

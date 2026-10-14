@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 
+import { InlineCommand } from '../../_components/inline-command';
 import {
   STATUS_FILTERS,
   filterRows,
@@ -57,8 +58,8 @@ export function SkillsTable({
       <div className="stak-skills">
         <p className="stak-skills-empty">
           No Skills in STAK yet. That&apos;s expected before your first scan —
-          run <code>stak scan</code> on a machine to find the ones you already
-          have there.
+          run <InlineCommand command="stak scan" /> on a machine to find the
+          ones you already have there.
         </p>
       </div>
     );

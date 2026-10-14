@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { InlineCommand } from '../_components/inline-command';
 import { approveCli } from './actions';
 
 type State = 'idle' | 'working' | 'done' | 'error';
@@ -45,8 +46,8 @@ export function AuthorizeButton({ userCode }: { userCode: string }) {
         <>
           <p className="stak-cli-error">{message}</p>
           <p className="stak-cli-safety">
-            Run <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>{' '}
-            again in your terminal for a new code.
+            Run <InlineCommand command="stak login" /> again in your terminal
+            for a new code.
           </p>
         </>
       ) : (

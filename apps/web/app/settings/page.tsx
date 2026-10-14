@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 
 import { AppSidebar } from '@/app/_components/app-sidebar';
+import { InlineCommand } from '@/app/_components/inline-command';
 import {
   PLACEHOLDER_COUNTS,
   ShellNotice,
@@ -102,8 +103,9 @@ export default async function SettingsPage() {
               </div>
             ) : (
               <p className="stak-settings-p">
-                Not backed up yet. Run <code>stak memory backup</code> on a
-                machine to set a mode and create your first backup.
+                Not backed up yet. Run{' '}
+                <InlineCommand command="stak memory backup" /> on a machine to
+                set a mode and create your first backup.
               </p>
             )}
             {view.mode === 'protected' ? (
@@ -114,10 +116,7 @@ export default async function SettingsPage() {
             ) : view.mode === 'standard' ? (
               <p className="stak-settings-p">
                 Mode is set on your machine, not in the browser. To move to
-                Protected, run{' '}
-                <code style={{ fontFamily: 'var(--mono)' }}>
-                  stak memory protect
-                </code>{' '}
+                Protected, run <InlineCommand command="stak memory protect" />{' '}
                 on a machine that has your Memory — it encrypts every future
                 backup there before it leaves.
               </p>
@@ -152,20 +151,12 @@ export default async function SettingsPage() {
             <p className="stak-settings-p">
               A Cloud backup existing doesn&apos;t mean recovery is configured —
               a separate fact. Run{' '}
-              <code style={{ fontFamily: 'var(--mono)' }}>
-                stak memory protect --passkey
-              </code>{' '}
-              to add a passkey (it opens your browser for the passkey ceremony),
-              or{' '}
-              <code style={{ fontFamily: 'var(--mono)' }}>
-                stak memory protect
-              </code>{' '}
-              to write a recovery file instead — entirely on that machine, no
-              browser step. To use Protected Memory on a new machine, run{' '}
-              <code style={{ fontFamily: 'var(--mono)' }}>
-                stak memory recover
-              </code>{' '}
-              there.
+              <InlineCommand command="stak memory protect --passkey" /> to add a
+              passkey (it opens your browser for the passkey ceremony), or{' '}
+              <InlineCommand command="stak memory protect" /> to write a
+              recovery file instead — entirely on that machine, no browser step.
+              To use Protected Memory on a new machine, run{' '}
+              <InlineCommand command="stak memory recover" /> there.
             </p>
           </section>
 

@@ -2,10 +2,12 @@ import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 
 import { FocusedShell } from '@/app/_components/focused-shell';
+import { InlineCommand } from '@/app/_components/inline-command';
 import { getCloudService } from '@/lib/cloud-service';
 import { displayNameOf, getSessionUser } from '@/lib/session';
 
 import { loadOnboardingView, type OnboardingStep } from './onboarding-data';
+import { renderStepDetail } from './step-detail';
 
 export const metadata: Metadata = {
   robots: { index: false, follow: false },
@@ -54,7 +56,7 @@ const StepRow = ({ step, index }: { step: OnboardingStep; index: number }) => (
         ) : null}
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--dim)', marginTop: 3 }}>
-        {step.detail}
+        {renderStepDetail(step.detail)}
       </div>
     </div>
   </div>
@@ -116,9 +118,7 @@ export default async function OnboardingPage() {
           <p>
             Map projects if needed — any project not already present on this
             machine:{' '}
-            <code style={{ fontFamily: 'var(--mono)' }}>
-              stak project map &lt;project&gt; &lt;directory&gt;
-            </code>
+            <InlineCommand command="stak project map <project> <directory>" />
           </p>
         </div>
       )}

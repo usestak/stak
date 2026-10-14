@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 
 import { AppSidebar } from '@/app/_components/app-sidebar';
 import { CommandDock } from '@/app/_components/command-dock';
+import { InlineCommand } from '@/app/_components/inline-command';
 import { MachineChooser } from '@/app/_components/machine-chooser';
 import { ShellNotice } from '@/app/_components/shell-notice';
 import { getCloudService } from '@/lib/cloud-service';
@@ -134,10 +135,9 @@ export default async function OverviewPage({
     return (
       <ShellNotice active="overview" handle={handle} title="No machines yet">
         <p>
-          Connect this computer to your account to see your STAK here. In your
-          terminal, run{' '}
-          <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>, then{' '}
-          <code style={{ fontFamily: 'var(--mono)' }}>stak memory backup</code>.
+          Connect this computer to your account first. In your terminal, run{' '}
+          <InlineCommand command="stak login" />, then{' '}
+          <InlineCommand command="stak scan" />.
         </p>
       </ShellNotice>
     );
@@ -147,14 +147,14 @@ export default async function OverviewPage({
         <p>
           STAK shows machine-specific state from that machine&apos;s last CLI
           check-in. Pick the machine you want to view — or run{' '}
-          <code style={{ fontFamily: 'var(--mono)' }}>stak open</code> on a
-          machine to jump straight there.
+          <InlineCommand command="stak open" /> on a machine to jump straight
+          there.
         </p>
         {!view.anyCheckedIn ? (
           <p>
             None of your machines has checked in yet. Run{' '}
-            <code style={{ fontFamily: 'var(--mono)' }}>stak status</code> on
-            the machine you want STAK to inspect, then pick it here.
+            <InlineCommand command="stak status" /> on the machine you want STAK
+            to inspect, then pick it here.
           </p>
         ) : null}
         <MachineChooser options={view.machines} />

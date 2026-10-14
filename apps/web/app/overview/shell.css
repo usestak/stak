@@ -483,6 +483,38 @@
 .stak-ms-search:focus-visible {
   border-color: var(--orange);
 }
+
+/* Inline copyable CLI command (launch-polish command-truth pass) - replaces the
+   plain/default-looking <code> pills previously used for real commands with a
+   STAK-native chip: dark background, subtle border, mono, warm ink text. Sized to
+   sit inline inside a sentence without breaking line-height. The global
+   `.stak :focus-visible` rule below already supplies the orange focus ring. */
+.stak-inline-cmd {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 0.92em;
+  line-height: 1.5;
+  padding: 2px 7px;
+  margin: 0 1px;
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    border-color 150ms ease,
+    color 150ms ease;
+}
+.stak-inline-cmd:hover {
+  border-color: var(--orange);
+  color: var(--orange);
+}
+.stak-inline-cmd--copied {
+  border-color: var(--green);
+  color: var(--green);
+}
 /* Bounded to ~5.5 visible rows (each ~42-44px). The scrollbar is visually hidden; a
    top/bottom mask fades the edge rows as a "more content" cue while wheel/touchpad
    scrolling and arrow-key navigation keep working. */

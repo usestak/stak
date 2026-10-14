@@ -5,6 +5,7 @@ import {
   CliApprovalShell,
 } from '@/app/_components/cli-approval-shell';
 import { FocusedShell } from '@/app/_components/focused-shell';
+import { InlineCommand } from '@/app/_components/inline-command';
 import { getCloudService } from '@/lib/cloud-service';
 import { supabaseServerClient } from '@/lib/supabase-server';
 
@@ -28,7 +29,7 @@ export default async function CliPage({
       <FocusedShell title="Device authorization">
         <p>
           No code provided. Start from your terminal with{' '}
-          <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>.
+          <InlineCommand command="stak login" />.
         </p>
       </FocusedShell>
     );
@@ -46,8 +47,8 @@ export default async function CliPage({
             We don&rsquo;t recognize this code. It may have been mistyped.
           </p>
           <p className="stak-cli-safety">
-            Run <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>{' '}
-            again in your terminal for a new code.
+            Run <InlineCommand command="stak login" /> again in your terminal
+            for a new code.
           </p>
         </CliApprovalCard>
       </CliApprovalShell>
@@ -59,8 +60,8 @@ export default async function CliPage({
         <CliApprovalCard heading="Authorize the Memory STAK CLI">
           <p className="stak-cli-error">This authorization code has expired.</p>
           <p className="stak-cli-safety">
-            Run <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>{' '}
-            again in your terminal for a new code.
+            Run <InlineCommand command="stak login" /> again in your terminal
+            for a new code.
           </p>
         </CliApprovalCard>
       </CliApprovalShell>
@@ -75,8 +76,7 @@ export default async function CliPage({
           </p>
           <p className="stak-cli-safety">
             If you&rsquo;re trying to sign the CLI in again, run{' '}
-            <code style={{ fontFamily: 'var(--mono)' }}>stak login</code> for a
-            new code.
+            <InlineCommand command="stak login" /> for a new code.
           </p>
         </CliApprovalCard>
       </CliApprovalShell>
@@ -109,10 +109,9 @@ export default async function CliPage({
             </a>
           </div>
           <p className="stak-cli-safety">
-            Only continue if you just ran{' '}
-            <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>.
-            &ldquo;This wasn&rsquo;t me&rdquo; just leaves this page &mdash; it
-            doesn&rsquo;t notify anyone.
+            Only continue if you just ran <InlineCommand command="stak login" />
+            . &ldquo;This wasn&rsquo;t me&rdquo; just leaves this page &mdash;
+            it doesn&rsquo;t notify anyone.
           </p>
         </CliApprovalCard>
       </CliApprovalShell>
@@ -130,8 +129,7 @@ export default async function CliPage({
           <>
             A terminal asked to connect to{' '}
             {displayName ? <>{displayName}&rsquo;s</> : 'your'} STAK. Only
-            approve if you just ran{' '}
-            <code style={{ fontFamily: 'var(--mono)' }}>stak login</code>.
+            approve if you just ran <InlineCommand command="stak login" />.
           </>
         }
         code={code}
