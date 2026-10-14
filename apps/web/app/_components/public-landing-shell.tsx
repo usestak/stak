@@ -153,7 +153,7 @@ function Hero() {
         one machine, bring it back on the next.
       </p>
       <div id="install" className="stak-landing-install-anchor" />
-      <CopyRow command="npm install -g @usestak/cli" />
+      <CopyRow command="npm install -g @memstk/cli" />
       {/* Pinned, scroll-scrubbed Windows -> Your STAK -> macOS portability
           story across 7 steps (P9 Task 2). See landing-scroll-story.tsx for
           the scroll-to-step formula and the exact per-step data/transforms,
@@ -545,7 +545,7 @@ function CloseSection() {
         Install Memory STAK, sign in, and keep working the way you already do.
       </p>
       <div className="stak-landing-close-cmds">
-        <CopyRow command="npm install -g @usestak/cli" prefix="1 " />
+        <CopyRow command="npm install -g @memstk/cli" prefix="1 " />
         <CopyRow command="stak login" prefix="2 " />
       </div>
     </section>

@@ -1,4 +1,4 @@
-# @usestak/cli
+# @memstk/cli
 
 **STAK — the control plane for portable AI agent environments.**
 
@@ -13,7 +13,7 @@ and lets you try someone else's stack without disturbing your setup.
 ## Install (after 0.1.0 is published)
 
 ```bash
-npm install -g @usestak/cli
+npm install -g @memstk/cli
 ```
 
 The package installs a single self-contained `stak` command (no runtime

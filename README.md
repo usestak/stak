@@ -36,7 +36,7 @@ See [docs/concepts.md](docs/concepts.md) for the full model.
 ## Install
 
 STAK is distributed as a single self-contained CLI. During the 0.1.0 release
-candidate the public package `@usestak/cli` is **not yet published to npm**, so
+candidate the public package `@memstk/cli` is **not yet published to npm**, so
 install from source:
 
 ```bash
@@ -49,7 +49,7 @@ node packages/cli/dist/bin.js --help
 ```
 
 Once 0.1.0 is published, the package will install the `stak` command via
-`npm install -g @usestak/cli`. (`npx stack` is an unrelated project.) See
+`npm install -g @memstk/cli`. (`npx stack` is an unrelated project.) See
 [docs/getting-started.md](docs/getting-started.md).
 
 ## First five minutes

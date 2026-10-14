@@ -73,9 +73,9 @@ test('hero renders the exact headline lines, lead copy, and a copy-anywhere inst
   // The same install command also appears as a copy row in the Close
   // section below; the hero's is the first one in document order.
   const installRow = screen.getAllByRole('button', {
-    name: 'Copy command: npm install -g @usestak/cli',
+    name: 'Copy command: npm install -g @memstk/cli',
   })[0];
-  expect(installRow).toHaveTextContent('npm install -g @usestak/cli');
+  expect(installRow).toHaveTextContent('npm install -g @memstk/cli');
   fireEvent.click(installRow);
   expect(installRow).toHaveTextContent('Copied ✓');
 });

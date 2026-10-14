@@ -34,7 +34,7 @@ All five must pass before a change is complete.
 - `@stack/cloud-client` — typed HTTP client and cloud error types.
 - `@stack/cloud-server` — framework-agnostic auth/environment/snapshot/public
   services, in-memory repository, and the `/api/v1` router.
-- `@usestak/cli` — the `stak` command (bundled into a self-contained binary).
+- `@memstk/cli` — the `stak` command (bundled into a self-contained binary).
 - `apps/web` — the Next.js STAK Cloud app (API routes + sign-in + public pages).
 
 Domain/infrastructure packages must not import CLI, web, React, Next.js, or

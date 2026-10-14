@@ -21,8 +21,11 @@ is automatically verified from what requires an owner decision.
 ## Resolved (identity & metadata)
 
 - [x] **Product identity** — STAK; CLI command `stak`.
-- [x] **Public npm package name** — `@usestak/cli` (the npm scope `@usestak` is
-      secured; `packages/cli` is non-private with `publishConfig.access: public`).
+- [x] **Public npm package name** — `@memstk/cli` (decided as part of the
+      Memory STAK rebrand; `packages/cli` is non-private with
+      `publishConfig.access: public`. The `@memstk` npm scope's ownership was
+      **not verified as part of this change** — confirm it's secured before
+      publish).
 - [x] **LICENSE** — MIT added at the repository root; package `license` set.
 - [x] **GitHub repository** — `usestak/stak`; the `origin` remote is configured
       locally (not yet pushed).
@@ -65,7 +68,7 @@ is automatically verified from what requires an owner decision.
 1. Final `pnpm install --frozen-lockfile && pnpm typecheck && pnpm lint && pnpm test && pnpm build` from a clean checkout.
 2. `cd packages/cli && npm pack`; inspect the tarball; install-smoke the `stak` binary.
 3. Push `main` to `origin` and tag `v0.1.0`.
-4. `npm publish` `@usestak/cli` (public access).
+4. `npm publish` `@memstk/cli` (public access).
 5. Apply Supabase migrations to production.
 6. Deploy `apps/web` with production env vars.
 7. Verify `stak login` → `push`/`pull` and a public publish/use against production.

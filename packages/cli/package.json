@@ -1,5 +1,5 @@
 {
-  "name": "@usestak/cli",
+  "name": "@memstk/cli",
   "version": "0.1.0",
   "type": "module",
   "description": "Memory STAK — the control plane for portable AI agent environments.",
