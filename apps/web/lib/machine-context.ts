@@ -49,8 +49,33 @@ export const displayAgent = (id: string): string => {
   }
 };
 
-export const displayName = (m: MachineSummary): string =>
-  m.name ?? 'Unnamed machine';
+/** Deterministic short discriminator derived from the machine's own stable `machineId` —
+ *  never from list order or position, so the same machine always gets the same suffix
+ *  regardless of how/when the active list was fetched. 4 uppercase hex chars is enough to
+ *  tell two same-named machines apart without exposing the full raw id. */
+const discriminator = (machineId: string): string =>
+  machineId.replace(/-/g, '').slice(-4).toUpperCase();
+
+/** Hostname-based display name for a machine, disambiguated against the rest of the
+ *  account's active machines when `all` is supplied. `stak login --label` is a one-time
+ *  CLI-token label shown only on the approval screen (see `cloud-server/service.ts`'s
+ *  `PendingCliAuthSessionView`) — it is never persisted as a machine nickname, so there is
+ *  currently no safe explicit user-set label to prefer over the hostname. Two machines
+ *  sharing a hostname (including two isolated homes on one physical machine) get a short,
+ *  stable `HOSTNAME · XXXX` suffix instead of being indistinguishable. */
+export const displayName = (
+  m: MachineSummary,
+  all?: readonly MachineSummary[],
+): string => {
+  const base = m.name ?? 'Unnamed machine';
+  if (!all) return base;
+  const collides = all.some(
+    (other) =>
+      other.machineId !== m.machineId &&
+      (other.name ?? 'Unnamed machine') === base,
+  );
+  return collides ? `${base} · ${discriminator(m.machineId)}` : base;
+};
 export const shortId = (id: string): string => id.slice(0, 8);
 export const checkedIn = (m: MachineSummary): boolean =>
   m.lastCheckinAt !== null;
@@ -98,9 +123,12 @@ export type MachineOption = {
   statusLabel: string;
 };
 
-export const machineOption = (m: MachineSummary): MachineOption => ({
+export const machineOption = (
+  m: MachineSummary,
+  all?: readonly MachineSummary[],
+): MachineOption => ({
   machineId: m.machineId,
-  name: displayName(m),
+  name: displayName(m, all),
   secondary: `${metaLine(m)} · ${statusLabel(m)}`,
   statusLabel: statusLabel(m),
 });

@@ -14,6 +14,7 @@ import {
   resolveViewingMachineId,
   type MachineOption,
 } from '../../lib/machine-context.js';
+import { projectDisplayName } from '../../lib/project-presentation.js';
 import type { SidebarCounts } from '../overview/overview-data.js';
 
 export type MemoryService = Pick<
@@ -60,6 +61,9 @@ export type MemoryView =
       viewingCheckedIn: boolean;
       statusSentence: string;
       machineSentence: string;
+      /** Dimension C only ("what's available on this machine") — never implies A/B. Null
+       *  when there's nothing to say (not backed up, has a local gap, or full coverage). */
+      coverageSentence: string | null;
       modeSentence: string;
       hasRecoveryMethod: boolean;
       needsRecoveryMethod: boolean;
@@ -90,7 +94,7 @@ export const loadMemoryView = async (
   if (active.length === 0) return { kind: 'no-machines' };
 
   const ordered = [...active].sort(sortMachinesForSelection);
-  const options = ordered.map(machineOption);
+  const options = ordered.map((m) => machineOption(m, active));
   const anyCheckedIn = active.some(checkedIn);
 
   const viewingId = resolveViewingMachineId(active, requestedMachine);
@@ -98,7 +102,7 @@ export const loadMemoryView = async (
     return { kind: 'choose-machine', machines: options, anyCheckedIn };
 
   const viewing = active.find((m) => m.machineId === viewingId)!;
-  const viewingName = displayName(viewing);
+  const viewingName = displayName(viewing, active);
   const viewingCheckedIn = checkedIn(viewing);
 
   let memory: MemoryReadModel;
@@ -120,6 +124,22 @@ export const loadMemoryView = async (
   const statusSentence = !backedUp
     ? 'Not backed up yet.'
     : `Backed up — latest ${relative(memory.latestBackupAt)}.`;
+
+  // Coverage fact (dimension C: "what part of Memory is available on THIS machine") is
+  // deliberately kept separate from the backup-freshness facts above (A/B) — a machine can
+  // be fully backed up/up to date (no local gap) while still only having a fraction of
+  // recovered Projects mapped here. Conflating the two produced the false "isn't backed up
+  // yet" reading for a machine that had, in fact, recovered the Cloud backup successfully.
+  const activeProjects = projects.filter((p) => p.lifecycle === 'active');
+  const presentHere = activeProjects.filter((p) =>
+    p.presentOn.includes(viewingId),
+  ).length;
+  const coverageSentence: string | null =
+    backedUp && !machineGap && activeProjects.length > 0
+      ? presentHere < activeProjects.length
+        ? `${presentHere} of ${activeProjects.length} Project${activeProjects.length === 1 ? '' : 's'} available on ${viewingName}. Map a Project's folder here to use its recovered Memory.`
+        : null
+      : null;
 
   const machineSentence = !viewingCheckedIn
     ? `${viewingName} hasn't checked in yet.`
@@ -145,12 +165,19 @@ export const loadMemoryView = async (
     isLatest: i === 0,
   }));
 
-  const nameById = new Map(projects.map((p) => [p.projectId, p.name]));
+  const allForSelector = projects.map((p) => ({
+    projectId: p.projectId,
+    ...(p.name ? { name: p.name } : {}),
+  }));
+  const byId = new Map(projects.map((p) => [p.projectId, p]));
   const perProject: MemoryPerProjectRow[] | null =
     memory.mode === 'standard' && memory.perProject
       ? memory.perProject.map((row) => ({
           projectId: row.projectId,
-          name: nameById.get(row.projectId) ?? row.projectId,
+          name: projectDisplayName(
+            byId.get(row.projectId) ?? { projectId: row.projectId },
+            allForSelector,
+          ),
           fileCount: row.fileCount,
         }))
       : null;
@@ -180,6 +207,7 @@ export const loadMemoryView = async (
     viewingCheckedIn,
     statusSentence,
     machineSentence,
+    coverageSentence,
     modeSentence,
     hasRecoveryMethod: memory.hasRecoveryMethod,
     needsRecoveryMethod,

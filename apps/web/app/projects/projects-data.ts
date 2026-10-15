@@ -17,6 +17,7 @@ import {
   cliProjectSelector,
   lifecycleLabel,
   presenceLabel,
+  projectDisplayName,
 } from '../../lib/project-presentation.js';
 import type { SidebarCounts } from '../overview/overview-data.js';
 
@@ -88,7 +89,7 @@ export const loadProjectsList = async (
   if (active.length === 0) return { kind: 'no-machines' };
 
   const ordered = [...active].sort(sortMachinesForSelection);
-  const options = ordered.map(machineOption);
+  const options = ordered.map((m) => machineOption(m, active));
   const anyCheckedIn = active.some(checkedIn);
 
   const viewingId = resolveViewingMachineId(active, requestedMachine);
@@ -113,7 +114,7 @@ export const loadProjectsList = async (
   const rows: ProjectRow[] = projects
     .map((p) => ({
       projectId: p.projectId,
-      name: p.name ?? p.projectId,
+      name: projectDisplayName(p, allForSelector),
       lifecycle: p.lifecycle,
       lifecycleLabel: lifecycleLabel(p.lifecycle),
       presence: presenceLabel(p.presentOn, viewingId),
@@ -134,14 +135,14 @@ export const loadProjectsList = async (
     rows.length === 0
       ? 'No Projects yet.'
       : notHereCount === 0
-        ? `${activeCount} active Project${activeCount === 1 ? '' : 's'}, all on ${displayName(viewing)}.`
-        : `${activeCount} active Project${activeCount === 1 ? '' : 's'}; ${notHereCount} not on ${displayName(viewing)}.`;
+        ? `${activeCount} active Project${activeCount === 1 ? '' : 's'}, all on ${displayName(viewing, active)}.`
+        : `${activeCount} active Project${activeCount === 1 ? '' : 's'}; ${notHereCount} not on ${displayName(viewing, active)}.`;
 
   return {
     kind: 'ready',
     viewing: {
       machineId: viewingId,
-      name: displayName(viewing),
+      name: displayName(viewing, active),
       statusLabel: statusLabel(viewing),
       dot: machineDot(viewing),
     },

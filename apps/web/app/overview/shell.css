@@ -451,6 +451,11 @@
   font: 500 13.5px var(--sans);
   cursor: pointer;
 }
+.stak-ms-trigger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  color: var(--dim);
+}
 .stak-ms-name {
   overflow: hidden;
   text-overflow: ellipsis;

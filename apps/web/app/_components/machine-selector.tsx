@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 
 import {
@@ -34,6 +34,12 @@ export function MachineSelector({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  // `isPending` covers the gap between picking a machine and the new server-rendered page
+  // actually arriving — without it the selector gave no feedback at all while the request
+  // was in flight, making it feel unresponsive. `router.refresh()`-driven RSC navigation
+  // (not a client fetch) is what `useTransition` is designed to wrap; no new loading
+  // library needed.
+  const [isPending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
@@ -69,7 +75,13 @@ export function MachineSelector({
       // `lib/machine-preference.ts`. Never awaited: this is a UI convenience,
       // not a gate on the navigation the user is already asking for.
       void setActiveMachinePreference(machineId);
-      router.replace(`${pathname}?machine=${encodeURIComponent(machineId)}`);
+      // Wrapped in a transition so `isPending` is true until the new server-rendered
+      // state for the picked machine actually lands — the trigger disables and shows
+      // "Switching..." for that whole window, so the old machine's data is never shown
+      // under the new selection and a second pick can't be queued mid-flight.
+      startTransition(() => {
+        router.replace(`${pathname}?machine=${encodeURIComponent(machineId)}`);
+      });
     }
   };
 
@@ -114,18 +126,26 @@ export function MachineSelector({
         className="stak-ms-trigger"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={`Viewing as ${currentOption?.name ?? 'a machine'}. Change machine.`}
+        aria-busy={isPending}
+        disabled={isPending}
+        aria-label={
+          isPending
+            ? 'Switching machines…'
+            : `Viewing as ${currentOption?.name ?? 'a machine'}. Change machine.`
+        }
         onClick={() => (open ? setOpen(false) : openMenu())}
         onKeyDown={onTriggerKeyDown}
       >
         <span className="stak-ms-name">
-          {currentOption?.name ?? 'Choose a machine'}
+          {isPending
+            ? 'Switching…'
+            : (currentOption?.name ?? 'Choose a machine')}
         </span>
         <span aria-hidden style={{ color: '#85817a', fontSize: 11 }}>
           ▾
         </span>
       </button>
-      {open ? (
+      {open && !isPending ? (
         <div className="stak-ms-popover">
           {showSearch ? (
             <input

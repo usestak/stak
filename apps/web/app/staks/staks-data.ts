@@ -119,7 +119,7 @@ export const loadStacksView = async (
   if (active.length === 0) return { kind: 'no-machines' };
 
   const ordered = [...active].sort(sortMachinesForSelection);
-  const options = ordered.map(machineOption);
+  const options = ordered.map((m) => machineOption(m, active));
   const anyCheckedIn = active.some(checkedIn);
 
   const viewingId = resolveViewingMachineId(active, requestedMachine);
@@ -169,7 +169,7 @@ export const loadStacksView = async (
     kind: 'ready',
     viewing: {
       machineId: viewingId,
-      name: displayName(viewing),
+      name: displayName(viewing, active),
       statusLabel: statusLabel(viewing),
       dot: machineDot(viewing),
     },

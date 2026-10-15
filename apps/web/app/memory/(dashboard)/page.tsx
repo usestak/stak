@@ -107,6 +107,9 @@ export default async function MemoryPage({
             <h1>{view.statusSentence}</h1>
           </div>
           <span className="stak-sub">{view.machineSentence}</span>
+          {view.coverageSentence ? (
+            <span className="stak-sub">{view.coverageSentence}</span>
+          ) : null}
         </div>
 
         <div className="stak-summaries">

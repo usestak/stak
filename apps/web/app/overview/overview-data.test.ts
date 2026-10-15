@@ -356,8 +356,12 @@ describe('loadOverview — Memory account-vs-machine truth gap (P4 final cleanup
     );
     expect(v.summaries.memory.value).toBe('Backed up'); // frozen term, account-level
     expect(v.summaries.memory.detail).toContain('Latest Cloud backup');
+    // Fixed wording: the Cloud backup genuinely exists (A) — the machine has a LOCAL gap
+    // (B), which is a different fact and must never read as though the Cloud backup itself
+    // doesn't exist (the original "DELL's current Memory isn't backed up yet." wording,
+    // read next to a MEMORY card that says "Backed up", was self-contradictory).
     expect(v.summaries.memory.detail).toContain(
-      "DELL's current Memory isn't backed up yet.",
+      'DELL has local Memory changes not yet backed up.',
     );
     // Never implies a direct Cloud-payload comparison that hasn't occurred.
     expect(v.summaries.memory.detail).not.toMatch(
@@ -383,6 +387,102 @@ describe('loadOverview — Memory account-vs-machine truth gap (P4 final cleanup
     );
     expect(v.detail).not.toContain("aren't backed up yet");
     expect(v.summaries.memory.detail).not.toContain("isn't backed up yet");
+  });
+
+  it('MEMORY summary adds a project-coverage clause (dimension C) only when there is no local gap', async () => {
+    const v = ready(
+      await loadOverview(
+        service({
+          machines: [
+            machine({
+              name: 'DELL',
+              status: 'up-to-date',
+              memoryBackedUp: true,
+            }),
+          ],
+          overview: overview({ projects: { total: 9, archived: 0 } }),
+          projects: [
+            {
+              projectId: 'prj_1',
+              lifecycle: 'active',
+              presentOn: [A1],
+              fileCount: 1,
+              lastBackupAt: null,
+            },
+            ...Array.from({ length: 8 }, (_, i) => ({
+              projectId: `prj_x${i}`,
+              lifecycle: 'active' as const,
+              presentOn: [],
+              fileCount: 1,
+              lastBackupAt: null,
+            })),
+          ],
+        }),
+        USER,
+        A1,
+      ),
+    );
+    expect(v.summaries.memory.detail).toMatch(/1 of 9 project/);
+    expect(v.summaries.memory.detail).not.toMatch(/not backed up/i);
+  });
+
+  it('project-not-on-machine attention uses the human display name, not the raw prj_ id', async () => {
+    const v = ready(
+      await loadOverview(
+        service({
+          machines: [machine({ name: 'DELL' })],
+          overview: overview({
+            needsAttention: [
+              {
+                kind: 'project-not-on-machine',
+                label: 'prj_4vm1k8z8tdq54ftc6j534xqh08 is not on this machine',
+                ref: 'prj_4vm1k8z8tdq54ftc6j534xqh08',
+              },
+            ],
+          }),
+          projects: [
+            {
+              projectId: 'prj_4vm1k8z8tdq54ftc6j534xqh08',
+              lifecycle: 'active',
+              presentOn: [],
+              fileCount: 1,
+              lastBackupAt: null,
+            },
+          ],
+        }),
+        USER,
+        A1,
+      ),
+    );
+    expect(v.needsAttention[0]!.title).not.toContain(
+      'prj_4vm1k8z8tdq54ftc6j534xqh08',
+    );
+    expect(v.needsAttention[0]!.title).toContain('Local project');
+  });
+
+  it('falls back to the server label when the attention ref cannot be resolved', async () => {
+    const v = ready(
+      await loadOverview(
+        service({
+          machines: [machine({ name: 'DELL' })],
+          overview: overview({
+            needsAttention: [
+              {
+                kind: 'project-not-on-machine',
+                label: 'mystery-project is not on this machine',
+                ref: 'prj_does_not_exist',
+              },
+            ],
+          }),
+          projects: [],
+        }),
+        USER,
+        A1,
+      ),
+    );
+    expect(v.needsAttention[0]!.title).toBe(
+      'mystery-project is not on this machine',
+    );
   });
 
   it('does not create a new Needs-attention kind for the memory gap', async () => {

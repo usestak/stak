@@ -17,6 +17,7 @@ import {
   cliProjectSelector,
   lifecycleLabel,
   presenceLabel,
+  projectDisplayName,
 } from '../../../lib/project-presentation.js';
 
 export type ProjectDetailService = Pick<
@@ -74,7 +75,7 @@ export const loadProjectDetail = async (
   if (active.length === 0) return { kind: 'no-machines' };
 
   const ordered = [...active].sort(sortMachinesForSelection);
-  const options = ordered.map(machineOption);
+  const options = ordered.map((m) => machineOption(m, active));
   const anyCheckedIn = active.some(checkedIn);
 
   const viewingId = resolveViewingMachineId(active, requestedMachine);
@@ -108,12 +109,12 @@ export const loadProjectDetail = async (
     kind: 'ready',
     viewing: {
       machineId: viewingId,
-      name: displayName(viewing),
+      name: displayName(viewing, active),
       statusLabel: statusLabel(viewing),
       dot: machineDot(viewing),
     },
     machines: options,
-    name: project.name ?? project.projectId,
+    name: projectDisplayName(project, allForSelector),
     lifecycle: project.lifecycle,
     lifecycleLabel: lifecycleLabel(project.lifecycle),
     presence: presenceLabel(project.presentOn, viewingId),

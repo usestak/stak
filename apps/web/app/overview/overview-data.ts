@@ -21,6 +21,7 @@ import {
   resolveViewingMachineId,
   type MachineOption,
 } from '../../lib/machine-context.js';
+import { projectDisplayName } from '../../lib/project-presentation.js';
 
 /** The P3 read methods the Overview consumes; injectable so the view model is unit-testable. */
 export type OverviewService = Pick<
@@ -107,7 +108,10 @@ export type OverviewView =
       dockCommand: string;
     };
 
-const attentionView = (item: NeedsAttention): NeedsAttentionView => {
+const attentionView = (
+  item: NeedsAttention,
+  projects: readonly { projectId: string; name?: string }[],
+): NeedsAttentionView => {
   switch (item.kind) {
     case 'update-available':
       return {
@@ -118,15 +122,27 @@ const attentionView = (item: NeedsAttention): NeedsAttentionView => {
         why: 'A newer approved version is available to review.',
         action: 'Review the change before approving.',
       };
-    case 'project-not-on-machine':
+    case 'project-not-on-machine': {
+      // The server's own `label` bakes in a fallback to the raw `prj_...` id for Local
+      // projects (it never receives a safe name for those — see `checkin.ts`). Rebuild the
+      // title from the already-loaded Projects list when `ref` resolves, so the same
+      // human-readable derivation (`projectDisplayName`) used everywhere else applies here
+      // too, instead of surfacing the id baked into the server string.
+      const match = item.ref
+        ? projects.find((p) => p.projectId === item.ref)
+        : undefined;
+      const title = match
+        ? `${projectDisplayName(match, projects)} is not on this machine`
+        : item.label;
       return {
         kind: item.kind,
         statusLabel: 'Not on this machine',
         dot: 'neutral',
-        title: item.label,
+        title,
         why: 'Its Memory is safe in STAK; no folder here is mapped to it.',
         action: 'Map its folder on this machine to use it here.',
       };
+    }
     case 'machine-stale':
       // Covers two distinct truthful conditions (same product-facing attention kind): a
       // machine that checked in before and has gone quiet for 30+ days, and a machine that
@@ -176,6 +192,7 @@ const memorySummary = (
   projectCount: number,
   viewingName: string,
   machineHasGap: boolean,
+  presentHere: number,
 ): OverviewSummary => {
   if (!overview.lastBackupAt)
     return {
@@ -183,11 +200,20 @@ const memorySummary = (
       value: 'Not backed up yet',
       detail: 'STAK has no backup of your agent Memory yet.',
     };
+  // Cloud-backup existence/freshness (A) is already established above (`lastBackupAt`
+  // exists) — `machineHasGap` is a SEPARATE, machine-local fact (B: does this machine's
+  // current Memory match what it last reported backed up) and must never be worded as
+  // though the Cloud backup itself doesn't exist. Project-mapping coverage (C) is a third,
+  // independent fact — shown here as its own clause, never substituted for either A or B.
+  const coverageClause =
+    projectCount > 0 && presentHere < projectCount
+      ? ` ${presentHere} of ${projectCount} project${projectCount === 1 ? '' : 's'} available on ${viewingName}.`
+      : '';
   if (machineHasGap)
     return {
       label: 'MEMORY',
       value: 'Backed up',
-      detail: `Latest Cloud backup ${relative(overview.lastBackupAt)}. ${viewingName}'s current Memory isn't backed up yet.`,
+      detail: `Latest Cloud backup ${relative(overview.lastBackupAt)}. ${viewingName} has local Memory changes not yet backed up.${coverageClause}`,
     };
   if (overview.memory.mode === 'protected')
     return {
@@ -198,14 +224,17 @@ const memorySummary = (
   return {
     label: 'MEMORY',
     value: 'Backed up',
-    detail: `Standard: private to your account; STAK's service can read it to deliver it.`,
+    detail: `Standard: private to your account; STAK's service can read it to deliver it.${coverageClause}`,
   };
 };
 
-const machineCard = (m: MachineSummary): OverviewMachineCard => {
+const machineCard = (
+  m: MachineSummary,
+  all: readonly MachineSummary[],
+): OverviewMachineCard => {
   const base = {
     machineId: m.machineId,
-    name: displayName(m),
+    name: displayName(m, all),
     meta: metaLine(m),
     status: statusLabel(m),
     dot: machineDot(m),
@@ -249,7 +278,7 @@ export const loadOverview = async (
   if (active.length === 0) return { kind: 'no-machines' };
 
   const ordered = [...active].sort(sortForOverview);
-  const options = ordered.map(option);
+  const options = ordered.map((m) => option(m, active));
   const anyCheckedIn = active.some(checkedIn);
 
   const viewingId = resolveViewingMachineId(active, requestedMachine);
@@ -277,7 +306,7 @@ export const loadOverview = async (
   const viewing = active.find(
     (m) => m.machineId === viewingId,
   ) as MachineSummary;
-  const viewingName = displayName(viewing);
+  const viewingName = displayName(viewing, active);
   const isCheckedIn = checkedIn(viewing);
   const attentionCount = overview.needsAttention.length;
   const presentHere = projects.filter((p) =>
@@ -319,7 +348,7 @@ export const loadOverview = async (
       ? ` ${updatesWaitingMachines} machine${updatesWaitingMachines === 1 ? '' : 's'} ${updatesWaitingMachines === 1 ? 'has' : 'have'} updates waiting.`
       : '';
 
-  const cards = ordered.slice(0, MAX_CARDS).map(machineCard);
+  const cards = ordered.slice(0, MAX_CARDS).map((m) => machineCard(m, active));
 
   return {
     kind: 'ready',
@@ -368,6 +397,7 @@ export const loadOverview = async (
         projectTotal,
         viewingName,
         machineHasMemoryGap,
+        presentHere,
       ),
       projects:
         projectTotal === 0
@@ -401,7 +431,9 @@ export const loadOverview = async (
             : 'If one is lost, restore on another.',
       },
     },
-    needsAttention: overview.needsAttention.map(attentionView),
+    needsAttention: overview.needsAttention.map((item) =>
+      attentionView(item, projects),
+    ),
     // Overview stays an overview: cap recent activity so it never dumps a long, repetitive
     // list of near-identical backup rows. Full history belongs to the Memory page.
     activity: overview.recentActivity.slice(0, MAX_ACTIVITY).map(activityView),

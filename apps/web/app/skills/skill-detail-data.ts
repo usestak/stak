@@ -159,7 +159,7 @@ export const loadSkillDetail = async (
   if (active.length === 0) return { kind: 'no-machines' };
 
   const ordered = [...active].sort(sortMachinesForSelection);
-  const options = ordered.map(machineOption);
+  const options = ordered.map((m) => machineOption(m, active));
   const anyCheckedIn = active.some(checkedIn);
 
   const viewingId = resolveViewingMachineId(active, requestedMachine);
@@ -188,7 +188,7 @@ export const loadSkillDetail = async (
   }
 
   const viewing = active.find((m) => m.machineId === viewingId)!;
-  const viewingName = displayName(viewing);
+  const viewingName = displayName(viewing, active);
   const viewingCheckedIn = checkedIn(viewing);
   const install = skill.installs.find((i) => i.machineId === viewingId);
   const reconciliation = machineReconciliation(

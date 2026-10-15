@@ -87,9 +87,13 @@ const agentsLabel = (m: MachineSummary): string => {
   return `${names} · ${asOf(m)}`;
 };
 
-const toCard = (m: MachineSummary, onlyActive: boolean): MachineCard => ({
+const toCard = (
+  m: MachineSummary,
+  onlyActive: boolean,
+  all: readonly MachineSummary[],
+): MachineCard => ({
   machineId: m.machineId,
-  name: displayName(m),
+  name: displayName(m, all),
   meta: metaLine(m),
   statusLabel: statusLabel(m),
   dot: machineDot(m),
@@ -179,7 +183,7 @@ export const loadMachinesView = async (
   if (active.length === 0) return { kind: 'no-machines' };
 
   const ordered = [...active].sort(sortMachinesForSelection);
-  const options = ordered.map(machineOption);
+  const options = ordered.map((m) => machineOption(m, active));
   const anyCheckedIn = active.some(checkedIn);
 
   const viewingId = resolveViewingMachineId(active, requestedMachine);
@@ -188,7 +192,7 @@ export const loadMachinesView = async (
 
   const viewing = active.find((m) => m.machineId === viewingId)!;
   const onlyActive = active.length === 1;
-  const cards = ordered.map((m) => toCard(m, onlyActive));
+  const cards = ordered.map((m) => toCard(m, onlyActive, active));
   const updatesWaitingCards = cards.filter((c) => c.updatesWaitingCount > 0);
 
   const attentionCount = cards.filter(
@@ -198,8 +202,8 @@ export const loadMachinesView = async (
   const statusSentence =
     active.length === 1
       ? attentionCount === 0
-        ? `Your STAK is on ${displayName(viewing)}.`
-        : `Your STAK is on ${displayName(viewing)}. It needs attention.`
+        ? `Your STAK is on ${displayName(viewing, active)}.`
+        : `Your STAK is on ${displayName(viewing, active)}. It needs attention.`
       : attentionCount === 0
         ? `Your STAK is on ${active.length} machines.`
         : `Your STAK is on ${active.length} machines. ${attentionCount} need${attentionCount === 1 ? 's' : ''} attention.`;
@@ -208,7 +212,7 @@ export const loadMachinesView = async (
     kind: 'ready',
     viewing: {
       machineId: viewingId,
-      name: displayName(viewing),
+      name: displayName(viewing, active),
       statusLabel: statusLabel(viewing),
       dot: machineDot(viewing),
     },

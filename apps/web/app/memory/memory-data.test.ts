@@ -129,6 +129,88 @@ describe('loadMemoryView', () => {
     expect(view.machineSentence).toMatch(/dell/i);
   });
 
+  it('a recovered backup with partial project coverage is NOT described as "not backed up" — the exact live Machine-B scenario', async () => {
+    // Machine B: successfully recovered the Cloud backup (so its local manifest matches —
+    // memoryBackedUp/machineGap is correctly false), but only 1 of 9 recovered projects is
+    // mapped on this machine. Dimension B (local backup freshness) and dimension C (how much
+    // of that Memory is available HERE) must read as two separate, truthful facts.
+    const projects = [
+      {
+        projectId: 'prj_1',
+        lifecycle: 'active' as const,
+        presentOn: [A1],
+        fileCount: 1,
+        lastBackupAt: nowIso(60),
+      },
+      ...Array.from({ length: 8 }, (_, i) => ({
+        projectId: `prj_not_here_${i}`,
+        lifecycle: 'active' as const,
+        presentOn: [],
+        fileCount: 3,
+        lastBackupAt: nowIso(60),
+      })),
+    ];
+    const view = ready(
+      await loadMemoryView(
+        service({
+          machines: [machine({ memoryBackedUp: true })],
+          projects,
+        }),
+        USER,
+        A1,
+      ),
+    );
+    expect(view.machineGap).toBe(false);
+    expect(view.machineSentence).not.toMatch(/isn.?t backed up/i);
+    expect(view.coverageSentence).toMatch(/1 of 9/);
+    expect(view.coverageSentence).not.toMatch(/not backed up/i);
+  });
+
+  it('coverage clause is absent when every project is present, or when the machine has a genuine local gap', async () => {
+    const fullCoverage = ready(
+      await loadMemoryView(
+        service({
+          machines: [machine({ memoryBackedUp: true })],
+          projects: [
+            {
+              projectId: 'prj_1',
+              lifecycle: 'active',
+              presentOn: [A1],
+              fileCount: 1,
+              lastBackupAt: null,
+            },
+          ],
+        }),
+        USER,
+        A1,
+      ),
+    );
+    expect(fullCoverage.coverageSentence).toBeNull();
+
+    const genuineGap = ready(
+      await loadMemoryView(
+        service({
+          machines: [machine({ memoryBackedUp: false })],
+          projects: [
+            {
+              projectId: 'prj_1',
+              lifecycle: 'active',
+              presentOn: [],
+              fileCount: 1,
+              lastBackupAt: null,
+            },
+          ],
+        }),
+        USER,
+        A1,
+      ),
+    );
+    // A genuine local gap (B) is reported as its own fact — coverage (C) doesn't also fire
+    // on top of it, so the two never blur into one confusing sentence.
+    expect(genuineGap.machineGap).toBe(true);
+    expect(genuineGap.coverageSentence).toBeNull();
+  });
+
   it('describes a stale-but-valid machine observation as tied to its last check-in, never as live state', async () => {
     const view = ready(
       await loadMemoryView(

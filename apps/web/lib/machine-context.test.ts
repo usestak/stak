@@ -6,6 +6,7 @@ import {
   statusLabel,
   machineDot,
   displayAgent,
+  displayName,
 } from './machine-context.js';
 
 const A1 = '00000000-0000-4000-8000-0000000000a1';
@@ -117,5 +118,48 @@ describe('machineOption', () => {
       secondary: expect.stringContaining('·'),
       statusLabel: expect.any(String),
     });
+  });
+});
+
+describe('displayName', () => {
+  it('shows the bare name when no disambiguation list is given', () => {
+    expect(displayName(machine({ name: 'DELL' }))).toBe('DELL');
+  });
+
+  it('shows the bare name when it is unique across the active list', () => {
+    const all = [
+      machine({ machineId: A1, name: 'DELL' }),
+      machine({ machineId: B2, name: 'Atlas' }),
+    ];
+    expect(displayName(all[0]!, all)).toBe('DELL');
+  });
+
+  it('appends a deterministic short discriminator when two machines share a name — e.g. two isolated STAK homes on the same physical laptop', () => {
+    const all = [
+      machine({ machineId: A1, name: 'DELL' }),
+      machine({ machineId: B2, name: 'DELL' }),
+    ];
+    const first = displayName(all[0]!, all);
+    const second = displayName(all[1]!, all);
+    expect(first).toMatch(/^DELL · [0-9A-F]{4}$/);
+    expect(second).toMatch(/^DELL · [0-9A-F]{4}$/);
+    expect(first).not.toBe(second);
+  });
+
+  it('derives the discriminator from the stable machineId, not list order', () => {
+    const all = [
+      machine({ machineId: A1, name: 'DELL' }),
+      machine({ machineId: B2, name: 'DELL' }),
+    ];
+    const reversed = [all[1]!, all[0]!];
+    expect(displayName(all[0]!, all)).toBe(displayName(all[0]!, reversed));
+  });
+
+  it('never exposes the full raw machineId', () => {
+    const all = [
+      machine({ machineId: A1, name: 'DELL' }),
+      machine({ machineId: B2, name: 'DELL' }),
+    ];
+    expect(displayName(all[0]!, all)).not.toContain(A1);
   });
 });
