@@ -72,10 +72,15 @@ describe('web product branding is STAK (R4)', () => {
     expect(sources).not.toContain('Stack Memory');
   });
 
-  it('domain-object "stack" terminology is preserved', () => {
+  it('public STAK/Skill domain-object copy uses the STAK brand', () => {
+    // The Stack->STAK naming migration renamed the domain-object noun too
+    // (it was only the generic `stack` data-structure word, @stack/* package
+    // scope, and literal DB/type identifiers that stayed "stack" — see the
+    // STAK naming migration's own exclusion list). These substrings prove
+    // the owner-profile and public-share pages render the new brand.
     const sources = allSources();
-    expect(sources).toContain('Public Stacks'); // owner page (object, plural)
-    expect(sources).toContain('This Stack'); // object noun preserved
+    expect(sources).toContain('Public STAKs'); // owner page (object, plural)
+    expect(sources).toContain("isSkill ? 'Skill' : 'STAK'"); // object noun, STAK branch
     expect(sources).toContain('stak use'); // product verb `stak` + object
   });
 

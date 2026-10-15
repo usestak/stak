@@ -49,8 +49,8 @@ export async function generateMetadata({
     : stack.latest
       ? isSkill
         ? `A Skill shared by @${stack.owner} on Memory STAK.`
-        : `A Memory STAK Stack with ${skillCount(requirementCount)}, shared by @${stack.owner}.`
-      : `@${stack.owner} has not published a version of this ${isSkill ? 'Skill' : 'Stack'} yet.`;
+        : `A Memory STAK with ${skillCount(requirementCount)}, shared by @${stack.owner}.`
+      : `@${stack.owner} has not published a version of this ${isSkill ? 'Skill' : 'STAK'} yet.`;
   // Indexable only once the Stack has a real published version — an empty
   // Stack ("no published versions yet") is thin content and stays noindex.
   const index = stack.latest !== null;
@@ -198,7 +198,7 @@ export default async function StackPage({
       <h2>Skills</h2>
       {requirements.length === 0 ? (
         <p className="stak-public-muted">
-          This Stack has no published versions yet.
+          This {isSkill ? 'Skill' : 'STAK'} has no published versions yet.
         </p>
       ) : (
         <ul className="stak-public-skills">

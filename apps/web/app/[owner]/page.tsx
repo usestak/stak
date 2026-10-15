@@ -53,7 +53,7 @@ export async function generateMetadata({
     count > 0
       ? `${[
           stackCountOnProfile > 0
-            ? `${stackCountOnProfile} public Stack${stackCountOnProfile === 1 ? '' : 's'}`
+            ? `${stackCountOnProfile} public STAK${stackCountOnProfile === 1 ? '' : 's'}`
             : null,
           skillCountOnProfile > 0
             ? `${skillCountOnProfile} shared Skill${skillCountOnProfile === 1 ? '' : 's'}`
@@ -95,7 +95,7 @@ export default async function ProfilePage({
         <p className="stak-public-muted">{profile.displayName}</p>
       ) : null}
 
-      <h2>Public Stacks &amp; Skills</h2>
+      <h2>Public STAKs &amp; Skills</h2>
       {profile.stacks.length === 0 ? (
         <p className="stak-public-muted">Nothing public yet.</p>
       ) : (

@@ -192,7 +192,7 @@ const STEPS: Step[] = [
     'stak push\nstak memory backup',
     '',
     'You choose what goes to STAK Cloud, and when.',
-    'Your Stack and Memory move only when you tell STAK to move them.',
+    'Your STAK and Memory move only when you tell STAK to move them.',
   ],
   [
     'Windows',
@@ -205,7 +205,7 @@ const STEPS: Step[] = [
     'macOS',
     'stak login\nstak pull\nstak memory recover',
     '',
-    'On macOS, pull your Stack and recover your Memory.',
+    'On macOS, pull your STAK and recover your Memory.',
     '',
   ],
   [

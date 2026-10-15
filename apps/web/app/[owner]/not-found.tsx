@@ -15,7 +15,7 @@ export default function OwnerNotFound() {
   return (
     <PublicShell title="Not found">
       <p className="stak-public-muted">
-        Memory STAK doesn&apos;t have a public profile or Stack at this address.
+        Memory STAK doesn&apos;t have a public profile or STAK at this address.
         It may have been renamed, made private, or never existed.
       </p>
       <p className="stak-public-muted">
