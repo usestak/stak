@@ -15,6 +15,7 @@ export const registerWhoamiCommand = (
     .command('whoami')
     .description('Show the signed-in STAK Cloud account')
     .option('--json', 'emit structured JSON only')
+    .option('--verbose', 'show detailed cloud internals')
     .action(async (options: { json?: boolean }) => {
       const me = await dependencies.cloudWhoami();
       if (options.json) {

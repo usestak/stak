@@ -16,6 +16,7 @@ export const registerRemoveCommand = (
     .command('remove <stak>')
     .description('Remove a STAK layer from main (desired state only)')
     .option('--yes', 'approve the desired-state change')
+    .option('--verbose', 'show detailed cloud internals')
     .action(async (identifier: string, options: { yes?: boolean }) => {
       const proposal = await dependencies.prepareRemove(identifier);
       dependencies.writeOut(renderStackRemove(proposal));

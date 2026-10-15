@@ -41,20 +41,86 @@ describe('resolveCloudBaseUrl env aliases (R3)', () => {
     ).toThrow(/STAK_API_URL.*STACK_API_URL/s);
   });
 
-  it('falls back to localhost in dev when nothing is configured', () => {
-    expect(resolveCloudBaseUrl({ env: {} })).toBe('http://localhost:3000');
+  // Release-gate finding (2026-10-15): an unconfigured installed CLI MUST reach
+  // real STAK Cloud, not a developer's local server — requiring an ordinary end
+  // user to set an env var just to make `stak login` work is backwards for a
+  // published package. See packages/cli/src/program.test.ts for the live-defect
+  // regression (`stak login` silently targeting localhost with nothing set).
+  it('an unconfigured CLI defaults to production (the core release-gate rule)', () => {
+    expect(resolveCloudBaseUrl({ env: {} })).toBe('https://www.memstk.com');
   });
 
-  it('STAK_ENV=production disables the dev fallback (fails closed)', () => {
-    expect(() =>
-      resolveCloudBaseUrl({ env: { STAK_ENV: 'production' } }),
-    ).toThrow();
+  it('an explicit --api-url override still wins over every other source', () => {
+    expect(
+      resolveCloudBaseUrl({
+        env: { STAK_API_URL: 'https://api.stak.test' },
+        storedApiUrl: 'https://stored.stak.test',
+        override: 'https://override.stak.test',
+      }),
+    ).toBe('https://override.stak.test');
   });
 
-  it('legacy STACK_ENV=production also disables the dev fallback', () => {
-    expect(() =>
-      resolveCloudBaseUrl({ env: { STACK_ENV: 'production' } }),
-    ).toThrow();
+  it('STAK_API_URL is used at its intended precedence (above stored, below override)', () => {
+    expect(
+      resolveCloudBaseUrl({
+        env: { STAK_API_URL: 'https://api.stak.test' },
+        storedApiUrl: 'https://stored.stak.test',
+      }),
+    ).toBe('https://api.stak.test');
+  });
+
+  it('a previously stored API URL is used when nothing else overrides it', () => {
+    expect(
+      resolveCloudBaseUrl({
+        env: {},
+        storedApiUrl: 'https://stored.stak.test',
+      }),
+    ).toBe('https://stored.stak.test');
+  });
+
+  it('STAK_ENV=development explicitly opts into the localhost fallback', () => {
+    expect(resolveCloudBaseUrl({ env: { STAK_ENV: 'development' } })).toBe(
+      'http://localhost:3000',
+    );
+  });
+
+  it('legacy STACK_ENV=development also opts into the localhost fallback', () => {
+    expect(resolveCloudBaseUrl({ env: { STACK_ENV: 'development' } })).toBe(
+      'http://localhost:3000',
+    );
+  });
+
+  it('STAK_ENV=local is also an explicit local signal', () => {
+    expect(resolveCloudBaseUrl({ env: { STAK_ENV: 'local' } })).toBe(
+      'http://localhost:3000',
+    );
+  });
+
+  it('NODE_ENV=development is also an explicit local signal', () => {
+    expect(resolveCloudBaseUrl({ env: { NODE_ENV: 'development' } })).toBe(
+      'http://localhost:3000',
+    );
+  });
+
+  it('an UNSET environment never implies development — the exact regression this fixes', () => {
+    // No STAK_ENV, no STACK_ENV, no NODE_ENV, no stored/override URL at all —
+    // this is the real shape of a fresh `npm install -g @memstk/cli` + `stak login`.
+    expect(resolveCloudBaseUrl({ env: {} })).not.toBe('http://localhost:3000');
+    expect(resolveCloudBaseUrl({ env: {} })).toBe('https://www.memstk.com');
+  });
+
+  it('STAK_ENV=production no longer has special meaning — production is already the default', () => {
+    // Kept only so a caller who still sets this legacy flag doesn't regress to
+    // localhost; it simply isn't "local", so it resolves to production either way.
+    expect(resolveCloudBaseUrl({ env: { STAK_ENV: 'production' } })).toBe(
+      'https://www.memstk.com',
+    );
+  });
+
+  it('legacy STACK_ENV=production behaves the same way', () => {
+    expect(resolveCloudBaseUrl({ env: { STACK_ENV: 'production' } })).toBe(
+      'https://www.memstk.com',
+    );
   });
 });
 
@@ -68,11 +134,14 @@ describe('resolveCloudAppUrl (P4 — stak open target)', () => {
     ).toBe('https://app.stak.test');
   });
 
-  it('falls back to localhost in development, fails closed in production', () => {
-    expect(resolveCloudAppUrl({ env: {} })).toBe('http://localhost:3000');
-    expect(() =>
-      resolveCloudAppUrl({ env: { STAK_ENV: 'production' } }),
-    ).toThrow();
+  it('an unconfigured CLI opens real STAK Cloud, not localhost', () => {
+    expect(resolveCloudAppUrl({ env: {} })).toBe('https://www.memstk.com');
+  });
+
+  it('STAK_ENV=development explicitly opts into the localhost fallback', () => {
+    expect(resolveCloudAppUrl({ env: { STAK_ENV: 'development' } })).toBe(
+      'http://localhost:3000',
+    );
   });
 });
 

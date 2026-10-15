@@ -32,6 +32,7 @@ export const registerPublishCommand = (
     .option('--dry-run', 'preview the publication without creating a version')
     .option('--json', 'emit structured JSON for dry-run')
     .option('--yes', 'publish non-interactively')
+    .option('--verbose', 'show detailed cloud internals')
     .action(
       async (
         input: string,

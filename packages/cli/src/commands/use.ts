@@ -46,6 +46,7 @@ export const registerUseCommand = (
     .option('--dry-run', 'preview without persistent mutation')
     .option('--json', 'emit structured JSON (with --dry-run)')
     .option('--yes', 'approve the desired-state change')
+    .option('--verbose', 'show detailed cloud internals')
     .action(
       async (
         input: string,

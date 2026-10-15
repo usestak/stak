@@ -2,15 +2,39 @@ import { CloudNotConfiguredError } from '@stack/cloud-client';
 import { resolveAliasedEnv, sameUrlValue } from '@stack/shared';
 
 const DEV_FALLBACK = 'http://localhost:3000';
+// The canonical, always-reachable production Cloud origin. An installed CLI with
+// nothing configured must reach real STAK Cloud, not a developer's local server —
+// requiring every ordinary end user to set an env var just to make `stak login`
+// work is backwards for a published package (release-gate finding, 2026-10-15).
+const PRODUCTION_FALLBACK = 'https://www.memstk.com';
+
+/** True when `STAK_ENV`/`STACK_ENV` (or `NODE_ENV`, for the common Node convention)
+ *  explicitly asks for local/dev behavior — the ONLY way localhost is reached now. */
+const isExplicitlyLocal = (env: NodeJS.ProcessEnv): boolean => {
+  const stakEnv = resolveAliasedEnv({
+    env,
+    preferred: 'STAK_ENV',
+    legacy: 'STACK_ENV',
+  });
+  return (
+    stakEnv === 'development' ||
+    stakEnv === 'local' ||
+    env.NODE_ENV === 'development'
+  );
+};
 
 /**
  * Resolve the STAK Cloud API base URL for cloud commands. Local commands never
- * call this, so they keep working without any cloud configuration. In production
- * an unset endpoint fails clearly; in development it falls back to localhost.
+ * call this, so they keep working without any cloud configuration.
  *
- * Phase R3: `STAK_API_URL` is preferred and `STACK_API_URL` is the legacy alias;
- * likewise `STAK_ENV` / `STACK_ENV`. Setting both of a pair to conflicting values is
- * a configuration error (see `resolveAliasedEnv`).
+ * UNCONFIGURED INSTALLED CLI = PRODUCTION: with nothing set, this resolves to
+ * real STAK Cloud (`PRODUCTION_FALLBACK`) — localhost is reached only when
+ * `STAK_ENV`/`STACK_ENV` is explicitly `development`/`local`, or `NODE_ENV` is
+ * explicitly `development`. An absent/unset environment never implies dev.
+ *
+ * Phase R3: `STAK_API_URL` is preferred and `STACK_API_URL` is the legacy alias.
+ * Setting both of a pair to conflicting values is a configuration error (see
+ * `resolveAliasedEnv`).
  */
 export const resolveCloudBaseUrl = (options: {
   env: NodeJS.ProcessEnv;
@@ -23,18 +47,11 @@ export const resolveCloudBaseUrl = (options: {
     legacy: 'STACK_API_URL',
     equivalent: sameUrlValue,
   });
-  const stakEnv = resolveAliasedEnv({
-    env: options.env,
-    preferred: 'STAK_ENV',
-    legacy: 'STACK_ENV',
-  });
   const candidate =
     options.override ??
     apiUrl ??
     options.storedApiUrl ??
-    (stakEnv === 'production' || options.env.NODE_ENV === 'production'
-      ? undefined
-      : DEV_FALLBACK);
+    (isExplicitlyLocal(options.env) ? DEV_FALLBACK : PRODUCTION_FALLBACK);
   if (!candidate) throw new CloudNotConfiguredError();
   return candidate;
 };
@@ -42,7 +59,9 @@ export const resolveCloudBaseUrl = (options: {
 /**
  * Resolve the STAK web APP base URL (where `stak open` points the browser) — distinct from
  * the API URL. `STAK_APP_URL` is preferred, `STACK_APP_URL` is the legacy alias (Phase R3).
- * In development it falls back to localhost; in production an unset URL fails clearly.
+ *
+ * Same rule as {@link resolveCloudBaseUrl}: an unconfigured installed CLI opens real STAK
+ * Cloud, not localhost — localhost requires explicitly requesting local/dev behavior.
  */
 export const resolveCloudAppUrl = (options: {
   env: NodeJS.ProcessEnv;
@@ -54,17 +73,10 @@ export const resolveCloudAppUrl = (options: {
     legacy: 'STACK_APP_URL',
     equivalent: sameUrlValue,
   });
-  const stakEnv = resolveAliasedEnv({
-    env: options.env,
-    preferred: 'STAK_ENV',
-    legacy: 'STACK_ENV',
-  });
   const candidate =
     options.override ??
     appUrl ??
-    (stakEnv === 'production' || options.env.NODE_ENV === 'production'
-      ? undefined
-      : DEV_FALLBACK);
+    (isExplicitlyLocal(options.env) ? DEV_FALLBACK : PRODUCTION_FALLBACK);
   if (!candidate) throw new CloudNotConfiguredError();
   return candidate;
 };

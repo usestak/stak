@@ -20,6 +20,7 @@ export const registerLoginCommand = (
     .option('--api-url <url>', 'STAK Cloud API base URL')
     .option('--label <label>', 'label for this CLI token')
     .option('--no-browser', 'do not attempt to open a browser automatically')
+    .option('--verbose', 'show detailed cloud internals')
     .action(
       async (options: {
         apiUrl?: string;

@@ -376,6 +376,50 @@ const runProgram = async (
   return { exit, output };
 };
 
+// Release-gate finding (2026-10-15): the shared Cloud-error message tells users to
+// retry with `--verbose`, but six Cloud-touching commands never registered that
+// option, so Commander's own strict parser rejected it with "unknown option"
+// before the real (actionable) error was ever reached. These prove Commander now
+// accepts `--verbose` on each — reaching the mocked dependency's own rejection
+// (rather than a CommanderError for an unknown option) IS the proof the flag parsed.
+describe('--verbose is accepted by every Cloud command the error message recommends it for', () => {
+  it('stak login --verbose parses (reaches cloudLogin, not an unknown-option error)', async () => {
+    await expect(runProgram(['login', '--verbose'])).rejects.toThrow(
+      'not configured',
+    );
+  });
+
+  it('stak logout --verbose parses', async () => {
+    await expect(runProgram(['logout', '--verbose'])).rejects.toThrow(
+      'not configured',
+    );
+  });
+
+  it('stak publish <stak> --verbose parses', async () => {
+    await expect(
+      runProgram(['publish', 'some-stak', '--verbose']),
+    ).rejects.toThrow('not configured');
+  });
+
+  it('stak remove <stak> --verbose parses', async () => {
+    await expect(
+      runProgram(['remove', 'some-stak', '--verbose']),
+    ).rejects.toThrow('not configured');
+  });
+
+  it('stak use <stak> --verbose parses', async () => {
+    await expect(runProgram(['use', 'some-stak', '--verbose'])).rejects.toThrow(
+      'not configured',
+    );
+  });
+
+  it('stak whoami --verbose parses', async () => {
+    await expect(runProgram(['whoami', '--verbose'])).rejects.toThrow(
+      'not configured',
+    );
+  });
+});
+
 describe('applyUse proposal discrimination (P10B)', () => {
   // These exercise the exact shapes prepareStackUse/prepareRemoteStackUse/prepareOwnedStackUse
   // produce. Regression: the discriminator once checked `'kind' in proposal.source`, which is

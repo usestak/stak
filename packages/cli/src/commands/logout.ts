@@ -14,6 +14,7 @@ export const registerLogoutCommand = (
   program
     .command('logout')
     .description('Sign out of STAK Cloud and remove the local credential')
+    .option('--verbose', 'show detailed cloud internals')
     .action(async () => {
       const result = await dependencies.cloudLogout();
       if (!result.wasSignedIn) {
