@@ -161,9 +161,9 @@ A Skill may originate from:
 
 ---
 
-### 4.2 Stack
+### 4.2 STAK
 
-A **Stack** is a versioned and shareable declaration of related Skills and their requirements.
+A **STAK** is a versioned and shareable declaration of related Skills and their requirements.
 
 Examples:
 
@@ -174,7 +174,7 @@ Examples:
 @acme/security
 ```
 
-A Stack may contain information such as:
+A STAK may contain information such as:
 
 * included Skills
 * Skill versions
@@ -185,19 +185,19 @@ A Stack may contain information such as:
 * source information
 * update policies
 
-A Stack can be:
+A STAK can be:
 
 * private
 * shared privately
 * public
 
-A Stack is reusable and composable.
+A STAK is reusable and composable.
 
 ---
 
 ### 4.3 Environment
 
-An **Environment** is the resolved combination of one or more Stacks and direct Skills.
+An **Environment** is the resolved combination of one or more STAKs and direct Skills.
 
 Example:
 
@@ -292,7 +292,7 @@ and see their current agent environment reconstructed.
 
 ### 5.2 Never Silently Break a Working Environment
 
-Using someone else's Stack must never silently overwrite incompatible Skills or unmanaged local files.
+Using someone else's STAK must never silently overwrite incompatible Skills or unmanaged local files.
 
 STAK should always:
 
@@ -342,9 +342,9 @@ Unmanaged local content is protected by default.
 
 ### 5.6 Composition Over Duplication
 
-Multiple Stacks should be able to share Skills.
+Multiple STAKs should be able to share Skills.
 
-If two Stacks require the same compatible Skill, STAK should deduplicate it.
+If two STAKs require the same compatible Skill, STAK should deduplicate it.
 
 Example:
 
@@ -362,7 +362,7 @@ The resulting Environment contains one resolved Skill.
 
 ### 5.7 Portability Without Lock-In
 
-The local CLI, Stack specification, and essential restoration format should remain open and portable.
+The local CLI, STAK specification, and essential restoration format should remain open and portable.
 
 A developer should not lose access to their Environment if the hosted STAK service becomes unavailable.
 
@@ -388,7 +388,7 @@ A developer with a curated workflow who wants to share it.
 
 Primary needs:
 
-* build reusable Stacks
+* build reusable STAKs
 * publish selected Skills
 * maintain versions
 * let others safely use their setup
@@ -399,7 +399,7 @@ An engineering team that wants consistent agent capabilities across developers.
 
 Primary needs:
 
-* shared Stacks
+* shared STAKs
 * private Skills
 * required Skills
 * version control
@@ -489,7 +489,7 @@ Sign in to:
 • back it up
 • restore it elsewhere
 • sync changes
-• share selected Stacks
+• share selected STAKs
 ```
 
 ---
@@ -627,7 +627,7 @@ Cloud → Machine
 stak use @someone/frontend
 ```
 
-Adds a Stack to the currently active Environment.
+Adds a STAK to the currently active Environment.
 
 If `main` is active:
 
@@ -645,7 +645,7 @@ Apply
 Updated main
 ```
 
-The imported Stack remains part of the Environment until removed.
+The imported STAK remains part of the Environment until removed.
 
 ---
 
@@ -655,7 +655,7 @@ The imported Stack remains part of the Environment until removed.
 stak remove @someone/frontend
 ```
 
-Removes that Stack from the active Environment.
+Removes that STAK from the active Environment.
 
 Skills still required elsewhere remain available.
 
@@ -667,7 +667,7 @@ Skills still required elsewhere remain available.
 stak try @someone/frontend
 ```
 
-Creates a temporary isolated Environment containing that Stack and its requirements.
+Creates a temporary isolated Environment containing that STAK and its requirements.
 
 `main` remains untouched.
 
@@ -696,7 +696,7 @@ stak try @someone/frontend -- codex
 Conceptually:
 
 ```text
-Fetch Stack
+Fetch STAK
 ↓
 Resolve
 ↓
@@ -731,13 +731,13 @@ Changes the active Environment.
 stak publish
 ```
 
-Creates a reusable, shareable Stack from selected parts of an Environment.
+Creates a reusable, shareable STAK from selected parts of an Environment.
 
 The user's entire `main` Environment is never automatically published.
 
 ---
 
-## 9. Main vs Stack
+## 9. Main vs STAK
 
 This distinction is frozen.
 
@@ -748,7 +748,7 @@ It may contain:
 ```text
 direct Skills
 +
-referenced Stacks
+referenced STAKs
 +
 overrides
 ```
@@ -762,20 +762,20 @@ Direct Skills
 - debugging
 - private-design-review
 
-Stacks
+STAKs
 - @temi/frontend
 - @temi/web3
 ```
 
-A Stack is a reusable unit that can be added to an Environment.
+A STAK is a reusable unit that can be added to an Environment.
 
 An Environment is the resolved setup a user wants active.
 
 ---
 
-## 10. Stack Composition
+## 10. STAK Composition
 
-Stacks are composable.
+STAKs are composable.
 
 Example:
 
@@ -787,7 +787,7 @@ Example:
 @temi/web3
 ```
 
-Stacks may also extend other Stacks.
+STAKs may also extend other STAKs.
 
 Example:
 
@@ -811,13 +811,13 @@ with additional Skills such as:
 
 The governing rule is:
 
-> Stacks compose optimistically, but conflicts are resolved explicitly.
+> STAKs compose optimistically, but conflicts are resolved explicitly.
 
 ---
 
 ### 11.1 Identical Requirements
 
-If two Stacks require the same Skill and exact compatible version:
+If two STAKs require the same Skill and exact compatible version:
 
 ```text
 @temi/base
@@ -868,7 +868,7 @@ Cancel
 
 ### 11.4 Overrides
 
-Users may override a Stack requirement in their Environment.
+Users may override a STAK requirement in their Environment.
 
 Example:
 
@@ -880,7 +880,7 @@ Environment override
 frontend-design v5
 ```
 
-The original Stack remains unchanged.
+The original STAK remains unchanged.
 
 STAK should make clear that the resulting Environment differs from the author's original resolution.
 
@@ -951,7 +951,7 @@ Required by:
 @acme/engineering
 ```
 
-If a Stack is removed, STAK can determine whether the Skill is still required elsewhere.
+If a STAK is removed, STAK can determine whether the Skill is still required elsewhere.
 
 ---
 
@@ -988,7 +988,7 @@ Private snapshots must never become public without explicit user action.
 
 ---
 
-## 15. Public and Private Stacks
+## 15. Public and Private STAKs
 
 The user's default Environment is private.
 
@@ -999,7 +999,7 @@ main
 PRIVATE
 ```
 
-Users can create curated public Stacks from their Environment.
+Users can create curated public STAKs from their Environment.
 
 Example:
 
@@ -1041,14 +1041,14 @@ UNCHANGED
 
 The temporary Environment contains:
 
-1. the requested Stack
-2. any Stack it extends
+1. the requested STAK
+2. any STAK it extends
 3. required dependencies
 4. selected optional dependencies
 
 It does not automatically inherit every Skill from `main`.
 
-The purpose is to test whether the Stack itself behaves as intended.
+The purpose is to test whether the STAK itself behaves as intended.
 
 ---
 
@@ -1101,7 +1101,7 @@ main
 ✓ unchanged
 
 Options:
-Use this Stack in main
+Use this STAK in main
 Keep test Environment
 Discard
 ```
@@ -1128,7 +1128,7 @@ STAK can materialize isolated Skills into a STAK-controlled runtime/workspace an
 
 Agent-specific details remain inside adapters.
 
-The Stack specification does not expose vendor filesystem mechanics.
+The STAK specification does not expose vendor filesystem mechanics.
 
 ---
 
@@ -1141,7 +1141,7 @@ STAK should be both an open-source developer tool and a hosted product.
 The open-source layer should include:
 
 * CLI
-* Stack specification
+* STAK specification
 * local scanner
 * local resolver
 * agent adapters
@@ -1155,12 +1155,12 @@ The hosted layer may include:
 
 * accounts
 * cloud backup
-* private Stacks
+* private STAKs
 * public profiles
-* Stack registry
-* Stack history
+* STAK registry
+* STAK history
 * sharing
-* team Stacks
+* team STAKs
 * organizational policy
 * compatibility data
 * audit logs
@@ -1187,10 +1187,10 @@ V0 should support:
 7. local desired-state management
 8. local restoration
 9. diff and drift detection
-10. creating and using Stacks
+10. creating and using STAKs
 11. basic conflict handling
 12. isolated `stak try`
-13. public/private Stack concepts
+13. public/private STAK concepts
 14. reference and snapshot restoration
 15. cloud push/pull after the local product works
 
@@ -1324,7 +1324,7 @@ stak push
 
 > I can reproduce or share this setup anywhere.
 
-Triggered by restore, `stak use`, and public Stacks.
+Triggered by restore, `stak use`, and public STAKs.
 
 ### Safe Exploration
 
@@ -1426,7 +1426,7 @@ Open-source CLI
         ↓
 Individual cloud product
         ↓
-Public Stack ecosystem
+Public STAK ecosystem
         ↓
 Team environments
         ↓
@@ -1490,7 +1490,7 @@ Implementation work should now focus on:
 7. isolated `stak try`
 8. Cursor and Claude adapters
 9. cloud portability
-10. public Stack flow
+10. public STAK flow
 
 Future ideas should be evaluated against:
 
