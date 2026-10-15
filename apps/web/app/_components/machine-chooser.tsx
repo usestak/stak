@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 
 import { SEARCH_THRESHOLD, filterOptions } from './machine-selector-logic';
+import { setActiveMachinePreference } from './machine-preference-actions';
 
 export type ChooserOption = {
   machineId: string;
@@ -58,6 +59,12 @@ export function MachineChooser({
                     textDecoration: 'none',
                     color: 'inherit',
                     display: 'flex',
+                  }}
+                  onClick={() => {
+                    // Fire-and-forget, same as the sidebar selector — persists
+                    // the pick so later routes don't ask again. Never blocks
+                    // the link's own navigation.
+                    void setActiveMachinePreference(m.machineId);
                   }}
                 >
                   <span

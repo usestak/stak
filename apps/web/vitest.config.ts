@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+
 import { defineConfig } from 'vitest/config';
 
 /**
@@ -9,6 +11,15 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   oxc: {
     jsx: { runtime: 'automatic' },
+  },
+  resolve: {
+    // Mirrors tsconfig.json's "@/*" -> "./*" path mapping. Several route/lib
+    // files already import via this alias (it's the Next build's own
+    // convention); without it here, any test that imports such a file fails
+    // to resolve under Vitest even though the real app builds fine.
+    alias: {
+      '@': fileURLToPath(new URL('.', import.meta.url)),
+    },
   },
   test: {
     environment: 'jsdom',

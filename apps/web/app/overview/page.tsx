@@ -7,6 +7,7 @@ import { InlineCommand } from '@/app/_components/inline-command';
 import { MachineChooser } from '@/app/_components/machine-chooser';
 import { ShellNotice } from '@/app/_components/shell-notice';
 import { getCloudService } from '@/lib/cloud-service';
+import { readActiveMachinePreference } from '@/lib/machine-preference';
 import { displayNameOf, getSessionUser } from '@/lib/session';
 
 import {
@@ -114,7 +115,8 @@ export default async function OverviewPage({
 }) {
   const user = await getSessionUser();
   if (!user) redirect('/');
-  const { machine } = await searchParams;
+  const { machine: requestedMachine } = await searchParams;
+  const machine = requestedMachine ?? (await readActiveMachinePreference());
   const handle = user.githubUsername ?? displayNameOf(user);
   const view = await loadOverview(getCloudService(), user, machine);
 

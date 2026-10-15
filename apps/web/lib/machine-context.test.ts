@@ -44,6 +44,44 @@ describe('resolveViewingMachineId', () => {
     const active = [machine({ machineId: A1 }), machine({ machineId: B2 })];
     expect(resolveViewingMachineId(active, undefined)).toBeUndefined();
   });
+
+  // Launch UX fix (persisted active-machine preference): the persisted value
+  // (now sourced from a cookie as a navigation fallback, not just the URL) is
+  // never trusted on its own — it only ever reaches this function as
+  // `requested`, which is validated against the CALLER'S OWN per-request
+  // `active` list. These two cases are the actual safety guarantee for a
+  // stale/revoked/cross-account cookie value, regardless of where it came
+  // from.
+  it('rejects a persisted selection that is no longer in the active list (revoked/deleted machine), falling back to the chooser when more than one machine remains', () => {
+    const C3 = '00000000-0000-4000-8000-0000000000c3';
+    const active = [machine({ machineId: A1 }), machine({ machineId: C3 })];
+    // B2 was presumably valid once (e.g. revoked since) - it must never be
+    // trusted just because it was "remembered", and with 2+ remaining active
+    // machines this must NOT silently auto-select either.
+    expect(resolveViewingMachineId(active, B2)).toBeUndefined();
+  });
+
+  it('rejects a persisted selection belonging to a different account (cross-user isolation)', () => {
+    const C3 = '00000000-0000-4000-8000-0000000000c3';
+    // Account B's active machines never include A1 - a cookie carried over
+    // from a previous login on the same browser must be ignored exactly like
+    // any other invalid id, never silently honored, even when account B also
+    // has multiple machines (so this isn't just the single-machine
+    // auto-select path masking the check).
+    const accountBActive = [
+      machine({ machineId: B2 }),
+      machine({ machineId: C3 }),
+    ];
+    expect(resolveViewingMachineId(accountBActive, A1)).toBeUndefined();
+  });
+
+  it('with exactly one owned machine, a stale/foreign requested id never leaks through - it still resolves to the one machine this account actually owns', () => {
+    const active = [machine({ machineId: A1 })];
+    // B2 here stands in for ANY untrusted requested value (stale, revoked, or
+    // another account's id) - the result is always the caller's own single
+    // active machine, never the untrusted input itself.
+    expect(resolveViewingMachineId(active, B2)).toBe(A1);
+  });
 });
 
 describe('machineDot / statusLabel', () => {

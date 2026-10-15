@@ -8,6 +8,7 @@ import {
   filterOptions,
   nextActiveIndex,
 } from './machine-selector-logic';
+import { setActiveMachinePreference } from './machine-preference-actions';
 
 export type SelectorOption = {
   machineId: string;
@@ -62,8 +63,14 @@ export function MachineSelector({
   const choose = (machineId: string) => {
     setOpen(false);
     setQuery('');
-    if (machineId !== current)
+    if (machineId !== current) {
+      // Persist the pick so it survives navigating away from this exact URL
+      // (the query param alone doesn't follow you to the next route) — see
+      // `lib/machine-preference.ts`. Never awaited: this is a UI convenience,
+      // not a gate on the navigation the user is already asking for.
+      void setActiveMachinePreference(machineId);
       router.replace(`${pathname}?machine=${encodeURIComponent(machineId)}`);
+    }
   };
 
   const openMenu = () => {

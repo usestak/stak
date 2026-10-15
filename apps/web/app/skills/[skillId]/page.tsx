@@ -7,6 +7,7 @@ import { InlineCommand } from '../../_components/inline-command';
 import { MachineChooser } from '../../_components/machine-chooser';
 import { ShellNotice } from '../../_components/shell-notice';
 import { getCloudService } from '../../../lib/cloud-service';
+import { readActiveMachinePreference } from '../../../lib/machine-preference';
 import { displayNameOf, getSessionUser } from '../../../lib/session';
 import { relative } from '../../../lib/machine-context';
 
@@ -83,7 +84,8 @@ export default async function SkillDetailPage({
   const user = await getSessionUser();
   if (!user) redirect('/');
   const { skillId } = await params;
-  const { machine } = await searchParams;
+  const { machine: requestedMachine } = await searchParams;
+  const machine = requestedMachine ?? (await readActiveMachinePreference());
   const handle = user.githubUsername ?? displayNameOf(user);
   const view = await loadSkillDetail(getCloudService(), user, skillId, machine);
 
