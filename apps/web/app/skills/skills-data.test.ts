@@ -65,6 +65,15 @@ const service = (
   getMachinesReadModel: async () => ({ machines }) as MachinesReadModel,
   getSkillsReadModel: async () =>
     ({ environmentExists: true, skills }) as SkillsReadModel,
+  // The shared sidebar summary degrades to blank badges on a read failure (by design —
+  // see sidebar-summary.ts); this file's own assertions only cover `.skills`, which this
+  // page overrides with its own `rows.length` regardless of the shared summary.
+  getOverview: async () => {
+    throw new Error('not exercised by this test file');
+  },
+  listUserStacks: async () => {
+    throw new Error('not exercised by this test file');
+  },
 });
 
 describe('deriveRow', () => {

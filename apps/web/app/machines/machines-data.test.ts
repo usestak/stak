@@ -44,6 +44,19 @@ const service = (opts: {
     if (opts.throwRevoke) throw new Error('offline');
     return { machineId, revoked: true };
   },
+  // Only this page's own `machines` badge is asserted here (machines-data.test.ts owns
+  // that one); the shared sidebar summary's other badges are covered by their own tests.
+  getOverview: async () => ({
+    viewingMachineId: A1,
+    lastBackupAt: null,
+    skills: { total: 0, paused: 0, updatesAvailable: 0 },
+    memory: { mode: null, hasRecoveryMethod: false },
+    projects: { total: 0, archived: 0 },
+    machines: { total: 0, updatesWaiting: 0 },
+    needsAttention: [],
+    recentActivity: [],
+  }),
+  listUserStacks: async () => ({ stacks: [] }),
 });
 
 const ready = (view: Awaited<ReturnType<typeof loadMachinesView>>) => {

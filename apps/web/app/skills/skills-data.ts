@@ -20,10 +20,14 @@ import {
 } from '../../lib/skill-presentation.js';
 import type { SidebarCounts } from '../overview/overview-data.js';
 import type { WebUser } from '../../lib/session.js';
+import { loadSidebarSummary } from '../../lib/sidebar-summary.js';
 
 export type SkillsService = Pick<
   CloudService,
-  'getMachinesReadModel' | 'getSkillsReadModel'
+  | 'getMachinesReadModel'
+  | 'getSkillsReadModel'
+  | 'getOverview'
+  | 'listUserStacks'
 >;
 
 const webAuth = (userId: string) => ({ userId, tokenId: 'web-session' });
@@ -267,6 +271,13 @@ export const loadSkillsList = async (
             : undefined
       : undefined;
 
+  // `.skills` is this page's own authoritative count (`rows.length`, the same list
+  // rendered below) — every other badge comes from the one shared loader.
+  const sidebar = {
+    ...(await loadSidebarSummary(service, user, viewingId, active.length)),
+    skills: String(rows.length),
+  };
+
   return {
     kind: 'ready',
     viewing: {
@@ -276,14 +287,7 @@ export const loadSkillsList = async (
       dot: machineDot(viewing),
     },
     machines: options,
-    sidebar: {
-      overview: { n: '', tone: 'neutral' },
-      skills: String(rows.length),
-      memory: { n: '', tone: 'neutral' },
-      projects: '',
-      machines: String(active.length),
-      staks: '',
-    },
+    sidebar,
     statusSentence,
     statusDot,
     ...(sourceHealthSentence ? { sourceHealthSentence } : {}),

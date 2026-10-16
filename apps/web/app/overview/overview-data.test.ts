@@ -75,6 +75,7 @@ const service = (opts: {
   overview?: OverviewReadModel;
   projects?: ProjectsReadModel['projects'];
   throwMachines?: boolean;
+  stakCount?: number;
 }): OverviewService => ({
   getMachinesReadModel: async (): Promise<MachinesReadModel> => {
     if (opts.throwMachines) throw new Error('offline');
@@ -82,6 +83,16 @@ const service = (opts: {
   },
   getOverview: async () => opts.overview ?? overview(),
   getProjectsReadModel: async () => ({ projects: opts.projects ?? [] }),
+  listUserStacks: async () => ({
+    stacks: Array.from({ length: opts.stakCount ?? 0 }, (_, i) => ({
+      stackId: `stack-${i}`,
+      name: `stack-${i}`,
+      description: '',
+      skillCount: 0,
+      updatedAt: null,
+      versionNumber: 0,
+    })),
+  }),
 });
 
 const ready = (view: Awaited<ReturnType<typeof loadOverview>>) => {

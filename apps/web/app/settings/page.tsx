@@ -3,11 +3,11 @@ import { redirect } from 'next/navigation';
 
 import { AppSidebar } from '@/app/_components/app-sidebar';
 import { InlineCommand } from '@/app/_components/inline-command';
-import {
-  PLACEHOLDER_COUNTS,
-  ShellNotice,
-} from '@/app/_components/shell-notice';
+import { ShellNotice } from '@/app/_components/shell-notice';
 import { getCloudService } from '@/lib/cloud-service';
+import { readActiveMachinePreference } from '@/lib/machine-preference';
+import { resolveSidebarMachineContext } from '@/lib/sidebar-machine-context';
+import { loadSidebarSummary } from '@/lib/sidebar-summary';
 import { displayNameOf, getSessionUser } from '@/lib/session';
 
 import { loadSettingsView } from './settings-data';
@@ -39,6 +39,17 @@ export default async function SettingsPage() {
   if (!user) redirect('/auth/login?next=/settings');
   const handle = user.githubUsername ?? displayNameOf(user);
   const view = await loadSettingsView(getCloudService(), user);
+  const machineContext = await resolveSidebarMachineContext(
+    getCloudService(),
+    user.id,
+    await readActiveMachinePreference(),
+  );
+  const sidebarCounts = await loadSidebarSummary(
+    getCloudService(),
+    user,
+    machineContext.viewing?.machineId ?? null,
+    machineContext.activeCount,
+  );
 
   if (view.kind === 'error')
     return (
@@ -59,9 +70,9 @@ export default async function SettingsPage() {
       <AppSidebar
         active="settings"
         handle={handle}
-        counts={PLACEHOLDER_COUNTS}
-        viewing={null}
-        machines={[]}
+        counts={sidebarCounts}
+        viewing={machineContext.viewing}
+        machines={machineContext.machines}
       />
       <main id="main-content" className="stak-main">
         <div className="stak-head">

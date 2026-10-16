@@ -4,6 +4,10 @@ import { redirect } from 'next/navigation';
 
 import { AppSidebar } from '../../_components/app-sidebar';
 import { ShellNotice } from '../../_components/shell-notice';
+import { getCloudService } from '../../../lib/cloud-service';
+import { readActiveMachinePreference } from '../../../lib/machine-preference';
+import { resolveSidebarMachineContext } from '../../../lib/sidebar-machine-context';
+import { loadSidebarSummary } from '../../../lib/sidebar-summary';
 import { displayNameOf, getSessionUser } from '../../../lib/session';
 
 import { listApprovedSkillsForPickerAction } from '../actions';
@@ -16,19 +20,27 @@ export const metadata: Metadata = {
 
 export const dynamic = 'force-dynamic';
 
-const PLACEHOLDER_SIDEBAR = {
-  overview: { n: '', tone: 'neutral' as const },
-  skills: '',
-  memory: { n: '', tone: 'neutral' as const },
-  projects: '',
-  machines: '',
-  staks: '',
-};
-
-export default async function NewStakPage() {
+export default async function NewStakPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ machine?: string }>;
+}) {
   const user = await getSessionUser();
   if (!user) redirect('/');
+  const { machine: requestedMachine } = await searchParams;
+  const machine = requestedMachine ?? (await readActiveMachinePreference());
   const handle = user.githubUsername ?? displayNameOf(user);
+  const machineContext = await resolveSidebarMachineContext(
+    getCloudService(),
+    user.id,
+    machine,
+  );
+  const sidebarCounts = await loadSidebarSummary(
+    getCloudService(),
+    user,
+    machineContext.viewing?.machineId ?? null,
+    machineContext.activeCount,
+  );
 
   const skills = await listApprovedSkillsForPickerAction();
   if (!skills.ok)
@@ -60,9 +72,9 @@ export default async function NewStakPage() {
       <AppSidebar
         active="staks"
         handle={handle}
-        counts={PLACEHOLDER_SIDEBAR}
-        viewing={null}
-        machines={[]}
+        counts={sidebarCounts}
+        viewing={machineContext.viewing}
+        machines={machineContext.machines}
       />
       <main id="main-content" className="stak-main">
         <div className="stak-head">

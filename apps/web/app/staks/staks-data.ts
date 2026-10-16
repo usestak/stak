@@ -15,10 +15,12 @@ import {
   type MachineOption,
 } from '../../lib/machine-context.js';
 import type { SidebarCounts } from '../overview/overview-data.js';
+import { loadSidebarSummary } from '../../lib/sidebar-summary.js';
 
 export type StacksService = Pick<
   CloudService,
   | 'getMachinesReadModel'
+  | 'getOverview'
   | 'getStacksReadModel'
   | 'getSkillsReadModel'
   | 'listUserStacks'
@@ -165,6 +167,13 @@ export const loadStacksView = async (
       : `Your ${owned.name} STAK has ${owned.skillCount} Skill${owned.skillCount === 1 ? '' : 's'}.`
     : "You don't have a STAK yet.";
 
+  const sidebar = await loadSidebarSummary(
+    service,
+    user,
+    viewingId,
+    active.length,
+  );
+
   return {
     kind: 'ready',
     viewing: {
@@ -174,14 +183,7 @@ export const loadStacksView = async (
       dot: machineDot(viewing),
     },
     machines: options,
-    sidebar: {
-      overview: { n: '', tone: 'neutral' },
-      skills: '',
-      memory: { n: '', tone: 'neutral' },
-      projects: '',
-      machines: '',
-      staks: owned ? '1' : '0',
-    },
+    sidebar,
     statusSentence,
     owned,
     savedStacks,

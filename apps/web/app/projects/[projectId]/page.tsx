@@ -9,21 +9,13 @@ import { ShellNotice } from '../../_components/shell-notice';
 import { getCloudService } from '../../../lib/cloud-service';
 import { readActiveMachinePreference } from '../../../lib/machine-preference';
 import { displayNameOf, getSessionUser } from '../../../lib/session';
+import { loadSidebarSummary } from '../../../lib/sidebar-summary';
 
 import { loadProjectDetail } from './project-detail-data';
 import { ProjectLifecycleButton } from '../_components/project-lifecycle-button';
 import '../projects.css';
 
 export const dynamic = 'force-dynamic';
-
-const PLACEHOLDER_SIDEBAR = {
-  overview: { n: '', tone: 'neutral' as const },
-  skills: '',
-  memory: { n: '', tone: 'neutral' as const },
-  projects: '',
-  machines: '',
-  staks: '',
-};
 
 export default async function ProjectDetailPage({
   params,
@@ -98,12 +90,19 @@ export default async function ProjectDetailPage({
       </ShellNotice>
     );
 
+  const sidebarCounts = await loadSidebarSummary(
+    getCloudService(),
+    user,
+    view.viewing.machineId,
+    view.machines.length,
+  );
+
   return (
     <div className="stak-frame">
       <AppSidebar
         active="projects"
         handle={handle}
-        counts={PLACEHOLDER_SIDEBAR}
+        counts={sidebarCounts}
         viewing={view.viewing}
         machines={view.machines}
       />

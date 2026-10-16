@@ -59,6 +59,16 @@ const service = (opts: {
     return opts.memory ?? memoryModel();
   },
   getProjectsReadModel: async () => ({ projects: opts.projects ?? [] }),
+  // The shared sidebar summary degrades to blank badges on a read failure (by design —
+  // see sidebar-summary.ts), so a throwing stub here is sufficient: this file's own
+  // assertions only cover `.memory`, which this page overrides with its own `backedUp`
+  // value regardless of what the shared summary computes.
+  getOverview: async () => {
+    throw new Error('not exercised by this test file');
+  },
+  listUserStacks: async () => {
+    throw new Error('not exercised by this test file');
+  },
 });
 
 const ready = (view: Awaited<ReturnType<typeof loadMemoryView>>) => {

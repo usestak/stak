@@ -10,6 +10,7 @@ import { getCloudService } from '../../../lib/cloud-service';
 import { readActiveMachinePreference } from '../../../lib/machine-preference';
 import { displayNameOf, getSessionUser } from '../../../lib/session';
 import { relative } from '../../../lib/machine-context';
+import { loadSidebarSummary } from '../../../lib/sidebar-summary';
 
 import { loadSkillDetail, type SkillDetailView } from '../skill-detail-data';
 import { SkillActions } from '../_components/skill-actions';
@@ -17,15 +18,6 @@ import { SkillShareSection } from '../_components/skill-share-section';
 import '../skills.css';
 
 export const dynamic = 'force-dynamic';
-
-const PLACEHOLDER_SIDEBAR = {
-  overview: { n: '', tone: 'neutral' as const },
-  skills: '',
-  memory: { n: '', tone: 'neutral' as const },
-  projects: '',
-  machines: '',
-  staks: '',
-};
 
 const DOT: Record<'ready' | 'attention' | 'neutral', string> = {
   ready: '#84cb8e',
@@ -155,13 +147,19 @@ export default async function SkillDetailPage({
         : view.sourceCheckState === 'update-available'
           ? 'Approve the update above, then run this on this machine to install it.'
           : 'Reconciles this machine to the approved version.';
+  const sidebarCounts = await loadSidebarSummary(
+    getCloudService(),
+    user,
+    view.viewing.machineId,
+    view.machines.length,
+  );
 
   return (
     <div className="stak-frame">
       <AppSidebar
         active="skills"
         handle={handle}
-        counts={PLACEHOLDER_SIDEBAR}
+        counts={sidebarCounts}
         viewing={view.viewing}
         machines={view.machines}
       />

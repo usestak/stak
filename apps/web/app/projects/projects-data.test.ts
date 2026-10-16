@@ -57,6 +57,15 @@ const service = (opts: {
     if (opts.throwProjects) throw new Error('offline');
     return { projects: opts.projects ?? [project()] };
   },
+  // The shared sidebar summary degrades to blank badges on a read failure (by design —
+  // see sidebar-summary.ts); this file's own assertions only cover `.projects`, which
+  // this page overrides with its own `rows.length` regardless of the shared summary.
+  getOverview: async () => {
+    throw new Error('not exercised by this test file');
+  },
+  listUserStacks: async () => {
+    throw new Error('not exercised by this test file');
+  },
 });
 
 const ready = (view: Awaited<ReturnType<typeof loadProjectsList>>) => {

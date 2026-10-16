@@ -26,7 +26,10 @@ import { projectDisplayName } from '../../lib/project-presentation.js';
 /** The P3 read methods the Overview consumes; injectable so the view model is unit-testable. */
 export type OverviewService = Pick<
   CloudService,
-  'getMachinesReadModel' | 'getOverview' | 'getProjectsReadModel'
+  | 'getMachinesReadModel'
+  | 'getOverview'
+  | 'getProjectsReadModel'
+  | 'listUserStacks'
 >;
 
 /** The web calls the P3 service as the signed-in session user (identity never from input). */
@@ -349,6 +352,13 @@ export const loadOverview = async (
       : '';
 
   const cards = ordered.slice(0, MAX_CARDS).map((m) => machineCard(m, active));
+  // Fetched separately from the overview/projects pair above, with its own graceful
+  // fallback — a stacks-read failure degrades to a blank sidebar badge, it never turns an
+  // otherwise-successful Overview load into a hard error.
+  const stakCount = await service
+    .listUserStacks(auth)
+    .then((s) => s.stacks.length)
+    .catch(() => 0);
 
   return {
     kind: 'ready',
@@ -370,7 +380,7 @@ export const loadOverview = async (
         : { n: '', tone: 'neutral' },
       projects: projectTotal > 0 ? String(projectTotal) : '',
       machines: String(active.length),
-      staks: '',
+      staks: stakCount > 0 ? String(stakCount) : '',
     },
     backedUp: overview.lastBackupAt !== null,
     checkedIn: isCheckedIn,

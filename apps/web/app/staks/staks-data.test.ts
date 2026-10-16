@@ -75,6 +75,11 @@ const service = (opts: {
     skills: opts.skills ?? [skill()],
   }),
   listUserStacks: async () => ({ stacks: opts.userStacks ?? [] }),
+  // The shared sidebar summary degrades to blank badges on a read failure (by design —
+  // see sidebar-summary.ts); this file's own tests don't assert on `.sidebar.staks`.
+  getOverview: async () => {
+    throw new Error('not exercised by this test file');
+  },
 });
 
 const ready = (view: Awaited<ReturnType<typeof loadStacksView>>) => {

@@ -18,10 +18,11 @@ import {
   type MachineOption,
 } from '../../lib/machine-context.js';
 import type { SidebarCounts } from '../overview/overview-data.js';
+import { loadSidebarSummary } from '../../lib/sidebar-summary.js';
 
 export type MachinesService = Pick<
   CloudService,
-  'getMachinesReadModel' | 'revokeMachine'
+  'getMachinesReadModel' | 'revokeMachine' | 'getOverview' | 'listUserStacks'
 >;
 
 export type MachineCard = {
@@ -208,6 +209,13 @@ export const loadMachinesView = async (
         ? `Your STAK is on ${active.length} machines.`
         : `Your STAK is on ${active.length} machines. ${attentionCount} need${attentionCount === 1 ? 's' : ''} attention.`;
 
+  const sidebar = await loadSidebarSummary(
+    service,
+    user,
+    viewingId,
+    active.length,
+  );
+
   return {
     kind: 'ready',
     viewing: {
@@ -217,14 +225,7 @@ export const loadMachinesView = async (
       dot: machineDot(viewing),
     },
     machines: options,
-    sidebar: {
-      overview: { n: '', tone: 'neutral' },
-      skills: '',
-      memory: { n: '', tone: 'neutral' },
-      projects: '',
-      machines: String(active.length),
-      staks: '',
-    },
+    sidebar,
     statusSentence,
     cards,
     updatesWaitingCards,

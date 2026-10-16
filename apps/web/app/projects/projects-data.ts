@@ -20,10 +20,14 @@ import {
   projectDisplayName,
 } from '../../lib/project-presentation.js';
 import type { SidebarCounts } from '../overview/overview-data.js';
+import { loadSidebarSummary } from '../../lib/sidebar-summary.js';
 
 export type ProjectsService = Pick<
   CloudService,
-  'getMachinesReadModel' | 'getProjectsReadModel'
+  | 'getMachinesReadModel'
+  | 'getProjectsReadModel'
+  | 'getOverview'
+  | 'listUserStacks'
 >;
 
 export type ProjectRow = {
@@ -147,13 +151,11 @@ export const loadProjectsList = async (
       dot: machineDot(viewing),
     },
     machines: options,
+    // `.projects` is this page's own authoritative count (`rows.length`, the same list
+    // rendered below) — every other badge comes from the one shared loader.
     sidebar: {
-      overview: { n: '', tone: 'neutral' },
-      skills: '',
-      memory: { n: '', tone: 'neutral' },
-      projects: String(rows.length),
-      machines: String(active.length),
-      staks: '',
+      ...(await loadSidebarSummary(service, user, viewingId, active.length)),
+      projects: rows.length > 0 ? String(rows.length) : '',
     },
     statusSentence,
     rows,

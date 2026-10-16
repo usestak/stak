@@ -16,10 +16,15 @@ import {
 } from '../../lib/machine-context.js';
 import { projectDisplayName } from '../../lib/project-presentation.js';
 import type { SidebarCounts } from '../overview/overview-data.js';
+import { loadSidebarSummary } from '../../lib/sidebar-summary.js';
 
 export type MemoryService = Pick<
   CloudService,
-  'getMachinesReadModel' | 'getMemoryReadModel' | 'getProjectsReadModel'
+  | 'getMachinesReadModel'
+  | 'getMemoryReadModel'
+  | 'getProjectsReadModel'
+  | 'getOverview'
+  | 'listUserStacks'
 >;
 
 export type MemoryHistoryRow = {
@@ -191,15 +196,15 @@ export const loadMemoryView = async (
       dot: machineDot(viewing),
     },
     machines: options,
+    // `.memory` is this page's own authoritative account-level backup fact (`backedUp`,
+    // just above) — never recomputed from `loadSidebarSummary`'s generic overview read,
+    // so this page's careful Memory-status semantics are never second-guessed by a
+    // differently-sourced value. Every other badge comes from the one shared loader.
     sidebar: {
-      overview: { n: '', tone: 'neutral' },
-      skills: '',
+      ...(await loadSidebarSummary(service, user, viewingId, active.length)),
       memory: backedUp
         ? { n: 'Backed up', tone: 'ready' }
         : { n: '', tone: 'neutral' },
-      projects: '',
-      machines: String(active.length),
-      staks: '',
     },
     mode: memory.mode,
     backedUp,
