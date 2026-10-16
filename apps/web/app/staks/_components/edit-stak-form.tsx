@@ -38,6 +38,7 @@ export function EditStakForm({
 }) {
   const router = useRouter();
   const [name, setName] = useState(detail.name);
+  const [description, setDescription] = useState(detail.description);
   const [rows, setRows] = useState<Row[]>(() => {
     const inStack = new Map(
       detail.skills.map((s) => [s.skillId, s.paused === true]),
@@ -91,6 +92,9 @@ export function EditStakForm({
       stackId: detail.stackId,
       expectedLatestVersionId: detail.version?.versionId ?? null,
       ...(name.trim() !== detail.name ? { name: name.trim() } : {}),
+      ...(description.trim() !== detail.description
+        ? { description: description.trim() }
+        : {}),
       skills: included.map((r) => ({ skillId: r.skillId, paused: r.paused })),
     });
     setPending(false);
@@ -146,6 +150,11 @@ export function EditStakForm({
         <span style={{ fontSize: 13 }}>
           Review changes to <strong>{name}</strong>
         </span>
+        {description ? (
+          <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
+            {description}
+          </span>
+        ) : null}
         <div style={{ border: '1px solid var(--line-2)', borderRadius: 8 }}>
           {included.length === 0 ? (
             <p style={{ padding: 14, fontSize: 13, color: 'var(--faint)' }}>
@@ -212,6 +221,26 @@ export function EditStakForm({
               background: '#151413',
               color: 'var(--ink)',
               maxWidth: 320,
+            }}
+          />
+        </label>
+
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ fontSize: 13, fontWeight: 500 }}>
+            Description <span style={{ color: 'var(--dim)' }}>(optional)</span>
+          </span>
+          <input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="What this STAK is for"
+            style={{
+              fontSize: 13,
+              padding: '8px 10px',
+              border: '1px solid var(--chip)',
+              borderRadius: 6,
+              background: '#151413',
+              color: 'var(--ink)',
+              maxWidth: 420,
             }}
           />
         </label>
