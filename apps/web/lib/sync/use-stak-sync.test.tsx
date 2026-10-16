@@ -6,8 +6,31 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ refresh }),
 }));
 
+const { realtimeHandlers, removeChannel, createSupabaseBrowserClient } =
+  vi.hoisted(() => {
+    const realtimeHandlers: Record<string, Array<() => void>> = {};
+    const removeChannel = vi.fn();
+    const fakeChannel = {
+      on: (_event: string, config: { table: string }, handler: () => void) => {
+        (realtimeHandlers[config.table] ??= []).push(handler);
+        return fakeChannel;
+      },
+      subscribe: vi.fn(() => fakeChannel),
+    };
+    const fakeClient = {
+      channel: vi.fn(() => fakeChannel),
+      removeChannel,
+    };
+    const createSupabaseBrowserClient = vi.fn(() => fakeClient);
+    return { realtimeHandlers, removeChannel, createSupabaseBrowserClient };
+  });
+
+vi.mock('../supabase-browser', () => ({
+  createSupabaseBrowserClient,
+}));
+
 import { useStakSync } from './use-stak-sync';
-import { SYNC_CHANNEL_NAME } from './stak-sync';
+import { SYNC_CHANNEL_NAME, emitSync } from './stak-sync';
 
 function Mounted() {
   useStakSync();
@@ -25,6 +48,8 @@ const setHidden = (hidden: boolean) => {
 afterEach(() => {
   cleanup();
   refresh.mockClear();
+  removeChannel.mockClear();
+  for (const key of Object.keys(realtimeHandlers)) delete realtimeHandlers[key];
 });
 
 describe('useStakSync', () => {
@@ -33,6 +58,31 @@ describe('useStakSync', () => {
     const sender = new BroadcastChannel(SYNC_CHANNEL_NAME);
 
     sender.postMessage({ domains: ['staks'], at: Date.now() });
+
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    sender.close();
+  });
+
+  it('does not double-refresh when this same tab is the one that emitted the signal', async () => {
+    render(<Mounted />);
+
+    // Simulate what every mutation call site does: emitSync from the SAME module instance
+    // this test file and use-stak-sync.ts both import, i.e. the same "tab".
+    emitSync(['staks']);
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('still refreshes for a broadcast whose source is a different tab', async () => {
+    render(<Mounted />);
+    const sender = new BroadcastChannel(SYNC_CHANNEL_NAME);
+
+    sender.postMessage({
+      domains: ['staks'],
+      at: Date.now(),
+      source: 'other-tab-id',
+    });
 
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
     sender.close();
@@ -72,5 +122,43 @@ describe('useStakSync', () => {
 
     expect(refresh).not.toHaveBeenCalled();
     sender.close();
+  });
+
+  it('refreshes on an authenticated Realtime invalidation while the tab stays focused', async () => {
+    render(<Mounted />);
+
+    realtimeHandlers.user_stacks[0]();
+
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+  });
+
+  it('coalesces a BroadcastChannel signal and a Realtime signal into one refresh', async () => {
+    render(<Mounted />);
+    const sender = new BroadcastChannel(SYNC_CHANNEL_NAME);
+
+    sender.postMessage({
+      domains: ['staks'],
+      at: Date.now(),
+      source: 'other-tab',
+    });
+    realtimeHandlers.machines[0]();
+
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    sender.close();
+  });
+
+  it('cleans up the Realtime subscription on unmount', () => {
+    const { unmount } = render(<Mounted />);
+    unmount();
+
+    expect(removeChannel).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays usable if creating the browser Supabase client throws', () => {
+    createSupabaseBrowserClient.mockImplementationOnce(() => {
+      throw new Error('no session yet');
+    });
+
+    expect(() => render(<Mounted />)).not.toThrow();
   });
 });

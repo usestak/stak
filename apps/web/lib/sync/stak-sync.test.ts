@@ -27,7 +27,7 @@ describe('emitSync', () => {
     expect(typeof message.at).toBe('number');
   });
 
-  it('never sends entity content — only the domain list and a timestamp', async () => {
+  it('never sends entity content — only the domain list, a timestamp, and a per-tab source id', async () => {
     const listener = track(new BroadcastChannel(SYNC_CHANNEL_NAME));
     const received = new Promise<SyncMessage>((resolve) => {
       listener.onmessage = (event: MessageEvent<SyncMessage>) =>
@@ -37,7 +37,7 @@ describe('emitSync', () => {
     emitSync(['publication']);
 
     const message = await received;
-    expect(Object.keys(message).sort()).toEqual(['at', 'domains']);
+    expect(Object.keys(message).sort()).toEqual(['at', 'domains', 'source']);
   });
 
   it('is a no-op for an empty domain list', async () => {

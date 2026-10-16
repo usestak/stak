@@ -8,6 +8,11 @@ vi.mock('../../lib/cloud-service', () => ({
 vi.mock('../../lib/site-origin', () => ({
   siteOrigin: () => 'https://www.memstk.com',
 }));
+// The page mounts PublicProfileSyncListener, a client component that calls useRouter();
+// this file otherwise renders the page outside a real Next.js App Router context.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
 
 import ProfilePage, { generateMetadata } from './page';
 

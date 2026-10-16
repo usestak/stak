@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 
 import { PublicShell } from '@/app/_components/public-shell';
+import { PublicProfileSyncListener } from '@/app/_components/public-profile-sync-listener';
 import { getCloudService } from '@/lib/cloud-service';
 import { relativeTime } from '@/lib/format';
 import { siteOrigin } from '@/lib/site-origin';
@@ -87,6 +88,7 @@ export default async function ProfilePage({
 
   return (
     <PublicShell title={`@${profile.owner}`}>
+      <PublicProfileSyncListener ownerHandle={profile.owner} />
       {profile.displayName ? (
         <p className="stak-public-muted">{profile.displayName}</p>
       ) : null}

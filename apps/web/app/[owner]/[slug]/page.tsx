@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { isSafeDisplayUrl } from '@stack/spec';
 
 import { PublicShell } from '@/app/_components/public-shell';
+import { PublicStakSyncListener } from '@/app/_components/public-stak-sync-listener';
 import { getCloudService } from '@/lib/cloud-service';
 import { relativeTime, skillCount } from '@/lib/format';
 import { siteOrigin } from '@/lib/site-origin';
@@ -95,6 +96,7 @@ export default async function StackPage({
     };
     return (
       <PublicShell title={stack.displayName}>
+        <PublicStakSyncListener stackId={stack.stackId} />
         <div className="stak-public-meta">
           <span className="stak-public-ref">{ref}</span>
           <span className="dot">Skill</span>
@@ -181,6 +183,7 @@ export default async function StackPage({
 
   return (
     <PublicShell title={stack.displayName}>
+      <PublicStakSyncListener stackId={stack.stackId} />
       <div className="stak-public-meta">
         <span className="stak-public-ref">{ref}</span>
         <span className="dot">{skillCount(requirements.length)}</span>
