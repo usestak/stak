@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
+import { emitSync } from '../../../lib/sync/stak-sync';
 import { setProjectLifecycleAction } from '../actions';
 
 export function ProjectLifecycleButton({
@@ -30,6 +31,7 @@ export function ProjectLifecycleButton({
       setError(result.error);
       return;
     }
+    emitSync(['projects', 'sidebar', 'overview']);
     router.refresh();
   };
 

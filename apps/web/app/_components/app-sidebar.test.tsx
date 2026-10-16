@@ -10,7 +10,7 @@ import { PLACEHOLDER_COUNTS } from './shell-notice';
 // context that only exists inside a real Next.js render tree, so we stub the
 // module rather than pull in a full router mount for this unit test.
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
   usePathname: () => '/overview',
 }));
 

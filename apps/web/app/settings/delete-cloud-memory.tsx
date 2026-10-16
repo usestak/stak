@@ -4,6 +4,7 @@ import { useState } from 'react';
 
 import { deleteCloudMemoryAction } from './actions';
 import { DELETE_CONFIRMATION_PHRASE } from './confirm-delete';
+import { emitSync } from '../../lib/sync/stak-sync';
 
 type Status =
   | { kind: 'idle' }
@@ -67,6 +68,7 @@ export function DeleteCloudMemory({
           });
           return;
         }
+        emitSync(['memory', 'sidebar', 'overview']);
         setStatus({ kind: 'done' });
       }}
     >

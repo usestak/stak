@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { MachineSelector } from './machine-selector';
 import type { SidebarCounts } from '../overview/overview-data';
 import type { MachineOption } from '../../lib/machine-context';
+import { useStakSync } from '../../lib/sync/use-stak-sync';
 
 const DOT: Record<string, string> = {
   ready: '#84cb8e',
@@ -61,6 +62,10 @@ export function AppSidebar({
   const [open, setOpen] = useState(false);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const close = () => setOpen(false);
+
+  // Rendered on every authenticated page, so this is the one place that needs to mount the
+  // cross-tab/focus sync listener — no per-page wiring required (see lib/sync).
+  useStakSync();
 
   useEffect(() => {
     if (!open) return;

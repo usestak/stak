@@ -8,6 +8,7 @@ import type {
   UserStackDetail,
 } from '@stack/spec';
 
+import { emitSync } from '../../../lib/sync/stak-sync';
 import {
   getUserStackPublicationStatusAction,
   publishUserStackAction,
@@ -110,6 +111,7 @@ export function EditStakForm({
     setSaved(result.versionNumber);
     setReviewing(false);
     setEditing(false);
+    emitSync(['staks', 'sidebar', 'overview']);
     router.refresh();
   };
 
@@ -148,6 +150,7 @@ export function EditStakForm({
     const status = await getUserStackPublicationStatusAction(detail.stackId);
     setPublishing(false);
     if (status.ok) setPublication(status.status);
+    emitSync(['staks', 'publication', 'sidebar', 'overview']);
     router.refresh();
   };
 
@@ -164,6 +167,7 @@ export function EditStakForm({
     }
     setConfirmingUnpublish(false);
     setPublication({ status: 'private' });
+    emitSync(['staks', 'publication', 'sidebar', 'overview']);
     router.refresh();
   };
 

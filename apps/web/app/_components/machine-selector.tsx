@@ -9,6 +9,7 @@ import {
   nextActiveIndex,
 } from './machine-selector-logic';
 import { setActiveMachinePreference } from './machine-preference-actions';
+import { emitSync } from '../../lib/sync/stak-sync';
 
 export type SelectorOption = {
   machineId: string;
@@ -75,6 +76,9 @@ export function MachineSelector({
       // `lib/machine-preference.ts`. Never awaited: this is a UI convenience,
       // not a gate on the navigation the user is already asking for.
       void setActiveMachinePreference(machineId);
+      // Other open tabs have no `?machine=` query param of their own, but they do share this
+      // cookie — tell them to refresh so they pick up the new "viewing as" preference too.
+      emitSync(['machines', 'sidebar']);
       // Wrapped in a transition so `isPending` is true until the new server-rendered
       // state for the picked machine actually lands — the trigger disables and shows
       // "Switching..." for that whole window, so the old machine's data is never shown

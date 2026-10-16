@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
+import { emitSync } from '../../../lib/sync/stak-sync';
 import { approveSkillVersionAction, setSkillPausedAction } from '../actions';
 
 export function SkillActions({
@@ -38,6 +39,7 @@ export function SkillActions({
       setStale(result.stale === true);
       return;
     }
+    emitSync(['skills', 'sidebar', 'overview']);
     router.refresh();
   };
 
@@ -51,6 +53,7 @@ export function SkillActions({
       setError(result.error);
       return;
     }
+    emitSync(['skills', 'sidebar']);
     router.refresh();
   };
 

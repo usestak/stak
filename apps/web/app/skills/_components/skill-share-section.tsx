@@ -5,6 +5,7 @@ import { useState } from 'react';
 
 import type { SkillShareStatus } from '@stack/spec';
 
+import { emitSync } from '../../../lib/sync/stak-sync';
 import { shareSkillAction, unshareSkillAction } from '../actions';
 
 /**
@@ -41,6 +42,7 @@ export function SkillShareSection({
     }
     setConfirmingUnshare(false);
     setUnshared(true);
+    emitSync(['skills', 'sidebar']);
     router.refresh();
   };
 
@@ -71,6 +73,7 @@ export function SkillShareSection({
         return;
       }
       setSharedUrl(result.url);
+      emitSync(['skills', 'sidebar']);
       router.refresh();
     };
     return (
@@ -178,6 +181,7 @@ export function SkillShareSection({
       return;
     }
     setSharedUrl(result.url);
+    emitSync(['skills', 'sidebar']);
     router.refresh();
   };
 

@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 import { InlineCommand } from '../../_components/inline-command';
+import { emitSync } from '../../../lib/sync/stak-sync';
 import { revokeMachineAction } from '../actions';
 
 /**
@@ -46,6 +47,7 @@ export function RevokeMachineButton({
       setError(result.error);
       return;
     }
+    emitSync(['machines', 'sidebar', 'overview']);
     router.refresh();
   };
 
