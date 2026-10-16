@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import type {
   GetUserStackPublicationStatusResponse,
@@ -67,6 +67,19 @@ export function EditStakForm({
   // the source composition changed.
   const [publication, setPublication] =
     useState<Publication>(initialPublication);
+  // `useState(initialPublication)` only consults the prop on the FIRST render — React
+  // preserves this component's state across every later re-render of the same mounted
+  // instance, including the one `router.refresh()` triggers after a Realtime/BroadcastChannel
+  // invalidation. Without this, a server-confirmed publish/unpublish/republish only reaches
+  // the Publish section after a full page reload, even though `detail.description`/
+  // `detail.skills` above already update correctly (they read the `detail` prop directly,
+  // not a copy in state). `publish`/`unpublish` still set `publication` optimistically from
+  // their own authoritative server response before this effect's prop ever changes, so this
+  // sync only overwrites it once the server's own refreshed props agree — never fabricates
+  // state, never loops (the effect only reruns when the prop reference actually changes).
+  useEffect(() => {
+    setPublication(initialPublication);
+  }, [initialPublication]);
   const [publishing, setPublishing] = useState(false);
   const [publishSlug, setPublishSlug] = useState(
     initialPublication.status === 'private'

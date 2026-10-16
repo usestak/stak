@@ -217,6 +217,124 @@ test('saving only sends description when it actually changed', async () => {
   );
 });
 
+/**
+ * Regression for the stale-publication-status bug: `router.refresh()` (triggered by
+ * Realtime/BroadcastChannel invalidation, or by the component's own save/publish/unpublish
+ * flow) re-renders this already-mounted component with a fresh `initialPublication` prop —
+ * it never remounts it. The Publish section must reconcile to that fresh prop without a
+ * full browser reload.
+ */
+test('a fresh initialPublication prop (no remount) flips Published to Unpublished changes', () => {
+  const { rerender } = render(
+    <EditStakForm
+      detail={detail}
+      approvedSkills={approvedSkills}
+      initialPublication={{
+        status: 'published',
+        owner: 'stephentony100',
+        slug: 'frontend-test',
+        url: PUBLISHED_URL,
+        versionNumber: 1,
+      }}
+    />,
+  );
+
+  expect(screen.getByText(/^published$/i)).toBeInTheDocument();
+  expect(
+    screen.queryByRole('button', { name: /republish/i }),
+  ).not.toBeInTheDocument();
+
+  rerender(
+    <EditStakForm
+      detail={detail}
+      approvedSkills={approvedSkills}
+      initialPublication={{
+        status: 'changed-since-published',
+        owner: 'stephentony100',
+        slug: 'frontend-test',
+        url: PUBLISHED_URL,
+        versionNumber: 1,
+      }}
+    />,
+  );
+
+  expect(screen.queryByText(/^published$/i)).not.toBeInTheDocument();
+  expect(screen.getByText(/unpublished changes/i)).toBeInTheDocument();
+  expect(
+    screen.getByRole('button', { name: /republish/i }),
+  ).toBeInTheDocument();
+});
+
+test('a fresh initialPublication prop (no remount) flips Unpublished changes back to Published', () => {
+  const { rerender } = render(
+    <EditStakForm
+      detail={detail}
+      approvedSkills={approvedSkills}
+      initialPublication={{
+        status: 'changed-since-published',
+        owner: 'stephentony100',
+        slug: 'frontend-test',
+        url: PUBLISHED_URL,
+        versionNumber: 1,
+      }}
+    />,
+  );
+
+  expect(screen.getByText(/unpublished changes/i)).toBeInTheDocument();
+
+  rerender(
+    <EditStakForm
+      detail={detail}
+      approvedSkills={approvedSkills}
+      initialPublication={{
+        status: 'published',
+        owner: 'stephentony100',
+        slug: 'frontend-test',
+        url: PUBLISHED_URL,
+        versionNumber: 1,
+      }}
+    />,
+  );
+
+  expect(screen.getByText(/^published$/i)).toBeInTheDocument();
+  expect(screen.queryByText(/unpublished changes/i)).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('button', { name: /republish/i }),
+  ).not.toBeInTheDocument();
+});
+
+test('clicking Republish flips the UI to Published without a reload', async () => {
+  publishUserStackAction.mockResolvedValue({ ok: true });
+  getUserStackPublicationStatusAction.mockResolvedValue({
+    ok: true,
+    status: {
+      status: 'published',
+      owner: 'stephentony100',
+      slug: 'frontend-test',
+      url: PUBLISHED_URL,
+      versionNumber: 2,
+    },
+  });
+  render(
+    <EditStakForm
+      detail={detail}
+      approvedSkills={approvedSkills}
+      initialPublication={{
+        status: 'changed-since-published',
+        owner: 'stephentony100',
+        slug: 'frontend-test',
+        url: PUBLISHED_URL,
+        versionNumber: 1,
+      }}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: /republish/i }));
+
+  await screen.findByText(/^published$/i);
+  expect(screen.queryByText(/unpublished changes/i)).not.toBeInTheDocument();
+});
+
 test('editing the description includes it in the save payload', async () => {
   updateUserStackAction.mockResolvedValue({ ok: true, versionNumber: 2 });
   render(
