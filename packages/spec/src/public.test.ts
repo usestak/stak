@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   PublicStackRefError,
+  formatPublicStackRef,
   inspectPublicSourceRemote,
   isSafeDisplayUrl,
   parsePublicStackRef,
@@ -26,6 +27,21 @@ describe('parsePublicStackRef', () => {
     '@temi/Frontend', // uppercase slug ok? slug is lowercase only
   ])('rejects %s', (input) => {
     expect(() => parsePublicStackRef(input)).toThrow(PublicStackRefError);
+  });
+});
+
+describe('formatPublicStackRef', () => {
+  // Regression: the CLI locator (`@owner/slug`) and the canonical browser share URL
+  // (`/owner/slug`, built in cloud-server's public-service.ts/user-stack-service.ts) are
+  // deliberately different grammars. This formatter is the CLI side only — it must always
+  // keep the leading `@`, never drift toward the bare web path form.
+  it('always keeps the leading @ (CLI locator, never the browser URL form)', () => {
+    const ref = formatPublicStackRef({
+      owner: 'stephentony100',
+      slug: 'frontend-test',
+    });
+    expect(ref).toBe('@stephentony100/frontend-test');
+    expect(ref.startsWith('@')).toBe(true);
   });
 });
 

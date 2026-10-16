@@ -28,10 +28,7 @@ export async function generateMetadata({
 }: {
   params: Promise<{ owner: string }>;
 }): Promise<Metadata> {
-  const { owner } = await params;
-  if (!owner.startsWith('@'))
-    return { robots: { index: false, follow: false } };
-  const handle = owner.slice(1);
+  const { owner: handle } = await params;
 
   let profile;
   try {
@@ -40,7 +37,8 @@ export async function generateMetadata({
     return { robots: { index: false, follow: false } };
   }
 
-  const url = `${siteOrigin()}/@${profile.owner}`;
+  // Canonical browser URL: `/owner`, never the `@owner` CLI locator form.
+  const url = `${siteOrigin()}/${profile.owner}`;
   const title = profile.displayName
     ? `${profile.displayName} (@${profile.owner}) | Memory STAK`
     : `@${profile.owner} | Memory STAK`;
@@ -78,9 +76,7 @@ export default async function ProfilePage({
 }: {
   params: Promise<{ owner: string }>;
 }) {
-  const { owner } = await params;
-  if (!owner.startsWith('@')) notFound();
-  const handle = owner.slice(1);
+  const { owner: handle } = await params;
 
   let profile;
   try {
@@ -103,7 +99,7 @@ export default async function ProfilePage({
           <Link
             key={stack.slug}
             className="stak-public-card"
-            href={`/@${profile.owner}/${stack.slug}`}
+            href={`/${profile.owner}/${stack.slug}`}
           >
             <div className="stak-public-card-title">
               {stack.displayName}

@@ -28,10 +28,7 @@ export async function generateMetadata({
 }: {
   params: Promise<{ owner: string; slug: string }>;
 }): Promise<Metadata> {
-  const { owner, slug } = await params;
-  if (!owner.startsWith('@'))
-    return { robots: { index: false, follow: false } };
-  const handle = owner.slice(1);
+  const { owner: handle, slug } = await params;
 
   let stack;
   try {
@@ -40,7 +37,8 @@ export async function generateMetadata({
     return { robots: { index: false, follow: false } };
   }
 
-  const url = `${siteOrigin()}/@${stack.owner}/${stack.slug}`;
+  // Canonical browser URL: `/owner/slug`, never the `@owner/slug` CLI locator form.
+  const url = `${siteOrigin()}/${stack.owner}/${stack.slug}`;
   const title = `${stack.displayName} by @${stack.owner} | Memory STAK`;
   const requirementCount = stack.latest?.bundle.requirements.length ?? 0;
   const isSkill = stack.latest?.bundle.stack.kind === 'skill';
@@ -69,9 +67,7 @@ export default async function StackPage({
 }: {
   params: Promise<{ owner: string; slug: string }>;
 }) {
-  const { owner, slug } = await params;
-  if (!owner.startsWith('@')) notFound();
-  const handle = owner.slice(1);
+  const { owner: handle, slug } = await params;
 
   let stack;
   try {

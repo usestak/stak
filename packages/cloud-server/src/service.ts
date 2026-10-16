@@ -195,6 +195,7 @@ export const createCloudService = (config: CloudServiceConfig) => {
   const skillShareMethods = createSkillShareService({
     repository: config.repository,
     newId,
+    appUrl,
     resolveHandle: publicMethods.resolveHandle,
     publishPublicStackVersion: publicMethods.publishPublicStackVersion,
     unpublishPublicStack: publicMethods.unpublishPublicStack,
@@ -205,6 +206,7 @@ export const createCloudService = (config: CloudServiceConfig) => {
     repository: config.repository,
     newId,
     nowIso,
+    appUrl,
     resolveHandle: publicMethods.resolveHandle,
     publishPublicStackVersion: publicMethods.publishPublicStackVersion,
     unpublishPublicStack: publicMethods.unpublishPublicStack,

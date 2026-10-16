@@ -236,6 +236,9 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
     expect(result.owner).toBe('temi');
     expect(result.slug).toBe('design-helper');
     expect(result.createdNew).toBe(true);
+    // Regression: canonical browser share URL, never the `@owner/slug` CLI locator.
+    expect(result.url).toBe('http://localhost:3000/temi/design-helper');
+    expect(result.url).not.toContain('@');
 
     // Public read model (reused as-is, §3): kind discriminates it as a Skill.
     const published = await service.getPublicStack('temi', 'design-helper');
@@ -253,6 +256,10 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
       owner: 'temi',
       slug: 'design-helper',
     });
+    if (after.share.status === 'already-shared') {
+      expect(after.share.url).toBe('http://localhost:3000/temi/design-helper');
+      expect(after.share.url).not.toContain('@');
+    }
   });
 
   it('an upstream remote moving after publish does not alter the already-published version', async () => {

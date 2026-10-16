@@ -6,22 +6,45 @@ vi.mock('next/navigation', () => ({
 }));
 
 const updateUserStackAction = vi.fn();
+const publishUserStackAction = vi.fn();
+const unpublishUserStackAction = vi.fn();
+const getUserStackPublicationStatusAction = vi.fn();
 vi.mock('../actions', () => ({
   updateUserStackAction: (...args: unknown[]) => updateUserStackAction(...args),
-  publishUserStackAction: vi.fn(),
-  unpublishUserStackAction: vi.fn(),
-  getUserStackPublicationStatusAction: vi.fn(),
+  publishUserStackAction: (...args: unknown[]) =>
+    publishUserStackAction(...args),
+  unpublishUserStackAction: (...args: unknown[]) =>
+    unpublishUserStackAction(...args),
+  getUserStackPublicationStatusAction: (...args: unknown[]) =>
+    getUserStackPublicationStatusAction(...args),
 }));
 
 import { EditStakForm } from './edit-stak-form';
 
-afterEach(cleanup);
+afterEach(() => {
+  vi.clearAllMocks();
+  cleanup();
+});
 
 const detail = {
   stackId: 'stack-1',
   name: 'frontend-test',
   description: 'A small frontend STAK for testing public sharing.',
-  skills: [],
+  skills: [
+    {
+      skillId: 'skill-1',
+      name: 'ByteRover',
+      contentHash: `sha256:${'a'.repeat(64)}`,
+      metadata: { name: 'ByteRover', description: 'A test Skill.' },
+      restoration: {
+        strategy: 'snapshot' as const,
+        contentHash: `sha256:${'a'.repeat(64)}`,
+        reason: 'local' as const,
+      },
+      observedSources: [],
+      paused: false,
+    },
+  ],
   version: {
     versionId: 'v1',
     versionNumber: 1,
@@ -31,6 +54,131 @@ const detail = {
 const approvedSkills = [
   { skillId: 'skill-1', name: 'ByteRover', paused: false },
 ];
+
+const PUBLISHED_URL = 'https://www.memstk.com/stephentony100/frontend-test';
+
+/** Default detail view (web UX simplification): shows the composition read-only, with an
+ *  explicit `Edit STAK` action, rather than reopening the full creation form. */
+test('a newly-loaded STAK detail defaults to a view, not the full Skill selector', () => {
+  render(
+    <EditStakForm
+      detail={detail}
+      approvedSkills={approvedSkills}
+      initialPublication={{ status: 'private' }}
+    />,
+  );
+
+  expect(
+    screen.queryByRole('group', { name: /skills in this stak/i }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('button', { name: /review changes/i }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole('button', { name: /edit stak/i }),
+  ).toBeInTheDocument();
+});
+
+test('view mode shows the selected Skills as a readable list with a count', () => {
+  render(
+    <EditStakForm
+      detail={detail}
+      approvedSkills={approvedSkills}
+      initialPublication={{ status: 'private' }}
+    />,
+  );
+
+  expect(screen.getByText(/skills \(1\)/i)).toBeInTheDocument();
+  expect(screen.getByText('ByteRover')).toBeInTheDocument();
+});
+
+test('Edit STAK reveals the existing name/description/Skill-selector editor', () => {
+  render(
+    <EditStakForm
+      detail={detail}
+      approvedSkills={approvedSkills}
+      initialPublication={{ status: 'private' }}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: /edit stak/i }));
+
+  expect(
+    screen.getByRole('group', { name: /skills in this stak/i }),
+  ).toBeInTheDocument();
+  expect(screen.getByPlaceholderText('What this STAK is for')).toHaveValue(
+    detail.description,
+  );
+  expect(
+    screen.getByRole('button', { name: /review changes/i }),
+  ).toBeInTheDocument();
+});
+
+test('published state shows the canonical share URL, never the @owner CLI form', () => {
+  render(
+    <EditStakForm
+      detail={detail}
+      approvedSkills={approvedSkills}
+      initialPublication={{
+        status: 'published',
+        owner: 'stephentony100',
+        slug: 'frontend-test',
+        url: PUBLISHED_URL,
+        versionNumber: 1,
+      }}
+    />,
+  );
+
+  const link = screen.getByRole('link', { name: PUBLISHED_URL });
+  expect(link).toHaveAttribute('href', PUBLISHED_URL);
+  expect(link.getAttribute('href')).not.toContain('@');
+  expect(
+    screen.getByRole('link', { name: /open public page/i }),
+  ).toHaveAttribute('href', PUBLISHED_URL);
+});
+
+test('changed-since-published surfaces "Unpublished changes" with a Republish action, no invented dirty state', () => {
+  render(
+    <EditStakForm
+      detail={detail}
+      approvedSkills={approvedSkills}
+      initialPublication={{
+        status: 'changed-since-published',
+        owner: 'stephentony100',
+        slug: 'frontend-test',
+        url: PUBLISHED_URL,
+        versionNumber: 1,
+      }}
+    />,
+  );
+
+  expect(screen.getByText(/unpublished changes/i)).toBeInTheDocument();
+  expect(
+    screen.getByRole('button', { name: /republish/i }),
+  ).toBeInTheDocument();
+});
+
+test('Unpublish still calls the existing unpublish action', async () => {
+  unpublishUserStackAction.mockResolvedValue({ ok: true });
+  render(
+    <EditStakForm
+      detail={detail}
+      approvedSkills={approvedSkills}
+      initialPublication={{
+        status: 'published',
+        owner: 'stephentony100',
+        slug: 'frontend-test',
+        url: PUBLISHED_URL,
+        versionNumber: 1,
+      }}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: /^unpublish$/i }));
+  fireEvent.click(screen.getByRole('button', { name: /stop publishing/i }));
+
+  expect(unpublishUserStackAction).toHaveBeenCalledWith('stack-1');
+});
 
 /** Regression for the known gap this task fixes: the private detail/edit page received
  *  `description` from the server (it's always present in UserStackDetail) but never
@@ -43,6 +191,8 @@ test('the edit form shows the STAK description and lets it be edited', () => {
       initialPublication={{ status: 'private' }}
     />,
   );
+
+  fireEvent.click(screen.getByRole('button', { name: /edit stak/i }));
 
   const input = screen.getByPlaceholderText('What this STAK is for');
   expect(input).toHaveValue(detail.description);
@@ -58,6 +208,7 @@ test('saving only sends description when it actually changed', async () => {
     />,
   );
 
+  fireEvent.click(screen.getByRole('button', { name: /edit stak/i }));
   fireEvent.click(screen.getByRole('button', { name: /review changes/i }));
   fireEvent.click(screen.getByRole('button', { name: /save as new version/i }));
 
@@ -76,6 +227,7 @@ test('editing the description includes it in the save payload', async () => {
     />,
   );
 
+  fireEvent.click(screen.getByRole('button', { name: /edit stak/i }));
   fireEvent.change(screen.getByPlaceholderText('What this STAK is for'), {
     target: { value: 'Updated description.' },
   });

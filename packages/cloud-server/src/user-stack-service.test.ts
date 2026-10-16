@@ -296,6 +296,10 @@ describe('Named Stacks (P10B §11-15)', () => {
     const published = await service.getPublicStack(result.owner, 'frontend');
     expect(published.latest?.bundle.stack.kind).toBe('stack');
     expect(published.latest?.bundle.requirements).toHaveLength(1);
+    // Regression: the canonical browser share URL is `owner/slug`, never the
+    // `@owner/slug` CLI locator form — the two are deliberately different grammars.
+    expect(result.url).toBe('http://localhost:3000/alice/frontend');
+    expect(result.url).not.toContain('@');
   });
 
   it('Hybrid Public Skill Portability: an all-local-snapshot named Stack publishes, and the snapshot is fetchable anonymously by content hash', async () => {
@@ -749,6 +753,13 @@ describe('Named Stacks (P10B §11-15)', () => {
         created.stackId,
       );
       expect(afterPublish.publication.status).toBe('published');
+      if (afterPublish.publication.status === 'published') {
+        // Regression: canonical browser share URL, never the `@owner/slug` CLI locator.
+        expect(afterPublish.publication.url).toBe(
+          'http://localhost:3000/alice/frontend',
+        );
+        expect(afterPublish.publication.url).not.toContain('@');
+      }
 
       await service.updateUserStack(auth, {
         stackId: created.stackId,
@@ -763,6 +774,12 @@ describe('Named Stacks (P10B §11-15)', () => {
         created.stackId,
       );
       expect(afterEdit.publication.status).toBe('changed-since-published');
+      // Republish/unpublished-changes state (web UX item H): the backend already exposes
+      // enough to show "Unpublished changes" + a Republish action without inventing any
+      // client-side dirty-state tracking.
+      if (afterEdit.publication.status === 'changed-since-published') {
+        expect(afterEdit.publication.url).not.toContain('@');
+      }
     });
   });
 

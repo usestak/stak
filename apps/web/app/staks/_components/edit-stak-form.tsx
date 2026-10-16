@@ -50,6 +50,11 @@ export function EditStakForm({
       paused: inStack.get(s.skillId) ?? false,
     }));
   });
+  // Default detail view is a VIEW, not a permanently-open editor (web UX simplification):
+  // `editing` reveals the name/description/Skill-selector form on demand; `reviewing` is a
+  // sub-step of editing. Creation already chose the composition once — this page's default
+  // state should show it, not ask the user to reconfigure it before they can publish.
+  const [editing, setEditing] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,7 +109,25 @@ export function EditStakForm({
     }
     setSaved(result.versionNumber);
     setReviewing(false);
+    setEditing(false);
     router.refresh();
+  };
+
+  const cancelEdit = () => {
+    setName(detail.name);
+    setDescription(detail.description);
+    setRows((prev) => {
+      const inStack = new Map(
+        detail.skills.map((s) => [s.skillId, s.paused === true]),
+      );
+      return prev.map((r) => ({
+        ...r,
+        inStack: inStack.has(r.skillId),
+        paused: inStack.get(r.skillId) ?? false,
+      }));
+    });
+    setError(null);
+    setEditing(false);
   };
 
   const publish = async () => {
@@ -204,6 +227,82 @@ export function EditStakForm({
       </div>
     );
 
+  if (!editing)
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+        <section className="stak-stack-form-step" aria-label="STAK composition">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 13, fontWeight: 500 }}>Description</span>
+            <span style={{ fontSize: 13, color: 'var(--faint)' }}>
+              {detail.description || 'No description.'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 500 }}>
+              Skills ({detail.skills.length})
+            </span>
+            {detail.skills.length === 0 ? (
+              <span style={{ fontSize: 13, color: 'var(--faint)' }}>
+                This STAK has no Skills.
+              </span>
+            ) : (
+              <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+                {detail.skills.map((s) => (
+                  <li
+                    key={s.skillId}
+                    style={{
+                      display: 'flex',
+                      gap: 8,
+                      alignItems: 'center',
+                      padding: '4px 0',
+                      fontSize: 13,
+                    }}
+                  >
+                    <span style={{ fontFamily: 'var(--mono)' }}>{s.name}</span>
+                    {s.paused ? (
+                      <span style={{ color: 'var(--faint)' }}>Paused</span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div>
+            <button
+              type="button"
+              className="stak-pill"
+              style={{ cursor: 'pointer' }}
+              onClick={() => setEditing(true)}
+            >
+              Edit STAK
+            </button>
+            {saved !== null ? (
+              <span
+                style={{
+                  marginLeft: 12,
+                  fontSize: 12.5,
+                  color: 'var(--faint)',
+                }}
+              >
+                Saved as version {saved}.
+              </span>
+            ) : null}
+          </div>
+        </section>
+        <PublishSection
+          publication={publication}
+          publishSlug={publishSlug}
+          setPublishSlug={setPublishSlug}
+          publish={publish}
+          publishing={publishing}
+          publishError={publishError}
+          confirmingUnpublish={confirmingUnpublish}
+          setConfirmingUnpublish={setConfirmingUnpublish}
+          unpublish={unpublish}
+        />
+      </div>
+    );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
       <section className="stak-stack-form-step">
@@ -277,7 +376,7 @@ export function EditStakForm({
           ))}
         </div>
 
-        <div>
+        <div style={{ display: 'flex', gap: 10 }}>
           <button
             type="button"
             className="stak-pill"
@@ -287,9 +386,22 @@ export function EditStakForm({
           >
             Review changes
           </button>
+          <button
+            type="button"
+            className="stak-pill"
+            style={{ cursor: 'pointer' }}
+            onClick={cancelEdit}
+          >
+            Cancel
+          </button>
           {saved !== null ? (
             <span
-              style={{ marginLeft: 12, fontSize: 12.5, color: 'var(--faint)' }}
+              style={{
+                marginLeft: 2,
+                alignSelf: 'center',
+                fontSize: 12.5,
+                color: 'var(--faint)',
+              }}
             >
               Saved as version {saved}.
             </span>
@@ -297,115 +409,161 @@ export function EditStakForm({
         </div>
       </section>
 
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <h2 style={{ margin: 0, fontSize: 14 }}>Publish</h2>
-        {publication.status === 'published' ||
-        publication.status === 'changed-since-published' ? (
-          <>
-            <span style={{ fontSize: 13 }}>
-              {publication.status === 'published'
-                ? 'Published'
-                : 'Changed since published'}
-            </span>
+      <PublishSection
+        publication={publication}
+        publishSlug={publishSlug}
+        setPublishSlug={setPublishSlug}
+        publish={publish}
+        publishing={publishing}
+        publishError={publishError}
+        confirmingUnpublish={confirmingUnpublish}
+        setConfirmingUnpublish={setConfirmingUnpublish}
+        unpublish={unpublish}
+      />
+    </div>
+  );
+}
+
+function PublishSection({
+  publication,
+  publishSlug,
+  setPublishSlug,
+  publish,
+  publishing,
+  publishError,
+  confirmingUnpublish,
+  setConfirmingUnpublish,
+  unpublish,
+}: {
+  publication: Publication;
+  publishSlug: string;
+  setPublishSlug: (slug: string) => void;
+  publish: () => void;
+  publishing: boolean;
+  publishError: string | null;
+  confirmingUnpublish: boolean;
+  setConfirmingUnpublish: (value: boolean) => void;
+  unpublish: () => void;
+}) {
+  return (
+    <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <h2 style={{ margin: 0, fontSize: 14 }}>Publish</h2>
+      {publication.status === 'published' ||
+      publication.status === 'changed-since-published' ? (
+        <>
+          <span style={{ fontSize: 13 }}>
+            {publication.status === 'published'
+              ? 'Published'
+              : 'Unpublished changes'}
+          </span>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
             <a
               href={publication.url}
               style={{ fontSize: 12.5, fontFamily: 'var(--mono)' }}
             >
               {publication.url}
             </a>
-            {publication.status === 'changed-since-published' && (
-              <>
-                <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
-                  This STAK&apos;s composition has changed since that version
-                  was published.
-                </span>
-                <button
-                  type="button"
-                  className="stak-pill"
-                  style={{ alignSelf: 'flex-start', cursor: 'pointer' }}
-                  onClick={publish}
-                  disabled={publishing}
-                >
-                  {publishing ? 'Updating…' : 'Update published version'}
-                </button>
-              </>
-            )}
-            {confirmingUnpublish ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
-                  Stop publishing this STAK? The public link will stop working.
-                  Your saved STAK stays unchanged.
-                </span>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    type="button"
-                    className="stak-pill"
-                    onClick={unpublish}
-                    disabled={publishing}
-                  >
-                    {publishing ? 'Stopping…' : 'Stop publishing'}
-                  </button>
-                  <button
-                    type="button"
-                    className="stak-pill"
-                    onClick={() => setConfirmingUnpublish(false)}
-                    disabled={publishing}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : (
+            <a
+              href={publication.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: 12.5 }}
+            >
+              Open public page
+            </a>
+          </div>
+          {publication.status === 'changed-since-published' && (
+            <>
+              <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
+                This STAK&apos;s saved composition no longer matches what&apos;s
+                published.
+              </span>
               <button
                 type="button"
                 className="stak-pill"
-                style={{ alignSelf: 'flex-start' }}
-                onClick={() => setConfirmingUnpublish(true)}
+                style={{ alignSelf: 'flex-start', cursor: 'pointer' }}
+                onClick={publish}
+                disabled={publishing}
               >
-                Unpublish
+                {publishing ? 'Republishing…' : 'Republish'}
               </button>
-            )}
-          </>
-        ) : (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>@you/</span>
-            <input
-              value={publishSlug}
-              onChange={(e) => setPublishSlug(e.target.value)}
-              aria-label="Public slug"
-              style={{ fontFamily: 'var(--mono)', fontSize: 13 }}
-              pattern="[a-z0-9][a-z0-9-_]{0,62}"
-            />
+            </>
+          )}
+          {confirmingUnpublish ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
+                Stop publishing this STAK? The public link will stop working.
+                Your saved STAK stays unchanged.
+              </span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  className="stak-pill"
+                  onClick={unpublish}
+                  disabled={publishing}
+                >
+                  {publishing ? 'Stopping…' : 'Stop publishing'}
+                </button>
+                <button
+                  type="button"
+                  className="stak-pill"
+                  onClick={() => setConfirmingUnpublish(false)}
+                  disabled={publishing}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
             <button
               type="button"
               className="stak-pill"
-              style={{ cursor: 'pointer' }}
-              onClick={publish}
-              disabled={publishing}
+              style={{ alignSelf: 'flex-start' }}
+              onClick={() => setConfirmingUnpublish(true)}
             >
-              {publishing ? 'Publishing…' : 'Publish'}
+              Unpublish
             </button>
-          </div>
-        )}
-        <span style={{ fontSize: 12, color: 'var(--dim)', maxWidth: 480 }}>
-          Publishing makes this STAK&apos;s current saved version public at a
-          URL anyone can read — including the contents of any Local Skill in it,
-          through an immutable content snapshot. Only publish content you have
-          permission to share. If a Skill hasn&apos;t been pushed to Cloud yet,
-          publishing fails for the whole STAK with a clear reason — it never
-          publishes a partial composition.
-        </span>
-        <span
-          role="status"
-          aria-live="polite"
-          style={{
-            fontSize: 12.5,
-            color: publishError ? '#e5776a' : 'transparent',
-          }}
-        >
-          {publishError ?? ''}
-        </span>
-      </section>
-    </div>
+          )}
+        </>
+      ) : (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>you/</span>
+          <input
+            value={publishSlug}
+            onChange={(e) => setPublishSlug(e.target.value)}
+            aria-label="Public slug"
+            style={{ fontFamily: 'var(--mono)', fontSize: 13 }}
+            pattern="[a-z0-9][a-z0-9-_]{0,62}"
+          />
+          <button
+            type="button"
+            className="stak-pill"
+            style={{ cursor: 'pointer' }}
+            onClick={publish}
+            disabled={publishing}
+          >
+            {publishing ? 'Publishing…' : 'Publish'}
+          </button>
+        </div>
+      )}
+      <span style={{ fontSize: 12, color: 'var(--dim)', maxWidth: 480 }}>
+        Publishing makes this STAK&apos;s current saved version public at a URL
+        anyone can read — including the contents of any Local Skill in it,
+        through an immutable content snapshot. Only publish content you have
+        permission to share. If a Skill hasn&apos;t been pushed to Cloud yet,
+        publishing fails for the whole STAK with a clear reason — it never
+        publishes a partial composition.
+      </span>
+      <span
+        role="status"
+        aria-live="polite"
+        style={{
+          fontSize: 12.5,
+          color: publishError ? '#e5776a' : 'transparent',
+        }}
+      >
+        {publishError ?? ''}
+      </span>
+    </section>
   );
 }

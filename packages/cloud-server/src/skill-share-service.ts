@@ -17,6 +17,7 @@ import type { AuthenticatedUser } from './service.js';
 export type SkillShareServiceContext = {
   repository: CloudRepository & PublicStackRepository;
   newId: () => string;
+  appUrl: string;
   resolveHandle: (userId: string) => Promise<string>;
   publishPublicStackVersion: (
     user: AuthenticatedUser,
@@ -126,7 +127,9 @@ export const createSkillShareService = (ctx: SkillShareServiceContext) => {
               status: upToDate ? 'already-shared' : 'update-available',
               owner: existingHandle,
               slug: existing.stack.slug,
-              url: `/@${existingHandle}/${existing.stack.slug}`,
+              // Canonical browser share URL, not the `@owner/slug` CLI locator — see the
+              // matching comment in public-service.ts's `url()` helper.
+              url: `${ctx.appUrl.replace(/\/+$/, '')}/${existingHandle}/${existing.stack.slug}`,
               versionNumber: existing.latest.versionNumber,
             },
           };

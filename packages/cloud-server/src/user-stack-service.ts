@@ -35,6 +35,7 @@ export type UserStackServiceContext = {
   repository: CloudRepository & UserStackRepository & PublicStackRepository;
   newId: () => string;
   nowIso: () => string;
+  appUrl: string;
   resolveHandle: (userId: string) => Promise<string>;
   publishPublicStackVersion: (
     user: AuthenticatedUser,
@@ -525,7 +526,9 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
         published.latestVersionId,
       );
       const handle = await ctx.resolveHandle(user.userId);
-      const url = `/@${handle}/${stack.publishedSlug}`;
+      // Canonical browser share URL, not the `@owner/slug` CLI locator — see the
+      // matching comment in public-service.ts's `url()` helper.
+      const url = `${ctx.appUrl.replace(/\/+$/, '')}/${handle}/${stack.publishedSlug}`;
       const version = await latestVersionOf(stack);
       const candidate = buildCandidateBundle(stack, version);
       const upToDate =

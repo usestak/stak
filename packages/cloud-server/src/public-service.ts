@@ -101,8 +101,13 @@ export const createPublicStackService = (ctx: PublicServiceContext) => {
     return candidate;
   };
 
+  // Canonical browser share URL — deliberately NOT the `@owner/slug` CLI locator form
+  // (see `formatPublicStackRef`/`parsePublicStackRef` in @stack/spec). The two are
+  // intentionally different grammars: `/owner/slug` is what the `[owner]/[slug]` web
+  // route matches, while `@owner/slug` is what the CLI parses. Conflating them here
+  // previously made the web UI emit `/@owner/slug`, a URL the public route rejects.
   const url = (handle: string, slug: string) =>
-    `${ctx.appUrl.replace(/\/+$/, '')}/@${handle}/${slug}`;
+    `${ctx.appUrl.replace(/\/+$/, '')}/${handle}/${slug}`;
 
   return {
     resolveHandle,
