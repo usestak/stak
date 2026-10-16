@@ -4,7 +4,11 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { hashSkillDirectory, hashSkillTreeEntries } from '@stack/shared';
+import {
+  hashSkillDirectory,
+  hashSkillTreeEntries,
+  sha256CanonicalJson,
+} from '@stack/shared';
 import type { SkillTreeEntry } from '@stack/shared';
 import type { ImportedStackVersion, SkillSource } from '@stack/spec';
 import {
@@ -250,20 +254,28 @@ describe('public Stack consumption', () => {
     const root = await temp();
     const cloud = makeCloud();
     const token = await mintToken(cloud.service, cloud.createClient);
-    const contentHash = await hashOfBody(root, 'v1');
+    // Snapshot-first publication: even this Git-backed Skill's content must already be in
+    // Cloud (equivalent to `stak push`) before it can publish.
+    const contentHash = await pushLocalSkill(root, cloud.blobStore, 'v1');
     const result = await publish(cloud, token, contentHash);
     expect(result.owner).toBe('alice');
 
     const anon = cloud.createClient({ baseUrl: 'http://localhost' });
     const read = await anon.getPublicStack('alice', 'frontend');
     expect(read?.latest?.bundle.requirements[0]?.name).toBe('design');
+    // The published restoration is the immutable snapshot, not a Git reference — proof this
+    // Git-backed Skill no longer depends on its repository remaining reachable.
+    expect(read?.latest?.bundle.requirements[0]?.restoration).toEqual({
+      strategy: 'snapshot',
+      contentHash,
+    });
   });
 
-  it('reconstructs a public Stack into main and stays offline afterward', async () => {
+  it('reconstructs a public Stack into main and stays offline afterward, with zero Git fetch for a Git-backed Skill', async () => {
     const root = await temp();
     const cloud = makeCloud();
     const token = await mintToken(cloud.service, cloud.createClient);
-    const contentHash = await hashOfBody(root, 'v1');
+    const contentHash = await pushLocalSkill(root, cloud.blobStore, 'v1');
     await publish(cloud, token, contentHash);
 
     const stackHome = path.join(root, 'consumer');
@@ -283,7 +295,11 @@ describe('public Stack consumption', () => {
       'missing',
     );
 
-    await applyRemoteStackUse(proposal, { gitExecutor: fakeGit('v1') });
+    // No `gitExecutor` passed at all — this is the central reproducibility guarantee: a
+    // published STAK is self-contained. The ORIGINAL source was Git-backed, but the published
+    // (snapshot) restoration never touches Git; only the public snapshot fetch (`client`) is
+    // needed to resolve it.
+    await applyRemoteStackUse(proposal, { client: anon });
     const state = await loadMainEnvironment({ stackHome });
     const layer = state.manifest.stacks[0];
     expect(layer?.source?.kind).toBe('public');
@@ -302,12 +318,28 @@ describe('public Stack consumption', () => {
     expect(removal.layer.name).toBe('frontend');
   });
 
-  it('leaves main unchanged when a reference cannot be verified', async () => {
+  it('leaves main unchanged when a public snapshot fails its integrity check', async () => {
     const root = await temp();
     const cloud = makeCloud();
     const token = await mintToken(cloud.service, cloud.createClient);
-    const contentHash = await hashOfBody(root, 'v1');
+    const contentHash = await pushLocalSkill(root, cloud.blobStore, 'v1');
     await publish(cloud, token, contentHash);
+
+    // Simulate corrupted/compromised storage: the bytes served for this exact published
+    // contentHash no longer match it (`ensurePublicSnapshotUploaded` trusts the caller's
+    // content-addressing at publish time — it never re-verifies bytes against the hash), so
+    // the CONSUMER-side extraction integrity check is what must hold the line. Since this
+    // requirement never touches Git at all now, this replaces the old "Git checkout returned
+    // the wrong content" scenario with the equivalent one for the snapshot path.
+    const tamperedEntries: SkillTreeEntry[] = [
+      {
+        relativePath: 'SKILL.md',
+        type: 'file',
+        content: Buffer.from(skillBody('tampered')),
+      },
+    ];
+    const tampered = packSkillTreeEntries(tamperedEntries);
+    await cloud.blobStore.putPublished(contentHash, tampered.bytes);
 
     const stackHome = path.join(root, 'consumer');
     await initializeMainEnvironment({ stackHome, scanResult: emptyScan() });
@@ -319,7 +351,7 @@ describe('public Stack consumption', () => {
     const proposal = await prepareRemoteStackUse({ stackHome, source });
     // Wrong content -> hash mismatch -> abort before persisting the layer.
     await expect(
-      applyRemoteStackUse(proposal, { gitExecutor: fakeGit('tampered') }),
+      applyRemoteStackUse(proposal, { client: anon }),
     ).rejects.toThrow();
     const state = await loadMainEnvironment({ stackHome });
     expect(state.manifest.stacks).toHaveLength(0);
@@ -329,7 +361,11 @@ describe('public Stack consumption', () => {
     const root = await temp();
     const cloud = makeCloud();
     const token = await mintToken(cloud.service, cloud.createClient);
-    await publish(cloud, token, await hashOfBody(root, 'v1'));
+    await publish(
+      cloud,
+      token,
+      await pushLocalSkill(root, cloud.blobStore, 'v1'),
+    );
 
     const stackHome = path.join(root, 'consumer');
     await initializeMainEnvironment({ stackHome, scanResult: emptyScan() });
@@ -340,13 +376,15 @@ describe('public Stack consumption', () => {
     });
     await applyRemoteStackUse(
       await prepareRemoteStackUse({ stackHome, source: v1 }),
-      {
-        gitExecutor: fakeGit('v1'),
-      },
+      { client: anon },
     );
 
     // Publish v2 (different content) and attempt to use it again.
-    await publish(cloud, token, await hashOfBody(root, 'v2'));
+    await publish(
+      cloud,
+      token,
+      await pushLocalSkill(root, cloud.blobStore, 'v2'),
+    );
     const v2 = await resolvePublicStackSource({
       client: anon,
       ref: '@alice/frontend',
@@ -356,11 +394,11 @@ describe('public Stack consumption', () => {
     ).rejects.toThrow(/already active/i);
   });
 
-  it('runs a remote trial that acquires content without a main', async () => {
+  it('runs a remote trial that acquires content without a main, with no Git fetch for a Git-backed Skill', async () => {
     const root = await temp();
     const cloud = makeCloud();
     const token = await mintToken(cloud.service, cloud.createClient);
-    const contentHash = await hashOfBody(root, 'v1');
+    const contentHash = await pushLocalSkill(root, cloud.blobStore, 'v1');
     await publish(cloud, token, contentHash);
 
     const stackHome = path.join(root, 'trial-machine');
@@ -370,10 +408,11 @@ describe('public Stack consumption', () => {
       ref: '@alice/frontend',
     });
     expect(trial.kind).toBe('public');
+    // No `gitExecutor` — same reproducibility guarantee as the `use` path above.
     await preserveRemoteTrialStack({
       stackHome,
       trial,
-      gitExecutor: fakeGit('v1'),
+      client: anon,
     });
     expect((await verifyStoredSkill({ stackHome, contentHash })).state).toBe(
       'available',
@@ -382,6 +421,95 @@ describe('public Stack consumption', () => {
     await expect(
       stat(path.join(stackHome, 'environments', 'main')),
     ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('legacy reference-only published bundles still resolve through the Git/reference path, unaffected by snapshot-first publication', async () => {
+    // A bundle shaped exactly like a row published before snapshot-first publication existed
+    // — built by hand, never through `buildPublicStackBundle` (which no longer emits this
+    // shape) — simulating a real pre-existing row read back from Cloud storage.
+    const root = await temp();
+    const cloud = makeCloud();
+    const token = await mintToken(cloud.service, cloud.createClient);
+    const publisher = cloud.createClient({
+      baseUrl: 'http://localhost',
+      token,
+    });
+
+    const legacyContentHash = await hashOfBody(root, 'legacy');
+    const legacyBundle = {
+      schemaVersion: 1 as const,
+      stack: {
+        name: 'legacy-frontend',
+        description: 'Legacy Frontend Stack',
+        versionHash: `sha256:${'0'.repeat(64)}`,
+        kind: 'stack' as const,
+      },
+      requirements: [
+        {
+          id: 'req_legacy01',
+          name: 'design',
+          requirement: 'required' as const,
+          contentHash: legacyContentHash,
+          metadata: { name: 'design', description: 'Design engineering' },
+          restoration: {
+            strategy: 'reference' as const,
+            reference: {
+              remote: REMOTE,
+              revision: REVISION,
+              path: SKILL_PATH,
+              expectedContentHash: legacyContentHash,
+            },
+          },
+          observedSources: [gitSource()],
+          preferredSource: gitSource(),
+          originStackName: 'legacy-frontend',
+        },
+      ],
+      inheritedStackMetadata: [],
+    };
+    const digestInput = {
+      stack: legacyBundle.stack,
+      requirements: legacyBundle.requirements,
+      inheritedStackMetadata: legacyBundle.inheritedStackMetadata,
+    };
+    const versionHash = sha256CanonicalJson({
+      name: legacyBundle.stack.name,
+      description: legacyBundle.stack.description,
+      requirements: legacyBundle.requirements,
+      inheritedStacks: legacyBundle.inheritedStackMetadata,
+      skippedOptional: [],
+    });
+    const finalBundle = {
+      ...legacyBundle,
+      stack: { ...legacyBundle.stack, versionHash },
+      digest: sha256CanonicalJson({
+        ...digestInput,
+        stack: { ...legacyBundle.stack, versionHash },
+      }),
+    };
+    await publisher.publishPublicStackVersion('legacy-frontend', {
+      slug: 'legacy-frontend',
+      bundle: finalBundle,
+      expectedLatestVersionId: null,
+    });
+
+    const stackHome = path.join(root, 'legacy-consumer');
+    await initializeMainEnvironment({ stackHome, scanResult: emptyScan() });
+    const anon = cloud.createClient({ baseUrl: 'http://localhost' });
+    const source = await resolvePublicStackSource({
+      client: anon,
+      ref: '@alice/legacy-frontend',
+    });
+    const restoration = source.restorations.get('req_legacy01');
+    expect(restoration?.strategy).toBe('reference');
+    const proposal = await prepareRemoteStackUse({ stackHome, source });
+    // No `client` passed — the legacy reference path never needs one; it resolves purely
+    // through Git.
+    await applyRemoteStackUse(proposal, { gitExecutor: fakeGit('legacy') });
+    expect(
+      (await verifyStoredSkill({ stackHome, contentHash: legacyContentHash }))
+        .state,
+    ).toBe('available');
   });
 
   it('Hybrid Public Skill Portability: an all-local (zero-Git) named Stack with 3 snapshot-backed Skills publishes and is fully consumable anonymously, with no Git source required', async () => {

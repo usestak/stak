@@ -32,15 +32,33 @@ export const publicBundleDigestInput = (bundle: {
 /**
  * Build a public Stack bundle from a resolved imported version.
  *
- * Hybrid Public Skill Portability: a Git-reference-backed Skill keeps publishing its
- * reference unchanged (still subject to the source-remote safety check below); a
- * snapshot-backed Skill (local/imported/no-Git) is now portable through its immutable
- * content snapshot (`contentHash` only — no owner-local `snapshotId` ever leaves this
- * process). This function stays pure/no-I/O: it does NOT upload anything — the server's
+ * Hybrid Public Skill Portability (snapshot-first publication): EVERY requirement — whether
+ * locally Git-backed (`restoration.strategy === 'reference'`) or local/imported/no-Git
+ * (`'snapshot'`) — now publishes through its immutable content snapshot. The public
+ * restoration is always `{ strategy: 'snapshot', contentHash }`, using the requirement's own
+ * top-level `contentHash` (never a machine-local `snapshotId`, which never leaves this
+ * process). A consumer of a NEW publication is therefore always self-contained: it never
+ * needs the original Git repository to remain reachable, even for a Git-backed Skill.
+ *
+ * Git provenance for a Git-backed Skill is NOT lost — it's preserved exactly where the
+ * existing public metadata model already supports it: `preferredSource`/`observedSources`
+ * (unconditionally carried through below) already retain the `type: 'git'` remote/revision/
+ * path. Provenance is display/update-check metadata, never a restoration dependency, so its
+ * presence must never cause the restoration strategy to fall back to `'reference'`.
+ *
+ * The source-remote safety check (no credentials, no loopback/local remotes) now runs over
+ * every git-typed `preferredSource`/`observedSources` entry on every requirement, not only
+ * ones with a `'reference'` restoration — those entries are published regardless of
+ * restoration strategy, so they're exactly where an unsafe remote could still leak.
+ *
+ * This function stays pure/no-I/O: it does NOT upload anything — the server's
  * `publishPublicStackVersion` (the one place every publish path converges, including this
  * CLI path's HTTP call) is the single place that validates/uploads each snapshot-backed
  * requirement's bytes into the public namespace, rejecting with an actionable
- * "run `stak push` first" error if the owner hasn't pushed that content yet.
+ * "run `stak push` first" error if the owner hasn't pushed that content yet. Legacy bundles
+ * published before this change — real stored rows with `restoration.strategy === 'reference'`
+ * — are untouched by this function and keep resolving through `publicBundleToImportedVersion`'s
+ * existing reference pass-through.
  */
 export const buildPublicStackBundle = (
   version: ImportedStackVersion,
@@ -48,20 +66,22 @@ export const buildPublicStackBundle = (
   const unsafe: string[] = [];
   const requirements: PublicStackRequirement[] = version.requirements.map(
     (requirement) => {
-      const { restoration: localRestoration } = requirement;
-      // Local `restoration.snapshot` carries only a machine-local `snapshotId` (storage.ts) —
-      // the portable identity is the requirement's own top-level `contentHash`, already the
-      // same content-addressed hash the owner's `stak push` uploaded under.
-      const restoration: PublicStackRequirement['restoration'] =
-        localRestoration.strategy === 'snapshot'
-          ? { strategy: 'snapshot', contentHash: requirement.contentHash }
-          : localRestoration;
-      if (localRestoration.strategy === 'reference') {
-        const verdict = inspectPublicSourceRemote(
-          localRestoration.reference.remote,
-        );
-        if (!verdict.safe)
+      const restoration: PublicStackRequirement['restoration'] = {
+        strategy: 'snapshot',
+        contentHash: requirement.contentHash,
+      };
+      const gitSources = [
+        requirement.preferredSource,
+        ...requirement.observedSources,
+      ].filter((source) => source?.type === 'git' && source.remote);
+      for (const source of gitSources) {
+        // Narrowed by the filter above, but TS can't see through it.
+        if (source?.type !== 'git' || !source.remote) continue;
+        const verdict = inspectPublicSourceRemote(source.remote);
+        if (!verdict.safe) {
           unsafe.push(`${requirement.name} (${verdict.reason})`);
+          break;
+        }
       }
       return {
         id: requirement.id,

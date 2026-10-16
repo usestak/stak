@@ -69,10 +69,24 @@ const referenceVersion = (
 };
 
 describe('buildPublicStackBundle', () => {
-  it('produces a reference-only bundle with a matching digest', () => {
-    const bundle = buildPublicStackBundle(referenceVersion());
+  it('snapshots a Git-backed Skill (snapshot-first publication) while preserving Git provenance as metadata', () => {
+    const remote = 'https://github.com/example/design.git';
+    const version = referenceVersion(remote);
+    const contentHash = version.requirements[0]?.contentHash;
+    const bundle = buildPublicStackBundle(version);
     expect(bundle.requirements).toHaveLength(1);
-    expect(bundle.requirements[0]?.restoration.strategy).toBe('reference');
+    // A Git-backed Skill now publishes through its immutable snapshot, not a Git reference —
+    // a consumer of this NEW publication never needs the original repository.
+    expect(bundle.requirements[0]?.restoration).toEqual({
+      strategy: 'snapshot',
+      contentHash,
+    });
+    // Git provenance is NOT discarded: it's retained as display/update-check metadata on
+    // `preferredSource`/`observedSources`, exactly as before.
+    expect(bundle.requirements[0]?.preferredSource).toEqual(gitSource(remote));
+    expect(bundle.requirements[0]?.observedSources).toEqual([
+      gitSource(remote),
+    ]);
     expect(sha256CanonicalJson(publicBundleDigestInput(bundle))).toBe(
       bundle.digest,
     );
@@ -126,7 +140,69 @@ describe('buildPublicStackBundle', () => {
     const bundle = buildPublicStackBundle(referenceVersion());
     const version = publicBundleToImportedVersion(bundle);
     expect(version.versionHash).toBe(bundle.stack.versionHash);
-    expect(version.requirements[0]?.restoration.strategy).toBe('reference');
+    // Snapshot-first publication: even though the SOURCE was Git-backed, the published (and
+    // round-tripped) restoration is 'snapshot' — no Git dependency survives into the bundle.
+    expect(version.requirements[0]?.restoration.strategy).toBe('snapshot');
+  });
+
+  it('legacy reference-only published bundles still resolve through the Git/reference path unchanged', () => {
+    // A bundle shaped exactly like one stored before snapshot-first publication existed —
+    // never built via `buildPublicStackBundle` (which no longer emits this shape) —
+    // simulating a real pre-existing row read back from Cloud storage.
+    const remote = 'https://github.com/example/design.git';
+    const contentHash = hash('b');
+    const requirements = [
+      {
+        id: 'req_bbbbbbbb',
+        name: 'design',
+        requirement: 'required' as const,
+        contentHash,
+        metadata: { name: 'design', description: 'Design engineering' },
+        restoration: {
+          strategy: 'reference' as const,
+          reference: {
+            remote,
+            revision,
+            path: 'skills/design',
+            expectedContentHash: contentHash,
+          },
+        },
+        observedSources: [gitSource(remote)],
+        preferredSource: gitSource(remote),
+        originStackName: 'frontend',
+      },
+    ];
+    const inheritedStackMetadata: never[] = [];
+    const stack = {
+      name: 'frontend',
+      description: 'Frontend Stack',
+      versionHash: sha256CanonicalJson({
+        name: 'frontend',
+        description: 'Frontend Stack',
+        requirements,
+        inheritedStacks: inheritedStackMetadata,
+        skippedOptional: [],
+      }),
+      kind: 'stack' as const,
+    };
+    const legacyBundle = {
+      schemaVersion: 1 as const,
+      stack,
+      requirements,
+      inheritedStackMetadata,
+      digest: sha256CanonicalJson(
+        publicBundleDigestInput({
+          stack,
+          requirements,
+          inheritedStackMetadata,
+        }),
+      ),
+    };
+    const version = publicBundleToImportedVersion(legacyBundle);
+    expect(version.versionHash).toBe(legacyBundle.stack.versionHash);
+    expect(version.requirements[0]?.restoration).toEqual(
+      requirements[0]?.restoration,
+    );
   });
 
   it('rejects a bundle whose version hash was tampered', () => {

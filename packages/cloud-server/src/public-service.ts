@@ -133,15 +133,33 @@ export const createPublicStackService = (ctx: PublicServiceContext) => {
             requirement.restoration.contentHash,
             requirement.name,
           );
-          continue;
-        }
-        const verdict = inspectPublicSourceRemote(
-          requirement.restoration.reference.remote,
-        );
-        if (!verdict.safe)
-          throw publicationNotEligible(
-            `Skill ${requirement.name} cannot be published: ${verdict.reason}`,
+        } else {
+          // Legacy reference-only publication path (pre-snapshot-first clients). Still
+          // supported unchanged.
+          const verdict = inspectPublicSourceRemote(
+            requirement.restoration.reference.remote,
           );
+          if (!verdict.safe)
+            throw publicationNotEligible(
+              `Skill ${requirement.name} cannot be published: ${verdict.reason}`,
+            );
+        }
+        // Snapshot-first publication (both branches above): Git provenance survives as
+        // `preferredSource`/`observedSources` regardless of restoration strategy, so an
+        // unsafe remote embedded there is just as exposable as one that used to live only
+        // inside `restoration.reference` — this is the server-side authoritative check, so
+        // it must not trust the client to have already run `buildPublicStackBundle`'s copy.
+        for (const source of [
+          requirement.preferredSource,
+          ...requirement.observedSources,
+        ]) {
+          if (source?.type !== 'git' || !source.remote) continue;
+          const verdict = inspectPublicSourceRemote(source.remote);
+          if (!verdict.safe)
+            throw publicationNotEligible(
+              `Skill ${requirement.name} cannot be published: ${verdict.reason}`,
+            );
+        }
       }
 
       // Digest integrity: recompute and require equality.

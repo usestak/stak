@@ -8,7 +8,6 @@ import {
 
 import { buildPublicStackBundle } from './public-stack.js';
 import { resolvePublicStackSource } from './remote-source.js';
-import { stackVersionHash } from './stack-loader.js';
 
 const contentHash = `sha256:${'a'.repeat(64)}`;
 const revision = 'a'.repeat(40);
@@ -80,20 +79,18 @@ describe('resolvePublicStackSource', () => {
       ref: '@alice/frontend',
     });
     expect(source.owner).toBe('alice');
-    expect(source.version.versionHash).toBe(
-      stackVersionHash({
-        name: 'frontend',
-        description: 'Frontend Stack',
-        requirements: source.version.requirements,
-        inheritedStacks: [],
-        skippedOptional: [],
-      }),
-    );
+    // Verified against the bundle's own stored hash, not recomputed over the LOCAL
+    // round-tripped requirement shape: a snapshot-restored requirement's local shape carries
+    // an inert placeholder `snapshotId` (see `publicBundleToImportedVersion`), which
+    // necessarily differs from the public contentHash-only shape the hash was computed over.
+    expect(source.version.versionHash).toBe(bundle.stack.versionHash);
     const restoration = source.restorations.get('req_design01');
-    expect(restoration?.strategy).toBe('reference');
+    // Snapshot-first publication: `buildPublicStackBundle` always emits a snapshot
+    // restoration now, even for this Git-backed source.
+    expect(restoration?.strategy).toBe('snapshot');
     expect(
-      restoration?.strategy === 'reference'
-        ? restoration.reference.expectedContentHash
+      restoration?.strategy === 'snapshot'
+        ? restoration.contentHash
         : undefined,
     ).toBe(contentHash);
   });

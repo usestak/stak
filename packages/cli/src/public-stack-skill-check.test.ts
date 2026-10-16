@@ -4,11 +4,15 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { hashSkillDirectory } from '@stack/shared';
-import type { ImportedStackVersion, SkillSource } from '@stack/spec';
+import { hashSkillDirectory, sha256CanonicalJson } from '@stack/shared';
+import type {
+  ImportedStackVersion,
+  PublicStackBundle,
+  SkillSource,
+} from '@stack/spec';
 import {
   applyRemoteStackUse,
-  buildPublicStackBundle,
+  publicBundleDigestInput,
   initializeMainEnvironment,
   loadMainEnvironment,
   prepareRemoteStackUse,
@@ -36,13 +40,67 @@ import { runSkillCheck } from './skill-check-runner.js';
  * imported via `stak use <stak>` carries its requirement's `restoration` field VERBATIM, see
  * packages/core/src/public-stack.ts) holds end-to-end: synthetic public Stack -> `stak use` ->
  * resulting locked Skill -> restoration reference preserved -> `stak skill check` -> exact
- * candidate materialized -> normalized source-check/review result. This is NOT a new
- * public-stack architecture and exercises `runSkillCheck` completely unmodified, with zero
- * Cloud public-stack special-casing: the only "fakery" is a git `url.<x>.insteadOf` rewrite (a
- * standard, real Git feature, configured via GIT_CONFIG_GLOBAL) so the Stack's necessarily-
- * portable-format (https://) remote resolves to a real local Git repository instead of the
- * network, letting every Git operation below (fetch, checkout, ls-remote) run for real.
+ * candidate materialized -> normalized source-check/review result. This exercises `runSkillCheck`
+ * completely unmodified, with zero Cloud public-stack special-casing: the only "fakery" is a git
+ * `url.<x>.insteadOf` rewrite (a standard, real Git feature, configured via GIT_CONFIG_GLOBAL) so
+ * the Stack's necessarily-portable-format (https://) remote resolves to a real local Git
+ * repository instead of the network, letting every Git operation below (fetch, checkout,
+ * ls-remote) run for real.
+ *
+ * Snapshot-first publication (Hybrid Public Skill Portability follow-up): a NEW publication's
+ * restoration is always `'snapshot'` now, even for a Git-backed source — so this exact
+ * "restoration preserved verbatim, checked via ordinary Git ref semantics" behavior is now a
+ * LEGACY-bundle-only guarantee. The bundle below is therefore built BY HAND in the old
+ * reference-only shape (never through `buildPublicStackBundle`, which no longer emits it),
+ * simulating a real pre-existing published row — exactly the back-compat case the snapshot-first
+ * change is required to leave untouched.
  */
+const buildLegacyBundle = (
+  version: ImportedStackVersion,
+): PublicStackBundle => {
+  const requirements = version.requirements.map((requirement) => ({
+    id: requirement.id,
+    name: requirement.name,
+    requirement: requirement.requirement,
+    contentHash: requirement.contentHash,
+    metadata: requirement.metadata,
+    restoration:
+      requirement.restoration.strategy === 'reference'
+        ? requirement.restoration
+        : (() => {
+            throw new Error(
+              'buildLegacyBundle only supports reference-restored requirements',
+            );
+          })(),
+    observedSources: requirement.observedSources,
+    ...(requirement.preferredSource
+      ? { preferredSource: requirement.preferredSource }
+      : {}),
+    originStackName: requirement.originStackName,
+  }));
+  const stack = {
+    name: version.name,
+    description: version.description,
+    versionHash: sha256CanonicalJson({
+      name: version.name,
+      description: version.description,
+      requirements,
+      inheritedStacks: version.inheritedStacks,
+      skippedOptional: [],
+    }),
+    kind: 'stack' as const,
+  };
+  const inheritedStackMetadata = version.inheritedStacks;
+  return {
+    schemaVersion: 1,
+    stack,
+    requirements,
+    inheritedStackMetadata,
+    digest: sha256CanonicalJson(
+      publicBundleDigestInput({ stack, requirements, inheritedStackMetadata }),
+    ),
+  };
+};
 
 const roots: string[] = [];
 const temp = async () => {
@@ -236,9 +294,7 @@ describe('public Stack -> stak use -> stak skill check (direct regression, no sp
 
     const cloud = makeCloud();
     const token = await mintToken(cloud);
-    const bundle = buildPublicStackBundle(
-      referenceVersion(contentHash, revisionV1),
-    );
+    const bundle = buildLegacyBundle(referenceVersion(contentHash, revisionV1));
     const publisher = cloud.createClient({
       baseUrl: 'http://localhost',
       token,

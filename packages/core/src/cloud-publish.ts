@@ -72,12 +72,15 @@ export const preparePublish = async (options: {
         noop = true;
     }
   }
+  // Hybrid Public Skill Portability (snapshot-first publication): restoration is always
+  // 'snapshot' now, so Git provenance for display comes from `preferredSource` (unaffected by
+  // the restoration-strategy change) rather than `restoration.reference`.
   const sourceRemotes = [
     ...new Set(
       bundle.requirements
         .map((requirement) =>
-          requirement.restoration.strategy === 'reference'
-            ? requirement.restoration.reference.remote
+          requirement.preferredSource?.type === 'git'
+            ? (requirement.preferredSource.remote ?? null)
             : null,
         )
         .filter((remote): remote is string => remote !== null),

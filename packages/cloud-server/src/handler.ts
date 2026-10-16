@@ -465,17 +465,45 @@ export const handleCloudRequest = async (
       const versionNumber = Number.parseInt(segments[4] ?? '', 10);
       if (!Number.isInteger(versionNumber) || versionNumber < 1)
         return errorResponse(400, 'invalid-request', 'Invalid version number.');
-      const bytes = await service.getPublicSkillSnapshot(
-        segments[1] ?? '',
-        segments[2] ?? '',
-        versionNumber,
-        segments[6] ?? '',
-      );
-      return {
-        status: 200,
-        headers: { 'content-type': 'application/octet-stream' },
-        binaryBody: bytes,
-      };
+      try {
+        const bytes = await service.getPublicSkillSnapshot(
+          segments[1] ?? '',
+          segments[2] ?? '',
+          versionNumber,
+          segments[6] ?? '',
+        );
+        return {
+          status: 200,
+          headers: {
+            'content-type': 'application/octet-stream',
+            // Content-addressed AND version-pinned: this exact (owner, slug, versionNumber,
+            // contentHash) tuple can never resolve to different bytes once it 200s, so a
+            // long-lived, shared-cache-eligible response is safe at any CDN tier. Explicit,
+            // not left to Vercel/CDN defaults.
+            'cache-control': 'public, max-age=31536000, immutable',
+          },
+          binaryBody: bytes,
+        };
+      } catch (error) {
+        if (error instanceof CloudServiceError) {
+          // Negative-cache safety: every invalid/private/unpublished case 404s identically
+          // (never revealing whether the underlying private blob exists — see
+          // `getPublicSkillSnapshot`'s own comment), and that 404 must NEVER be cached long
+          // enough to survive a later valid publish at this same URL — e.g. a consumer
+          // hitting this route before the owner's first publish completes. `no-store` is
+          // explicit rather than relying on CDN/Vercel defaults, which can vary by deployment
+          // target and must not be load-bearing for this invariant.
+          return {
+            status: error.httpStatus,
+            headers: {
+              'content-type': 'application/json',
+              'cache-control': 'no-store',
+            },
+            jsonBody: { error: { code: error.code, message: error.message } },
+          };
+        }
+        throw error;
+      }
     }
     if (method === 'GET' && segments.length === 2 && segments[0] === 'profiles')
       return json(200, await service.getPublicProfile(segments[1] ?? ''));

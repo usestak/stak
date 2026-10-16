@@ -35,6 +35,7 @@ const setup = () => {
 };
 
 const pushMainFor = async (
+  blobStore: ReturnType<typeof createInMemoryBlobStore>,
   service: ReturnType<typeof createCloudService>,
   userId: string,
   skills: Record<
@@ -99,10 +100,22 @@ const pushMainFor = async (
     bundle,
     expectedLatestVersionId: null,
   });
+  // Snapshot-first publication: a Git-backed (`strategy: 'reference'`) Skill now also
+  // publishes through its immutable snapshot, so `publishUserStack` requires real bytes for
+  // it too. Seed a placeholder under the owner's scope, mirroring what a real `stak push`
+  // (or an ordinary checkout already cached in the local Store) would have produced — no
+  // test here asserts the exact bytes of a Git-backed snapshot, only its presence/shape.
+  // Snapshot-strategy skills are deliberately left unseeded: tests that need pushed bytes for
+  // them already call `blobStore.put` explicitly, and tests proving the "not pushed yet"
+  // failure path rely on this function NOT seeding them.
+  for (const s of Object.values(skills))
+    if (s.strategy === 'reference')
+      await blobStore.put(userId, s.contentHash, new Uint8Array([1, 2, 3]));
 };
 
 const pushMain = (
   service: ReturnType<typeof createCloudService>,
+  blobStore: ReturnType<typeof createInMemoryBlobStore>,
   skills: Record<
     string,
     {
@@ -112,12 +125,12 @@ const pushMain = (
       remote?: string;
     }
   >,
-) => pushMainFor(service, USER_A, skills);
+) => pushMainFor(blobStore, service, USER_A, skills);
 
 describe('Named Stacks (P10B §11-15)', () => {
   it('creates a named Stack from approved Skills and lists it', async () => {
-    const { service, auth } = setup();
-    await pushMain(service, {
+    const { service, blobStore, auth } = setup();
+    await pushMain(service, blobStore, {
       [SKILL_ID]: {
         name: 'design',
         contentHash: CONTENT_HASH,
@@ -141,8 +154,8 @@ describe('Named Stacks (P10B §11-15)', () => {
   });
 
   it('rejects a duplicate Stack name', async () => {
-    const { service, auth } = setup();
-    await pushMain(service, {
+    const { service, blobStore, auth } = setup();
+    await pushMain(service, blobStore, {
       [SKILL_ID]: {
         name: 'design',
         contentHash: CONTENT_HASH,
@@ -159,8 +172,8 @@ describe('Named Stacks (P10B §11-15)', () => {
   });
 
   it('editing a named Stack never touches `main`', async () => {
-    const { service, auth } = setup();
-    await pushMain(service, {
+    const { service, blobStore, auth } = setup();
+    await pushMain(service, blobStore, {
       [SKILL_ID]: {
         name: 'design',
         contentHash: CONTENT_HASH,
@@ -201,8 +214,8 @@ describe('Named Stacks (P10B §11-15)', () => {
   });
 
   it('rename is a pure rename — no new version, rejects collision', async () => {
-    const { service, auth } = setup();
-    await pushMain(service, {
+    const { service, blobStore, auth } = setup();
+    await pushMain(service, blobStore, {
       [SKILL_ID]: {
         name: 'design',
         contentHash: CONTENT_HASH,
@@ -236,8 +249,8 @@ describe('Named Stacks (P10B §11-15)', () => {
   });
 
   it('publishing fails closed when any Skill in the Stack is ineligible (never partial)', async () => {
-    const { service, auth } = setup();
-    await pushMain(service, {
+    const { service, blobStore, auth } = setup();
+    await pushMain(service, blobStore, {
       [SKILL_ID]: {
         name: 'design',
         contentHash: CONTENT_HASH,
@@ -262,9 +275,9 @@ describe('Named Stacks (P10B §11-15)', () => {
   });
 
   it('publishes an all-eligible named Stack via the existing public-Stack pipeline', async () => {
-    const { service, repository, auth } = setup();
+    const { service, repository, blobStore, auth } = setup();
     await repository.upsertProfile({ userId: USER_A, githubUsername: 'alice' });
-    await pushMain(service, {
+    await pushMain(service, blobStore, {
       [SKILL_ID]: {
         name: 'design',
         contentHash: CONTENT_HASH,
@@ -288,7 +301,7 @@ describe('Named Stacks (P10B §11-15)', () => {
   it('Hybrid Public Skill Portability: an all-local-snapshot named Stack publishes, and the snapshot is fetchable anonymously by content hash', async () => {
     const { service, repository, blobStore, auth } = setup();
     await repository.upsertProfile({ userId: USER_A, githubUsername: 'alice' });
-    await pushMain(service, {
+    await pushMain(service, blobStore, {
       [SKILL_ID]: {
         name: 'local-notes',
         contentHash: CONTENT_HASH,
@@ -326,7 +339,7 @@ describe('Named Stacks (P10B §11-15)', () => {
   it("Hybrid Public Skill Portability authorization matrix: a contentHash that exists in the owner's private blob store but was never part of any published bundle is not retrievable (guessing a hash cannot expose private content)", async () => {
     const { service, repository, blobStore, auth } = setup();
     await repository.upsertProfile({ userId: USER_A, githubUsername: 'alice' });
-    await pushMain(service, {
+    await pushMain(service, blobStore, {
       [SKILL_ID]: {
         name: 'local-notes',
         contentHash: CONTENT_HASH,
@@ -359,7 +372,7 @@ describe('Named Stacks (P10B §11-15)', () => {
   it("Hybrid Public Skill Portability authorization matrix: a never-published named Stack's snapshot is inaccessible, and an unpublished Stack's snapshot becomes inaccessible", async () => {
     const { service, repository, blobStore, auth } = setup();
     await repository.upsertProfile({ userId: USER_A, githubUsername: 'alice' });
-    await pushMain(service, {
+    await pushMain(service, blobStore, {
       [SKILL_ID]: {
         name: 'local-notes',
         contentHash: CONTENT_HASH,
@@ -404,8 +417,8 @@ describe('Named Stacks (P10B §11-15)', () => {
   });
 
   it('rejects "main" as a named-Stack name, even after normalization', async () => {
-    const { service, auth } = setup();
-    await pushMain(service, {
+    const { service, blobStore, auth } = setup();
+    await pushMain(service, blobStore, {
       [SKILL_ID]: {
         name: 'design',
         contentHash: CONTENT_HASH,
@@ -423,8 +436,8 @@ describe('Named Stacks (P10B §11-15)', () => {
   });
 
   it('canonicalizes name case/whitespace to one identity (rename collision after normalization)', async () => {
-    const { service, auth } = setup();
-    await pushMain(service, {
+    const { service, blobStore, auth } = setup();
+    await pushMain(service, blobStore, {
       [SKILL_ID]: {
         name: 'design',
         contentHash: CONTENT_HASH,
@@ -454,12 +467,12 @@ describe('Named Stacks (P10B §11-15)', () => {
 
   describe('republish lifecycle (spec P10 correction §2/§12)', () => {
     it('first publish creates version 1', async () => {
-      const { service, repository, auth } = setup();
+      const { service, repository, blobStore, auth } = setup();
       await repository.upsertProfile({
         userId: USER_A,
         githubUsername: 'alice',
       });
-      await pushMain(service, {
+      await pushMain(service, blobStore, {
         [SKILL_ID]: {
           name: 'design',
           contentHash: CONTENT_HASH,
@@ -479,12 +492,12 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
 
     it('republish after editing the Stack commits a new version, resolved server-side', async () => {
-      const { service, repository, auth } = setup();
+      const { service, repository, blobStore, auth } = setup();
       await repository.upsertProfile({
         userId: USER_A,
         githubUsername: 'alice',
       });
-      await pushMain(service, {
+      await pushMain(service, blobStore, {
         [SKILL_ID]: {
           name: 'design',
           contentHash: CONTENT_HASH,
@@ -529,12 +542,12 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
 
     it('identical-content republish is a clean no-op, not a meaningless duplicate version', async () => {
-      const { service, repository, auth } = setup();
+      const { service, repository, blobStore, auth } = setup();
       await repository.upsertProfile({
         userId: USER_A,
         githubUsername: 'alice',
       });
-      await pushMain(service, {
+      await pushMain(service, blobStore, {
         [SKILL_ID]: {
           name: 'design',
           contentHash: CONTENT_HASH,
@@ -558,12 +571,12 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
 
     it('concurrent stale republish fails safely for the loser, succeeds for the winner', async () => {
-      const { service, repository, auth } = setup();
+      const { service, repository, blobStore, auth } = setup();
       await repository.upsertProfile({
         userId: USER_A,
         githubUsername: 'alice',
       });
-      await pushMain(service, {
+      await pushMain(service, blobStore, {
         [SKILL_ID]: {
           name: 'design',
           contentHash: CONTENT_HASH,
@@ -604,12 +617,12 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
 
     it('republish revalidates CURRENT eligibility — a Local Skill added after v1 blocks v2', async () => {
-      const { service, repository, auth } = setup();
+      const { service, repository, blobStore, auth } = setup();
       await repository.upsertProfile({
         userId: USER_A,
         githubUsername: 'alice',
       });
-      await pushMain(service, {
+      await pushMain(service, blobStore, {
         [SKILL_ID]: {
           name: 'design',
           contentHash: CONTENT_HASH,
@@ -654,12 +667,12 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
 
     it('getUserStackPublicationStatus reflects private / published / changed-since-published', async () => {
-      const { service, repository, auth } = setup();
+      const { service, repository, blobStore, auth } = setup();
       await repository.upsertProfile({
         userId: USER_A,
         githubUsername: 'alice',
       });
-      await pushMain(service, {
+      await pushMain(service, blobStore, {
         [SKILL_ID]: {
           name: 'design',
           contentHash: CONTENT_HASH,
@@ -710,12 +723,12 @@ describe('Named Stacks (P10B §11-15)', () => {
 
   describe('cross-account isolation (spec P10 correction §9)', () => {
     it('user B cannot list, fetch, rename, version-read, commit, or publish user A Stacks', async () => {
-      const { service, repository, auth, authB } = setup();
+      const { service, repository, blobStore, auth, authB } = setup();
       await repository.upsertProfile({
         userId: USER_A,
         githubUsername: 'alice',
       });
-      await pushMainFor(service, USER_A, {
+      await pushMainFor(blobStore, service, USER_A, {
         [SKILL_ID]: {
           name: 'design',
           contentHash: CONTENT_HASH,
@@ -778,8 +791,8 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
 
     it('a guessed/known version id cannot cross the ownership boundary (owner-scoped reads, §8)', async () => {
-      const { service, repository, auth } = setup();
-      await pushMainFor(service, USER_A, {
+      const { service, repository, blobStore, auth } = setup();
+      await pushMainFor(blobStore, service, USER_A, {
         [SKILL_ID]: {
           name: 'design',
           contentHash: CONTENT_HASH,
@@ -805,12 +818,12 @@ describe('Named Stacks (P10B §11-15)', () => {
 
   describe('unpublish/reactivate lifecycle (spec P10 final lifecycle pass §8/§9/§10/§11/§12)', () => {
     it('unpublish deactivates the public share; the URL 404s; the private Stack and main are untouched', async () => {
-      const { service, repository, auth } = setup();
+      const { service, repository, blobStore, auth } = setup();
       await repository.upsertProfile({
         userId: USER_A,
         githubUsername: 'alice',
       });
-      await pushMain(service, {
+      await pushMain(service, blobStore, {
         [SKILL_ID]: {
           name: 'design',
           contentHash: CONTENT_HASH,
@@ -846,12 +859,12 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
 
     it('unpublish is idempotent — calling it twice is a safe no-op', async () => {
-      const { service, repository, auth } = setup();
+      const { service, repository, blobStore, auth } = setup();
       await repository.upsertProfile({
         userId: USER_A,
         githubUsername: 'alice',
       });
-      await pushMain(service, {
+      await pushMain(service, blobStore, {
         [SKILL_ID]: {
           name: 'design',
           contentHash: CONTENT_HASH,
@@ -873,12 +886,12 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
 
     it('publish -> unpublish -> publish again reactivates the SAME identity/slug and preserves history (identical content: no new version)', async () => {
-      const { service, repository, auth } = setup();
+      const { service, repository, blobStore, auth } = setup();
       await repository.upsertProfile({
         userId: USER_A,
         githubUsername: 'alice',
       });
-      await pushMain(service, {
+      await pushMain(service, blobStore, {
         [SKILL_ID]: {
           name: 'design',
           contentHash: CONTENT_HASH,
@@ -905,12 +918,12 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
 
     it('publish -> unpublish -> edit composition -> publish again creates a new version and reactivates', async () => {
-      const { service, repository, auth } = setup();
+      const { service, repository, blobStore, auth } = setup();
       await repository.upsertProfile({
         userId: USER_A,
         githubUsername: 'alice',
       });
-      await pushMain(service, {
+      await pushMain(service, blobStore, {
         [SKILL_ID]: {
           name: 'design',
           contentHash: CONTENT_HASH,
@@ -948,12 +961,12 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
 
     it('unpublishing does not release the slug for a DIFFERENT Stack in the same account', async () => {
-      const { service, repository, auth } = setup();
+      const { service, repository, blobStore, auth } = setup();
       await repository.upsertProfile({
         userId: USER_A,
         githubUsername: 'alice',
       });
-      await pushMain(service, {
+      await pushMain(service, blobStore, {
         [SKILL_ID]: {
           name: 'design',
           contentHash: CONTENT_HASH,
@@ -988,12 +1001,12 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
 
     it('slug stability: a Stack already published cannot silently change its public slug', async () => {
-      const { service, repository, auth } = setup();
+      const { service, repository, blobStore, auth } = setup();
       await repository.upsertProfile({
         userId: USER_A,
         githubUsername: 'alice',
       });
-      await pushMain(service, {
+      await pushMain(service, blobStore, {
         [SKILL_ID]: {
           name: 'design',
           contentHash: CONTENT_HASH,
@@ -1017,12 +1030,12 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
 
     it('renaming the private Stack after publish does not change the public slug; republish after unpublish+rename keeps the original slug', async () => {
-      const { service, repository, auth } = setup();
+      const { service, repository, blobStore, auth } = setup();
       await repository.upsertProfile({
         userId: USER_A,
         githubUsername: 'alice',
       });
-      await pushMain(service, {
+      await pushMain(service, blobStore, {
         [SKILL_ID]: {
           name: 'design',
           contentHash: CONTENT_HASH,
@@ -1057,12 +1070,12 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
 
     it('unpublish never mutates public_stack_versions rows; only the active-state flag changes', async () => {
-      const { service, repository, auth } = setup();
+      const { service, repository, blobStore, auth } = setup();
       await repository.upsertProfile({
         userId: USER_A,
         githubUsername: 'alice',
       });
-      await pushMain(service, {
+      await pushMain(service, blobStore, {
         [SKILL_ID]: {
           name: 'design',
           contentHash: CONTENT_HASH,
@@ -1094,12 +1107,12 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
 
     it('republish after unpublish still revalidates CURRENT eligibility', async () => {
-      const { service, repository, auth } = setup();
+      const { service, repository, blobStore, auth } = setup();
       await repository.upsertProfile({
         userId: USER_A,
         githubUsername: 'alice',
       });
-      await pushMain(service, {
+      await pushMain(service, blobStore, {
         [SKILL_ID]: {
           name: 'design',
           contentHash: CONTENT_HASH,
@@ -1134,20 +1147,20 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
 
     it('user B cannot unpublish, reactivate, or publish onto user A public identity', async () => {
-      const { service, repository, auth, authB } = setup();
+      const { service, repository, blobStore, auth, authB } = setup();
       await repository.upsertProfile({
         userId: USER_A,
         githubUsername: 'alice',
       });
       await repository.upsertProfile({ userId: USER_B, githubUsername: 'bob' });
-      await pushMain(service, {
+      await pushMain(service, blobStore, {
         [SKILL_ID]: {
           name: 'design',
           contentHash: CONTENT_HASH,
           strategy: 'reference',
         },
       });
-      await pushMainFor(service, USER_B, {
+      await pushMainFor(blobStore, service, USER_B, {
         [SKILL_ID]: {
           name: 'design',
           contentHash: CONTENT_HASH,
