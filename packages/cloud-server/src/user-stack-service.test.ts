@@ -416,6 +416,51 @@ describe('Named Stacks (P10B §11-15)', () => {
     ).rejects.toMatchObject({ code: 'public-stack-not-found' });
   });
 
+  it('prevents cached access after unpublish: a published snapshot 200s with Cache-Control: no-store, and the same URL 404s with no-store (not a cacheable policy) after unpublish', async () => {
+    const { service, repository, blobStore, auth } = setup();
+    await repository.upsertProfile({ userId: USER_A, githubUsername: 'alice' });
+    await pushMain(service, blobStore, {
+      [SKILL_ID]: {
+        name: 'local-notes',
+        contentHash: CONTENT_HASH,
+        strategy: 'snapshot',
+      },
+    });
+    await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([9, 8, 7]));
+    const created = await service.createUserStack(auth, {
+      name: 'notes',
+      skillIds: [SKILL_ID],
+    });
+    const result = await service.publishUserStack(auth, {
+      stackId: created.stackId,
+      slug: 'notes',
+    });
+    const published = await service.getPublicStack(result.owner, 'notes');
+    const versionNumber = published.latest?.version.versionNumber ?? 0;
+    const snapshotPath = `/api/v1/stacks/${result.owner}/notes/versions/${versionNumber}/snapshots/${CONTENT_HASH}`;
+
+    const beforeUnpublish = await handleCloudRequest(service, {
+      method: 'GET',
+      path: snapshotPath,
+      headers: {},
+    });
+    expect(beforeUnpublish.status).toBe(200);
+    expect(beforeUnpublish.headers['cache-control']).toBe('no-store');
+
+    await service.unpublishUserStack(auth, created.stackId);
+
+    // Direct existence of the underlying blob must not bypass the publication check: the
+    // same URL that 200'd a moment ago now 404s, and that 404 is marked no-store too, so a
+    // CDN that cached the earlier 200 is never load-bearing for either response.
+    const afterUnpublish = await handleCloudRequest(service, {
+      method: 'GET',
+      path: snapshotPath,
+      headers: {},
+    });
+    expect(afterUnpublish.status).toBe(404);
+    expect(afterUnpublish.headers['cache-control']).toBe('no-store');
+  });
+
   it('rejects "main" as a named-Stack name, even after normalization', async () => {
     const { service, blobStore, auth } = setup();
     await pushMain(service, blobStore, {

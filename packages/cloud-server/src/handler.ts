@@ -476,11 +476,13 @@ export const handleCloudRequest = async (
           status: 200,
           headers: {
             'content-type': 'application/octet-stream',
-            // Content-addressed AND version-pinned: this exact (owner, slug, versionNumber,
-            // contentHash) tuple can never resolve to different bytes once it 200s, so a
-            // long-lived, shared-cache-eligible response is safe at any CDN tier. Explicit,
-            // not left to Vercel/CDN defaults.
-            'cache-control': 'public, max-age=31536000, immutable',
+            // Content is immutable, but public ACCESS is revocable: unpublishing the Stack
+            // must take effect immediately, and a CDN holding a long-lived cached copy of
+            // this response would keep serving it after unpublish, bypassing the
+            // application-layer publication check in `getPublicSkillSnapshot`. `no-store`
+            // (not just a short max-age) so no intermediary is ever load-bearing for that
+            // invariant.
+            'cache-control': 'no-store',
           },
           binaryBody: bytes,
         };
