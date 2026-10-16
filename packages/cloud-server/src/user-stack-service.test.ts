@@ -6,6 +6,8 @@ import {
   createCloudService,
   createInMemoryBlobStore,
   createInMemoryRepository,
+  handleCloudRequest,
+  type CloudRequest,
 } from './index.js';
 
 const USER_A = '00000000-0000-4000-8000-00000000d1a1';
@@ -19,16 +21,17 @@ const SKILL_ID_3 = 'skill_extra00001';
 
 const setup = () => {
   const repository = createInMemoryRepository();
+  const blobStore = createInMemoryBlobStore();
   const service = createCloudService({
     repository,
-    blobStore: createInMemoryBlobStore(),
+    blobStore,
     appUrl: 'http://localhost:3000',
     ticketSecret: 'user-stack-secret',
     now: () => new Date('2026-10-11T00:00:00.000Z'),
   });
   const auth = { userId: USER_A, tokenId: 'test' };
   const authB = { userId: USER_B, tokenId: 'test-b' };
-  return { service, repository, auth, authB };
+  return { service, repository, blobStore, auth, authB };
 };
 
 const pushMainFor = async (
@@ -280,6 +283,124 @@ describe('Named Stacks (P10B §11-15)', () => {
     const published = await service.getPublicStack(result.owner, 'frontend');
     expect(published.latest?.bundle.stack.kind).toBe('stack');
     expect(published.latest?.bundle.requirements).toHaveLength(1);
+  });
+
+  it('Hybrid Public Skill Portability: an all-local-snapshot named Stack publishes, and the snapshot is fetchable anonymously by content hash', async () => {
+    const { service, repository, blobStore, auth } = setup();
+    await repository.upsertProfile({ userId: USER_A, githubUsername: 'alice' });
+    await pushMain(service, {
+      [SKILL_ID]: {
+        name: 'local-notes',
+        contentHash: CONTENT_HASH,
+        strategy: 'snapshot',
+      },
+    });
+    // Equivalent to `stak push`: the owner's content bytes already exist in Cloud.
+    await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([9, 8, 7]));
+    const created = await service.createUserStack(auth, {
+      name: 'notes',
+      skillIds: [SKILL_ID],
+    });
+    const result = await service.publishUserStack(auth, {
+      stackId: created.stackId,
+      slug: 'notes',
+    });
+    const published = await service.getPublicStack(result.owner, 'notes');
+    expect(published.latest?.bundle.requirements[0]?.restoration).toEqual({
+      strategy: 'snapshot',
+      contentHash: CONTENT_HASH,
+    });
+
+    const versionNumber = published.latest?.version.versionNumber ?? 0;
+    const request: CloudRequest = {
+      method: 'GET',
+      path: `/api/v1/stacks/${result.owner}/notes/versions/${versionNumber}/snapshots/${CONTENT_HASH}`,
+      headers: {},
+    };
+    const response = await handleCloudRequest(service, request);
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toBe('application/octet-stream');
+    expect(response.binaryBody).toEqual(new Uint8Array([9, 8, 7]));
+  });
+
+  it("Hybrid Public Skill Portability authorization matrix: a contentHash that exists in the owner's private blob store but was never part of any published bundle is not retrievable (guessing a hash cannot expose private content)", async () => {
+    const { service, repository, blobStore, auth } = setup();
+    await repository.upsertProfile({ userId: USER_A, githubUsername: 'alice' });
+    await pushMain(service, {
+      [SKILL_ID]: {
+        name: 'local-notes',
+        contentHash: CONTENT_HASH,
+        strategy: 'snapshot',
+      },
+    });
+    await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([9, 8, 7]));
+    const created = await service.createUserStack(auth, {
+      name: 'notes',
+      skillIds: [SKILL_ID],
+    });
+    const result = await service.publishUserStack(auth, {
+      stackId: created.stackId,
+      slug: 'notes',
+    });
+    const published = await service.getPublicStack(result.owner, 'notes');
+    const versionNumber = published.latest?.version.versionNumber ?? 0;
+
+    // CONTENT_HASH_2 was never pushed, never published, never referenced by any bundle.
+    await expect(
+      service.getPublicSkillSnapshot(
+        result.owner,
+        'notes',
+        versionNumber,
+        CONTENT_HASH_2,
+      ),
+    ).rejects.toMatchObject({ code: 'public-stack-not-found' });
+  });
+
+  it("Hybrid Public Skill Portability authorization matrix: a never-published named Stack's snapshot is inaccessible, and an unpublished Stack's snapshot becomes inaccessible", async () => {
+    const { service, repository, blobStore, auth } = setup();
+    await repository.upsertProfile({ userId: USER_A, githubUsername: 'alice' });
+    await pushMain(service, {
+      [SKILL_ID]: {
+        name: 'local-notes',
+        contentHash: CONTENT_HASH,
+        strategy: 'snapshot',
+      },
+    });
+    await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([9, 8, 7]));
+    const created = await service.createUserStack(auth, {
+      name: 'draft-notes',
+      skillIds: [SKILL_ID],
+    });
+    // Never published — guessing a plausible owner/slug/version/hash combination 404s,
+    // same as any other unknown route; no public Stack row exists for this slug at all.
+    await expect(
+      service.getPublicSkillSnapshot('alice', 'draft-notes', 1, CONTENT_HASH),
+    ).rejects.toMatchObject({ code: 'public-stack-not-found' });
+
+    const result = await service.publishUserStack(auth, {
+      stackId: created.stackId,
+      slug: 'draft-notes',
+    });
+    const published = await service.getPublicStack(result.owner, 'draft-notes');
+    const versionNumber = published.latest?.version.versionNumber ?? 0;
+    await expect(
+      service.getPublicSkillSnapshot(
+        result.owner,
+        'draft-notes',
+        versionNumber,
+        CONTENT_HASH,
+      ),
+    ).resolves.toEqual(new Uint8Array([9, 8, 7]));
+
+    await service.unpublishUserStack(auth, created.stackId);
+    await expect(
+      service.getPublicSkillSnapshot(
+        result.owner,
+        'draft-notes',
+        versionNumber,
+        CONTENT_HASH,
+      ),
+    ).rejects.toMatchObject({ code: 'public-stack-not-found' });
   });
 
   it('rejects "main" as a named-Stack name, even after normalization', async () => {

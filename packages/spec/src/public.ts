@@ -154,13 +154,37 @@ export const isSafeDisplayUrl = (value: string): boolean =>
 /* Public Stack bundle (reference-only)                                       */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Public-safe snapshot restoration (Hybrid Public Skill Portability): unlike the private
+ * `snapshotRestorationSchema`, this carries no owner-local `snapshotId` — only the
+ * content-addressed `contentHash`, which doubles as the public blob's lookup key. A consumer
+ * resolves this by fetching the immutable snapshot for this exact published version, never by
+ * re-deriving a path or trusting an owner-supplied locator.
+ */
+export const publicSnapshotRestorationSchema = z.object({
+  strategy: z.literal('snapshot'),
+  contentHash: contentHashSchema,
+});
+export const publicStackRestorationSchema = z.discriminatedUnion('strategy', [
+  referenceRestorationSchema,
+  publicSnapshotRestorationSchema,
+]);
+export type PublicStackRestoration = z.infer<
+  typeof publicStackRestorationSchema
+>;
+
 export const publicStackRequirementSchema = z.object({
   id: z.string().regex(/^req_[A-Za-z0-9_-]{8,}$/),
   name: z.string().min(1),
   requirement: z.enum(['required', 'optional']),
   contentHash: contentHashSchema,
   metadata: skillMetadataSchema,
-  restoration: referenceRestorationSchema,
+  // Additive (Hybrid Public Skill Portability): a published Skill is ALWAYS portable through
+  // an immutable content snapshot now; a Git reference, when the source was git-backed, is
+  // retained only as display/update-check metadata, never a hard runtime dependency. Every
+  // bundle committed before this field's snapshot variant existed only ever used 'reference',
+  // so existing fixtures/published versions keep parsing and resolving unchanged.
+  restoration: publicStackRestorationSchema,
   observedSources: z.array(skillSourceSchema),
   preferredSource: skillSourceSchema.optional(),
   originStackName: z.string().min(1),

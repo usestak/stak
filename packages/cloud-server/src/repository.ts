@@ -558,4 +558,18 @@ export interface CloudBlobStore {
   ): Promise<Uint8Array | null>;
   /** Idempotent: deleting an already-deleted/never-existed artifact id never throws. */
   deleteReviewPayload(userId: string, reviewArtifactId: string): Promise<void>;
+  /**
+   * Public Skill snapshot storage (Hybrid Public Skill Portability) — content-addressed,
+   * deliberately NOT keyed by `userId`: the whole point is that the same `contentHash`
+   * published by two different owners (or republished by the same owner) needs only one
+   * copy. This is a SEPARATE namespace from `put`/`get`'s owner-scoped bucket — copying a
+   * byte range from there into here is the only way bytes reach this namespace; nothing
+   * here is ever reachable by owner-scoped lookup, and the owner-scoped bucket is never
+   * made broadly public by this addition. The application layer (not bucket ACLs) is the
+   * authorization boundary: a caller may only serve `getPublished` bytes after confirming
+   * the requested `contentHash` belongs to an active, published Stack version's own bundle.
+   */
+  putPublished(contentHash: string, bytes: Uint8Array): Promise<void>;
+  getPublished(contentHash: string): Promise<Uint8Array | null>;
+  hasPublished(contentHash: string): Promise<boolean>;
 }

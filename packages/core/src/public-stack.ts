@@ -10,15 +10,12 @@ import type {
   EnvironmentStackLayer,
   ImportedStackVersion,
   PublicStackBundle,
+  PublicStackRequirement,
 } from '@stack/spec';
 import { sha256CanonicalJson } from '@stack/shared';
 import { PublicationNotEligibleError } from '@stack/cloud-client';
 
-import {
-  loadLocalStack,
-  StackCompositionError,
-  stackVersionHash,
-} from './stack-loader.js';
+import { loadLocalStack, StackCompositionError } from './stack-loader.js';
 import { loadMainEnvironment } from './state.js';
 
 /** Canonical digest input for a public bundle (must match the server). */
@@ -33,47 +30,54 @@ export const publicBundleDigestInput = (bundle: {
 });
 
 /**
- * Build a reference-only public Stack bundle from a resolved imported version.
- * Blocks publication when any Skill is snapshot-backed (private) or its source
- * remote is unsafe to expose publicly.
+ * Build a public Stack bundle from a resolved imported version.
+ *
+ * Hybrid Public Skill Portability: a Git-reference-backed Skill keeps publishing its
+ * reference unchanged (still subject to the source-remote safety check below); a
+ * snapshot-backed Skill (local/imported/no-Git) is now portable through its immutable
+ * content snapshot (`contentHash` only — no owner-local `snapshotId` ever leaves this
+ * process). This function stays pure/no-I/O: it does NOT upload anything — the server's
+ * `publishPublicStackVersion` (the one place every publish path converges, including this
+ * CLI path's HTTP call) is the single place that validates/uploads each snapshot-backed
+ * requirement's bytes into the public namespace, rejecting with an actionable
+ * "run `stak push` first" error if the owner hasn't pushed that content yet.
  */
 export const buildPublicStackBundle = (
   version: ImportedStackVersion,
 ): PublicStackBundle => {
-  const snapshotBacked = version.requirements.filter(
-    (requirement) => requirement.restoration.strategy === 'snapshot',
-  );
-  if (snapshotBacked.length > 0)
-    throw new PublicationNotEligibleError(
-      `Cannot publish ${version.name}. ${snapshotBacked.length} Skill(s) require private snapshots: ${snapshotBacked
-        .map((requirement) => requirement.name)
-        .join(', ')}. Public snapshot publishing is not supported in V0.`,
-    );
-
   const unsafe: string[] = [];
-  const requirements = version.requirements.map((requirement) => {
-    if (requirement.restoration.strategy !== 'reference')
-      throw new PublicationNotEligibleError(
-        `Skill ${requirement.name} is not reference-backed.`,
-      );
-    const verdict = inspectPublicSourceRemote(
-      requirement.restoration.reference.remote,
-    );
-    if (!verdict.safe) unsafe.push(`${requirement.name} (${verdict.reason})`);
-    return {
-      id: requirement.id,
-      name: requirement.name,
-      requirement: requirement.requirement,
-      contentHash: requirement.contentHash,
-      metadata: requirement.metadata,
-      restoration: requirement.restoration,
-      observedSources: requirement.observedSources,
-      ...(requirement.preferredSource
-        ? { preferredSource: requirement.preferredSource }
-        : {}),
-      originStackName: requirement.originStackName,
-    };
-  });
+  const requirements: PublicStackRequirement[] = version.requirements.map(
+    (requirement) => {
+      const { restoration: localRestoration } = requirement;
+      // Local `restoration.snapshot` carries only a machine-local `snapshotId` (storage.ts) —
+      // the portable identity is the requirement's own top-level `contentHash`, already the
+      // same content-addressed hash the owner's `stak push` uploaded under.
+      const restoration: PublicStackRequirement['restoration'] =
+        localRestoration.strategy === 'snapshot'
+          ? { strategy: 'snapshot', contentHash: requirement.contentHash }
+          : localRestoration;
+      if (localRestoration.strategy === 'reference') {
+        const verdict = inspectPublicSourceRemote(
+          localRestoration.reference.remote,
+        );
+        if (!verdict.safe)
+          unsafe.push(`${requirement.name} (${verdict.reason})`);
+      }
+      return {
+        id: requirement.id,
+        name: requirement.name,
+        requirement: requirement.requirement,
+        contentHash: requirement.contentHash,
+        metadata: requirement.metadata,
+        restoration,
+        observedSources: requirement.observedSources,
+        ...(requirement.preferredSource
+          ? { preferredSource: requirement.preferredSource }
+          : {}),
+        originStackName: requirement.originStackName,
+      };
+    },
+  );
   if (unsafe.length > 0)
     throw new PublicationNotEligibleError(
       `Cannot publish ${version.name}. Unsafe public source references: ${unsafe.join(', ')}.`,
@@ -81,8 +85,14 @@ export const buildPublicStackBundle = (
 
   const inheritedStackMetadata = version.inheritedStacks;
   // Deterministic, path-free public version hash over the public content only
-  // (skipped-optional authoring diagnostics are excluded to avoid leaking paths).
-  const versionHash = stackVersionHash({
+  // (skipped-optional authoring diagnostics are excluded to avoid leaking paths). Uses
+  // `sha256CanonicalJson` directly (not `stackVersionHash`, which is typed for the LOCAL
+  // `ImportedStackVersion` requirement shape) because the public requirements array now
+  // carries the public (contentHash-only) snapshot restoration shape, not the local
+  // (snapshotId) one — both helpers hash with the identical canonical-JSON + sha256
+  // algorithm, so this remains byte-identical to what a pure-reference bundle hashed to
+  // before, and byte-identical to the server's own `sha256CanonicalJson` computation.
+  const versionHash = sha256CanonicalJson({
     name: version.name,
     description: version.description,
     requirements,

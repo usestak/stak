@@ -41,11 +41,10 @@ describe('assessSkillShareEligibility (spec P10A §4)', () => {
     expect(assessSkillShareEligibility(pinned)).toEqual({ eligible: true });
   });
 
-  it('Local-origin Skills fail closed with the plain-language copy', () => {
-    const result = assessSkillShareEligibility(snapshot('local'));
-    expect(result.eligible).toBe(false);
-    if (!result.eligible)
-      expect(result.reason).toContain("can't publish a safe public reference");
+  it('Hybrid Public Skill Portability: Local-origin (snapshot) Skills ARE eligible — portable through an immutable content snapshot instead of a reference', () => {
+    expect(assessSkillShareEligibility(snapshot('local'))).toEqual({
+      eligible: true,
+    });
   });
 
   for (const reason of [
@@ -54,10 +53,10 @@ describe('assessSkillShareEligibility (spec P10A §4)', () => {
     'modified-source',
     'non-portable-source',
   ] as const) {
-    it(`${reason} Skills fail closed`, () => {
-      expect(assessSkillShareEligibility(snapshot(reason)).eligible).toBe(
-        false,
-      );
+    it(`${reason} Skills are eligible too — every snapshot reason describes why a Git REFERENCE isn't safe, not why the content itself is unsafe to snapshot`, () => {
+      expect(assessSkillShareEligibility(snapshot(reason))).toEqual({
+        eligible: true,
+      });
     });
   }
 

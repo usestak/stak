@@ -25,6 +25,7 @@ import {
 } from './errors.js';
 import {
   PublicStackConflict,
+  type CloudBlobStore,
   type CloudRepository,
   type PublicStackRepository,
   type PublicStackVersionRecord,
@@ -35,6 +36,7 @@ const MAX_REQUIREMENTS = 500;
 
 export type PublicServiceContext = {
   repository: CloudRepository & PublicStackRepository;
+  blobStore: CloudBlobStore;
   nowIso: () => string;
   newId: () => string;
   appUrl: string;
@@ -118,8 +120,21 @@ export const createPublicStackService = (ctx: PublicServiceContext) => {
           `A public Stack version may contain at most ${MAX_REQUIREMENTS} Skills.`,
         );
 
-      // Reference-only + source-remote safety (schema already enforces reference).
+      // Hybrid Public Skill Portability — the ONE place every publish path converges
+      // (named-Stack publish, single-Skill share, and the legacy anonymous CLI
+      // `stack publish <arg>` path all end up here), so this is the single place the
+      // "every snapshot-backed requirement must have real public bytes before commit"
+      // invariant is enforced — never duplicated per caller, never skippable.
       for (const requirement of bundle.requirements) {
+        if (requirement.restoration.strategy === 'snapshot') {
+          await ensurePublicSnapshotUploaded(
+            ctx.blobStore,
+            user.userId,
+            requirement.restoration.contentHash,
+            requirement.name,
+          );
+          continue;
+        }
         const verdict = inspectPublicSourceRemote(
           requirement.restoration.reference.remote,
         );
@@ -305,6 +320,43 @@ export const createPublicStackService = (ctx: PublicServiceContext) => {
       };
     },
 
+    /**
+     * Serve an immutable public Skill snapshot's bytes (Hybrid Public Skill Portability).
+     * The application-layer authorization boundary, not a bucket ACL: bytes are only ever
+     * returned after confirming `contentHash` is actually one of THIS exact published,
+     * currently-active version's own requirements — an unpublished Stack, a wrong version,
+     * or a contentHash that simply isn't referenced there all fail identically (not-found),
+     * so guessing a hash can never reach either an unpublished snapshot or an unrelated
+     * owner-private one (which lives in a structurally separate, never-public namespace).
+     */
+    getPublicSkillSnapshot: async (
+      owner: string,
+      slug: string,
+      versionNumber: number,
+      contentHash: string,
+    ): Promise<Uint8Array> => {
+      const stack = await ctx.repository.getPublicStackByHandleSlug(
+        owner,
+        slug,
+      );
+      if (!stack || stack.unpublishedAt !== null) throw publicStackNotFound();
+      const version = await ctx.repository.getPublicStackVersionByNumber(
+        stack.stackId,
+        versionNumber,
+      );
+      if (!version)
+        throw publicStackNotFound('Public Stack version not found.');
+      const belongs = version.bundle.requirements.some(
+        (requirement) =>
+          requirement.restoration.strategy === 'snapshot' &&
+          requirement.restoration.contentHash === contentHash,
+      );
+      if (!belongs) throw publicStackNotFound('Snapshot not found.');
+      const bytes = await ctx.blobStore.getPublished(contentHash);
+      if (!bytes) throw publicStackNotFound('Snapshot not found.');
+      return bytes;
+    },
+
     getPublicProfile: async (owner: string): Promise<PublicProfileResponse> => {
       if (!publicHandleSchema.safeParse(owner).success)
         throw publicStackNotFound('Unknown profile.');
@@ -374,6 +426,31 @@ export const guardPublicSlugClaim = async (
     throw publicSlugTaken(
       `The public link "${requestedSlug}" is already used by another shared Skill or Stack in your account.`,
     );
+};
+
+/**
+ * Ensure a Skill's content is copied into the public, content-addressed snapshot namespace
+ * before a publish naming it completes (Hybrid Public Skill Portability) — shared by
+ * named-Stack and Skill publishing so there is exactly one upload path. Deliberately a
+ * publish-time I/O step, not part of `assessSkillShareEligibility` (which stays pure): the
+ * owner must have already pushed this exact content to Cloud (`stak push`) for bytes to
+ * exist at all. Idempotent/deduped — a `contentHash` already present in the public namespace
+ * (from an earlier publish, by this owner or republished content that happens to hash the
+ * same) is never re-uploaded.
+ */
+export const ensurePublicSnapshotUploaded = async (
+  blobStore: CloudBlobStore,
+  ownerUserId: string,
+  contentHash: string,
+  skillName: string,
+): Promise<void> => {
+  if (await blobStore.hasPublished(contentHash)) return;
+  const bytes = await blobStore.get(ownerUserId, contentHash);
+  if (!bytes)
+    throw publicationNotEligible(
+      `${skillName}'s content hasn't been uploaded to STAK Cloud yet. Run \`stak push\` first, then try sharing again.`,
+    );
+  await blobStore.putPublished(contentHash, bytes);
 };
 
 // Re-exported for symmetry with @owner/name formatting on the client.

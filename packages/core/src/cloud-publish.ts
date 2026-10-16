@@ -74,9 +74,13 @@ export const preparePublish = async (options: {
   }
   const sourceRemotes = [
     ...new Set(
-      bundle.requirements.map(
-        (requirement) => requirement.restoration.reference.remote,
-      ),
+      bundle.requirements
+        .map((requirement) =>
+          requirement.restoration.strategy === 'reference'
+            ? requirement.restoration.reference.remote
+            : null,
+        )
+        .filter((remote): remote is string => remote !== null),
     ),
   ].sort();
   return {

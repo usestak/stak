@@ -214,13 +214,21 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
     const description = descriptionOverride ?? version.bundle.description;
     const requirements: PublicStackRequirement[] = version.bundle.skills.map(
       (skill) => {
-        // Safe: every skill above passed assessSkillShareEligibility, which only accepts
-        // reference-strategy restorations — this narrows the type the same runtime fact
-        // already guarantees.
-        if (skill.restoration.strategy !== 'reference')
-          throw publicationNotEligible(
-            `Cannot publish "${stack.name}". ${skill.name} is not reference-backed.`,
-          );
+        // Hybrid Public Skill Portability: every skill above passed
+        // assessSkillShareEligibility, which now accepts BOTH restoration strategies. A
+        // snapshot-backed skill becomes publicly portable through its immutable content
+        // snapshot (contentHash only — no owner-local snapshotId ever leaves this process);
+        // a reference-backed skill keeps publishing its Git reference unchanged. The actual
+        // snapshot upload (publish-time I/O) happens separately in `publishUserStack`, before
+        // this bundle is handed to `publishPublicStackVersion` — this function stays a pure
+        // bundle builder.
+        const restoration: PublicStackRequirement['restoration'] =
+          skill.restoration.strategy === 'snapshot'
+            ? {
+                strategy: 'snapshot',
+                contentHash: skill.restoration.contentHash,
+              }
+            : skill.restoration;
         return {
           // Deterministic, not `ctx.newId()` (bug fixed by this correction pass): a random
           // id made the published bundle's hash non-reproducible between calls, which broke
@@ -232,7 +240,7 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
           requirement: 'required' as const,
           contentHash: skill.contentHash,
           metadata: skill.metadata,
-          restoration: skill.restoration,
+          restoration,
           observedSources: skill.observedSources,
           ...(skill.preferredSource
             ? { preferredSource: skill.preferredSource }
@@ -436,6 +444,9 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
         request.description,
       );
       if (!candidate.eligible) throw publicationNotEligible(candidate.reason);
+      // Every snapshot-backed requirement's immutable public bytes are validated/uploaded
+      // centrally inside `publishPublicStackVersion` itself (the one place every publish
+      // path converges) — not duplicated here.
       // Slug-ownership invariant (spec final lifecycle pass §11/§12): this Stack's OWN bound
       // slug (if any) is the only slug it may ever publish/republish under; a slug it does
       // not already own must not already belong to a different Skill/Stack in this account —

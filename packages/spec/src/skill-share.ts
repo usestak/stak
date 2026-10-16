@@ -8,8 +8,6 @@ import {
   publicSlugSchema,
   publishPublicStackVersionResponseSchema,
 } from './public.js';
-import type { SnapshotReason } from './storage.js';
-
 /* -------------------------------------------------------------------------- */
 /* Eligibility (pure, no I/O — safe to call from CLI, Cloud, or web)          */
 /* -------------------------------------------------------------------------- */
@@ -21,41 +19,27 @@ export const skillShareEligibilitySchema = z.discriminatedUnion('eligible', [
 export type SkillShareEligibility = z.infer<typeof skillShareEligibilitySchema>;
 
 /**
- * Plain-language, non-technical explanations for each structural reason a Skill cannot be
- * published as a safe public reference. Mirrors `snapshotReasonSchema` 1:1. Never surfaces a
- * raw hash, path, or remote — only the Skill's name is ever interpolated by the caller.
- */
-const SNAPSHOT_REASON_COPY: Record<SnapshotReason, string> = {
-  local:
-    "This Skill comes from a local source, so STAK can't publish a safe public reference for it.",
-  'unknown-source':
-    "STAK couldn't determine a safe, public source for this Skill, so it can't be shared.",
-  'ambiguous-source':
-    "This Skill's source is ambiguous, so STAK can't publish a safe public reference for it.",
-  'modified-source':
-    "This Skill's local copy has changed from its source, so STAK can't publish a safe public reference for it.",
-  'non-portable-source':
-    "This Skill's source isn't portable enough for STAK to publish safely.",
-};
-
-/**
- * Decide whether a Skill's CURRENT APPROVED restoration can become a public reference.
- * Reuses the exact same structural guarantee the public-Stack pipeline already enforces
- * (snapshot-strategy Skills cannot be type-constructed into a public bundle) plus the same
- * source-remote safety check (`inspectPublicSourceRemote`) run at Stack-publish time — so a
- * Skill that is eligible here is, by construction, eligible for the underlying one-item
- * public Stack bundle it will become. Fails closed: any restoration shape this function does
- * not recognize as safe is not-eligible, never defaulted to eligible.
+ * Decide whether a Skill's CURRENT APPROVED restoration can become publicly shareable.
+ *
+ * Hybrid Public Skill Portability: every snapshot `reason` (local, unknown-source,
+ * ambiguous-source, modified-source, non-portable-source) describes why STAK can't build a
+ * safe public GIT REFERENCE for this Skill — none of them describe the Skill's content as
+ * unreadable or unsafe to snapshot. The content itself was already hashed/fenced to its own
+ * directory tree by the same primitive a reference-strategy Skill's content is (P5/P10
+ * hashing), so a snapshot-strategy Skill is unconditionally eligible here: the Skill becomes
+ * portable through an immutable content snapshot instead of a reference. This function stays
+ * pure/no-I/O — whether the owner's Cloud-side bytes for that snapshot actually exist yet
+ * (i.e. whether they've run `stak push`) is a publish-time I/O concern, checked separately by
+ * the caller before the snapshot is actually copied into public storage.
+ *
+ * For reference-strategy Skills, the same source-remote safety check
+ * (`inspectPublicSourceRemote`) run at Stack-publish time still applies — Git provenance
+ * remains useful display/update-check metadata, never a hard runtime requirement either way.
  */
 export const assessSkillShareEligibility = (
   restoration: PortableRestorationStrategy,
 ): SkillShareEligibility => {
-  if (restoration.strategy === 'snapshot')
-    return {
-      eligible: false,
-      reason:
-        SNAPSHOT_REASON_COPY[restoration.reason] ?? SNAPSHOT_REASON_COPY.local,
-    };
+  if (restoration.strategy === 'snapshot') return { eligible: true };
   const verdict = inspectPublicSourceRemote(restoration.reference.remote);
   if (!verdict.safe) return { eligible: false, reason: verdict.reason };
   return { eligible: true };

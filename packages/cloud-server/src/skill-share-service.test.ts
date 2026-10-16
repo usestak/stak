@@ -140,11 +140,19 @@ const setup = () => {
       },
     });
   };
-  return { repository, service, call, signIn, pushEnvironment, auth };
+  return {
+    repository,
+    blobStore,
+    service,
+    call,
+    signIn,
+    pushEnvironment,
+    auth,
+  };
 };
 
 describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
-  it('fails closed: a Local-origin (snapshot) Skill is not shareable', async () => {
+  it('Hybrid Public Skill Portability: a Local-origin (snapshot) Skill IS shareable, but still requires its content to already be pushed to Cloud', async () => {
     const { service, signIn, pushEnvironment, auth } = setup();
     const skillId = 'skill_local0001';
     const token = await signIn(USER_A, 'temi');
@@ -154,18 +162,19 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
     );
     const status = await service.getSkillShareStatus(auth, skillId);
     expect(status.share).toEqual({
-      status: 'not-shareable',
-      reason:
-        "This Skill comes from a local source, so STAK can't publish a safe public reference for it.",
+      status: 'shareable',
+      suggestedSlug: 'design-helper',
     });
+    // Eligible (no longer rejected for being local/no-Git), but this content was never
+    // `stak push`ed to Cloud — `ensurePublicSnapshotUploaded` must fail closed, actionably.
     await expect(
       service.shareSkill(auth, { skillId, slug: 'design-helper' }),
     ).rejects.toMatchObject({ code: 'publication-not-eligible' });
   });
 
-  it('fails closed: a dirty/modified-source Skill is not shareable', async () => {
-    const { service, signIn, pushEnvironment, auth } = setup();
-    const skillId = 'skill_dirty0001';
+  it('a snapshot Skill whose content has been pushed to Cloud shares successfully through its immutable snapshot', async () => {
+    const { service, signIn, pushEnvironment, auth, blobStore } = setup();
+    const skillId = 'skill_local0002';
     const token = await signIn(USER_A, 'temi');
     await pushEnvironment(
       token,
@@ -174,8 +183,22 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
         snapshotReason: 'modified-source',
       }),
     );
-    const status = await service.getSkillShareStatus(auth, skillId);
-    expect(status.share.status).toBe('not-shareable');
+    await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([1, 2, 3]));
+    const result = await service.shareSkill(auth, {
+      skillId,
+      slug: 'design-helper',
+    });
+    const version = await service.getPublicStackVersion(
+      result.owner,
+      result.slug,
+      result.version.versionNumber,
+    );
+    expect(version.bundle.requirements[0]?.restoration).toEqual({
+      strategy: 'snapshot',
+      contentHash: CONTENT_HASH,
+    });
+    const published = await blobStore.getPublished(CONTENT_HASH);
+    expect(published).toEqual(new Uint8Array([1, 2, 3]));
   });
 
   it('fails closed: a credential-bearing source URL is not shareable and cannot leak', async () => {

@@ -6,10 +6,16 @@ import type {
   EnvironmentManifest,
   EnvironmentStackLayer,
   ImportedStackVersion,
-  ReferenceRecord,
+  PublicStackRequirement,
   TryResolvedEnvironment,
 } from '@stack/spec';
-import { ingestSkill, verifyStoredSkill } from '@stack/store';
+import {
+  archiveHashOf,
+  ArchiveIntegrityError,
+  extractSnapshotArchiveToStore,
+  ingestSkill,
+  verifyStoredSkill,
+} from '@stack/store';
 
 import { importedVersionKey, resolveEnvironment } from './resolver.js';
 import {
@@ -123,13 +129,17 @@ export type RemoteTrialResolution = {
   kind: 'public';
   resolved: TryResolvedEnvironment;
   version: ImportedStackVersion;
-  references: Map<string, ReferenceRecord>;
+  // Hybrid Public Skill Portability: per-requirement restoration straight from the public
+  // bundle — see `ResolvedPublicStackSource.restorations` for why this isn't derived from
+  // the local `version` shape.
+  restorations: Map<string, PublicStackRequirement['restoration']>;
   source: {
     ref: string;
     owner: string;
     slug: string;
     publicStackId: string;
     publicVersionId: string;
+    versionNumber: number;
     versionHash: string;
   };
 };
@@ -207,13 +217,14 @@ export const resolveRemoteTrialStack = async (options: {
     kind: 'public',
     resolved,
     version: source.version,
-    references: source.references,
+    restorations: source.restorations,
     source: {
       ref: source.ref,
       owner: source.owner,
       slug: source.slug,
       publicStackId: source.publicStackId,
       publicVersionId: source.publicVersionId,
+      versionNumber: source.versionNumber,
       versionHash: source.versionHash,
     },
   };
@@ -224,6 +235,9 @@ export const preserveRemoteTrialStack = async (options: {
   trial: RemoteTrialResolution;
   gitExecutor?: GitExecutor;
   now?: () => Date;
+  // Hybrid Public Skill Portability: only needed when the trial has at least one
+  // snapshot-restored requirement not yet available locally.
+  client?: Pick<PublicStackClient, 'getPublicSkillSnapshot'>;
 }): Promise<void> => {
   for (const requirement of options.trial.version.requirements) {
     const verification = await verifyStoredSkill({
@@ -231,17 +245,47 @@ export const preserveRemoteTrialStack = async (options: {
       contentHash: requirement.contentHash,
     });
     if (verification.state === 'available') continue;
-    const reference = options.trial.references.get(requirement.id);
-    if (!reference)
+    const restoration = options.trial.restorations.get(requirement.id);
+    if (!restoration)
       throw new StackCompositionError(
         'remote-reference-missing',
-        `No reference is available for ${requirement.name}.`,
+        `No restoration is available for ${requirement.name}.`,
       );
-    await restoreReference({
-      stackHome: options.stackHome,
-      reference,
-      ...(options.gitExecutor ? { gitExecutor: options.gitExecutor } : {}),
-      ...(options.now ? { now: options.now } : {}),
-    });
+    if (restoration.strategy === 'snapshot') {
+      if (!options.client)
+        throw new StackCompositionError(
+          'remote-reference-missing',
+          `No Cloud client is available to fetch ${requirement.name}'s public snapshot.`,
+        );
+      const bytes = await options.client.getPublicSkillSnapshot(
+        options.trial.source.owner,
+        options.trial.source.slug,
+        options.trial.source.versionNumber,
+        restoration.contentHash,
+      );
+      try {
+        await extractSnapshotArchiveToStore({
+          stackHome: options.stackHome,
+          contentHash: restoration.contentHash,
+          archiveHash: archiveHashOf(bytes),
+          bytes,
+          ...(options.now ? { now: options.now } : {}),
+        });
+      } catch (error) {
+        if (error instanceof ArchiveIntegrityError)
+          throw new StackCompositionError(
+            'remote-snapshot-integrity-mismatch',
+            `The public Skill snapshot for "${requirement.name}" did not match its expected content hash. It was not installed.`,
+          );
+        throw error;
+      }
+    } else {
+      await restoreReference({
+        stackHome: options.stackHome,
+        reference: restoration.reference,
+        ...(options.gitExecutor ? { gitExecutor: options.gitExecutor } : {}),
+        ...(options.now ? { now: options.now } : {}),
+      });
+    }
   }
 };

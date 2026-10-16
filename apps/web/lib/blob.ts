@@ -14,6 +14,12 @@ const pendingKey = (ticket: string) =>
 // collide with a Memory snapshot even if the underlying bytes happened to match.
 const reviewPayloadKey = (userId: string, reviewArtifactId: string) =>
   `review-artifacts/${userId}/${reviewArtifactId}.json`;
+// Content-addressed, deliberately NOT user-scoped (Hybrid Public Skill Portability) — the
+// same published Skill content needs only one copy regardless of which owner/version
+// referenced it first. Distinct top-level prefix from `snapshots/` (owner-private) so a
+// public read path can never be pointed at an owner-private key by construction.
+const publishedKey = (contentHash: string) =>
+  `published/${contentHash.replace(':', '_')}.tar`;
 
 const toBytes = async (blob: Blob | null): Promise<Uint8Array | null> =>
   blob ? new Uint8Array(await blob.arrayBuffer()) : null;
@@ -82,6 +88,23 @@ export const supabaseBlobStore = (): CloudBlobStore => {
       ]);
       if (error)
         throw new Error(`Review payload delete failed: ${error.message}`);
+    },
+    putPublished: async (contentHash, bytes) => {
+      const { error } = await storage().upload(
+        publishedKey(contentHash),
+        Buffer.from(bytes),
+        { contentType: 'application/octet-stream', upsert: true },
+      );
+      if (error)
+        throw new Error(`Published snapshot upload failed: ${error.message}`);
+    },
+    getPublished: async (contentHash) => {
+      const { data } = await storage().download(publishedKey(contentHash));
+      return toBytes(data);
+    },
+    hasPublished: async (contentHash) => {
+      const { data } = await storage().download(publishedKey(contentHash));
+      return Boolean(data);
     },
   };
 };

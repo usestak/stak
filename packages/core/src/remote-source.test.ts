@@ -89,9 +89,13 @@ describe('resolvePublicStackSource', () => {
         skippedOptional: [],
       }),
     );
-    expect(source.references.get('req_design01')?.expectedContentHash).toBe(
-      contentHash,
-    );
+    const restoration = source.restorations.get('req_design01');
+    expect(restoration?.strategy).toBe('reference');
+    expect(
+      restoration?.strategy === 'reference'
+        ? restoration.reference.expectedContentHash
+        : undefined,
+    ).toBe(contentHash);
   });
 
   it('rejects a tampered digest', async () => {

@@ -184,6 +184,15 @@ export interface PublicStackClient {
     slug: string,
     request: PublishPublicStackVersionRequest,
   ): Promise<PublishPublicStackVersionResponse>;
+  /** Anonymous fetch of one immutable public Skill snapshot's raw bytes (Hybrid Public Skill
+   *  Portability) — authorization is entirely server-side (the contentHash must belong to
+   *  THIS exact published version's own bundle); no token is sent or required. */
+  getPublicSkillSnapshot(
+    owner: string,
+    slug: string,
+    versionNumber: number,
+    contentHash: string,
+  ): Promise<Uint8Array>;
 }
 
 export interface UserStackClient {
@@ -603,6 +612,14 @@ export const createCloudClient = (
           { auth: false },
         ),
       ),
+    getPublicSkillSnapshot: async (owner, slug, versionNumber, contentHash) => {
+      const result = await request(
+        'GET',
+        `stacks/${encodeURIComponent(owner)}/${encodeURIComponent(slug)}/versions/${versionNumber}/snapshots/${encodeURIComponent(contentHash)}`,
+        { auth: false, raw: true },
+      );
+      return result.bytes;
+    },
     getPublicProfile: async (owner) => {
       try {
         return json(

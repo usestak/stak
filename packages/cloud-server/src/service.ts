@@ -183,6 +183,7 @@ export const createCloudService = (config: CloudServiceConfig) => {
 
   const publicMethods = createPublicStackService({
     repository: config.repository,
+    blobStore: config.blobStore,
     nowIso,
     newId,
     appUrl,

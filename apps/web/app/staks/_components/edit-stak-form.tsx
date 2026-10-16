@@ -388,11 +388,12 @@ export function EditStakForm({
           </div>
         )}
         <span style={{ fontSize: 12, color: 'var(--dim)', maxWidth: 480 }}>
-          Publishing makes a reference-only copy of this STAK&apos;s current
-          saved version public at a URL anyone can read. If any Skill in it
-          can&apos;t be published (for example, a Local Skill with no Git
-          origin), publishing fails for the whole STAK with a clear reason — it
-          never publishes a partial composition.
+          Publishing makes this STAK&apos;s current saved version public at a
+          URL anyone can read — including the contents of any Local Skill in it,
+          through an immutable content snapshot. Only publish content you have
+          permission to share. If a Skill hasn&apos;t been pushed to Cloud yet,
+          publishing fails for the whole STAK with a clear reason — it never
+          publishes a partial composition.
         </span>
         <span
           role="status"

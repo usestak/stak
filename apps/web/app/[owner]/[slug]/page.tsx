@@ -86,7 +86,7 @@ export default async function StackPage({
   const soleSkill = isSkill ? requirements[0] : undefined;
 
   if (isSkill && soleSkill) {
-    const reference = soleSkill.restoration.reference;
+    const restoration = soleSkill.restoration;
     const capabilities = soleSkill.metadata.capabilities;
     const declaredCapabilities = capabilities
       ? Object.entries(capabilities).filter(([, v]) => v !== undefined)
@@ -119,21 +119,34 @@ export default async function StackPage({
         </p>
 
         <h2>Provenance</h2>
-        <div className="stak-public-skill-source">
-          {isSafeDisplayUrl(reference.remote) ? (
-            <a href={reference.remote} rel="noopener noreferrer nofollow">
-              {reference.remote}
-            </a>
-          ) : (
-            reference.remote
-          )}{' '}
-          · {reference.path}
-        </div>
-        <p className="stak-public-muted" style={{ marginTop: '0.3rem' }}>
-          Pinned to an immutable revision ({reference.revision.slice(0, 12)}) at
-          the time this Skill was shared. If the source later moves, this
-          published version does not change.
-        </p>
+        {restoration.strategy === 'reference' ? (
+          <>
+            <div className="stak-public-skill-source">
+              {isSafeDisplayUrl(restoration.reference.remote) ? (
+                <a
+                  href={restoration.reference.remote}
+                  rel="noopener noreferrer nofollow"
+                >
+                  {restoration.reference.remote}
+                </a>
+              ) : (
+                restoration.reference.remote
+              )}{' '}
+              · {restoration.reference.path}
+            </div>
+            <p className="stak-public-muted" style={{ marginTop: '0.3rem' }}>
+              Pinned to an immutable revision (
+              {restoration.reference.revision.slice(0, 12)}) at the time this
+              Skill was shared. If the source later moves, this published
+              version does not change.
+            </p>
+          </>
+        ) : (
+          <p className="stak-public-muted">
+            Portable via an immutable content snapshot — this Skill has no Git
+            origin. Its published content never changes.
+          </p>
+        )}
 
         <h2>Declared capabilities</h2>
         {declaredCapabilities.length > 0 ? (
@@ -203,7 +216,7 @@ export default async function StackPage({
       ) : (
         <ul className="stak-public-skills">
           {requirements.map((requirement) => {
-            const reference = requirement.restoration.reference;
+            const restoration = requirement.restoration;
             return (
               <li key={requirement.id}>
                 <div className="stak-public-skill-name">{requirement.name}</div>
@@ -213,17 +226,24 @@ export default async function StackPage({
                   </div>
                 ) : null}
                 <div className="stak-public-skill-source">
-                  {isSafeDisplayUrl(reference.remote) ? (
-                    <a
-                      href={reference.remote}
-                      rel="noopener noreferrer nofollow"
-                    >
-                      {reference.remote}
-                    </a>
+                  {restoration.strategy === 'reference' ? (
+                    <>
+                      {isSafeDisplayUrl(restoration.reference.remote) ? (
+                        <a
+                          href={restoration.reference.remote}
+                          rel="noopener noreferrer nofollow"
+                        >
+                          {restoration.reference.remote}
+                        </a>
+                      ) : (
+                        restoration.reference.remote
+                      )}{' '}
+                      · {restoration.reference.path} @{' '}
+                      {restoration.reference.revision.slice(0, 12)}
+                    </>
                   ) : (
-                    reference.remote
-                  )}{' '}
-                  · {reference.path} @ {reference.revision.slice(0, 12)}
+                    'Portable via an immutable content snapshot (no Git origin)'
+                  )}
                 </div>
               </li>
             );

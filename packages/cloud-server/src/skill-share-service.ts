@@ -160,10 +160,16 @@ export const createSkillShareService = (ctx: SkillShareServiceContext) => {
     ): Promise<PublishPublicStackVersionResponse> => {
       const skill = await requireSkill(user.userId, request.skillId);
       const eligibility = assessSkillShareEligibility(skill.restoration);
-      if (!eligibility.eligible || skill.restoration.strategy !== 'reference')
-        throw publicationNotEligible(
-          eligibility.eligible ? 'Not shareable.' : eligibility.reason,
-        );
+      if (!eligibility.eligible)
+        throw publicationNotEligible(eligibility.reason);
+      // Hybrid Public Skill Portability: a snapshot-backed Skill becomes publicly portable
+      // through its immutable content snapshot (contentHash only); a reference-backed Skill
+      // keeps publishing its Git reference unchanged. The actual snapshot upload happens
+      // below, before `publishPublicStackVersion` is called.
+      const restoration: PublicStackRequirement['restoration'] =
+        skill.restoration.strategy === 'snapshot'
+          ? { strategy: 'snapshot', contentHash: skill.restoration.contentHash }
+          : skill.restoration;
 
       const handle = await ctx.resolveHandle(user.userId);
       const existing = await findExistingShare(
@@ -185,7 +191,7 @@ export const createSkillShareService = (ctx: SkillShareServiceContext) => {
           requirement: 'required',
           contentHash: skill.contentHash,
           metadata: skill.metadata ?? { name: skill.name, description },
-          restoration: skill.restoration,
+          restoration,
           observedSources: skill.observedSources,
           ...(skill.preferredSource
             ? { preferredSource: skill.preferredSource }
@@ -226,6 +232,9 @@ export const createSkillShareService = (ctx: SkillShareServiceContext) => {
         inheritedStackMetadata,
         digest,
       };
+      // The immutable public snapshot (if any) is validated/uploaded centrally inside
+      // `publishPublicStackVersion` itself (the one place every publish path converges) —
+      // not duplicated here.
       // Slug-ownership invariant (§11/§12) — same guard, same reasoning as the named-Stack
       // publish path: this Skill's own previously-used slug (if any) is the only one it may
       // keep publishing under, and a slug it doesn't already own must not belong to another

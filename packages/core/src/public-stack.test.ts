@@ -76,9 +76,11 @@ describe('buildPublicStackBundle', () => {
     expect(sha256CanonicalJson(publicBundleDigestInput(bundle))).toBe(
       bundle.digest,
     );
-    // Public version hash is deterministic over public content.
+    // Public version hash is deterministic over public content. Uses
+    // `sha256CanonicalJson` directly (not `stackVersionHash`, which is typed for the
+    // LOCAL requirement shape) since `bundle.requirements` is now public-shaped.
     expect(bundle.stack.versionHash).toBe(
-      stackVersionHash({
+      sha256CanonicalJson({
         name: 'frontend',
         description: 'Frontend Stack',
         requirements: bundle.requirements,
@@ -88,8 +90,9 @@ describe('buildPublicStackBundle', () => {
     );
   });
 
-  it('blocks snapshot-backed Skills', () => {
+  it('Hybrid Public Skill Portability: builds a snapshot-restoration bundle for snapshot-backed (no-Git) Skills instead of blocking them', () => {
     const version = referenceVersion();
+    const contentHash = version.requirements[0]?.contentHash;
     const snapshotVersion: ImportedStackVersion = {
       ...version,
       requirements: version.requirements.map((requirement) => ({
@@ -101,9 +104,14 @@ describe('buildPublicStackBundle', () => {
         },
       })),
     };
-    expect(() => buildPublicStackBundle(snapshotVersion)).toThrow(
-      PublicationNotEligibleError,
-    );
+    const bundle = buildPublicStackBundle(snapshotVersion);
+    expect(bundle.requirements).toHaveLength(1);
+    // The public restoration carries the requirement's own content-addressed hash — the
+    // local-only `snapshotId` never leaves this function.
+    expect(bundle.requirements[0]?.restoration).toEqual({
+      strategy: 'snapshot',
+      contentHash,
+    });
   });
 
   it('blocks credential-bearing source remotes', () => {

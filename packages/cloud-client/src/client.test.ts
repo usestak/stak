@@ -38,6 +38,17 @@ const jsonResponse = (status: number, body: unknown) => ({
   arrayBuffer: async () => new ArrayBuffer(0),
 });
 
+const binaryResponse = (status: number, bytes: Uint8Array) => ({
+  status,
+  headers: {
+    get: (name: string) =>
+      name === 'content-type' ? 'application/octet-stream' : null,
+  },
+  text: async () => '',
+  arrayBuffer: async (): Promise<ArrayBuffer> =>
+    bytes.buffer.slice(0) as ArrayBuffer,
+});
+
 describe('cloud client', () => {
   it('requires HTTPS outside localhost', () => {
     expect(() =>
@@ -230,5 +241,32 @@ describe('cloud client', () => {
         after: { byteSize: 2, hash: 'sha256:eeee' },
       },
     ]);
+  });
+
+  it('fetches a public Skill snapshot anonymously (Hybrid Public Skill Portability)', async () => {
+    let capturedUrl = '';
+    let capturedInit:
+      { method: string; headers: Record<string, string> } | undefined;
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const fetchImpl: FetchLike = async (url, init) => {
+      capturedUrl = url;
+      capturedInit = init as typeof capturedInit;
+      return binaryResponse(200, bytes);
+    };
+    const client = createCloudClient({
+      baseUrl: 'http://localhost:3000',
+      fetchImpl,
+    });
+    const result = await client.getPublicSkillSnapshot(
+      'alice',
+      'notes',
+      1,
+      'sha256:aaaa',
+    );
+    expect(result).toEqual(bytes);
+    expect(capturedUrl).toBe(
+      'http://localhost:3000/api/v1/stacks/alice/notes/versions/1/snapshots/sha256%3Aaaaa',
+    );
+    expect(capturedInit?.headers.authorization).toBeUndefined();
   });
 });

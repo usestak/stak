@@ -534,11 +534,14 @@ const defaultDependencies: ProgramDependencies = {
       return prepareOwnedStackUse({ stackHome, source });
     }
   },
-  applyUse: (proposal) =>
+  applyUse: async (proposal) =>
     isOwnedUseProposal(proposal)
       ? applyOwnedStackUse(proposal, { gitExecutor: spawnGit })
       : isRemoteUseProposal(proposal)
-        ? applyRemoteStackUse(proposal, { gitExecutor: spawnGit })
+        ? applyRemoteStackUse(proposal, {
+            gitExecutor: spawnGit,
+            client: await publicReadClient(cloudDeps),
+          })
         : applyStackUse(proposal),
   prepareRemove: (identifier) => prepareStackRemove({ stackHome, identifier }),
   applyRemove: (proposal) => applyStackRemove(proposal),
@@ -567,9 +570,14 @@ const defaultDependencies: ProgramDependencies = {
           client: await publicReadClient(cloudDeps),
         })
       : resolveTrialStack({ input }),
-  preserveTry: (trial) =>
-    'references' in trial
-      ? preserveRemoteTrialStack({ stackHome, trial, gitExecutor: spawnGit })
+  preserveTry: async (trial) =>
+    'restorations' in trial
+      ? preserveRemoteTrialStack({
+          stackHome,
+          trial,
+          gitExecutor: spawnGit,
+          client: await publicReadClient(cloudDeps),
+        })
       : preserveTrialStack({ stackHome, trial }),
   prepareTry: async (trial) => {
     // Conservatively retry any prior runtimes left in cleanup-failed before

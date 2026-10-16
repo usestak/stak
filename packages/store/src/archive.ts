@@ -124,7 +124,11 @@ const concat = (chunks: Uint8Array[]): Uint8Array => {
 const pad = (size: number): Uint8Array =>
   new Uint8Array((BLOCK - (size % BLOCK)) % BLOCK);
 
-const archiveHashOf = (bytes: Uint8Array): string =>
+/** Exported so a caller that downloads already-packed archive bytes (e.g. a public Skill
+ *  snapshot fetch) can self-compute `archiveHash` for `extractSnapshotArchiveToStore` — the
+ *  real tamper-detection boundary there is the separate `contentHash` check against an
+ *  independently-sourced expected value, not this archive-internal consistency check. */
+export const archiveHashOf = (bytes: Uint8Array): string =>
   `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 
 export type SkillArchive = {

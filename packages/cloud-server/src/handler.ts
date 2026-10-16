@@ -449,6 +449,34 @@ export const handleCloudRequest = async (
         ),
       );
     }
+    // Hybrid Public Skill Portability: anonymous binary snapshot fetch — NO `authenticate()`
+    // call. Authorization is entirely `getPublicSkillSnapshot`'s job (owner/slug/version must
+    // resolve to a currently-published public Stack, and contentHash must belong to THAT
+    // exact version's own bundle); guessing a hash can never reach an unpublished or
+    // owner-private snapshot. Mirrors the private authenticated download route's binary
+    // response shape above.
+    if (
+      method === 'GET' &&
+      segments.length === 7 &&
+      segments[0] === 'stacks' &&
+      segments[3] === 'versions' &&
+      segments[5] === 'snapshots'
+    ) {
+      const versionNumber = Number.parseInt(segments[4] ?? '', 10);
+      if (!Number.isInteger(versionNumber) || versionNumber < 1)
+        return errorResponse(400, 'invalid-request', 'Invalid version number.');
+      const bytes = await service.getPublicSkillSnapshot(
+        segments[1] ?? '',
+        segments[2] ?? '',
+        versionNumber,
+        segments[6] ?? '',
+      );
+      return {
+        status: 200,
+        headers: { 'content-type': 'application/octet-stream' },
+        binaryBody: bytes,
+      };
+    }
     if (method === 'GET' && segments.length === 2 && segments[0] === 'profiles')
       return json(200, await service.getPublicProfile(segments[1] ?? ''));
 

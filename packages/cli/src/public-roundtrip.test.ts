@@ -4,7 +4,8 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { hashSkillDirectory } from '@stack/shared';
+import { hashSkillDirectory, hashSkillTreeEntries } from '@stack/shared';
+import type { SkillTreeEntry } from '@stack/shared';
 import type { ImportedStackVersion, SkillSource } from '@stack/spec';
 import {
   applyRemoteStackUse,
@@ -25,7 +26,12 @@ import {
   createInMemoryRepository,
   createInProcessFetch,
 } from '@stack/cloud-server';
-import { verifyStoredSkill } from '@stack/store';
+import {
+  ingestSkill,
+  packSkillTreeEntries,
+  packStoreObject,
+  verifyStoredSkill,
+} from '@stack/store';
 
 const roots: string[] = [];
 const temp = async () => {
@@ -46,9 +52,10 @@ const SKILL_PATH = 'skills/design';
 
 const makeCloud = () => {
   const repository = createInMemoryRepository();
+  const blobStore = createInMemoryBlobStore();
   const service = createCloudService({
     repository,
-    blobStore: createInMemoryBlobStore(),
+    blobStore,
     appUrl: 'http://localhost:3000',
     ticketSecret: 'public-secret',
   });
@@ -59,7 +66,7 @@ const makeCloud = () => {
       ...(options.token ? { token: options.token } : {}),
       fetchImpl,
     });
-  return { service, createClient };
+  return { service, blobStore, createClient };
 };
 
 const mintToken = async (
@@ -132,6 +139,70 @@ const hashOfBody = async (root: string, marker: string) => {
   return (await hashSkillDirectory(dir)).hash;
 };
 
+const multiSnapshotVersion = (
+  skills: { skillId: string; name: string; contentHash: string }[],
+): ImportedStackVersion => ({
+  schemaVersion: 1,
+  name: 'local-stack',
+  description: 'All-local Stack',
+  versionHash:
+    'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+  requirements: skills.map(({ skillId, name, contentHash }) => ({
+    id: `req_${skillId}`,
+    name,
+    requirement: 'required' as const,
+    contentHash,
+    metadata: { name, description: `${name} description` },
+    // Local-only placeholder restoration — never dereferenced downstream (see
+    // `publicBundleToImportedVersion`'s comment); `buildPublicStackBundle` reads the
+    // requirement's own top-level `contentHash`, not anything inside `restoration`.
+    restoration: {
+      strategy: 'snapshot' as const,
+      snapshotId: `snap_${skillId}`,
+      reason: 'local' as const,
+    },
+    observedSources: [],
+    originStackName: 'local-stack',
+  })),
+  inheritedStacks: [],
+  skippedOptional: [],
+});
+
+const snapshotVersion = (
+  skillId: string,
+  name: string,
+  contentHash: string,
+): ImportedStackVersion =>
+  multiSnapshotVersion([{ skillId, name, contentHash }]);
+
+/**
+ * Simulate `stak push`: ingest a real directory into the OWNER's own local Store, pack it
+ * into the exact transport-archive bytes the real push flow would upload, then seed those
+ * bytes directly into the owner-scoped Cloud blob store (bypassing the HTTP upload-ticket
+ * dance, which isn't what this test is verifying).
+ */
+const pushLocalSkill = async (
+  ownerStackHome: string,
+  blobStore: ReturnType<typeof createInMemoryBlobStore>,
+  marker: string,
+): Promise<string> => {
+  const sourceDir = path.join(ownerStackHome, `source-${marker}`);
+  await mkdir(sourceDir, { recursive: true });
+  await writeFile(path.join(sourceDir, 'SKILL.md'), skillBody(marker));
+  const expectedContentHash = (await hashSkillDirectory(sourceDir)).hash;
+  const { contentHash } = await ingestSkill({
+    stackHome: ownerStackHome,
+    sourcePath: sourceDir,
+    expectedContentHash,
+  });
+  const { bytes } = await packStoreObject({
+    stackHome: ownerStackHome,
+    contentHash,
+  });
+  await blobStore.put(USER_A, contentHash, bytes);
+  return contentHash;
+};
+
 const fakeGit =
   (marker: string): GitExecutor =>
   async (args, { cwd }) => {
@@ -153,6 +224,22 @@ const publish = async (
   const existing = await client.getPublicStack('alice', 'frontend');
   return client.publishPublicStackVersion('frontend', {
     slug: 'frontend',
+    bundle,
+    expectedLatestVersionId: existing?.latest?.version.versionId ?? null,
+  });
+};
+
+const publishVersion = async (
+  cloud: ReturnType<typeof makeCloud>,
+  token: string,
+  slug: string,
+  version: ImportedStackVersion,
+) => {
+  const bundle = buildPublicStackBundle(version);
+  const client = cloud.createClient({ baseUrl: 'http://localhost', token });
+  const existing = await client.getPublicStack('alice', slug);
+  return client.publishPublicStackVersion(slug, {
+    slug,
     bundle,
     expectedLatestVersionId: existing?.latest?.version.versionId ?? null,
   });
@@ -295,6 +382,165 @@ describe('public Stack consumption', () => {
     await expect(
       stat(path.join(stackHome, 'environments', 'main')),
     ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('Hybrid Public Skill Portability: an all-local (zero-Git) named Stack with 3 snapshot-backed Skills publishes and is fully consumable anonymously, with no Git source required', async () => {
+    const root = await temp();
+    const cloud = makeCloud();
+    const token = await mintToken(cloud.service, cloud.createClient);
+    const ownerHome = path.join(root, 'owner');
+
+    const hashA = await pushLocalSkill(ownerHome, cloud.blobStore, 'local-a');
+    const hashB = await pushLocalSkill(ownerHome, cloud.blobStore, 'local-b');
+    const hashC = await pushLocalSkill(ownerHome, cloud.blobStore, 'local-c');
+    const version = multiSnapshotVersion([
+      { skillId: 'local_a00', name: 'local-skill-a', contentHash: hashA },
+      { skillId: 'local_b00', name: 'local-skill-b', contentHash: hashB },
+      { skillId: 'local_c00', name: 'local-skill-c', contentHash: hashC },
+    ]);
+    const published = await publishVersion(
+      cloud,
+      token,
+      'local-stack',
+      version,
+    );
+    expect(published.createdNew).toBe(true);
+
+    // Anonymous (unauthenticated) consumer — no token anywhere below.
+    const anon = cloud.createClient({ baseUrl: 'http://localhost' });
+    const read = await anon.getPublicStack('alice', 'local-stack');
+    expect(read?.latest?.bundle.requirements).toHaveLength(3);
+    for (const requirement of read?.latest?.bundle.requirements ?? [])
+      expect(requirement.restoration).toEqual({
+        strategy: 'snapshot',
+        contentHash: requirement.contentHash,
+      });
+
+    const stackHome = path.join(root, 'consumer');
+    await initializeMainEnvironment({ stackHome, scanResult: emptyScan() });
+    const source = await resolvePublicStackSource({
+      client: anon,
+      ref: '@alice/local-stack',
+    });
+    const proposal = await prepareRemoteStackUse({ stackHome, source });
+    // No gitExecutor passed at all — proves no Git source is ever required.
+    await applyRemoteStackUse(proposal, { client: anon });
+
+    for (const hash of [hashA, hashB, hashC])
+      expect(
+        (await verifyStoredSkill({ stackHome, contentHash: hash })).state,
+      ).toBe('available');
+    const state = await loadMainEnvironment({ stackHome });
+    expect(state.manifest.stacks[0]?.source?.kind).toBe('public');
+  });
+
+  it('Hybrid Public Skill Portability: version immutability — V1 keeps retrieving its own snapshot after V2 republishes different content', async () => {
+    const root = await temp();
+    const cloud = makeCloud();
+    const token = await mintToken(cloud.service, cloud.createClient);
+    const ownerHome = path.join(root, 'owner');
+
+    const hashA = await pushLocalSkill(ownerHome, cloud.blobStore, 'immut-a');
+    const v1 = await publishVersion(
+      cloud,
+      token,
+      'notes',
+      snapshotVersion('notes0001', 'notes', hashA),
+    );
+    const hashB = await pushLocalSkill(ownerHome, cloud.blobStore, 'immut-b');
+    const v2 = await publishVersion(
+      cloud,
+      token,
+      'notes',
+      snapshotVersion('notes0001', 'notes', hashB),
+    );
+    expect(v2.version.versionNumber).toBe(v1.version.versionNumber + 1);
+
+    const anon = cloud.createClient({ baseUrl: 'http://localhost' });
+    const v1Bytes = await anon.getPublicSkillSnapshot(
+      'alice',
+      'notes',
+      v1.version.versionNumber,
+      hashA,
+    );
+    const v2Bytes = await anon.getPublicSkillSnapshot(
+      'alice',
+      'notes',
+      v2.version.versionNumber,
+      hashB,
+    );
+    expect(new TextDecoder().decode(v1Bytes)).not.toBe(
+      new TextDecoder().decode(v2Bytes),
+    );
+    // V1's hash is not part of V2's own bundle — consuming V2 by its hash never returns A,
+    // and A does not get silently overwritten by B under the same content-addressed key.
+    await expect(
+      anon.getPublicSkillSnapshot(
+        'alice',
+        'notes',
+        v2.version.versionNumber,
+        hashA,
+      ),
+    ).rejects.toThrow();
+    // `@owner/slug` without a version pin resolves to the CURRENT (latest) publication.
+    const current = await anon.getPublicStack('alice', 'notes');
+    expect(current?.latest?.version.versionNumber).toBe(
+      v2.version.versionNumber,
+    );
+    expect(current?.latest?.bundle.requirements[0]?.contentHash).toBe(hashB);
+  });
+
+  it('Hybrid Public Skill Portability: a symlink entry inside a public snapshot that targets outside the tree is rejected, not installed, even when its content hash matches perfectly', async () => {
+    const root = await temp();
+    const cloud = makeCloud();
+    const token = await mintToken(cloud.service, cloud.createClient);
+
+    // Craft a malicious archive directly (not through `ingestSkill`, which enforces safety
+    // on normal local ingestion) — simulates untrusted bytes reaching the public namespace
+    // (compromised storage, a server bug) so the CONSUMER-side extraction is what must hold
+    // the line, not just the owner's own push path.
+    const maliciousEntries: SkillTreeEntry[] = [
+      {
+        relativePath: 'SKILL.md',
+        type: 'file',
+        content: Buffer.from(skillBody('evil')),
+      },
+      { relativePath: 'escape', type: 'symlink', target: '../../../outside' },
+    ];
+    const maliciousHash = hashSkillTreeEntries(maliciousEntries);
+    const malicious = packSkillTreeEntries(maliciousEntries);
+    // Seed the OWNER-scoped store directly with the malicious bytes under their own real
+    // hash, so `ensurePublicSnapshotUploaded` (server-side) finds real "pushed" bytes and
+    // copies them into the public namespace at publish time — exactly the real flow.
+    await cloud.blobStore.put(USER_A, maliciousHash, malicious.bytes);
+    await publishVersion(
+      cloud,
+      token,
+      'evil-stack',
+      snapshotVersion('evil00001', 'evil-skill', maliciousHash),
+    );
+
+    const stackHome = path.join(root, 'consumer');
+    await initializeMainEnvironment({ stackHome, scanResult: emptyScan() });
+    const anon = cloud.createClient({ baseUrl: 'http://localhost' });
+    const source = await resolvePublicStackSource({
+      client: anon,
+      ref: '@alice/evil-stack',
+    });
+    const proposal = await prepareRemoteStackUse({ stackHome, source });
+    await expect(
+      applyRemoteStackUse(proposal, { client: anon }),
+    ).rejects.toThrow();
+    expect(
+      (await verifyStoredSkill({ stackHome, contentHash: maliciousHash }))
+        .state,
+    ).toBe('missing');
+    const state = await loadMainEnvironment({ stackHome });
+    expect(state.manifest.stacks).toHaveLength(0);
+    // The escape target was never written outside the Store/stackHome root.
+    await expect(stat(path.join(root, 'outside'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
   });
 });
 

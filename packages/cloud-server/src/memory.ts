@@ -524,6 +524,7 @@ export const createInMemoryBlobStore = (): CloudBlobStore & {
   const pending = new Map<string, Uint8Array>();
   const blobs = new Map<string, Uint8Array>();
   const reviewPayloads = new Map<string, Uint8Array>();
+  const published = new Map<string, Uint8Array>();
   return {
     blobs,
     putPending: async (ticket, bytes) => {
@@ -547,5 +548,10 @@ export const createInMemoryBlobStore = (): CloudBlobStore & {
     deleteReviewPayload: async (userId, reviewArtifactId) => {
       reviewPayloads.delete(reviewPayloadKey(userId, reviewArtifactId));
     },
+    putPublished: async (contentHash, bytes) => {
+      published.set(contentHash, bytes);
+    },
+    getPublished: async (contentHash) => published.get(contentHash) ?? null,
+    hasPublished: async (contentHash) => published.has(contentHash),
   };
 };

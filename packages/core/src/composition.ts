@@ -19,7 +19,14 @@ import type {
   MachineEnvironmentBaseline,
   ResolvedEnvironment,
 } from '@stack/spec';
-import { ingestSkill, verifyStoredSkill } from '@stack/store';
+import {
+  archiveHashOf,
+  ArchiveIntegrityError,
+  extractSnapshotArchiveToStore,
+  ingestSkill,
+  verifyStoredSkill,
+} from '@stack/store';
+import type { PublicStackClient } from '@stack/cloud-client';
 
 import { loadLocalStack, StackCompositionError } from './stack-loader.js';
 import type { LoadedLocalStack } from './stack-loader.js';
@@ -685,14 +692,21 @@ export const prepareRemoteStackUse = async (options: {
       hardConflicts: resolved.conflicts.length,
       stackLayers: manifest.stacks.length,
       resolvedSkills: resolved.skills.length,
-      references: options.source.references.size,
+      references: options.source.restorations.size,
     },
   };
 };
 
 export const applyRemoteStackUse = async (
   proposal: StackRemoteUseProposal,
-  options: { gitExecutor?: GitExecutor; now?: () => Date } = {},
+  options: {
+    gitExecutor?: GitExecutor;
+    now?: () => Date;
+    // Hybrid Public Skill Portability: only needed when the proposal has at least one
+    // snapshot-restored requirement not yet available locally — a pure Git-reference `use`
+    // never touches this.
+    client?: Pick<PublicStackClient, 'getPublicSkillSnapshot'>;
+  } = {},
 ): Promise<StackRemoteUseProposal> => {
   if (proposal.resolved.conflicts.length)
     throw new StackCompositionError(
@@ -700,7 +714,7 @@ export const applyRemoteStackUse = async (
       'Remote Stack has required Skill conflicts.',
     );
   await withMainMutationLock(proposal.stackHome, proposal.current, async () => {
-    // Acquire and verify every reference BEFORE persisting anything. A failure
+    // Acquire and verify every restoration BEFORE persisting anything. A failure
     // here throws, leaving main untouched (Store cache objects may remain).
     for (const requirement of proposal.source.version.requirements) {
       const verification = await verifyStoredSkill({
@@ -708,18 +722,48 @@ export const applyRemoteStackUse = async (
         contentHash: requirement.contentHash,
       });
       if (verification.state === 'available') continue;
-      const reference = proposal.source.references.get(requirement.id);
-      if (!reference)
+      const restoration = proposal.source.restorations.get(requirement.id);
+      if (!restoration)
         throw new StackCompositionError(
           'remote-reference-missing',
-          `No reference is available for ${requirement.name}.`,
+          `No restoration is available for ${requirement.name}.`,
         );
-      await restoreReference({
-        stackHome: proposal.stackHome,
-        reference,
-        ...(options.gitExecutor ? { gitExecutor: options.gitExecutor } : {}),
-        ...(options.now ? { now: options.now } : {}),
-      });
+      if (restoration.strategy === 'snapshot') {
+        if (!options.client)
+          throw new StackCompositionError(
+            'remote-reference-missing',
+            `No Cloud client is available to fetch ${requirement.name}'s public snapshot.`,
+          );
+        const bytes = await options.client.getPublicSkillSnapshot(
+          proposal.source.owner,
+          proposal.source.slug,
+          proposal.source.versionNumber,
+          restoration.contentHash,
+        );
+        try {
+          await extractSnapshotArchiveToStore({
+            stackHome: proposal.stackHome,
+            contentHash: restoration.contentHash,
+            archiveHash: archiveHashOf(bytes),
+            bytes,
+            ...(options.now ? { now: options.now } : {}),
+          });
+        } catch (error) {
+          if (error instanceof ArchiveIntegrityError)
+            throw new StackCompositionError(
+              'remote-snapshot-integrity-mismatch',
+              `The public Skill snapshot for "${requirement.name}" did not match its expected content hash. It was not installed.`,
+            );
+          throw error;
+        }
+      } else {
+        await restoreReference({
+          stackHome: proposal.stackHome,
+          reference: restoration.reference,
+          ...(options.gitExecutor ? { gitExecutor: options.gitExecutor } : {}),
+          ...(options.now ? { now: options.now } : {}),
+        });
+      }
     }
     await persistVersion(
       proposal.stackHome,
