@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import type { Command } from 'commander';
 
 import { shortProjectId } from '@stack/memory';
@@ -38,8 +40,15 @@ export type ProjectCommandDependencies = {
   writeOut(value: string): void;
 };
 
-const identityLabel = (row: ProjectListRow): string =>
-  row.identity.kind === 'git' ? row.identity.canonical : 'local project';
+/** For a Local project that is mapped on this machine, show the bound directory's basename
+ *  (e.g. `swft`) rather than the generic "local project" — never the path itself. Falls back
+ *  to the generic label when unmapped or when no safe basename can be determined. */
+export const identityLabel = (row: ProjectListRow): string => {
+  if (row.identity.kind === 'git') return row.identity.canonical;
+  if (!row.binding) return 'local project';
+  const base = path.basename(row.binding).trim();
+  return base && base !== '.' && base !== '..' ? base : 'local project';
+};
 
 const renderRow = (row: ProjectListRow): string[] => {
   const availability =

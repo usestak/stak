@@ -74,6 +74,31 @@ describe('projectDisplayName', () => {
     ];
     expect(projectDisplayName(all[0]!, all)).toBe('Local project · prj_aaa');
   });
+
+  it('shows a Local basename directly when unique', () => {
+    const all = [{ projectId: 'prj_abc123', name: 'swft' }];
+    expect(projectDisplayName(all[0]!, all)).toBe('swft');
+  });
+
+  it('disambiguates two Local projects with the same basename using a stable projectId discriminator', () => {
+    const all = [
+      { projectId: 'prj_aaaaaaaaaaaaaaaaaaaaaaaaa81f', name: 'app' },
+      { projectId: 'prj_bbbbbbbbbbbbbbbbbbbbbbbbbc92d', name: 'app' },
+    ];
+    expect(projectDisplayName(all[0]!, all)).toBe('app · A81F');
+    expect(projectDisplayName(all[1]!, all)).toBe('app · C92D');
+    // Identity itself is never touched by the disambiguation.
+    expect(all[0]!.projectId).toBe('prj_aaaaaaaaaaaaaaaaaaaaaaaaa81f');
+  });
+
+  it('never confuses a Local basename collision with a Git canonical name collision', () => {
+    const all = [
+      { projectId: 'prj_local1', name: 'stak' },
+      { projectId: 'prj_git1', name: 'github.com/usestak/stak' },
+    ];
+    expect(projectDisplayName(all[0]!, all)).toBe('stak');
+    expect(projectDisplayName(all[1]!, all)).toBe('stak');
+  });
 });
 
 describe('lifecycleLabel', () => {

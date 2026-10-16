@@ -12,6 +12,7 @@ import {
   buildCheckinPayload,
   gatherCheckinInputs,
   installedSkillsFrom,
+  localProjectDisplayName,
   nativeMemoryBackedUp,
   projectPresenceFrom,
   projectSyncPayloadFrom,
@@ -260,6 +261,25 @@ describe('projectPresenceFrom (P1 review #1 — real availability)', () => {
   });
 });
 
+describe('localProjectDisplayName (project-naming UX)', () => {
+  it('returns the basename of a bound directory', () => {
+    // Forward slashes are accepted as separators by Node's `path.basename` on both
+    // win32 and posix, so this assertion is platform-independent.
+    expect(localProjectDisplayName('C:/Users/NT/Desktop/swft')).toBe('swft');
+    expect(localProjectDisplayName('/Users/dana/work/nexus')).toBe('nexus');
+  });
+
+  it('returns undefined when there is no binding', () => {
+    expect(localProjectDisplayName(null)).toBeUndefined();
+    expect(localProjectDisplayName(undefined)).toBeUndefined();
+  });
+
+  it('falls back to undefined for a root/degenerate path with no safe basename', () => {
+    expect(localProjectDisplayName('C:\\')).toBeUndefined();
+    expect(localProjectDisplayName('/')).toBeUndefined();
+  });
+});
+
 describe('projectSyncPayloadFrom (P3 review §5 — no path leaks into the name)', () => {
   it('names a project only from a strong Git identity, never a local path/vendorKey', () => {
     const payload = projectSyncPayloadFrom([
@@ -281,6 +301,25 @@ describe('projectSyncPayloadFrom (P3 review §5 — no path leaks into the name)
     expect(JSON.stringify(payload)).not.toMatch(
       /C--Users|\/Users\/|[A-Za-z]:\\\\/,
     );
+  });
+
+  it('names an unmapped Local project nothing (no binding on this machine)', () => {
+    const payload = projectSyncPayloadFrom([
+      { projectId: 'prj_local', identity: { kind: 'local' }, binding: null },
+    ]);
+    expect(payload).toEqual([{ projectId: 'prj_local' }]);
+  });
+
+  it('names a mapped Local project from the bound directory basename only, never the full path', () => {
+    const payload = projectSyncPayloadFrom([
+      {
+        projectId: 'prj_local',
+        identity: { kind: 'local' },
+        binding: 'C:/Users/NT/Desktop/swft',
+      },
+    ]);
+    expect(payload).toEqual([{ projectId: 'prj_local', name: 'swft' }]);
+    expect(JSON.stringify(payload)).not.toMatch(/Users|Desktop/);
   });
 });
 

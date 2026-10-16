@@ -1,4 +1,5 @@
 import os from 'node:os';
+import path from 'node:path';
 
 import {
   AuthenticationExpiredError,
@@ -168,10 +169,29 @@ export const projectPresenceFrom = (rows: ProjectRowLike[]): CheckinProject[] =>
   }));
 
 /**
- * Discovery-sync payload for the cloud project registry (P3). The safe display `name` is taken
- * ONLY from a STRONG Git identity (its canonical `host/owner/repo`), which is account metadata,
- * not a path. A Local project's identity (a vendor key derived from a filesystem location) is
- * NEVER sent as a name — paths must not leak into the account-side registry. No lifecycle is
+ * A Cloud-safe display name for a Local project: just the final path segment (e.g. `swft`
+ * from `C:\Users\NT\Desktop\swft`), never the path itself. `path.basename` cannot return a
+ * string containing a path separator, so this can never smuggle a directory structure; the
+ * explicit separator check below is defense in depth against a future caller passing
+ * something other than a real directory. Returns `undefined` (no name sent — the fallback
+ * `Local project · <id>` label stays in effect) when no safe basename can be determined.
+ */
+export const localProjectDisplayName = (
+  dir: string | null | undefined,
+): string | undefined => {
+  if (!dir) return undefined;
+  const base = path.basename(dir).trim();
+  if (!base || base === '.' || base === '..') return undefined;
+  if (/[\\/]/.test(base)) return undefined;
+  return base.slice(0, 200);
+};
+
+/**
+ * Discovery-sync payload for the cloud project registry (P3). The safe display `name` comes
+ * from either: a STRONG Git identity (its canonical `host/owner/repo`, which is account
+ * metadata, not a path), or — for a Local project with a machine-local binding on THIS
+ * machine — the bound directory's basename only (never the path itself, never the
+ * path-derived vendor key). A Local project with no binding sends no name. No lifecycle is
  * sent: discovery never conveys lifecycle intent.
  */
 export type ProjectSyncRowLike = {
@@ -180,15 +200,21 @@ export type ProjectSyncRowLike = {
   // strips it (it is path-derived); even if present, it is NEVER forwarded as a name.
   identity:
     { kind: 'git'; canonical: string } | { kind: 'local'; vendorKey?: string };
+  // Machine-local absolute directory this project is bound to, if any. NEVER forwarded
+  // as-is — only its basename (via `localProjectDisplayName`) may be sent.
+  binding?: string | null;
 };
 export const projectSyncPayloadFrom = (
   rows: ProjectSyncRowLike[],
 ): { projectId: string; name?: string }[] =>
-  rows.map((row) =>
-    row.identity.kind === 'git'
-      ? { projectId: row.projectId, name: row.identity.canonical }
-      : { projectId: row.projectId },
-  );
+  rows.map((row) => {
+    if (row.identity.kind === 'git')
+      return { projectId: row.projectId, name: row.identity.canonical };
+    const name = localProjectDisplayName(row.binding);
+    return name
+      ? { projectId: row.projectId, name }
+      : { projectId: row.projectId };
+  });
 
 /**
  * Memory backed-up truth (P1 review #3). TRUE only when every current native Memory item is
