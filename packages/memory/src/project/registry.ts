@@ -94,6 +94,11 @@ export type MachineBinding = z.infer<typeof machineBindingSchema>;
 export const projectNameHintSchema = z.object({
   projectId: z.string().regex(PROJECT_ID_PATTERN),
   name: z.string().min(1).max(200),
+  // Absent/false: this hint came from discovery (`onLocalProjectResolved`) and may be
+  // refreshed by a later discovery run. True: the user explicitly set this name
+  // (`stak project name`) — discovery must never silently overwrite it; only another
+  // explicit `stak project name` call may change it.
+  explicit: z.boolean().optional(),
 });
 export type ProjectNameHint = z.infer<typeof projectNameHintSchema>;
 
@@ -367,8 +372,40 @@ export const nameHintFor = (
 ): string | undefined =>
   nameHintsOf(registry).find((hint) => hint.projectId === projectId)?.name;
 
-/** Set (or replace) a Project's discovery-time name hint. Never mutates the input. */
+export const nameHintIsExplicit = (
+  registry: LocalRegistry,
+  projectId: string,
+): boolean =>
+  nameHintsOf(registry).find((hint) => hint.projectId === projectId)
+    ?.explicit === true;
+
+/**
+ * Set (or replace) a Project's discovery-time name hint. A no-op when an EXPLICIT
+ * name (`setExplicitNameHint`) already exists for this Project — discovery must never
+ * silently overwrite a deliberate user rename. Never mutates the input.
+ */
 export const setNameHint = (
+  registry: LocalRegistry,
+  projectId: string,
+  name: string,
+): LocalRegistry => {
+  if (nameHintIsExplicit(registry, projectId)) return registry;
+  return {
+    ...registry,
+    nameHints: [
+      ...nameHintsOf(registry).filter((hint) => hint.projectId !== projectId),
+      { projectId, name },
+    ],
+  };
+};
+
+/**
+ * Set (or replace) a Project's EXPLICIT display name (`stak project name`) — always
+ * wins over the current value, and protects it from future discovery-time overwrites
+ * (see `setNameHint`). Never mutates the input, never touches identity (claims,
+ * bindings) or lifecycle.
+ */
+export const setExplicitNameHint = (
   registry: LocalRegistry,
   projectId: string,
   name: string,
@@ -376,7 +413,7 @@ export const setNameHint = (
   ...registry,
   nameHints: [
     ...nameHintsOf(registry).filter((hint) => hint.projectId !== projectId),
-    { projectId, name },
+    { projectId, name, explicit: true },
   ],
 });
 
@@ -431,14 +468,26 @@ export const adoptReconciledProjectId = (
   );
   if (keptBinding) bindings.push(keptBinding);
 
-  const toHint = nameHintFor(registry, toProjectId);
-  const fromHint = nameHintFor(registry, fromProjectId);
-  const keptHintName = toHint ?? fromHint;
+  // An EXPLICIT name (either side) always wins; otherwise prefer `toProjectId`'s own
+  // hint, else fall back to `fromProjectId`'s, retargeted.
+  const toHintRecord = nameHintsOf(registry).find(
+    (h) => h.projectId === toProjectId,
+  );
+  const fromHintRecord = nameHintsOf(registry).find(
+    (h) => h.projectId === fromProjectId,
+  );
+  const keptHint = toHintRecord?.explicit
+    ? toHintRecord
+    : fromHintRecord?.explicit
+      ? { ...fromHintRecord, projectId: toProjectId }
+      : (toHintRecord ??
+        (fromHintRecord
+          ? { ...fromHintRecord, projectId: toProjectId }
+          : undefined));
   const nameHints = nameHintsOf(registry).filter(
     (h) => h.projectId !== fromProjectId && h.projectId !== toProjectId,
   );
-  if (keptHintName !== undefined)
-    nameHints.push({ projectId: toProjectId, name: keptHintName });
+  if (keptHint) nameHints.push(keptHint);
 
   return { ...registry, projects, bindings, nameHints };
 };

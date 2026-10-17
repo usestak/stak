@@ -263,4 +263,5 @@ export const CHECKIN_COMMANDS: ReadonlySet<string> = new Set([
   'recover', // local store/registry reconciled → presence + memory-backed-up
   'restore', // writes native agent Memory → memory-backed-up
   'map', // binding added → project presence changes
+  'name', // explicit display-name set → syncProjects should carry it to Cloud now
 ]);

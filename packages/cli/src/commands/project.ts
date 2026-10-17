@@ -8,6 +8,7 @@ import type {
   MapProjectResult,
   ProjectListRow,
   SetLifecycleResult,
+  SetProjectNameResult,
 } from '../memory/project-ops.js';
 
 /**
@@ -36,6 +37,10 @@ export type ProjectCommandDependencies = {
   projectUnarchive(options: {
     project: string;
   }): Promise<LifecycleCommandResult>;
+  projectSetName(options: {
+    project: string;
+    name: string;
+  }): Promise<SetProjectNameResult>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -146,6 +151,32 @@ const renderMapResult = (result: MapProjectResult): string => {
   }
 };
 
+const renderSetNameResult = (result: SetProjectNameResult): string => {
+  switch (result.status) {
+    case 'ok':
+      return (
+        `Renamed ${shortProjectId(result.projectId)} to "${result.name}".\n` +
+        'This is presentation metadata only; it does not change the Project ID, ' +
+        'mapping, or restore behavior.\n'
+      );
+    case 'project-not-found':
+      return 'No matching project. Run `stak project` to see known projects.\n';
+    case 'ambiguous-selector':
+      return `That selector matches ${result.matches.length} projects. Use a full Project ID.\n`;
+    case 'git-identity':
+      return (
+        `Refused: this project's name is its Git identity (${result.canonical}) ` +
+        'and cannot be renamed.\n'
+      );
+    case 'invalid-name':
+      return result.reason === 'empty'
+        ? 'That name is empty.\n'
+        : result.reason === 'too-long'
+          ? 'That name is too long (200 characters max).\n'
+          : 'That name looks like a path and was refused — use a plain name, not a directory.\n';
+  }
+};
+
 export const registerProjectCommand = (
   program: Command,
   dependencies: ProjectCommandDependencies,
@@ -202,6 +233,30 @@ export const registerProjectCommand = (
           return;
         }
         dependencies.writeOut(renderMapResult(result));
+      },
+    );
+
+  project
+    .command('name <project> <name>')
+    .description(
+      "Set a logical project's display name (presentation only — never identity)",
+    )
+    .option('--json', 'emit structured JSON only')
+    .action(
+      async (
+        projectSelector: string,
+        name: string,
+        options: { json?: boolean },
+      ) => {
+        const result = await dependencies.projectSetName({
+          project: projectSelector,
+          name,
+        });
+        if (options.json) {
+          dependencies.writeOut(`${JSON.stringify(result, null, 2)}\n`);
+          return;
+        }
+        dependencies.writeOut(renderSetNameResult(result));
       },
     );
 

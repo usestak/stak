@@ -320,6 +320,7 @@ const runProgram = async (
     projectMap: async () => ({ status: 'project-not-found' }),
     projectArchive: async () => ({ status: 'project-not-found' }),
     projectUnarchive: async () => ({ status: 'project-not-found' }),
+    projectSetName: async () => ({ status: 'project-not-found' }),
     skillUpdate: async () => ({ status: 'ok', agents: [] }),
     skillPause: async () => ({ status: 'not-found' }),
     skillResume: async () => ({ status: 'not-found' }),
@@ -2181,6 +2182,65 @@ describe('STAK CLI', () => {
     });
     expect(confirmed).toBe(false); // unarchive is non-destructive; no prompt
     expect(result.output).toContain('is active');
+  });
+
+  it('project name sets the display name and reports success, without a confirmation prompt', async () => {
+    let requested: { project: string; name: string } | undefined;
+    const result = await runProgram(['project', 'name', 'prj_x', 'nexus'], {
+      projectSetName: async (options) => {
+        requested = options;
+        return {
+          status: 'ok',
+          projectId: 'prj_mexxxxxxxxxxxxxxxxxxxxxxx',
+          name: 'nexus',
+        };
+      },
+    });
+    expect(requested).toEqual({ project: 'prj_x', name: 'nexus' });
+    expect(result.output).toContain('Renamed');
+    expect(result.output).toContain('"nexus"');
+    expect(result.output.toLowerCase()).toContain(
+      'does not change the project id',
+    );
+  });
+
+  it('project name refuses a Git-backed project with a clear message', async () => {
+    const result = await runProgram(['project', 'name', 'prj_g', 'stak'], {
+      projectSetName: async () => ({
+        status: 'git-identity',
+        canonical: 'github.com/usestak/stak',
+      }),
+    });
+    expect(result.output).toContain('github.com/usestak/stak');
+    expect(result.output.toLowerCase()).toContain('cannot be renamed');
+  });
+
+  it('project name reports an invalid (path-like) name without writing anything', async () => {
+    const result = await runProgram(['project', 'name', 'prj_x', 'C:/a/b'], {
+      projectSetName: async () => ({
+        status: 'invalid-name',
+        reason: 'path-like',
+      }),
+    });
+    expect(result.output.toLowerCase()).toContain('path');
+  });
+
+  it('project name --json emits structured, machine-readable output', async () => {
+    const result = await runProgram(
+      ['project', 'name', 'prj_x', 'nexus', '--json'],
+      {
+        projectSetName: async () => ({
+          status: 'ok',
+          projectId: 'prj_mexxxxxxxxxxxxxxxxxxxxxxx',
+          name: 'nexus',
+        }),
+      },
+    );
+    expect(JSON.parse(result.output)).toEqual({
+      status: 'ok',
+      projectId: 'prj_mexxxxxxxxxxxxxxxxxxxxxxx',
+      name: 'nexus',
+    });
   });
 });
 

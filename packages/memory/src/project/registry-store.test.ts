@@ -10,6 +10,7 @@ import {
   nameHintFor,
   resolveProjectForIdentity,
   setBinding,
+  setExplicitNameHint,
 } from './registry.js';
 import {
   readLocalRegistry,
@@ -248,5 +249,34 @@ describe('Local -> Git identity-strengthening retires the obsolete local record 
       ]),
     });
     expect(result.registry.projects).toHaveLength(1);
+  });
+});
+
+describe('explicit display names survive future backups (stak project name precedence)', () => {
+  it('a later backup whose discovery DOES find a basename never overwrites a previously-set explicit name', async () => {
+    const stackHome = await tempHome();
+    await writeManifest(stackHome, [
+      localItem('C--Users-NT-Desktop-nexus', 'n1.md'),
+    ]);
+
+    const first = await syncRegistryForBackup({ stackHome, mint });
+    const projectId = first.registry.projects[0]?.projectId as string;
+    const explicit = setExplicitNameHint(first.registry, projectId, 'my nexus');
+    await writeLocalRegistry(stackHome, explicit);
+
+    // A later backup where discovery DOES resolve a directory again (e.g. the folder
+    // reappeared under a different basename) must not clobber the explicit rename.
+    const second = await syncRegistryForBackup({
+      stackHome,
+      mint,
+      nameHints: new Map([
+        ['C--Users-NT-Desktop-nexus', 'some-other-basename'],
+      ]),
+    });
+
+    expect(nameHintFor(second.registry, projectId)).toBe('my nexus');
+
+    const reloaded = await readLocalRegistry(stackHome);
+    expect(nameHintFor(reloaded, projectId)).toBe('my nexus');
   });
 });

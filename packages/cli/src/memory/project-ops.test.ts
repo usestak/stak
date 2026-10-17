@@ -22,6 +22,7 @@ import { renderProjectList } from '../commands/project.js';
 import {
   listProjects,
   mapProject,
+  setProjectDisplayName,
   setProjectLifecycle,
 } from './project-ops.js';
 
@@ -684,5 +685,156 @@ describe('discoveredName (project-naming UX, recovery path)', () => {
 
     const rows = await listProjects({ stackHome });
     expect(rows[0]?.discoveredName).toBeNull();
+  });
+});
+
+describe('setProjectDisplayName (stak project name — explicit, presentation-only rename)', () => {
+  const idOf = async (stackHome: string) =>
+    (await readLocalRegistry(stackHome)).projects[0]?.projectId as string;
+
+  it('sets an explicit name, surfaced through listProjects as discoveredName', async () => {
+    const stackHome = await seedRegistry([
+      localItem('C--Users-NT-Desktop-swft', 'n.md'),
+    ]);
+    const id = await idOf(stackHome);
+    const result = await setProjectDisplayName({
+      stackHome,
+      selector: id,
+      name: 'swft',
+    });
+    expect(result).toEqual({ status: 'ok', projectId: id, name: 'swft' });
+    const rows = await listProjects({ stackHome });
+    expect(rows[0]?.discoveredName).toBe('swft');
+  });
+
+  it('trims surrounding whitespace', async () => {
+    const stackHome = await seedRegistry([localItem('C--x', 'n.md')]);
+    const id = await idOf(stackHome);
+    const result = await setProjectDisplayName({
+      stackHome,
+      selector: id,
+      name: '  nexus  ',
+    });
+    expect(result).toEqual({ status: 'ok', projectId: id, name: 'nexus' });
+  });
+
+  it('refuses an empty name', async () => {
+    const stackHome = await seedRegistry([localItem('C--x', 'n.md')]);
+    const id = await idOf(stackHome);
+    expect(
+      await setProjectDisplayName({ stackHome, selector: id, name: '   ' }),
+    ).toEqual({ status: 'invalid-name', reason: 'empty' });
+  });
+
+  it('refuses a name longer than 200 characters', async () => {
+    const stackHome = await seedRegistry([localItem('C--x', 'n.md')]);
+    const id = await idOf(stackHome);
+    expect(
+      await setProjectDisplayName({
+        stackHome,
+        selector: id,
+        name: 'a'.repeat(201),
+      }),
+    ).toEqual({ status: 'invalid-name', reason: 'too-long' });
+  });
+
+  it('refuses a path-like name (never a full path, never looks like a Git canonical)', async () => {
+    const stackHome = await seedRegistry([localItem('C--x', 'n.md')]);
+    const id = await idOf(stackHome);
+    expect(
+      await setProjectDisplayName({
+        stackHome,
+        selector: id,
+        name: 'C:/Users/NT/Desktop/swft',
+      }),
+    ).toEqual({ status: 'invalid-name', reason: 'path-like' });
+    expect(
+      await setProjectDisplayName({
+        stackHome,
+        selector: id,
+        name: 'foo/bar',
+      }),
+    ).toEqual({ status: 'invalid-name', reason: 'path-like' });
+  });
+
+  it('refuses to rename a Git-backed project (its name is its canonical identity)', async () => {
+    const stackHome = await seedRegistry([
+      gitItem('github.com/usestak/stak', 'a.md'),
+    ]);
+    const id = await idOf(stackHome);
+    expect(
+      await setProjectDisplayName({
+        stackHome,
+        selector: id,
+        name: 'stak',
+      }),
+    ).toEqual({ status: 'git-identity', canonical: 'github.com/usestak/stak' });
+    // Unchanged.
+    const rows = await listProjects({ stackHome });
+    expect(rows[0]?.identity).toEqual({
+      kind: 'git',
+      canonical: 'github.com/usestak/stak',
+    });
+  });
+
+  it('an ambiguous selector fails closed; an unknown selector is not-found', async () => {
+    const stackHome = await seedRegistry([
+      localItem('C--a', 'a.md'),
+      localItem('C--b', 'b.md'),
+    ]);
+    expect(
+      (
+        await setProjectDisplayName({
+          stackHome,
+          selector: 'prj_',
+          name: 'x',
+        })
+      ).status,
+    ).toBe('ambiguous-selector');
+    expect(
+      (
+        await setProjectDisplayName({
+          stackHome,
+          selector: 'prj_zzzzzzzzzzzzzzzzzzzzzzzzzz',
+          name: 'x',
+        })
+      ).status,
+    ).toBe('project-not-found');
+  });
+
+  it('never changes projectId, claims, bindings, or lifecycle — presentation only', async () => {
+    const stackHome = await seedRegistry([localItem('C--x', 'n.md')]);
+    const id = await idOf(stackHome);
+    await mapProject({
+      stackHome,
+      selector: id,
+      dir: await tempDir('bound-dir-'),
+      gitOrigin: noGit,
+    });
+    const before = await readLocalRegistry(stackHome);
+
+    await setProjectDisplayName({ stackHome, selector: id, name: 'renamed' });
+
+    const after = await readLocalRegistry(stackHome);
+    expect(after.projects).toEqual(before.projects);
+    expect(after.bindings).toEqual(before.bindings);
+  });
+
+  it('does not require the project to be active (an explicitly-selected archived project can still be renamed)', async () => {
+    const stackHome = await seedRegistry([localItem('C--x', 'n.md')]);
+    const id = await idOf(stackHome);
+    await setProjectLifecycle({
+      stackHome,
+      selector: id,
+      lifecycle: 'archived',
+    });
+    expect(
+      await setProjectDisplayName({ stackHome, selector: id, name: 'renamed' }),
+    ).toEqual({ status: 'ok', projectId: id, name: 'renamed' });
+    const rows = await listProjects({ stackHome });
+    expect(rows[0]).toMatchObject({
+      lifecycle: 'archived',
+      discoveredName: 'renamed',
+    });
   });
 });

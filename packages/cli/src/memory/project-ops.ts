@@ -24,6 +24,7 @@ import {
   resolveProjectForIdentity,
   registryConflicts,
   setBinding,
+  setExplicitNameHint,
   setLifecycle,
   writeLocalRegistry,
   readMemoryManifest,
@@ -293,4 +294,70 @@ export const setProjectLifecycle = async (deps: {
     lifecycle: deps.lifecycle,
     changed,
   };
+};
+
+/* -------------------------------------------------------------------------- */
+/* name (explicit display name)                                                */
+/* -------------------------------------------------------------------------- */
+
+export type SetProjectNameResult =
+  | { status: 'ok'; projectId: string; name: string }
+  | { status: 'project-not-found' }
+  | { status: 'ambiguous-selector'; matches: string[] }
+  | { status: 'git-identity'; canonical: string }
+  | { status: 'invalid-name'; reason: 'empty' | 'too-long' | 'path-like' };
+
+const MAX_PROJECT_NAME_LENGTH = 200;
+
+/**
+ * Validate a user-supplied display name is safe to store and sync: never a path (no
+ * separators — this also keeps it from ever being misread as a Git canonical by the
+ * web's `name.includes('/')` shape check), never empty, and bounded in length (matches
+ * `projectNameHintSchema`). This is presentation input validation, not a basename
+ * extractor — unlike `safeDirectoryBasename`, it never looks at a real directory.
+ */
+const invalidProjectNameReason = (
+  name: string,
+): 'empty' | 'too-long' | 'path-like' | null => {
+  const trimmed = name.trim();
+  if (!trimmed) return 'empty';
+  if (trimmed.length > MAX_PROJECT_NAME_LENGTH) return 'too-long';
+  if (/[\\/]/.test(trimmed)) return 'path-like';
+  return null;
+};
+
+/**
+ * Set a Project's EXPLICIT display name (`stak project name <project> <name>`).
+ * Machine-local write only, synced to Cloud through the existing `syncProjects` path on
+ * the next check-in — exactly the mechanism discovery-time names already use. Never
+ * touches `projectId`, claims, bindings, or lifecycle: displayName is presentation
+ * metadata only, never identity. Refused for a Git-backed Project — its name is its
+ * canonical Git identity and is not user-renamable. Always targets one explicitly
+ * selected Project; there is no bulk/implicit rename path, so an archived Project is
+ * only ever renamed when the caller explicitly names it.
+ */
+export const setProjectDisplayName = async (deps: {
+  stackHome: string;
+  selector: string;
+  name: string;
+}): Promise<SetProjectNameResult> => {
+  const invalid = invalidProjectNameReason(deps.name);
+  if (invalid) return { status: 'invalid-name', reason: invalid };
+
+  const registry = await readLocalRegistry(deps.stackHome);
+  const resolved = resolveSelector(registry, deps.selector);
+  if ('error' in resolved)
+    return resolved.error === 'project-not-found'
+      ? { status: 'project-not-found' }
+      : { status: 'ambiguous-selector', matches: resolved.matches };
+  const record = resolved.record;
+  const git = gitClaimOf(record);
+  if (git) return { status: 'git-identity', canonical: git.canonical };
+
+  const name = deps.name.trim();
+  await writeLocalRegistry(
+    deps.stackHome,
+    setExplicitNameHint(registry, record.projectId, name),
+  );
+  return { status: 'ok', projectId: record.projectId, name };
 };

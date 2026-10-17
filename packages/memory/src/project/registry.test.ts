@@ -10,10 +10,12 @@ import {
   legacyCompatKey,
   mergePortableSnapshot,
   nameHintFor,
+  nameHintIsExplicit,
   registryConflicts,
   resolveOrMintProject,
   resolveProjectForIdentity,
   setBinding,
+  setExplicitNameHint,
   setNameHint,
   toPortableSnapshot,
   type LocalRegistry,
@@ -184,6 +186,59 @@ describe('name hints (machine-local, never portable)', () => {
   });
 });
 
+describe('setExplicitNameHint (stak project name — user-set display names)', () => {
+  it('sets a name retrievable by nameHintFor, marked explicit', () => {
+    const registry = setExplicitNameHint(
+      emptyRegistry(),
+      'prj_abc123',
+      'nexus',
+    );
+    expect(nameHintFor(registry, 'prj_abc123')).toBe('nexus');
+    expect(nameHintIsExplicit(registry, 'prj_abc123')).toBe(true);
+  });
+
+  it('a later discovery-time setNameHint call never overwrites an explicit name', () => {
+    let registry = setExplicitNameHint(emptyRegistry(), 'prj_abc123', 'nexus');
+    registry = setNameHint(registry, 'prj_abc123', 'some-other-basename');
+    expect(nameHintFor(registry, 'prj_abc123')).toBe('nexus');
+    expect(nameHintIsExplicit(registry, 'prj_abc123')).toBe(true);
+  });
+
+  it('a later explicit rename DOES replace a previous explicit name', () => {
+    let registry = setExplicitNameHint(
+      emptyRegistry(),
+      'prj_abc123',
+      'old-name',
+    );
+    registry = setExplicitNameHint(registry, 'prj_abc123', 'new-name');
+    expect(nameHintFor(registry, 'prj_abc123')).toBe('new-name');
+  });
+
+  it('an explicit name can replace a prior discovery-time hint', () => {
+    let registry = setNameHint(
+      emptyRegistry(),
+      'prj_abc123',
+      'discovered-basename',
+    );
+    registry = setExplicitNameHint(registry, 'prj_abc123', 'renamed');
+    expect(nameHintFor(registry, 'prj_abc123')).toBe('renamed');
+    expect(nameHintIsExplicit(registry, 'prj_abc123')).toBe(true);
+  });
+
+  it('nameHintIsExplicit is false for a discovery-time hint and for no hint at all', () => {
+    const withDiscovered = setNameHint(emptyRegistry(), 'prj_abc123', 'x');
+    expect(nameHintIsExplicit(withDiscovered, 'prj_abc123')).toBe(false);
+    expect(nameHintIsExplicit(emptyRegistry(), 'prj_abc123')).toBe(false);
+  });
+
+  it('never mutates the input registry', () => {
+    const before: LocalRegistry = emptyRegistry();
+    const snapshot = JSON.parse(JSON.stringify(before));
+    setExplicitNameHint(before, 'prj_abc123', 'nexus');
+    expect(before).toEqual(snapshot);
+  });
+});
+
 describe('adoptReconciledProjectId (identity reconciliation — one logical Project, never two)', () => {
   it('merges claims from the obsolete id into the authoritative id and drops the obsolete record', () => {
     let registry = emptyRegistry();
@@ -304,6 +359,72 @@ describe('adoptReconciledProjectId (identity reconciliation — one logical Proj
 
     expect(bindingFor(merged, 'prj_to000000000000000000001')?.dir).toBe(
       'C:\\Users\\NT\\Desktop\\stack',
+    );
+  });
+
+  it('an explicit name hint on the OBSOLETE id survives reconciliation onto the authoritative id', () => {
+    let registry = emptyRegistry();
+    registry = resolveOrMintProject(
+      registry,
+      { kind: 'local', vendorKey: 'L' },
+      () => 'prj_from00000000000000000001',
+    ).registry;
+    registry = resolveOrMintProject(
+      registry,
+      git('github.com/usestak/stak'),
+      () => 'prj_to000000000000000000001',
+    ).registry;
+    registry = setExplicitNameHint(
+      registry,
+      'prj_from00000000000000000001',
+      'my nickname',
+    );
+
+    const merged = adoptReconciledProjectId(
+      registry,
+      'prj_from00000000000000000001',
+      'prj_to000000000000000000001',
+    );
+
+    expect(nameHintFor(merged, 'prj_to000000000000000000001')).toBe(
+      'my nickname',
+    );
+    expect(nameHintIsExplicit(merged, 'prj_to000000000000000000001')).toBe(
+      true,
+    );
+  });
+
+  it('an explicit name hint on the AUTHORITATIVE id wins over a plain discovery hint on the obsolete id', () => {
+    let registry = emptyRegistry();
+    registry = resolveOrMintProject(
+      registry,
+      { kind: 'local', vendorKey: 'L' },
+      () => 'prj_from00000000000000000001',
+    ).registry;
+    registry = resolveOrMintProject(
+      registry,
+      git('github.com/usestak/stak'),
+      () => 'prj_to000000000000000000001',
+    ).registry;
+    registry = setNameHint(
+      registry,
+      'prj_from00000000000000000001',
+      'discovered-basename',
+    );
+    registry = setExplicitNameHint(
+      registry,
+      'prj_to000000000000000000001',
+      'explicit-name',
+    );
+
+    const merged = adoptReconciledProjectId(
+      registry,
+      'prj_from00000000000000000001',
+      'prj_to000000000000000000001',
+    );
+
+    expect(nameHintFor(merged, 'prj_to000000000000000000001')).toBe(
+      'explicit-name',
     );
   });
 

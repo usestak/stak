@@ -163,10 +163,12 @@ import {
 import {
   listProjects,
   mapProject,
+  setProjectDisplayName,
   setProjectLifecycle,
   type MapProjectResult,
   type ProjectListRow,
   type SetLifecycleResult,
+  type SetProjectNameResult,
 } from './memory/project-ops.js';
 import { fileCredentialStore } from './cloud/credentials.js';
 import {
@@ -290,6 +292,10 @@ export type ProgramDependencies = {
   }): Promise<MapProjectResult>;
   projectArchive(options: { project: string }): Promise<SetLifecycleResult>;
   projectUnarchive(options: { project: string }): Promise<SetLifecycleResult>;
+  projectSetName(options: {
+    project: string;
+    name: string;
+  }): Promise<SetProjectNameResult>;
   skillUpdate(options: { selector?: string }): Promise<SkillUpdateResult>;
   skillPause(options: { selector: string }): Promise<SetSkillPausedResult>;
   skillResume(options: { selector: string }): Promise<SetSkillPausedResult>;
@@ -678,6 +684,11 @@ const defaultDependencies: ProgramDependencies = {
     }),
   projectMap: async ({ project, dir }) =>
     mapProject({ stackHome, selector: project, dir, gitOrigin: gitOriginOf }),
+  // Machine-local write only; propagates to Cloud through the normal discovery-sync
+  // postAction hook (`name` is in CHECKIN_COMMANDS), the same path a discovery-time
+  // name already uses — no separate Cloud call needed here.
+  projectSetName: async ({ project, name }) =>
+    setProjectDisplayName({ stackHome, selector: project, name }),
   projectArchive: async ({ project }) => {
     const result = await setProjectLifecycle({
       stackHome,
