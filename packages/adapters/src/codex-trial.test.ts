@@ -1373,6 +1373,28 @@ describe('stale cleanup-failed runtime recovery', () => {
     expect(result.scanned).toBe(0);
     await expect(access(sessionRoot)).resolves.toBeUndefined();
   });
+
+  it('ignores a stale runtime marked for a different agent', async () => {
+    const { stackHome, session } = await preparedRuntime(
+      await temp(),
+      'otheragentrec01',
+    );
+    await driveToCleanupFailed(stackHome, session);
+    const sessionRoot = path.dirname(session.workspacePath);
+    const marker = JSON.parse(
+      await readFile(path.join(sessionRoot, 'session.json'), 'utf8'),
+    );
+    await writeFile(
+      path.join(sessionRoot, 'session.json'),
+      JSON.stringify({ ...marker, agent: 'claude' }),
+    );
+    const result = await recoverStaleTryRuntimes({
+      stackHome,
+      ...fastControls,
+    });
+    expect(result).toMatchObject({ scanned: 0, cleaned: 0, retained: 0 });
+    await expect(access(sessionRoot)).resolves.toBeUndefined();
+  });
 });
 
 describe('controlled descendant reproduction', () => {

@@ -78,7 +78,7 @@ export const bridgeCursorRuntimeState = async (options: {
     names = await readdir(options.sourceCursorHome);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw new TryAuthBridgeFailedError({ cause: error });
+    throw new TryAuthBridgeFailedError('Cursor', { cause: error });
   }
   const copied: string[] = [];
   try {
@@ -92,7 +92,7 @@ export const bridgeCursorRuntimeState = async (options: {
     }
     return copied.sort();
   } catch (error) {
-    throw new TryAuthBridgeFailedError({ cause: error });
+    throw new TryAuthBridgeFailedError('Cursor', { cause: error });
   }
 };
 
@@ -265,7 +265,7 @@ export const prepareCursorTryRuntime = async (options: {
       try {
         await removeOwnedRuntimePath(runtimeRoot, finalDirectory);
       } catch (cleanupError) {
-        throw new TryRuntimeCleanupFailedError({ cause: cleanupError });
+        throw new TryRuntimeCleanupFailedError('Cursor', { cause: cleanupError });
       }
     if (
       error instanceof TryRuntimePreparationFailedError ||
@@ -314,7 +314,7 @@ export const cleanupCursorTryRuntime = async (
       right: expectedCursorHome,
     }));
   if (!sessionPathsValid)
-    throw new TryRuntimeCleanupFailedError({
+    throw new TryRuntimeCleanupFailedError('Cursor', {
       cause: new Error(
         'Runtime paths are outside the owned session directory.',
       ),
@@ -324,7 +324,7 @@ export const cleanupCursorTryRuntime = async (
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT')
       return { cleaned: true };
-    throw new TryRuntimeCleanupFailedError({ cause: error });
+    throw new TryRuntimeCleanupFailedError('Cursor', { cause: error });
   }
   let marker: TrySession;
   try {
@@ -341,7 +341,7 @@ export const cleanupCursorTryRuntime = async (
       if (!(await pathsEqual(pair)))
         throw new Error('Runtime marker does not match the requested session.');
   } catch (error) {
-    throw new TryRuntimeCleanupFailedError({ cause: error });
+    throw new TryRuntimeCleanupFailedError('Cursor', { cause: error });
   }
 
   const recordFailure = async (

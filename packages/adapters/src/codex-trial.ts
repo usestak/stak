@@ -137,7 +137,7 @@ export const bridgeCodexRuntimeState = async (options: {
     names = await readdir(options.sourceCodexHome);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw new TryAuthBridgeFailedError({ cause: error });
+    throw new TryAuthBridgeFailedError('Codex', { cause: error });
   }
   const copied: string[] = [];
   try {
@@ -161,7 +161,7 @@ export const bridgeCodexRuntimeState = async (options: {
     }
     return copied.sort();
   } catch (error) {
-    throw new TryAuthBridgeFailedError({ cause: error });
+    throw new TryAuthBridgeFailedError('Codex', { cause: error });
   }
 };
 
@@ -336,7 +336,7 @@ export const prepareCodexTryRuntime = async (options: {
       try {
         await removeOwnedRuntimePath(runtimeRoot, finalDirectory);
       } catch (cleanupError) {
-        throw new TryRuntimeCleanupFailedError({ cause: cleanupError });
+        throw new TryRuntimeCleanupFailedError('Codex', { cause: cleanupError });
       }
     if (
       error instanceof TryRuntimePreparationFailedError ||
@@ -384,7 +384,7 @@ export const cleanupCodexTryRuntime = async (
       right: expectedCodexHome,
     }));
   if (!sessionPathsValid)
-    throw new TryRuntimeCleanupFailedError({
+    throw new TryRuntimeCleanupFailedError('Codex', {
       cause: new Error(
         'Runtime paths are outside the owned session directory.',
       ),
@@ -394,7 +394,7 @@ export const cleanupCodexTryRuntime = async (
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT')
       return { cleaned: true };
-    throw new TryRuntimeCleanupFailedError({ cause: error });
+    throw new TryRuntimeCleanupFailedError('Codex', { cause: error });
   }
   let marker: TrySession;
   try {
@@ -411,7 +411,7 @@ export const cleanupCodexTryRuntime = async (
       if (!(await pathsEqual(pair)))
         throw new Error('Runtime marker does not match the requested session.');
   } catch (error) {
-    throw new TryRuntimeCleanupFailedError({ cause: error });
+    throw new TryRuntimeCleanupFailedError('Codex', { cause: error });
   }
 
   // --- Marker-last cleanup. Owned-child delete failures do NOT throw: they
@@ -532,6 +532,7 @@ export const recoverStaleTryRuntimes = async (
     } catch {
       continue; // unmarked / corrupt / forged — never touch
     }
+    if (marker.agent !== 'codex') continue;
     if (marker.status !== 'cleanup-failed') continue;
     if (marker.sessionId !== entry.name) continue;
     scanned += 1;

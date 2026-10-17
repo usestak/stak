@@ -56,20 +56,20 @@ export class TryRuntimePreparationFailedError extends StackAdapterError {
   }
 }
 export class TryRuntimeCleanupFailedError extends StackAdapterError {
-  constructor(options?: ErrorOptions) {
+  constructor(agent = 'Codex', options?: ErrorOptions) {
     super(
       'try-runtime-cleanup-failed',
-      'The isolated Codex trial runtime could not be cleaned.',
+      `The isolated ${agent} trial runtime could not be cleaned.`,
       options,
     );
     this.name = 'TryRuntimeCleanupFailedError';
   }
 }
 export class TryAuthBridgeFailedError extends StackAdapterError {
-  constructor(options?: ErrorOptions) {
+  constructor(agent = 'Codex', options?: ErrorOptions) {
     super(
       'try-auth-bridge-failed',
-      'Allowlisted Codex runtime state could not be copied.',
+      `Allowlisted ${agent} runtime state could not be copied.`,
       options,
     );
     this.name = 'TryAuthBridgeFailedError';

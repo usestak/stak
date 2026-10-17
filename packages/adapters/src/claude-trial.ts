@@ -95,7 +95,7 @@ export const bridgeClaudeRuntimeState = async (options: {
     names = await readdir(options.sourceClaudeHome);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw new TryAuthBridgeFailedError({ cause: error });
+    throw new TryAuthBridgeFailedError('Claude', { cause: error });
   }
   const copied: string[] = [];
   try {
@@ -117,7 +117,7 @@ export const bridgeClaudeRuntimeState = async (options: {
     }
     return copied.sort();
   } catch (error) {
-    throw new TryAuthBridgeFailedError({ cause: error });
+    throw new TryAuthBridgeFailedError('Claude', { cause: error });
   }
 };
 
@@ -287,7 +287,7 @@ export const prepareClaudeTryRuntime = async (options: {
       try {
         await removeOwnedRuntimePath(runtimeRoot, finalDirectory);
       } catch (cleanupError) {
-        throw new TryRuntimeCleanupFailedError({ cause: cleanupError });
+        throw new TryRuntimeCleanupFailedError('Claude', { cause: cleanupError });
       }
     if (
       error instanceof TryRuntimePreparationFailedError ||
@@ -336,7 +336,7 @@ export const cleanupClaudeTryRuntime = async (
       right: expectedClaudeHome,
     }));
   if (!sessionPathsValid)
-    throw new TryRuntimeCleanupFailedError({
+    throw new TryRuntimeCleanupFailedError('Claude', {
       cause: new Error(
         'Runtime paths are outside the owned session directory.',
       ),
@@ -346,7 +346,7 @@ export const cleanupClaudeTryRuntime = async (
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT')
       return { cleaned: true };
-    throw new TryRuntimeCleanupFailedError({ cause: error });
+    throw new TryRuntimeCleanupFailedError('Claude', { cause: error });
   }
   let marker: TrySession;
   try {
@@ -363,7 +363,7 @@ export const cleanupClaudeTryRuntime = async (
       if (!(await pathsEqual(pair)))
         throw new Error('Runtime marker does not match the requested session.');
   } catch (error) {
-    throw new TryRuntimeCleanupFailedError({ cause: error });
+    throw new TryRuntimeCleanupFailedError('Claude', { cause: error });
   }
 
   const recordFailure = async (
