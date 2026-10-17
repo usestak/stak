@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ManifestItem, MemoryManifest } from '../domain.js';
 import { writeMemoryManifest } from '../store.js';
-import { setBinding } from './registry.js';
+import { nameHintFor, setBinding } from './registry.js';
 import {
   readLocalRegistry,
   readPortableSnapshot,
@@ -128,5 +128,58 @@ describe('registry store', () => {
     expect(registry.projects).toHaveLength(1);
     // No binding invented for a legacy project without a directory.
     expect(registry.bindings).toEqual([]);
+  });
+});
+
+describe('syncRegistryForBackup name hints', () => {
+  it('persists a discovery-time name hint for a local project, keyed by its resolved Project ID', async () => {
+    const stackHome = await tempHome();
+    await writeManifest(stackHome, [
+      localItem('C--Users-NT-Desktop-nexus', 'n1.md'),
+    ]);
+
+    const { registry } = await syncRegistryForBackup({
+      stackHome,
+      nameHints: new Map([['C--Users-NT-Desktop-nexus', 'nexus']]),
+    });
+
+    const record = registry.projects[0];
+    if (!record) throw new Error('expected a minted project record');
+    expect(nameHintFor(registry, record.projectId)).toBe('nexus');
+
+    // Persisted to disk, not just returned in-memory.
+    const reloaded = await readLocalRegistry(stackHome);
+    expect(nameHintFor(reloaded, record.projectId)).toBe('nexus');
+  });
+
+  it('does not add a hint for a vendor key the manifest does not reference', async () => {
+    const stackHome = await tempHome();
+    await writeManifest(stackHome, [
+      localItem('C--Users-NT-Desktop-nexus', 'n1.md'),
+    ]);
+
+    const { registry } = await syncRegistryForBackup({
+      stackHome,
+      nameHints: new Map([['C--Users-NT-Desktop-swft', 'swft']]), // unrelated vendor key
+    });
+
+    const record = registry.projects[0];
+    if (!record) throw new Error('expected a minted project record');
+    expect(nameHintFor(registry, record.projectId)).toBeUndefined();
+  });
+
+  it('never writes a name hint into the portable snapshot', async () => {
+    const stackHome = await tempHome();
+    await writeManifest(stackHome, [
+      localItem('C--Users-NT-Desktop-nexus', 'n1.md'),
+    ]);
+
+    await syncRegistryForBackup({
+      stackHome,
+      nameHints: new Map([['C--Users-NT-Desktop-nexus', 'nexus']]),
+    });
+
+    const snapshot = await readPortableSnapshot(stackHome);
+    expect(JSON.stringify(snapshot)).not.toContain('nexus');
   });
 });

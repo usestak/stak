@@ -11,6 +11,7 @@ import {
   mergePortableSnapshot,
   portableRegistrySnapshotSchema,
   resolveOrMintProject,
+  setNameHint,
   toPortableSnapshot,
   type LocalRegistry,
   type PortableRegistrySnapshot,
@@ -140,6 +141,10 @@ const manifestProjectIdentities = async (
 export const syncRegistryForBackup = async (options: {
   stackHome: string;
   mint?: () => string;
+  /** vendorKey -> safe basename, collected by the caller from this run's native discovery
+   *  (`onLocalProjectResolved`). Only applied to a LOCAL identity the current manifest
+   *  actually references by that vendor key; unrelated keys are ignored. */
+  nameHints?: Map<string, string>;
 }): Promise<{ registry: LocalRegistry; minted: number }> => {
   let registry = await readLocalRegistry(options.stackHome);
   let minted = 0;
@@ -147,6 +152,10 @@ export const syncRegistryForBackup = async (options: {
     const result = resolveOrMintProject(registry, identity, options.mint);
     registry = result.registry;
     if (result.minted) minted += 1;
+    if (identity.kind === 'local' && identity.vendorKey) {
+      const hint = options.nameHints?.get(identity.vendorKey);
+      if (hint) registry = setNameHint(registry, result.projectId, hint);
+    }
   }
   await writeLocalRegistry(options.stackHome, registry);
   await writePortableSnapshot(options.stackHome, toPortableSnapshot(registry));

@@ -23,6 +23,7 @@ import {
   readLocalRegistry,
   syncRegistryForBackup,
 } from './project/registry-store.js';
+import { safeDirectoryBasename } from './project-identity.js';
 
 export type MemoryVerifyResult = {
   ok: boolean;
@@ -83,7 +84,14 @@ export const createClaudeMemoryAdapter = (
         ...(options.projects ? { projects: options.projects } : {}),
       }),
     backup: async () => {
-      const nativeItems = await discoverClaudeMemory(discoveryOptions);
+      const nameHints = new Map<string, string>();
+      const nativeItems = await discoverClaudeMemory({
+        ...discoveryOptions,
+        onLocalProjectResolved: (vendorKey, dir) => {
+          const base = safeDirectoryBasename(dir);
+          if (base) nameHints.set(vendorKey, base);
+        },
+      });
       // Phase 15B.3: compose the next backup as the native scan PLUS previously
       // backed-up Memory whose project is unavailable on this machine, so a new
       // generation never silently drops unresolved Memory.
@@ -102,7 +110,8 @@ export const createClaudeMemoryAdapter = (
       });
       // Phase 15B: resolve/mint stable Project IDs and refresh the portable
       // registry snapshot the next Cloud bundle will carry (paths never included).
-      await syncRegistryForBackup({ stackHome: options.stackHome });
+      // Also persists this run's discovery-time name hints (machine-local only).
+      await syncRegistryForBackup({ stackHome: options.stackHome, nameHints });
       return result;
     },
     planRestore: async () =>

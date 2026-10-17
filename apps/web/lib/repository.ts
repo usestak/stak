@@ -175,6 +175,20 @@ const mapSkillReviewCheck = (row: any): SkillReviewCheckRecord => ({
     : {}),
 });
 
+/**
+ * Resolve the `name` to persist on a Project-sync upsert row. An incoming name always
+ * wins (it reflects this sync's fresher discovery — a Git canonical or a safe basename).
+ * When the incoming payload carries no name at all (nothing safely derivable on the
+ * syncing machine this run — e.g. an unmapped Local project recovered on a second
+ * machine, before it has been mapped there), the EXISTING Cloud name is preserved
+ * rather than erased: a sync from a machine that currently knows less about a Project
+ * must never un-name it for every other machine.
+ */
+export const resolveSyncedProjectName = (
+  incoming: string | undefined,
+  existing: string | null,
+): string | null => incoming ?? existing;
+
 /** Production repository backed by Supabase Postgres. */
 export const supabaseRepository = (): CloudRepository &
   PublicStackRepository &
@@ -575,13 +589,33 @@ export const supabaseRepository = (): CloudRepository &
       // Discovery only: omit `lifecycle` from the upsert so ON CONFLICT updates name/updated_at
       // but PRESERVES an existing row's lifecycle; a newly-inserted row takes the column default
       // ('active'). A stale local machine therefore can never unarchive a web-archived Project.
+      //
+      // `name` must NOT simply be `project.name ?? null`: a machine that currently knows no
+      // name for this Project (e.g. recovered but not yet mapped) sends no name at all, and
+      // that must never erase a name a DIFFERENT machine already gave this Project in Cloud —
+      // see `resolveSyncedProjectName`. So the existing names are fetched first and merged in.
+      const ids = projects.map((project) => project.projectId);
+      const { data: existingRows } = await db()
+        .from('cloud_projects')
+        .select('project_id, name')
+        .eq('user_id', userId)
+        .in('project_id', ids);
+      const existingNameById = new Map(
+        (
+          (existingRows as
+            { project_id: string; name: string | null }[] | null) ?? []
+        ).map((row) => [row.project_id, row.name]),
+      );
       await db()
         .from('cloud_projects')
         .upsert(
           projects.map((project) => ({
             user_id: userId,
             project_id: project.projectId,
-            name: project.name ?? null,
+            name: resolveSyncedProjectName(
+              project.name,
+              existingNameById.get(project.projectId) ?? null,
+            ),
             updated_at: now,
           })),
           { onConflict: 'user_id,project_id' },

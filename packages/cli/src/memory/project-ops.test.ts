@@ -655,3 +655,34 @@ describe('project lifecycle (15C)', () => {
     });
   });
 });
+
+describe('discoveredName (project-naming UX, recovery path)', () => {
+  it('surfaces a persisted discovery-time name hint even when the project is unmapped', async () => {
+    const stackHome = await tempDir('stack-pops-');
+    const manifest: MemoryManifest = {
+      schemaVersion: 1,
+      provider: 'claude',
+      createdAt: '2026-09-27T00:00:00.000Z',
+      items: [localItem('C--Users-NT-Desktop-nexus', 'n1.md')],
+    };
+    await writeMemoryManifest({ stackHome, manifest });
+    await syncRegistryForBackup({
+      stackHome,
+      nameHints: new Map([['C--Users-NT-Desktop-nexus', 'nexus']]),
+    });
+
+    const rows = await listProjects({ stackHome });
+    expect(rows[0]?.discoveredName).toBe('nexus');
+    expect(rows[0]?.binding).toBeNull();
+    expect(rows[0]?.availability).toBe('unavailable');
+  });
+
+  it('is null when no hint was ever captured', async () => {
+    const stackHome = await seedRegistry([
+      localItem('C--Users-NT-Desktop-nexus', 'n1.md'),
+    ]);
+
+    const rows = await listProjects({ stackHome });
+    expect(rows[0]?.discoveredName).toBeNull();
+  });
+});

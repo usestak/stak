@@ -17,6 +17,7 @@ import {
   bindingFor,
   gitClaimOf,
   lifecycleOf,
+  nameHintFor,
   projectIdentityKey,
   readLocalRegistry,
   recordFor,
@@ -54,6 +55,11 @@ export type ProjectListRow = {
   availability: 'present' | 'unavailable';
   conflict: boolean;
   recoveryReference: RecoveryReference | null;
+  // Machine-local discovery-time basename hint (never a full path) — see
+  // `@stack/memory`'s `nameHintFor`. Null when no hint has ever been captured on this
+  // machine. Takes precedence over the binding's basename (see `checkin.ts`'s
+  // `projectSyncPayloadFrom` and `project.ts`'s `identityLabel`).
+  discoveredName: string | null;
 };
 
 const identityView = (record: PortableProjectRecord): ProjectIdentityView => {
@@ -135,6 +141,7 @@ export const listProjects = async (deps: {
         recoveryReference: reference
           ? ({ kind: 'legacy-local', value: reference } as const)
           : null,
+        discoveredName: nameHintFor(registry, record.projectId) ?? null,
       };
     })
     .sort((a, b) => (a.projectId < b.projectId ? -1 : 1));

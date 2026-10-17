@@ -1,5 +1,4 @@
 import os from 'node:os';
-import path from 'node:path';
 
 import {
   AuthenticationExpiredError,
@@ -7,6 +6,7 @@ import {
   NotAuthenticatedError,
   type CloudClient,
 } from '@stack/cloud-client';
+import { safeDirectoryBasename } from '@stack/memory';
 import type { MachineCheckinRequest } from '@stack/spec';
 
 /**
@@ -178,13 +178,7 @@ export const projectPresenceFrom = (rows: ProjectRowLike[]): CheckinProject[] =>
  */
 export const localProjectDisplayName = (
   dir: string | null | undefined,
-): string | undefined => {
-  if (!dir) return undefined;
-  const base = path.basename(dir).trim();
-  if (!base || base === '.' || base === '..') return undefined;
-  if (/[\\/]/.test(base)) return undefined;
-  return base.slice(0, 200);
-};
+): string | undefined => safeDirectoryBasename(dir);
 
 /**
  * Discovery-sync payload for the cloud project registry (P3). The safe display `name` comes
@@ -203,6 +197,11 @@ export type ProjectSyncRowLike = {
   // Machine-local absolute directory this project is bound to, if any. NEVER forwarded
   // as-is — only its basename (via `localProjectDisplayName`) may be sent.
   binding?: string | null;
+  // Machine-local discovery-time basename hint (see `@stack/memory`'s `nameHintFor`),
+  // never a full path. Takes precedence over `binding`'s basename — a project's
+  // discovery-time name should not flip just because its current mapping points
+  // somewhere with a different folder name.
+  discoveredName?: string | null;
 };
 export const projectSyncPayloadFrom = (
   rows: ProjectSyncRowLike[],
@@ -210,7 +209,7 @@ export const projectSyncPayloadFrom = (
   rows.map((row) => {
     if (row.identity.kind === 'git')
       return { projectId: row.projectId, name: row.identity.canonical };
-    const name = localProjectDisplayName(row.binding);
+    const name = row.discoveredName || localProjectDisplayName(row.binding);
     return name
       ? { projectId: row.projectId, name }
       : { projectId: row.projectId };

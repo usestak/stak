@@ -39,6 +39,15 @@ export type ClaudeMemoryDiscoveryOptions = {
    */
   gitRemoteOf?: (dir: string) => Promise<string | undefined>;
   isDirectory?: (candidate: string) => Promise<boolean>;
+  /**
+   * Fired, best-effort, whenever step 3 resolves a real on-disk directory for a vendor
+   * key that remains a LOCAL identity (no Git remote) — whether resolved via a passed
+   * candidate or via `reconstructProjectDir`. The directory is the raw resolved value
+   * (never sanitized here); callers decide what, if anything, to persist from it. Never
+   * fired for a vendor key that resolves to a Git identity (it already has a portable
+   * name) or for one that never resolves to a real directory at all.
+   */
+  onLocalProjectResolved?: (vendorKey: string, dir: string) => void;
 };
 
 export type MemoryDetection = { installed: boolean; reason?: string };
@@ -184,13 +193,16 @@ export const discoverClaudeMemory = async (
   //    (local) with its real vendor key preserved.
   const platform = options.platform ?? process.platform;
   const gitByVendorKey = new Map<string, ProjectIdentity>();
+  const dirByVendorKey = new Map<string, string>();
   for (const project of options.projects ?? []) {
+    const key = normalizeVendorKey(
+      encodeClaudeProjectKey(project.dir),
+      platform,
+    );
+    dirByVendorKey.set(key, path.resolve(project.dir));
     const git = canonicalGitIdentity(project.gitRemote);
     if (!git) continue; // no origin → do not resolve; leave as local
-    gitByVendorKey.set(
-      normalizeVendorKey(encodeClaudeProjectKey(project.dir), platform),
-      git,
-    );
+    gitByVendorKey.set(key, git);
   }
   const projectsRoot = path.join(home, 'projects');
   for (const vendorKey of await listDirNames(projectsRoot)) {
@@ -201,8 +213,9 @@ export const discoverClaudeMemory = async (
     // project's OWN checkout (reconstructed from the vendor key) so a native project
     // with a strong Git identity is never mis-minted as a new local project just
     // because it is not the current working directory (Phase 15B.4).
-    let identity =
-      gitByVendorKey.get(normalizeVendorKey(vendorKey, platform)) ?? null;
+    const normalizedKey = normalizeVendorKey(vendorKey, platform);
+    let identity = gitByVendorKey.get(normalizedKey) ?? null;
+    let resolvedDir = dirByVendorKey.get(normalizedKey);
     if (!identity && options.gitRemoteOf && options.isDirectory) {
       const dir = await reconstructProjectDir({
         vendorKey,
@@ -210,11 +223,14 @@ export const discoverClaudeMemory = async (
         platform,
       });
       if (dir) {
+        resolvedDir = dir;
         const git = canonicalGitIdentity(await options.gitRemoteOf(dir));
         if (git) identity = git;
       }
     }
     identity = identity ?? localIdentity(vendorKey);
+    if (resolvedDir && identity.kind === 'local')
+      options.onLocalProjectResolved?.(vendorKey, resolvedDir);
     for (const { rel, abs } of files)
       items.push(
         await fileItem({

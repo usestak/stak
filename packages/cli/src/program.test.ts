@@ -2007,6 +2007,7 @@ describe('STAK CLI', () => {
       availability: 'present' as const,
       conflict: false,
       recoveryReference: null,
+      discoveredName: null,
     },
     {
       projectId: 'prj_bbbbbbbbbbbbbbbbbbbbbbbbbb',
@@ -2017,6 +2018,7 @@ describe('STAK CLI', () => {
       availability: 'unavailable' as const,
       conflict: false,
       recoveryReference: null,
+      discoveredName: null,
     },
   ];
 

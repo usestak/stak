@@ -321,6 +321,42 @@ describe('projectSyncPayloadFrom (P3 review §5 — no path leaks into the name)
     expect(payload).toEqual([{ projectId: 'prj_local', name: 'swft' }]);
     expect(JSON.stringify(payload)).not.toMatch(/Users|Desktop/);
   });
+
+  it('prefers the discovery-time name hint over the binding basename when both are present', () => {
+    const payload = projectSyncPayloadFrom([
+      {
+        projectId: 'prj_local',
+        identity: { kind: 'local' },
+        binding: 'C:/Users/NT/Desktop/old-folder-name',
+        discoveredName: 'nexus',
+      },
+    ]);
+    expect(payload).toEqual([{ projectId: 'prj_local', name: 'nexus' }]);
+  });
+
+  it('falls back to the binding basename when there is no discovery-time name hint', () => {
+    const payload = projectSyncPayloadFrom([
+      {
+        projectId: 'prj_local',
+        identity: { kind: 'local' },
+        binding: 'C:/Users/NT/Desktop/swft',
+        discoveredName: null,
+      },
+    ]);
+    expect(payload).toEqual([{ projectId: 'prj_local', name: 'swft' }]);
+  });
+
+  it('names an unmapped Local project from its discovery-time hint alone (the recovery case)', () => {
+    const payload = projectSyncPayloadFrom([
+      {
+        projectId: 'prj_local',
+        identity: { kind: 'local' },
+        binding: null,
+        discoveredName: 'nexus',
+      },
+    ]);
+    expect(payload).toEqual([{ projectId: 'prj_local', name: 'nexus' }]);
+  });
 });
 
 describe('nativeMemoryBackedUp (P1 review #3 — truthful backup state)', () => {

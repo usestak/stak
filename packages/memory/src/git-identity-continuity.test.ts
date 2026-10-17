@@ -514,3 +514,54 @@ describe('Git identity continuity across restored native memory (15B.4)', () => 
     expect(items[0]?.project?.kind).toBe('local');
   });
 });
+
+describe('onLocalProjectResolved hook (discovery-time basename capture)', () => {
+  it('fires with the vendor key and the real resolved directory for an unmatched local project with no Git remote', async () => {
+    const claudeHome = await tempDir('claude-');
+    const checkout = path.join(await tempDir('repos-'), 'nexus');
+    await mkdir(checkout, { recursive: true });
+    const vendorKey = encodeClaudeProjectKey(checkout);
+    const memoryDir = path.join(claudeHome, 'projects', vendorKey, 'memory');
+    await mkdir(memoryDir, { recursive: true });
+    await writeFile(path.join(memoryDir, 'n1.md'), '# nexus\n', 'utf8');
+
+    const resolved: Array<{ vendorKey: string; dir: string }> = [];
+    const items = await discoverClaudeMemory({
+      claudeHome,
+      gitRemoteOf: async () => undefined, // no remote → identity stays local
+      isDirectory,
+      platform: process.platform,
+      onLocalProjectResolved: (key, dir) =>
+        resolved.push({ vendorKey: key, dir }),
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.project).toEqual({ kind: 'local', vendorKey });
+    expect(resolved).toEqual([{ vendorKey, dir: path.resolve(checkout) }]);
+  });
+
+  it('never fires for a project that resolved to a Git identity', async () => {
+    const claudeHome = await tempDir('claude-');
+    const checkout = path.join(await tempDir('repos-'), 'atlas-access-flow');
+    await mkdir(checkout, { recursive: true });
+    const vendorKey = encodeClaudeProjectKey(checkout);
+    const memoryDir = path.join(claudeHome, 'projects', vendorKey, 'memory');
+    await mkdir(memoryDir, { recursive: true });
+    await writeFile(path.join(memoryDir, 'a1.md'), '# atlas\n', 'utf8');
+
+    const resolved: Array<{ vendorKey: string; dir: string }> = [];
+    await discoverClaudeMemory({
+      claudeHome,
+      gitRemoteOf: async (dir) =>
+        path.resolve(dir) === path.resolve(checkout)
+          ? 'https://github.com/example/atlas.git'
+          : undefined,
+      isDirectory,
+      platform: process.platform,
+      onLocalProjectResolved: (key, dir) =>
+        resolved.push({ vendorKey: key, dir }),
+    });
+
+    expect(resolved).toEqual([]);
+  });
+});

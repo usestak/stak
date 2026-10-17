@@ -4,6 +4,7 @@ import {
   canonicalGitIdentity,
   encodeClaudeProjectKey,
   projectIdentityMatches,
+  safeDirectoryBasename,
 } from './project-identity.js';
 
 describe('canonicalGitIdentity', () => {
@@ -83,6 +84,29 @@ describe('projectIdentityMatches', () => {
     if (!git) throw new Error('expected git identity');
     expect(projectIdentityMatches(git, { kind: 'local', vendorKey: 'x' })).toBe(
       false,
+    );
+  });
+});
+
+describe('safeDirectoryBasename', () => {
+  it('returns the final path segment only', () => {
+    expect(safeDirectoryBasename('C:/Users/NT/Desktop/nexus')).toBe('nexus');
+    expect(safeDirectoryBasename('/Users/dana/work/nexus')).toBe('nexus');
+  });
+
+  it('returns undefined for null/undefined input', () => {
+    expect(safeDirectoryBasename(null)).toBeUndefined();
+    expect(safeDirectoryBasename(undefined)).toBeUndefined();
+  });
+
+  it('returns undefined for a root/degenerate path with no safe basename', () => {
+    expect(safeDirectoryBasename('C:\\')).toBeUndefined();
+    expect(safeDirectoryBasename('/')).toBeUndefined();
+  });
+
+  it('never returns a string containing a path separator', () => {
+    expect(safeDirectoryBasename('C:/Users/NT/Desktop/nexus')).not.toMatch(
+      /[\\/]/,
     );
   });
 });

@@ -83,11 +83,27 @@ export const machineBindingSchema = z.object({
 });
 export type MachineBinding = z.infer<typeof machineBindingSchema>;
 
+/**
+ * A machine-local, advisory display-name hint for a Project ID — the safe basename
+ * captured the last time Memory backup discovered this project's directory on THIS
+ * machine (see `claude-adapter.ts`'s `onLocalProjectResolved`). It is NEVER part of
+ * the portable snapshot and NEVER a full path; it exists only so the Cloud `name` sync
+ * and `stak project` CLI rendering can show a recognizable name even when the project
+ * is not currently bound (`stak project map`) on this machine.
+ */
+export const projectNameHintSchema = z.object({
+  projectId: z.string().regex(PROJECT_ID_PATTERN),
+  name: z.string().min(1).max(200),
+});
+export type ProjectNameHint = z.infer<typeof projectNameHintSchema>;
+
 export const LOCAL_REGISTRY_VERSION = 1 as const;
 export const localRegistrySchema = z.object({
   schemaVersion: z.literal(LOCAL_REGISTRY_VERSION),
   projects: z.array(portableProjectRecordSchema),
   bindings: z.array(machineBindingSchema),
+  // Optional so pre-existing registry files decode safely; absence means no hints yet.
+  nameHints: z.array(projectNameHintSchema).optional(),
 });
 export type LocalRegistry = z.infer<typeof localRegistrySchema>;
 
@@ -95,6 +111,7 @@ export const emptyRegistry = (): LocalRegistry => ({
   schemaVersion: LOCAL_REGISTRY_VERSION,
   projects: [],
   bindings: [],
+  nameHints: [],
 });
 
 /* -------------------------------------------------------------------------- */
@@ -336,6 +353,29 @@ export const setBinding = (
   bindings: [
     ...registry.bindings.filter((b) => b.projectId !== binding.projectId),
     binding,
+  ],
+});
+
+/** A registry's name hints, defaulting a pre-existing (field-absent) registry to none. */
+export const nameHintsOf = (registry: LocalRegistry): ProjectNameHint[] =>
+  registry.nameHints ?? [];
+
+export const nameHintFor = (
+  registry: LocalRegistry,
+  projectId: string,
+): string | undefined =>
+  nameHintsOf(registry).find((hint) => hint.projectId === projectId)?.name;
+
+/** Set (or replace) a Project's discovery-time name hint. Never mutates the input. */
+export const setNameHint = (
+  registry: LocalRegistry,
+  projectId: string,
+  name: string,
+): LocalRegistry => ({
+  ...registry,
+  nameHints: [
+    ...nameHintsOf(registry).filter((hint) => hint.projectId !== projectId),
+    { projectId, name },
   ],
 });
 

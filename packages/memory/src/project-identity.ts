@@ -167,6 +167,22 @@ export const reconstructProjectDir = async (options: {
   return dirs.length === 1 ? (dirs[0] as string) : null;
 };
 
+/**
+ * A Cloud-safe, UI-safe display basename for a local directory (e.g. `nexus` from
+ * `C:\Users\NT\Desktop\nexus`), never the path itself. `path.basename` cannot return a
+ * string containing a path separator, so this can never smuggle directory structure.
+ * Returns `undefined` when no safe basename can be determined (root/degenerate path).
+ */
+export const safeDirectoryBasename = (
+  dir: string | null | undefined,
+): string | undefined => {
+  if (!dir) return undefined;
+  const base = path.basename(dir).trim();
+  if (!base || base === '.' || base === '..') return undefined;
+  if (/[\\/]/.test(base)) return undefined;
+  return base.slice(0, 200);
+};
+
 /** Whether two identities refer to the same project. */
 export const projectIdentityMatches = (
   a: ProjectIdentity,

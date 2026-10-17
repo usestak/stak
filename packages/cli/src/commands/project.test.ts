@@ -12,6 +12,7 @@ const baseRow = (overrides: Partial<ProjectListRow>): ProjectListRow => ({
   availability: 'unavailable',
   conflict: false,
   recoveryReference: null,
+  discoveredName: null,
   ...overrides,
 });
 
@@ -37,6 +38,19 @@ describe('identityLabel (project-naming UX)', () => {
   it('falls back to the generic label when the binding has no safe basename', () => {
     const row = baseRow({ binding: 'C:/' });
     expect(identityLabel(row)).toBe('local project');
+  });
+
+  it('shows the discovery-time name hint for an unmapped Local project, never the generic label', () => {
+    const row = baseRow({ binding: null, discoveredName: 'nexus' });
+    expect(identityLabel(row)).toBe('nexus');
+  });
+
+  it('prefers the discovery-time name hint over the binding basename when both are present', () => {
+    const row = baseRow({
+      binding: 'C:/Users/NT/Desktop/old-folder-name',
+      discoveredName: 'nexus',
+    });
+    expect(identityLabel(row)).toBe('nexus');
   });
 });
 

@@ -45,6 +45,7 @@ export type ProjectCommandDependencies = {
  *  to the generic label when unmapped or when no safe basename can be determined. */
 export const identityLabel = (row: ProjectListRow): string => {
   if (row.identity.kind === 'git') return row.identity.canonical;
+  if (row.discoveredName) return row.discoveredName;
   if (!row.binding) return 'local project';
   const base = path.basename(row.binding).trim();
   return base && base !== '.' && base !== '..' ? base : 'local project';

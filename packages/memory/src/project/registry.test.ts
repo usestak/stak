@@ -7,9 +7,11 @@ import {
   identityClaim,
   legacyCompatKey,
   mergePortableSnapshot,
+  nameHintFor,
   registryConflicts,
   resolveOrMintProject,
   resolveProjectForIdentity,
+  setNameHint,
   toPortableSnapshot,
   type LocalRegistry,
 } from './registry.js';
@@ -147,5 +149,34 @@ describe('project registry (portable model)', () => {
     expect(claimKey(identityClaim(git('GitHub.com/Acme/Atlas')))).toBe(
       claimKey(identityClaim(git('github.com/acme/atlas'))),
     );
+  });
+});
+
+describe('name hints (machine-local, never portable)', () => {
+  it('setNameHint adds a hint retrievable by nameHintFor', () => {
+    const registry = setNameHint(emptyRegistry(), 'prj_abc123', 'nexus');
+    expect(nameHintFor(registry, 'prj_abc123')).toBe('nexus');
+  });
+
+  it('nameHintFor returns undefined when no hint exists', () => {
+    expect(nameHintFor(emptyRegistry(), 'prj_abc123')).toBeUndefined();
+  });
+
+  it('setNameHint replaces an existing hint for the same projectId rather than duplicating', () => {
+    let registry = setNameHint(emptyRegistry(), 'prj_abc123', 'old-name');
+    registry = setNameHint(registry, 'prj_abc123', 'new-name');
+    expect(nameHintFor(registry, 'prj_abc123')).toBe('new-name');
+    expect(registry.nameHints).toHaveLength(1);
+  });
+
+  it('is absent from a fresh empty registry', () => {
+    expect(emptyRegistry().nameHints).toEqual([]);
+  });
+
+  it('never mutates the input registry', () => {
+    const before: LocalRegistry = emptyRegistry();
+    const snapshot = JSON.parse(JSON.stringify(before));
+    setNameHint(before, 'prj_abc123', 'nexus');
+    expect(before).toEqual(snapshot);
   });
 });
