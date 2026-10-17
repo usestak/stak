@@ -4,13 +4,16 @@ import { assertPathWithin } from '@stack/shared';
 
 import type { ProjectIdentity } from '../domain.js';
 import { readMemoryManifest, memoryStorePaths } from '../store.js';
+import { projectIdentityKey } from '../project-identity.js';
 import { atomicWriteFile } from '../remote/secure-file.js';
 import {
+  adoptReconciledProjectId,
   emptyRegistry,
   localRegistrySchema,
   mergePortableSnapshot,
   portableRegistrySnapshotSchema,
   resolveOrMintProject,
+  resolveProjectForIdentity,
   setNameHint,
   toPortableSnapshot,
   type LocalRegistry,
@@ -145,6 +148,15 @@ export const syncRegistryForBackup = async (options: {
    *  (`onLocalProjectResolved`). Only applied to a LOCAL identity the current manifest
    *  actually references by that vendor key; unrelated keys are ignored. */
   nameHints?: Map<string, string>;
+  /**
+   * identityKey (`projectIdentityKey(identity)`, e.g. `git:github.com/o/r` or
+   * `local:<vendorKey>`) -> the vendor key this run's discovery observed backing it,
+   * collected by the caller from `nativeItems` (pre-portable-strip, so a Git-resolved
+   * item's vendor key is still available). Used ONLY to retire an obsolete
+   * `local:<vendorKey>` record for the SAME vendor key when this identity resolved to
+   * Git this run (Local -> Git identity-strengthening) — never to invent identity.
+   */
+  vendorKeys?: Map<string, string>;
 }): Promise<{ registry: LocalRegistry; minted: number }> => {
   let registry = await readLocalRegistry(options.stackHome);
   let minted = 0;
@@ -155,6 +167,26 @@ export const syncRegistryForBackup = async (options: {
     if (identity.kind === 'local' && identity.vendorKey) {
       const hint = options.nameHints?.get(identity.vendorKey);
       if (hint) registry = setNameHint(registry, result.projectId, hint);
+    }
+    // Local -> Git identity-strengthening (Bug B): this vendor key previously resolved
+    // as a local-only identity (before its Git remote was resolvable); now that it
+    // resolves to Git, retire the obsolete local record into this one so there is
+    // never both an active `local:<vendorKey>` AND an active Git-identified Project
+    // for the same real directory.
+    if (identity.kind === 'git') {
+      const vendorKey = options.vendorKeys?.get(projectIdentityKey(identity));
+      if (vendorKey) {
+        const stale = resolveProjectForIdentity(registry, {
+          kind: 'local',
+          vendorKey,
+        });
+        if (stale.status === 'resolved' && stale.projectId !== result.projectId)
+          registry = adoptReconciledProjectId(
+            registry,
+            stale.projectId,
+            result.projectId,
+          );
+      }
     }
   }
   await writeLocalRegistry(options.stackHome, registry);

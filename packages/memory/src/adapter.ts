@@ -23,7 +23,10 @@ import {
   readLocalRegistry,
   syncRegistryForBackup,
 } from './project/registry-store.js';
-import { safeDirectoryBasename } from './project-identity.js';
+import {
+  projectIdentityKey,
+  safeDirectoryBasename,
+} from './project-identity.js';
 
 export type MemoryVerifyResult = {
   ok: boolean;
@@ -92,6 +95,15 @@ export const createClaudeMemoryAdapter = (
           if (base) nameHints.set(vendorKey, base);
         },
       });
+      // identityKey -> vendor key, from the live (pre-portable-strip) items, so a
+      // Git-resolved identity's vendor key survives for Bug-B zombie retirement even
+      // though the portable manifest never carries one for Git identities.
+      const vendorKeys = new Map<string, string>();
+      for (const item of nativeItems) {
+        if (item.scope !== 'project' || !item.project || !item.source.vendorKey)
+          continue;
+        vendorKeys.set(projectIdentityKey(item.project), item.source.vendorKey);
+      }
       // Phase 15B.3: compose the next backup as the native scan PLUS previously
       // backed-up Memory whose project is unavailable on this machine, so a new
       // generation never silently drops unresolved Memory.
@@ -110,8 +122,13 @@ export const createClaudeMemoryAdapter = (
       });
       // Phase 15B: resolve/mint stable Project IDs and refresh the portable
       // registry snapshot the next Cloud bundle will carry (paths never included).
-      // Also persists this run's discovery-time name hints (machine-local only).
-      await syncRegistryForBackup({ stackHome: options.stackHome, nameHints });
+      // Also persists this run's discovery-time name hints (machine-local only) and
+      // retires any obsolete Local record whose vendor key now resolves to Git.
+      await syncRegistryForBackup({
+        stackHome: options.stackHome,
+        nameHints,
+        vendorKeys,
+      });
       return result;
     },
     planRestore: async () =>

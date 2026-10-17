@@ -176,13 +176,13 @@ const mapSkillReviewCheck = (row: any): SkillReviewCheckRecord => ({
 });
 
 /**
- * Resolve the `name` to persist on a Project-sync upsert row. An incoming name always
- * wins (it reflects this sync's fresher discovery — a Git canonical or a safe basename).
- * When the incoming payload carries no name at all (nothing safely derivable on the
- * syncing machine this run — e.g. an unmapped Local project recovered on a second
- * machine, before it has been mapped there), the EXISTING Cloud name is preserved
- * rather than erased: a sync from a machine that currently knows less about a Project
- * must never un-name it for every other machine.
+ * Resolve a value to persist on a Project-sync upsert row (used for both `name` and
+ * `git_canonical`). An incoming value always wins (it reflects this sync's fresher
+ * discovery). When the incoming payload carries none at all (nothing safely derivable
+ * on the syncing machine this run — e.g. an unmapped Local project recovered on a
+ * second machine, before it has been mapped there), the EXISTING Cloud value is
+ * preserved rather than erased: a sync from a machine that currently knows less about a
+ * Project must never un-name/un-identify it for every other machine.
  */
 export const resolveSyncedProjectName = (
   incoming: string | undefined,
@@ -585,41 +585,96 @@ export const supabaseRepository = (): CloudRepository &
       return ((data as any[] | null) ?? []).map(mapProject);
     },
     syncProjects: async (userId, projects, now) => {
-      if (projects.length === 0) return;
-      // Discovery only: omit `lifecycle` from the upsert so ON CONFLICT updates name/updated_at
-      // but PRESERVES an existing row's lifecycle; a newly-inserted row takes the column default
-      // ('active'). A stale local machine therefore can never unarchive a web-archived Project.
+      if (projects.length === 0) return { reconciled: [] };
+
+      // Git-canonical reconciliation FIRST (never by displayName/path text): an
+      // incoming row whose `gitCanonical` already belongs to this user under a
+      // DIFFERENT `projectId` must never become a second logical Project. No row is
+      // upserted for it; the caller adopts `toProjectId` locally instead.
+      const canonicalByIncoming = new Map(
+        projects
+          .filter(
+            (p): p is typeof p & { gitCanonical: string } => !!p.gitCanonical,
+          )
+          .map((p) => [p.projectId, p.gitCanonical.toLowerCase()] as const),
+      );
+      const reconciled: { fromProjectId: string; toProjectId: string }[] = [];
+      if (canonicalByIncoming.size > 0) {
+        const canonicals = [...new Set(canonicalByIncoming.values())];
+        const { data: ownedRows } = await db()
+          .from('cloud_projects')
+          .select('project_id, git_canonical')
+          .eq('user_id', userId)
+          .in('git_canonical', canonicals);
+        const ownerByCanonical = new Map(
+          (
+            (ownedRows as
+              { project_id: string; git_canonical: string | null }[] | null) ??
+            []
+          )
+            .filter((row) => row.git_canonical !== null)
+            .map((row) => [row.git_canonical as string, row.project_id]),
+        );
+        for (const [projectId, canonical] of canonicalByIncoming) {
+          const owner = ownerByCanonical.get(canonical);
+          if (owner && owner !== projectId)
+            reconciled.push({ fromProjectId: projectId, toProjectId: owner });
+        }
+      }
+      const reconciledFromIds = new Set(reconciled.map((r) => r.fromProjectId));
+      const toUpsert = projects.filter(
+        (p) => !reconciledFromIds.has(p.projectId),
+      );
+      if (toUpsert.length === 0) return { reconciled };
+
+      // Discovery only: omit `lifecycle` from the upsert so ON CONFLICT updates
+      // name/git_canonical/updated_at but PRESERVES an existing row's lifecycle; a
+      // newly-inserted row takes the column default ('active'). A stale local machine
+      // therefore can never unarchive a web-archived Project.
       //
-      // `name` must NOT simply be `project.name ?? null`: a machine that currently knows no
-      // name for this Project (e.g. recovered but not yet mapped) sends no name at all, and
-      // that must never erase a name a DIFFERENT machine already gave this Project in Cloud —
-      // see `resolveSyncedProjectName`. So the existing names are fetched first and merged in.
-      const ids = projects.map((project) => project.projectId);
+      // `name`/`git_canonical` must NOT simply be `project.x ?? null`: a machine that
+      // currently knows no name/canonical for this Project (e.g. recovered but not yet
+      // mapped) sends neither, and that must never erase what a DIFFERENT machine
+      // already gave this Project in Cloud — see `resolveSyncedProjectName`.
+      const ids = toUpsert.map((project) => project.projectId);
       const { data: existingRows } = await db()
         .from('cloud_projects')
-        .select('project_id, name')
+        .select('project_id, name, git_canonical')
         .eq('user_id', userId)
         .in('project_id', ids);
-      const existingNameById = new Map(
+      const existingById = new Map(
         (
           (existingRows as
-            { project_id: string; name: string | null }[] | null) ?? []
-        ).map((row) => [row.project_id, row.name]),
+            | {
+                project_id: string;
+                name: string | null;
+                git_canonical: string | null;
+              }[]
+            | null) ?? []
+        ).map((row) => [row.project_id, row]),
       );
       await db()
         .from('cloud_projects')
         .upsert(
-          projects.map((project) => ({
-            user_id: userId,
-            project_id: project.projectId,
-            name: resolveSyncedProjectName(
-              project.name,
-              existingNameById.get(project.projectId) ?? null,
-            ),
-            updated_at: now,
-          })),
+          toUpsert.map((project) => {
+            const existing = existingById.get(project.projectId);
+            return {
+              user_id: userId,
+              project_id: project.projectId,
+              name: resolveSyncedProjectName(
+                project.name,
+                existing?.name ?? null,
+              ),
+              git_canonical: resolveSyncedProjectName(
+                project.gitCanonical?.toLowerCase(),
+                existing?.git_canonical ?? null,
+              ),
+              updated_at: now,
+            };
+          }),
           { onConflict: 'user_id,project_id' },
         );
+      return { reconciled };
     },
     bindTokenMachine: async (tokenId, machineId) => {
       // Bind only when currently unbound (migration-on-first-use); never rebind.

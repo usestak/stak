@@ -26,12 +26,15 @@ import {
   newKeyring,
   openMmkFromEnvelope,
   protectedCloudBackup,
+  resolveProjectForIdentity,
   standardCloudBackup,
   unwrapWithRecoveryKey,
   isHistoricalRecovery,
   readLocalRecoveryState,
   writeLocalRecoveryState,
   type BackupResult,
+  type DiscoveredMemoryItem,
+  type LocalRegistry,
   type BridgeEnvelope,
   type BridgeFailureReason,
   type LocalMemoryKeyStore,
@@ -446,6 +449,36 @@ export const readBackupSupersession = async (
       cloudLatestGeneration === null ? 0 : cloudLatestGeneration + 1,
     supersedes: isHistoricalRecovery(provenance, cloudLatestGeneration),
   };
+};
+
+/**
+ * Fresh/reset-registry safeguard. Detects the dangerous combination: this machine's
+ * private Memory store has NEVER been recovered from Cloud (`localRecoveredGeneration
+ * === null` — not merely "behind", but truly unseeded), Cloud already has Memory
+ * history worth preserving (`cloudLatestGeneration !== null`), AND this backup would
+ * mint a brand-new Local-only identity this registry has never seen before. Git-backed
+ * identities are excluded — they reconcile safely through Cloud's canonical-identity
+ * check (`syncProjects`), never through this guard. An ESTABLISHED machine (one whose
+ * registry already has ANY prior knowledge — i.e. this native item's identity already
+ * resolves locally) is never blocked merely for discovering one more genuinely new
+ * project; only a registry with zero prior knowledge of THIS identity, while Cloud
+ * already has history, is risky enough to refuse.
+ */
+export const freshRegistryRisksDuplication = (deps: {
+  localRecoveredGeneration: number | null;
+  cloudLatestGeneration: number | null;
+  nativeItems: Pick<DiscoveredMemoryItem, 'scope' | 'project'>[];
+  registry: LocalRegistry;
+}): boolean => {
+  if (deps.localRecoveredGeneration !== null) return false;
+  if (deps.cloudLatestGeneration === null) return false;
+  return deps.nativeItems.some(
+    (item) =>
+      item.scope === 'project' &&
+      item.project?.kind === 'local' &&
+      resolveProjectForIdentity(deps.registry, item.project).status ===
+        'unknown',
+  );
 };
 
 /* -------------------------------------------------------------------------- */

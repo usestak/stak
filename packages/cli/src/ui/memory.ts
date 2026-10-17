@@ -387,6 +387,13 @@ export type BackupSupersessionView = {
 export type MemoryBackupPreview = BackupComposition & {
   privacy: 'standard' | 'protected' | null;
   supersession: BackupSupersessionView;
+  // Fresh/reset-registry safeguard (see `freshRegistryRisksDuplication`): true when
+  // this machine has never recovered Cloud Memory, Cloud already has history, and this
+  // backup would mint a brand-new Local-only Project identity — i.e. backing up now
+  // would risk uploading a second, duplicate logical Project for something Cloud
+  // already knows under a different id. Git-backed identities never trigger this.
+  // Optional (absent treated as false) so existing preview fixtures stay valid.
+  risksDuplicatingLocalProjects?: boolean;
 };
 
 const privacyLabel = (privacy: MemoryBackupPreview['privacy']): string =>
@@ -402,6 +409,8 @@ export const renderMemoryBackupPreview = (
   options: RenderOptions = {},
 ): string => {
   const lines = ['Memory backup preview', '', 'Claude', ''];
+  if (preview.risksDuplicatingLocalProjects)
+    lines.push(`${freshRegistryGuardWarning()}`, '');
   const s = preview.supersession;
   if (s.supersedes)
     lines.push(
@@ -467,6 +476,13 @@ export const historicalBaseBackupWarning = (
   `Your latest Cloud backup is #${s.cloudLatestGeneration}.\n\n` +
   `This will create backup #${s.nextGeneration} from your current local Memory.\n` +
   `Backup #${s.cloudLatestGeneration} will remain available in your backup history.`;
+
+/** Refusal shown before a real backup that would risk duplicating Local Projects
+ *  Cloud already has history for (the fresh/reset-registry safeguard). */
+export const freshRegistryGuardWarning = (): string =>
+  'Cloud Memory already exists, but this machine does not have the logical ' +
+  'Project identities needed to preserve it.\n' +
+  'Run `stak memory recover` before backing up on this machine.';
 
 const bytesLabel = (bytes: number): string => {
   if (bytes < 1024) return `${bytes} B`;

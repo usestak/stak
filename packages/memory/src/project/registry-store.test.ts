@@ -6,7 +6,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ManifestItem, MemoryManifest } from '../domain.js';
 import { writeMemoryManifest } from '../store.js';
-import { nameHintFor, setBinding } from './registry.js';
+import {
+  nameHintFor,
+  resolveProjectForIdentity,
+  setBinding,
+} from './registry.js';
 import {
   readLocalRegistry,
   readPortableSnapshot,
@@ -181,5 +185,68 @@ describe('syncRegistryForBackup name hints', () => {
 
     const snapshot = await readPortableSnapshot(stackHome);
     expect(JSON.stringify(snapshot)).not.toContain('nexus');
+  });
+});
+
+describe('Local -> Git identity-strengthening retires the obsolete local record (Bug B, production regression)', () => {
+  it('one logical Project survives — not local L + git G — for the exact stack-repo case', async () => {
+    const stackHome = await tempHome();
+    const vendorKey = 'C--Users-NT-Desktop-stack';
+
+    // Earlier backup: this checkout's Git remote was not yet resolvable, so its
+    // auto-memory resolved as a local-only identity and minted projectId L.
+    await writeManifest(stackHome, [localItem(vendorKey, 'old.md')]);
+    const first = await syncRegistryForBackup({ stackHome, mint });
+    const localProjectId = first.registry.projects[0]?.projectId;
+    expect(localProjectId).toBeDefined();
+
+    // Later backup: the SAME directory's Git remote is now resolvable, so discovery
+    // resolves it to the strong Git identity — but discovery still reports the SAME
+    // vendor key backing it (via `source.vendorKey` / `onLocalProjectResolved`), which
+    // is how the caller builds `vendorKeys`.
+    await writeManifest(stackHome, [
+      gitItem('github.com/usestak/stak', 'new.md'),
+    ]);
+    const second = await syncRegistryForBackup({
+      stackHome,
+      mint,
+      vendorKeys: new Map([['github.com/usestak/stak', vendorKey]]),
+    });
+
+    // Exactly one active logical Project — the obsolete local record is gone.
+    expect(second.registry.projects).toHaveLength(1);
+    const survivor = second.registry.projects[0];
+    expect(survivor?.projectId).not.toBe(localProjectId);
+    expect(
+      resolveProjectForIdentity(second.registry, {
+        kind: 'git',
+        canonical: 'github.com/usestak/stak',
+        host: 'github.com',
+        owner: 'usestak',
+        repo: 'stak',
+      }),
+    ).toEqual({ status: 'resolved', projectId: survivor?.projectId });
+    // The old local identity now also resolves to the SAME surviving Project (never a
+    // dangling second id if something still reports it as local-only transiently).
+    expect(
+      resolveProjectForIdentity(second.registry, { kind: 'local', vendorKey }),
+    ).toEqual({ status: 'resolved', projectId: survivor?.projectId });
+
+    // Persisted to disk, not just returned in-memory.
+    const reloaded = await readLocalRegistry(stackHome);
+    expect(reloaded.projects).toHaveLength(1);
+  });
+
+  it('does nothing when no stale local record exists for the vendor key (first-ever Git resolution)', async () => {
+    const stackHome = await tempHome();
+    await writeManifest(stackHome, [gitItem('github.com/acme/atlas', 'a.md')]);
+    const result = await syncRegistryForBackup({
+      stackHome,
+      mint,
+      vendorKeys: new Map([
+        ['github.com/acme/atlas', 'C--Users-NT-Desktop-atlas'],
+      ]),
+    });
+    expect(result.registry.projects).toHaveLength(1);
   });
 });

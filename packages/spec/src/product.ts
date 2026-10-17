@@ -452,13 +452,32 @@ export const setProjectLifecycleResponseSchema = z.object({
   projectId: z.string(),
   lifecycle: projectLifecycleSchema,
 });
-export const syncProjectsResponseSchema = z.object({ ok: z.literal(true) });
+/**
+ * A Project this sync minted a FRESH `projectId` for, but that this account already owns
+ * under a DIFFERENT, authoritative `projectId` for the exact same Git canonical identity —
+ * Cloud refused the second row and reports the existing one here so the CLI can retire its
+ * freshly-minted id and adopt the authoritative one before the next backup/check-in (never
+ * leaving the local registry in a state that would just recreate the duplicate next run).
+ */
+export const projectReconciliationSchema = z.object({
+  fromProjectId: z.string(),
+  toProjectId: z.string(),
+});
+export const syncProjectsResponseSchema = z.object({
+  ok: z.literal(true),
+  reconciled: z.array(projectReconciliationSchema).optional(),
+});
 /**
  * CLI → cloud project DISCOVERY sync. This conveys only that a stable Project exists and its
  * safe display metadata (a name that is never a path). It carries NO lifecycle: discovery must
  * never masquerade as lifecycle intent, so a stale local machine can never silently unarchive a
  * Project the account archived from the web. Lifecycle is changed only by the explicit
  * account-side archive/unarchive write. A newly-discovered Project defaults to `active`.
+ *
+ * `gitCanonical`, when present, is the actual canonical Git identity (`host/owner/repo`) this
+ * Project resolved to — carried explicitly, never re-derived from `name` by string-sniffing, so
+ * Cloud-side canonical-identity reconciliation (never identity-by-displayName) has a real
+ * identity signal to match on.
  */
 export const syncProjectsRequestSchema = z
   .object({
@@ -468,6 +487,7 @@ export const syncProjectsRequestSchema = z
           .object({
             projectId: z.string().min(1).max(100),
             name: z.string().max(200).optional(),
+            gitCanonical: z.string().max(200).optional(),
           })
           .strict(),
       )

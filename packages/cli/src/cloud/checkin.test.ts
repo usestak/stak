@@ -294,13 +294,44 @@ describe('projectSyncPayloadFrom (P3 review §5 — no path leaks into the name)
       },
     ]);
     expect(payload).toEqual([
-      { projectId: 'prj_git', name: 'github.com/acme/atlas' },
+      {
+        projectId: 'prj_git',
+        name: 'github.com/acme/atlas',
+        gitCanonical: 'github.com/acme/atlas',
+      },
       { projectId: 'prj_local' }, // no name — the path-derived vendor key is never sent
     ]);
     // Nothing path-like leaked anywhere in the serialized payload.
     expect(JSON.stringify(payload)).not.toMatch(
       /C--Users|\/Users\/|[A-Za-z]:\\\\/,
     );
+  });
+
+  it('carries the Git canonical explicitly for server-side reconciliation (never re-derived from the name string)', () => {
+    const payload = projectSyncPayloadFrom([
+      {
+        projectId: 'prj_git',
+        identity: { kind: 'git', canonical: 'github.com/usestak/stak' },
+      },
+    ]);
+    expect(payload).toEqual([
+      {
+        projectId: 'prj_git',
+        name: 'github.com/usestak/stak',
+        gitCanonical: 'github.com/usestak/stak',
+      },
+    ]);
+  });
+
+  it('never sends a gitCanonical for a Local project', () => {
+    const payload = projectSyncPayloadFrom([
+      {
+        projectId: 'prj_local',
+        identity: { kind: 'local' },
+        discoveredName: 'nexus',
+      },
+    ]);
+    expect(payload).toEqual([{ projectId: 'prj_local', name: 'nexus' }]);
   });
 
   it('names an unmapped Local project nothing (no binding on this machine)', () => {

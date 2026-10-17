@@ -2809,6 +2809,150 @@ describe('P3 project sync is discovery-only', () => {
   });
 });
 
+/* -------------- P3 Git-canonical reconciliation (never two logical Projects) -------------- */
+
+describe('P3 Git-canonical project reconciliation', () => {
+  it('a fresh projectId for an already-owned Git canonical is reconciled, not duplicated', async () => {
+    const env = setup();
+    const alice = await env.signIn('alice', MACHINE_A);
+
+    // Machine A: first-ever sync of this repo, under projectId G.
+    await env.call('POST', 'projects/sync', {
+      token: alice,
+      body: {
+        projects: [
+          {
+            projectId: 'prj_g',
+            name: 'github.com/usestak/stak',
+            gitCanonical: 'github.com/usestak/stak',
+          },
+        ],
+      },
+    });
+
+    // A reset/second local registry independently mints a DIFFERENT id (B) for the
+    // SAME canonical and tries to sync it.
+    const second = await env.call('POST', 'projects/sync', {
+      token: alice,
+      body: {
+        projects: [
+          {
+            projectId: 'prj_b',
+            name: 'github.com/usestak/stak',
+            gitCanonical: 'github.com/usestak/stak',
+          },
+        ],
+      },
+    });
+
+    expect(second.jsonBody).toEqual({
+      ok: true,
+      reconciled: [{ fromProjectId: 'prj_b', toProjectId: 'prj_g' }],
+    });
+
+    const body = (await env.call('GET', 'projects', { token: alice }))
+      .jsonBody as { projects: Array<{ projectId: string }> };
+    // Exactly ONE row for this canonical — never a second prj_b row.
+    expect(body.projects.map((p) => p.projectId)).toEqual(['prj_g']);
+  });
+
+  it('is case-insensitive on owner/repo casing', async () => {
+    const env = setup();
+    const alice = await env.signIn('alice', MACHINE_A);
+    await env.call('POST', 'projects/sync', {
+      token: alice,
+      body: {
+        projects: [
+          {
+            projectId: 'prj_g',
+            gitCanonical: 'github.com/usestak/stak',
+          },
+        ],
+      },
+    });
+    const second = await env.call('POST', 'projects/sync', {
+      token: alice,
+      body: {
+        projects: [
+          { projectId: 'prj_b', gitCanonical: 'GitHub.com/UseStak/Stak' },
+        ],
+      },
+    });
+    expect(second.jsonBody).toEqual({
+      ok: true,
+      reconciled: [{ fromProjectId: 'prj_b', toProjectId: 'prj_g' }],
+    });
+  });
+
+  it('does not reconcile two different accounts’ Projects for the same public repo', async () => {
+    const MACHINE_B = '00000000-0000-4000-8000-0000000000b2';
+    const env = setup();
+    const alice = await env.signIn('alice', MACHINE_A);
+    const bob = await env.signIn('bob', MACHINE_B);
+    await env.call('POST', 'projects/sync', {
+      token: alice,
+      body: {
+        projects: [{ projectId: 'prj_alice', gitCanonical: 'github.com/o/r' }],
+      },
+    });
+    const bobSync = await env.call('POST', 'projects/sync', {
+      token: bob,
+      body: {
+        projects: [{ projectId: 'prj_bob', gitCanonical: 'github.com/o/r' }],
+      },
+    });
+    expect(bobSync.jsonBody).toEqual({ ok: true });
+    const bobBody = (await env.call('GET', 'projects', { token: bob }))
+      .jsonBody as { projects: Array<{ projectId: string }> };
+    expect(bobBody.projects.map((p) => p.projectId)).toEqual(['prj_bob']);
+  });
+
+  it('a re-sync of the SAME canonical under its own authoritative id is not reported as reconciled', async () => {
+    const env = setup();
+    const alice = await env.signIn('alice', MACHINE_A);
+    await env.call('POST', 'projects/sync', {
+      token: alice,
+      body: {
+        projects: [{ projectId: 'prj_g', gitCanonical: 'github.com/o/r' }],
+      },
+    });
+    const resync = await env.call('POST', 'projects/sync', {
+      token: alice,
+      body: {
+        projects: [{ projectId: 'prj_g', gitCanonical: 'github.com/o/r' }],
+      },
+    });
+    expect(resync.jsonBody).toEqual({ ok: true });
+  });
+
+  it('a nameless resync (recovered, unmapped) does not erase an existing Cloud name or canonical', async () => {
+    const env = setup();
+    const alice = await env.signIn('alice', MACHINE_A);
+    await env.call('POST', 'projects/sync', {
+      token: alice,
+      body: {
+        projects: [
+          {
+            projectId: 'prj_g',
+            name: 'github.com/o/r',
+            gitCanonical: 'github.com/o/r',
+          },
+        ],
+      },
+    });
+    // A second machine reports presence with no name/canonical derivable yet.
+    await env.call('POST', 'projects/sync', {
+      token: alice,
+      body: { projects: [{ projectId: 'prj_g' }] },
+    });
+    const body = (await env.call('GET', 'projects', { token: alice }))
+      .jsonBody as { projects: Array<{ projectId: string; name?: string }> };
+    expect(body.projects.find((p) => p.projectId === 'prj_g')?.name).toBe(
+      'github.com/o/r',
+    );
+  });
+});
+
 /* --------------------- MACHINE REVOKE: LEGACY + OWNERSHIP (review §2) --------------------- */
 
 describe('P3 machine revoke covers legacy tokens and is scoped', () => {

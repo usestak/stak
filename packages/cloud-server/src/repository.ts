@@ -93,7 +93,18 @@ export type CloudProjectRecord = {
   projectId: string;
   lifecycle: 'active' | 'archived';
   name?: string;
+  /** The canonical Git identity (`host/owner/repo`, case-folded), when this Project is
+   *  Git-backed — the queryable identity signal `syncProjects` reconciles on. Never a
+   *  path; distinct from `name`, which is presentation-only and never matched on. */
+  gitCanonical?: string;
   updatedAt: string;
+};
+
+/** A Git-canonical reconciliation `syncProjects` performed instead of creating a second
+ *  logical Project for an identity this account already owns. */
+export type ProjectReconciliation = {
+  fromProjectId: string;
+  toProjectId: string;
 };
 
 /** Phase P1: a machine's installed version of one skill, reported at check-in. */
@@ -277,11 +288,17 @@ export interface CloudRepository {
    * existing row's lifecycle (that is explicit account-side intent); a newly-created row
    * defaults to `active`. So a stale local machine can never unarchive a web-archived Project.
    */
+  /**
+   * Returns the Git-canonical reconciliations this call performed: for any incoming
+   * project whose `gitCanonical` already belongs to this user under a DIFFERENT
+   * `projectId`, no second row is created — the caller must adopt `toProjectId`
+   * locally instead of `fromProjectId` (see `ProjectReconciliation`).
+   */
   syncProjects(
     userId: string,
-    projects: { projectId: string; name?: string }[],
+    projects: { projectId: string; name?: string; gitCanonical?: string }[],
     now: string,
-  ): Promise<void>;
+  ): Promise<{ reconciled: ProjectReconciliation[] }>;
   /** Bind a token to its machine only if unbound (migration-on-first-authenticated-use). */
   bindTokenMachine(tokenId: string, machineId: string): Promise<boolean>;
   /** Explicit account-side lifecycle change; returns the row, or null when not owned/found. */

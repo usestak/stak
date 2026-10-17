@@ -55,11 +55,14 @@ import type {
   TrialStackResolution,
 } from '@stack/core';
 import {
+  adoptReconciledProjectId,
   createClaudeMemoryAdapter,
   fileLocalMemoryKeyStore,
   generateRecoveryKey,
+  readLocalRegistry,
   readMemoryManifest,
   readMemoryStatus,
+  writeLocalRegistry,
   type BackupResult,
   type DiscoveredMemoryItem,
   type MemoryStatus,
@@ -86,6 +89,7 @@ import {
 import { registerOpenCommand } from './commands/open.js';
 import { stackCloudRemoteMemoryBackend } from './memory/cloud-backend.js';
 import {
+  freshRegistryRisksDuplication,
   readBackupSupersession,
   readMemoryCloudStatus,
   runMemoryCloudBackup,
@@ -620,7 +624,18 @@ const defaultDependencies: ProgramDependencies = {
       privacy = profile?.privacyMode ?? 'standard';
     }
     const supersession = await readBackupSupersession(cloud);
-    return { ...composition, privacy, supersession };
+    const risksDuplicatingLocalProjects = freshRegistryRisksDuplication({
+      localRecoveredGeneration: supersession.localRecoveredGeneration,
+      cloudLatestGeneration: supersession.cloudLatestGeneration,
+      nativeItems: composition.native,
+      registry: await readLocalRegistry(stackHome),
+    });
+    return {
+      ...composition,
+      privacy,
+      supersession,
+      risksDuplicatingLocalProjects,
+    };
   },
   memoryCloudBackup: async () =>
     runMemoryCloudBackup(await buildMemoryCloudDeps()),
@@ -901,7 +916,23 @@ const defaultDependencies: ProgramDependencies = {
           gitOrigin: gitOriginOf,
         }),
       });
-      await client.syncProjects({ projects: projectSyncPayloadFrom(rows) });
+      const response = await client.syncProjects({
+        projects: projectSyncPayloadFrom(rows),
+      });
+      // Cloud-side Git-canonical reconciliation (never by displayName/path text):
+      // adopt the authoritative projectId locally NOW, in this same invocation, so
+      // the next backup/check-in never re-sends the just-retired id and recreates the
+      // duplicate Cloud refused to create.
+      if (response.reconciled && response.reconciled.length > 0) {
+        let registry = await readLocalRegistry(stackHome);
+        for (const { fromProjectId, toProjectId } of response.reconciled)
+          registry = adoptReconciledProjectId(
+            registry,
+            fromProjectId,
+            toProjectId,
+          );
+        await writeLocalRegistry(stackHome, registry);
+      }
     } catch {
       // Non-fatal: the project registry refreshes on the next successful check-in.
     }

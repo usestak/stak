@@ -15,6 +15,7 @@ import type {
   PasskeyFailureReason,
 } from '../memory/cloud-ops.js';
 import {
+  freshRegistryGuardWarning,
   historicalBaseBackupWarning,
   renderMemoryBackupPreview,
   renderMemoryCloudBackup,
@@ -147,6 +148,8 @@ export const registerMemoryCommand = (
             cloudLatestBackup: preview.supersession.cloudLatestGeneration,
             parentBackup: preview.supersession.parentGeneration,
             nextBackup: preview.supersession.nextGeneration,
+            risksDuplicatingLocalProjects:
+              preview.risksDuplicatingLocalProjects === true,
             dryRun: true,
           });
           return;
@@ -158,9 +161,21 @@ export const registerMemoryCommand = (
         );
         return;
       }
+      // Fresh/reset-registry safeguard: this machine has never recovered Cloud Memory,
+      // Cloud already has history, and this backup would mint a brand-new Local-only
+      // Project — refuse outright (no `-y` override; silently minting a duplicate
+      // logical Project is never something to confirm past).
+      const preview = await dependencies.memoryBackupPreview();
+      if (preview.risksDuplicatingLocalProjects) {
+        if (options.json) {
+          emitJson(dependencies, { status: 'needs-recovery-first' });
+          return;
+        }
+        dependencies.writeOut(`${freshRegistryGuardWarning()}\n`);
+        return;
+      }
       // Backing up after a historical recovery would supersede a newer Cloud
       // backup — require explicit confirmation (fail closed).
-      const preview = await dependencies.memoryBackupPreview();
       if (preview.supersession.supersedes) {
         if (options.json && options.yes !== true) {
           emitJson(dependencies, {

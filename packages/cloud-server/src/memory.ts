@@ -257,18 +257,49 @@ export const createInMemoryRepository = (): CloudRepository &
         .filter((p) => p.userId === userId)
         .sort((a, b) => a.projectId.localeCompare(b.projectId)),
     syncProjects: async (userId, incoming, now) => {
+      const reconciled: { fromProjectId: string; toProjectId: string }[] = [];
       for (const project of incoming) {
+        const canonical = project.gitCanonical?.toLowerCase();
+        if (canonical) {
+          const existingOwner = [...projects.values()].find(
+            (p) =>
+              p.userId === userId &&
+              p.gitCanonical === canonical &&
+              p.projectId !== project.projectId,
+          );
+          if (existingOwner) {
+            // This account already owns this exact Git canonical identity under a
+            // different projectId — never create a second row; report it instead.
+            reconciled.push({
+              fromProjectId: project.projectId,
+              toProjectId: existingOwner.projectId,
+            });
+            continue;
+          }
+        }
         const k = key(userId, project.projectId);
         const existing = projects.get(k);
         // Discovery only: NEVER change an existing row's lifecycle; a new row defaults active.
+        // Preserve an existing name/gitCanonical when this sync's row carries none (never
+        // erase what a different sync already established).
         projects.set(k, {
           userId,
           projectId: project.projectId,
           lifecycle: existing?.lifecycle ?? 'active',
-          ...(project.name !== undefined ? { name: project.name } : {}),
+          ...(project.name !== undefined
+            ? { name: project.name }
+            : existing?.name !== undefined
+              ? { name: existing.name }
+              : {}),
+          ...(canonical
+            ? { gitCanonical: canonical }
+            : existing?.gitCanonical !== undefined
+              ? { gitCanonical: existing.gitCanonical }
+              : {}),
           updatedAt: now,
         });
       }
+      return { reconciled };
     },
     bindTokenMachine: async (tokenId, machineId) => {
       const existing = tokens.get(tokenId);

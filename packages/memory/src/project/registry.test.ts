@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import type { ProjectIdentity } from '../domain.js';
 import {
+  adoptReconciledProjectId,
+  bindingFor,
   claimKey,
   emptyRegistry,
   identityClaim,
@@ -11,6 +13,7 @@ import {
   registryConflicts,
   resolveOrMintProject,
   resolveProjectForIdentity,
+  setBinding,
   setNameHint,
   toPortableSnapshot,
   type LocalRegistry,
@@ -178,5 +181,175 @@ describe('name hints (machine-local, never portable)', () => {
     const snapshot = JSON.parse(JSON.stringify(before));
     setNameHint(before, 'prj_abc123', 'nexus');
     expect(before).toEqual(snapshot);
+  });
+});
+
+describe('adoptReconciledProjectId (identity reconciliation — one logical Project, never two)', () => {
+  it('merges claims from the obsolete id into the authoritative id and drops the obsolete record', () => {
+    let registry = emptyRegistry();
+    registry = resolveOrMintProject(
+      registry,
+      { kind: 'local', vendorKey: 'L' },
+      () => 'prj_from00000000000000000001',
+    ).registry;
+    registry = resolveOrMintProject(
+      registry,
+      git('github.com/usestak/stak'),
+      () => 'prj_to000000000000000000001',
+    ).registry;
+
+    const merged = adoptReconciledProjectId(
+      registry,
+      'prj_from00000000000000000001',
+      'prj_to000000000000000000001',
+    );
+
+    expect(merged.projects.map((p) => p.projectId)).toEqual([
+      'prj_to000000000000000000001',
+    ]);
+    expect(
+      resolveProjectForIdentity(merged, { kind: 'local', vendorKey: 'L' }),
+    ).toEqual({
+      status: 'resolved',
+      projectId: 'prj_to000000000000000000001',
+    });
+    expect(
+      resolveProjectForIdentity(merged, git('github.com/usestak/stak')),
+    ).toEqual({
+      status: 'resolved',
+      projectId: 'prj_to000000000000000000001',
+    });
+  });
+
+  it('creates the surviving record under toProjectId even when this registry has never seen it before', () => {
+    let registry = emptyRegistry();
+    registry = resolveOrMintProject(
+      registry,
+      git('github.com/usestak/stak'),
+      () => 'prj_from00000000000000000001',
+    ).registry;
+
+    // toProjectId (Cloud's existing, authoritative id) is NOT present locally yet.
+    const merged = adoptReconciledProjectId(
+      registry,
+      'prj_from00000000000000000001',
+      'prj_cloud0000000000000000001',
+    );
+
+    expect(merged.projects).toEqual([
+      {
+        projectId: 'prj_cloud0000000000000000001',
+        claims: [identityClaim(git('github.com/usestak/stak'))],
+        lifecycle: 'active',
+      },
+    ]);
+  });
+
+  it('retargets a binding on the obsolete id to the authoritative id', () => {
+    let registry = emptyRegistry();
+    registry = resolveOrMintProject(
+      registry,
+      { kind: 'local', vendorKey: 'L' },
+      () => 'prj_from00000000000000000001',
+    ).registry;
+    registry = setBinding(registry, {
+      projectId: 'prj_from00000000000000000001',
+      dir: 'D:\\Work\\nexus',
+      boundAt: '2026-10-17T00:00:00.000Z',
+      provenance: 'user-map',
+    });
+
+    const merged = adoptReconciledProjectId(
+      registry,
+      'prj_from00000000000000000001',
+      'prj_to000000000000000000001',
+    );
+
+    expect(bindingFor(merged, 'prj_to000000000000000000001')?.dir).toBe(
+      'D:\\Work\\nexus',
+    );
+    expect(bindingFor(merged, 'prj_from00000000000000000001')).toBeUndefined();
+  });
+
+  it('prefers the authoritative id binding/name hint when both ids have one', () => {
+    let registry = emptyRegistry();
+    registry = resolveOrMintProject(
+      registry,
+      { kind: 'local', vendorKey: 'L' },
+      () => 'prj_from00000000000000000001',
+    ).registry;
+    registry = resolveOrMintProject(
+      registry,
+      git('github.com/usestak/stak'),
+      () => 'prj_to000000000000000000001',
+    ).registry;
+    registry = setBinding(registry, {
+      projectId: 'prj_from00000000000000000001',
+      dir: 'C:\\old\\path',
+      boundAt: '2026-10-17T00:00:00.000Z',
+      provenance: 'user-map',
+    });
+    registry = setBinding(registry, {
+      projectId: 'prj_to000000000000000000001',
+      dir: 'C:\\Users\\NT\\Desktop\\stack',
+      boundAt: '2026-10-17T00:00:00.000Z',
+      provenance: 'user-map',
+    });
+
+    const merged = adoptReconciledProjectId(
+      registry,
+      'prj_from00000000000000000001',
+      'prj_to000000000000000000001',
+    );
+
+    expect(bindingFor(merged, 'prj_to000000000000000000001')?.dir).toBe(
+      'C:\\Users\\NT\\Desktop\\stack',
+    );
+  });
+
+  it('is a no-op when the two ids are already the same', () => {
+    let registry = emptyRegistry();
+    registry = resolveOrMintProject(
+      registry,
+      git('github.com/usestak/stak'),
+      () => 'prj_a0000000000000000000001',
+    ).registry;
+    const result = adoptReconciledProjectId(
+      registry,
+      'prj_a0000000000000000000001',
+      'prj_a0000000000000000000001',
+    );
+    expect(result).toEqual(registry);
+  });
+
+  it('is a no-op when the obsolete id does not exist in this registry', () => {
+    const registry = emptyRegistry();
+    const result = adoptReconciledProjectId(
+      registry,
+      'prj_from00000000000000000001',
+      'prj_to000000000000000000001',
+    );
+    expect(result).toEqual(registry);
+  });
+
+  it('never mutates the input registry', () => {
+    let registry = emptyRegistry();
+    registry = resolveOrMintProject(
+      registry,
+      { kind: 'local', vendorKey: 'L' },
+      () => 'prj_from00000000000000000001',
+    ).registry;
+    registry = resolveOrMintProject(
+      registry,
+      git('github.com/usestak/stak'),
+      () => 'prj_to000000000000000000001',
+    ).registry;
+    const snapshot = JSON.parse(JSON.stringify(registry));
+    adoptReconciledProjectId(
+      registry,
+      'prj_from00000000000000000001',
+      'prj_to000000000000000000001',
+    );
+    expect(registry).toEqual(snapshot);
   });
 });

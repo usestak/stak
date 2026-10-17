@@ -1942,6 +1942,90 @@ describe('STAK CLI', () => {
     expect(backedUp).toBe(true);
   });
 
+  it('memory backup refuses outright (no override) when the fresh/reset-registry safeguard trips — Cloud history exists but this machine never recovered it', async () => {
+    const riskyPreview = {
+      provider: 'claude' as const,
+      native: [],
+      carriedForward: [],
+      nativeFiles: 4,
+      nativeProjects: 1,
+      availableProjects: 1,
+      retainedFiles: 0,
+      retainedProjects: 0,
+      retainedAvailableFiles: 0,
+      retainedAvailableProjects: 0,
+      retainedUnavailableFiles: 0,
+      retainedUnavailableProjects: 0,
+      finalFiles: 4,
+      finalProjects: 1,
+      privacy: 'standard' as const,
+      supersession: {
+        localRecoveredGeneration: null,
+        cloudLatestGeneration: 2,
+        parentGeneration: 2,
+        nextGeneration: 3,
+        supersedes: false,
+      },
+      risksDuplicatingLocalProjects: true,
+    };
+    let backedUp = false;
+    const result = await runProgram(['memory', 'backup'], {
+      memoryBackupPreview: async () => riskyPreview,
+      memoryCloudBackup: async () => {
+        backedUp = true;
+        throw new Error('must not back up before the safeguard is resolved');
+      },
+    });
+    expect(backedUp).toBe(false);
+    expect(result.output).toContain('stak memory recover');
+    expect(result.output).toContain('Cloud Memory already exists');
+  });
+
+  it('memory backup proceeds normally when the fresh/reset-registry safeguard does not trip', async () => {
+    const safePreview = {
+      provider: 'claude' as const,
+      native: [],
+      carriedForward: [],
+      nativeFiles: 1,
+      nativeProjects: 1,
+      availableProjects: 1,
+      retainedFiles: 0,
+      retainedProjects: 0,
+      retainedAvailableFiles: 0,
+      retainedAvailableProjects: 0,
+      retainedUnavailableFiles: 0,
+      retainedUnavailableProjects: 0,
+      finalFiles: 1,
+      finalProjects: 1,
+      privacy: 'standard' as const,
+      supersession: {
+        localRecoveredGeneration: null,
+        cloudLatestGeneration: null,
+        parentGeneration: null,
+        nextGeneration: 0,
+        supersedes: false,
+      },
+      risksDuplicatingLocalProjects: false,
+    };
+    let backedUp = false;
+    await runProgram(['memory', 'backup'], {
+      memoryBackupPreview: async () => safePreview,
+      memoryCloudBackup: async () => {
+        backedUp = true;
+        return {
+          local: {
+            provider: 'claude',
+            files: 1,
+            projects: 1,
+            createdAt: '2026-10-17T00:00:00.000Z',
+          },
+          cloud: { status: 'skipped' },
+        };
+      },
+    });
+    expect(backedUp).toBe(true);
+  });
+
   it('recover --backup N selects exactly N and reports it as backup #N', async () => {
     let requested: number | undefined;
     const result = await runProgram(['memory', 'recover', '--backup', '3'], {

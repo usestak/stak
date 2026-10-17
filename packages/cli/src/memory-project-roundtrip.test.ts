@@ -13,6 +13,7 @@ import {
   createInProcessFetch,
 } from '@stack/cloud-server';
 import {
+  adoptReconciledProjectId,
   cloudRecover,
   encodeClaudeProjectKey,
   generateMmk,
@@ -24,6 +25,7 @@ import {
   readLocalRegistry,
   readPortableSnapshot,
   registryConflicts,
+  resolveOrMintProject,
   resolveProjectForIdentity,
   runMemoryBackup,
   standardCloudBackup,
@@ -38,6 +40,7 @@ import {
   type MemoryManifest,
 } from '@stack/memory';
 
+import { projectSyncPayloadFrom } from './cloud/checkin.js';
 import { stackCloudRemoteMemoryBackend } from './memory/cloud-backend.js';
 import { mapProject } from './memory/project-ops.js';
 
@@ -88,11 +91,11 @@ const makeCloud = () => {
     if (token.status !== 'approved') throw new Error('sign-in failed');
     return token.token;
   };
+  const clientForToken = (token: string) =>
+    createCloudClient({ baseUrl: 'http://localhost:3000', token, fetchImpl });
   const backendForToken = (token: string) =>
-    stackCloudRemoteMemoryBackend(
-      createCloudClient({ baseUrl: 'http://localhost:3000', token, fetchImpl }),
-    );
-  return { signIn, backendForToken };
+    stackCloudRemoteMemoryBackend(clientForToken(token));
+  return { signIn, backendForToken, clientForToken };
 };
 
 const gitItem = (
@@ -733,3 +736,86 @@ const makeNative = async (
     sensitivity: 'private',
   };
 };
+
+/* -------------------------------------------------------------------------- */
+/* Git-canonical reconciliation across machines (production regression)        */
+/* -------------------------------------------------------------------------- */
+
+describe('Git-canonical Project reconciliation end-to-end (CLI payload -> real Cloud sync -> local adoption)', () => {
+  it('a reset/second local registry that independently mints a fresh id for an already-owned Git repo adopts the authoritative id after syncing — Cloud never duplicates, identity stays stable', async () => {
+    const cloud = makeCloud();
+    const token = await cloud.signIn(USER);
+    const client = cloud.clientForToken(token);
+    const canonical = 'github.com/usestak/stak';
+    const gitIdentity = {
+      kind: 'git' as const,
+      canonical,
+      host: 'github.com',
+      owner: 'usestak',
+      repo: 'stak',
+    };
+
+    // Machine A: discovers this repo for the first time, mints projectId G locally.
+    const registryA = resolveOrMintProject(
+      { schemaVersion: 1, projects: [], bindings: [] },
+      gitIdentity,
+      () => 'prj_g0000000000000000000000001',
+    ).registry;
+    const rowsA = [
+      { projectId: 'prj_g0000000000000000000000001', identity: gitIdentity },
+    ];
+    const firstSync = await client.syncProjects({
+      projects: projectSyncPayloadFrom(rowsA),
+    });
+    expect(firstSync).toEqual({ ok: true });
+
+    // A reset/second local registry (same account, same real repo) never saw Machine
+    // A's registry and independently mints a DIFFERENT fresh id B for the same repo.
+    let registryB = resolveOrMintProject(
+      { schemaVersion: 1, projects: [], bindings: [] },
+      gitIdentity,
+      () => 'prj_b0000000000000000000000001',
+    ).registry;
+    const rowsB = [
+      { projectId: 'prj_b0000000000000000000000001', identity: gitIdentity },
+    ];
+    const secondSync = await client.syncProjects({
+      projects: projectSyncPayloadFrom(rowsB),
+    });
+    expect(secondSync).toEqual({
+      ok: true,
+      reconciled: [
+        {
+          fromProjectId: 'prj_b0000000000000000000000001',
+          toProjectId: 'prj_g0000000000000000000000001',
+        },
+      ],
+    });
+
+    // Local adoption (the exact wiring `program.ts` performs on this response): no
+    // duplicate row was created in Cloud, and this machine's own registry now agrees.
+    for (const r of secondSync.reconciled ?? [])
+      registryB = adoptReconciledProjectId(
+        registryB,
+        r.fromProjectId,
+        r.toProjectId,
+      );
+    expect(registryB.projects.map((p) => p.projectId)).toEqual([
+      'prj_g0000000000000000000000001',
+    ]);
+
+    // A LATER sync from the now-corrected Machine B registry never re-triggers
+    // reconciliation (it is already using the authoritative id) — no duplicate loop.
+    const thirdSync = await client.syncProjects({
+      projects: projectSyncPayloadFrom([
+        { projectId: 'prj_g0000000000000000000000001', identity: gitIdentity },
+      ]),
+    });
+    expect(thirdSync).toEqual({ ok: true });
+
+    // registryA is untouched by this reconciliation (identity never changes under it).
+    expect(resolveProjectForIdentity(registryA, gitIdentity).status).toBe(
+      'resolved',
+    );
+  });
+});

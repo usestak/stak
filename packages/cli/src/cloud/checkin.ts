@@ -205,10 +205,16 @@ export type ProjectSyncRowLike = {
 };
 export const projectSyncPayloadFrom = (
   rows: ProjectSyncRowLike[],
-): { projectId: string; name?: string }[] =>
+): { projectId: string; name?: string; gitCanonical?: string }[] =>
   rows.map((row) => {
     if (row.identity.kind === 'git')
-      return { projectId: row.projectId, name: row.identity.canonical };
+      return {
+        projectId: row.projectId,
+        name: row.identity.canonical,
+        // Carried explicitly so Cloud-side reconciliation matches on the actual
+        // canonical identity, never by sniffing the `name` string.
+        gitCanonical: row.identity.canonical,
+      };
     const name = row.discoveredName || localProjectDisplayName(row.binding);
     return name
       ? { projectId: row.projectId, name }

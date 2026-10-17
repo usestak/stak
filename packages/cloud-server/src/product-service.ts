@@ -27,6 +27,7 @@ import type {
   SkillsReadModel,
   StacksReadModel,
   SyncProjectsRequest,
+  SyncProjectsResponse,
   UploadSkillReviewArtifactRequest,
   UploadSkillReviewArtifactResponse,
 } from '@stack/spec';
@@ -991,16 +992,29 @@ export const createProductMethods = (config: ProductServiceConfig) => {
     syncProjects: async (
       user: AuthenticatedUser,
       request: SyncProjectsRequest,
-    ): Promise<{ ok: true }> => {
-      await config.repository.syncProjects(
+    ): Promise<SyncProjectsResponse> => {
+      const { reconciled } = await config.repository.syncProjects(
         user.userId,
         request.projects.map((project) => ({
           projectId: project.projectId,
           ...(project.name !== undefined ? { name: project.name } : {}),
+          ...(project.gitCanonical !== undefined
+            ? { gitCanonical: project.gitCanonical }
+            : {}),
         })),
         nowIso(),
       );
-      return { ok: true };
+      return {
+        ok: true,
+        ...(reconciled.length > 0
+          ? {
+              reconciled: reconciled.map((r) => ({
+                fromProjectId: r.fromProjectId,
+                toProjectId: r.toProjectId,
+              })),
+            }
+          : {}),
+      };
     },
 
     setProjectLifecycle: async (

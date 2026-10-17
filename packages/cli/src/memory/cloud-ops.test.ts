@@ -6,12 +6,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   InMemoryRemoteMemoryStore,
+  emptyRegistry,
   fileLocalMemoryKeyStore,
   generateRecoveryKey,
   hashBytes,
   inMemoryRemoteMemoryBackend,
   memoryStorePaths,
   readMemoryObject,
+  resolveOrMintProject,
   writeMemoryManifest,
   writeMemoryObject,
   type BackupResult,
@@ -20,6 +22,7 @@ import {
 } from '@stack/memory';
 
 import {
+  freshRegistryRisksDuplication,
   readMemoryCloudStatus,
   runMemoryCloudBackup,
   runMemoryCloudProtect,
@@ -315,5 +318,93 @@ describe('memory cloud operations', () => {
     expect(await keys.hasKey()).toBe(false);
     // The Standard backup remains usable.
     expect((await backend.getLatest())?.privacyMode).toBe('standard');
+  });
+});
+
+describe('freshRegistryRisksDuplication (fresh/reset-registry safeguard)', () => {
+  const localItem = (vendorKey: string) => ({
+    scope: 'project' as const,
+    project: { kind: 'local' as const, vendorKey },
+  });
+  const gitItem = (canonical: string) => ({
+    scope: 'project' as const,
+    project: {
+      kind: 'git' as const,
+      canonical,
+      host: 'github.com',
+      owner: canonical.split('/')[1] as string,
+      repo: canonical.split('/')[2] as string,
+    },
+  });
+
+  it('blocks: never recovered, Cloud has history, and a brand-new Local identity would be minted', () => {
+    expect(
+      freshRegistryRisksDuplication({
+        localRecoveredGeneration: null,
+        cloudLatestGeneration: 3,
+        nativeItems: [localItem('C--Users-NT-Desktop-nexus')],
+        registry: emptyRegistry(),
+      }),
+    ).toBe(true);
+  });
+
+  it('does not block: this machine already recovered at some point (established, even if behind)', () => {
+    expect(
+      freshRegistryRisksDuplication({
+        localRecoveredGeneration: 1,
+        cloudLatestGeneration: 3,
+        nativeItems: [localItem('C--Users-NT-Desktop-nexus')],
+        registry: emptyRegistry(),
+      }),
+    ).toBe(false);
+  });
+
+  it('does not block: Cloud has no history yet (genuinely new account/first use)', () => {
+    expect(
+      freshRegistryRisksDuplication({
+        localRecoveredGeneration: null,
+        cloudLatestGeneration: null,
+        nativeItems: [localItem('C--Users-NT-Desktop-nexus')],
+        registry: emptyRegistry(),
+      }),
+    ).toBe(false);
+  });
+
+  it('does not block an established registry that already knows this exact identity (one more genuinely new project elsewhere does not retroactively block this one)', () => {
+    const registry = resolveOrMintProject(
+      emptyRegistry(),
+      { kind: 'local', vendorKey: 'C--Users-NT-Desktop-nexus' },
+      () => 'prj_known0000000000000000001',
+    ).registry;
+    expect(
+      freshRegistryRisksDuplication({
+        localRecoveredGeneration: null,
+        cloudLatestGeneration: 3,
+        nativeItems: [localItem('C--Users-NT-Desktop-nexus')],
+        registry,
+      }),
+    ).toBe(false);
+  });
+
+  it('does not block a Git-backed identity even when never recovered (reconciles safely through Cloud instead)', () => {
+    expect(
+      freshRegistryRisksDuplication({
+        localRecoveredGeneration: null,
+        cloudLatestGeneration: 3,
+        nativeItems: [gitItem('github.com/usestak/stak')],
+        registry: emptyRegistry(),
+      }),
+    ).toBe(false);
+  });
+
+  it('does not block on global-scope items (no project identity involved)', () => {
+    expect(
+      freshRegistryRisksDuplication({
+        localRecoveredGeneration: null,
+        cloudLatestGeneration: 3,
+        nativeItems: [{ scope: 'global' as const }],
+        registry: emptyRegistry(),
+      }),
+    ).toBe(false);
   });
 });

@@ -140,7 +140,8 @@ export const isStrongClaim = (claim: ProjectClaim): boolean =>
 const recordKeys = (record: PortableProjectRecord): string[] =>
   record.claims.map(claimKey);
 
-const dedupeClaims = (claims: ProjectClaim[]): ProjectClaim[] => {
+/** Deduplicate claims by their stable comparison key, keeping first occurrence order. */
+export const dedupeClaims = (claims: ProjectClaim[]): ProjectClaim[] => {
   const seen = new Set<string>();
   const out: ProjectClaim[] = [];
   for (const claim of claims) {
@@ -378,6 +379,69 @@ export const setNameHint = (
     { projectId, name },
   ],
 });
+
+/**
+ * Retire an obsolete logical Project (`fromProjectId`) into the authoritative one
+ * (`toProjectId`): union their claims (deduped), keep `toProjectId`'s binding and name
+ * hint when it has one (otherwise adopt `fromProjectId`'s, retargeted), and drop the
+ * `fromProjectId` record entirely so it never again appears as a second active logical
+ * Project. Never mutates the input. A no-op when the two ids are already the same.
+ *
+ * Two call sites rely on this, both expressing "these were always the same real
+ * Project, only the identity resolution strengthened or reconciled late":
+ *  - Local -> Git identity-strengthening (a vendor key's auto-memory first resolved as
+ *    `local:<vendorKey>` before its Git remote was resolvable, and now resolves to a
+ *    strong Git identity — the stale local record is `fromProjectId`, the Git-identified
+ *    one is `toProjectId`).
+ *  - Cloud Git-canonical reconciliation (this machine just minted `fromProjectId` for a
+ *    Git identity Cloud already recognizes under its existing `toProjectId` — the CLI
+ *    adopts Cloud's id after `syncProjects` reports the reconciliation).
+ *
+ * `toProjectId` need not already exist locally (e.g. a Cloud-reconciled id this machine
+ * has never seen before) — the surviving record is created under that id either way.
+ */
+export const adoptReconciledProjectId = (
+  registry: LocalRegistry,
+  fromProjectId: string,
+  toProjectId: string,
+): LocalRegistry => {
+  if (fromProjectId === toProjectId) return registry;
+  const fromRecord = registry.projects.find(
+    (r) => r.projectId === fromProjectId,
+  );
+  if (!fromRecord) return registry; // nothing to adopt
+
+  const toRecord = registry.projects.find((r) => r.projectId === toProjectId);
+  const claims = dedupeClaims([
+    ...(toRecord?.claims ?? []),
+    ...fromRecord.claims,
+  ]);
+  const lifecycle = lifecycleOf(toRecord ?? fromRecord);
+  const projects = registry.projects
+    .filter((r) => r.projectId !== fromProjectId && r.projectId !== toProjectId)
+    .concat([{ projectId: toProjectId, claims, lifecycle }]);
+
+  const toBinding = bindingFor(registry, toProjectId);
+  const fromBinding = bindingFor(registry, fromProjectId);
+  const keptBinding =
+    toBinding ??
+    (fromBinding ? { ...fromBinding, projectId: toProjectId } : undefined);
+  const bindings = registry.bindings.filter(
+    (b) => b.projectId !== fromProjectId && b.projectId !== toProjectId,
+  );
+  if (keptBinding) bindings.push(keptBinding);
+
+  const toHint = nameHintFor(registry, toProjectId);
+  const fromHint = nameHintFor(registry, fromProjectId);
+  const keptHintName = toHint ?? fromHint;
+  const nameHints = nameHintsOf(registry).filter(
+    (h) => h.projectId !== fromProjectId && h.projectId !== toProjectId,
+  );
+  if (keptHintName !== undefined)
+    nameHints.push({ projectId: toProjectId, name: keptHintName });
+
+  return { ...registry, projects, bindings, nameHints };
+};
 
 /** All strong-identity conflicts currently present in a registry. */
 export const registryConflicts = (
