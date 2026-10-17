@@ -141,7 +141,10 @@ import { registerInitCommand } from './commands/init.js';
 import { registerScanCommand } from './commands/scan.js';
 import { registerStatusCommand } from './commands/status.js';
 import { registerRunCommand } from './commands/run.js';
-import { registerUseCommand } from './commands/use.js';
+import {
+  registerUseCommand,
+  type UseBootstrapPreview,
+} from './commands/use.js';
 import { registerRemoveCommand } from './commands/remove.js';
 import { registerTryCommand } from './commands/try.js';
 import { registerLoginCommand } from './commands/login.js';
@@ -200,9 +203,19 @@ export type ProgramDependencies = {
   diff(scanResult: ScanResult): Promise<EnvironmentDiff>;
   prepareUse(
     input: string,
-  ): Promise<StackUseProposal | StackRemoteUseProposal | StackOwnedUseProposal>;
+    options: { dryRun: boolean },
+  ): Promise<
+    | StackUseProposal
+    | StackRemoteUseProposal
+    | StackOwnedUseProposal
+    | UseBootstrapPreview
+  >;
   applyUse(
-    proposal: StackUseProposal | StackRemoteUseProposal | StackOwnedUseProposal,
+    proposal:
+      | StackUseProposal
+      | StackRemoteUseProposal
+      | StackOwnedUseProposal
+      | UseBootstrapPreview,
   ): Promise<unknown>;
   prepareRemove(identifier: string): Promise<StackRemoveProposal>;
   applyRemove(proposal: StackRemoveProposal): Promise<unknown>;
@@ -385,20 +398,29 @@ const cloudDeps: CloudOperationsDeps = {
 const buildMemoryCloudDeps = async (): Promise<MemoryCloudDeps> => {
   const credential = await cloudDeps.credentials.read();
   let backend: RemoteMemoryBackend | null = null;
+  let fetchProjectNames: MemoryCloudDeps['fetchProjectNames'];
   if (credential) {
     const baseUrl = resolveCloudBaseUrl({
       env: process.env,
       ...(credential.apiUrl ? { storedApiUrl: credential.apiUrl } : {}),
     });
-    backend = stackCloudRemoteMemoryBackend(
-      createCloudClient({ baseUrl, token: credential.token }),
-    );
+    const cloudClient = createCloudClient({ baseUrl, token: credential.token });
+    backend = stackCloudRemoteMemoryBackend(cloudClient);
+    // Read-only; seeds a recovered Project's Cloud-known display name locally right
+    // after `memory recover` (never read from the Memory bundle — see
+    // `seedRecoveredProjectNames`).
+    fetchProjectNames = async () =>
+      (await cloudClient.getProjects()).projects.map((p) => ({
+        projectId: p.projectId,
+        ...(p.name !== undefined ? { name: p.name } : {}),
+      }));
   }
   return {
     stackHome,
     backend,
     localKeyStore: fileLocalMemoryKeyStore(stackHome),
     runLocalBackup: async () => (await memoryAdapter()).backup(),
+    ...(fetchProjectNames ? { fetchProjectNames } : {}),
   };
 };
 
@@ -422,6 +444,9 @@ const buildPasskeyDeps = async (): Promise<PasskeyBridgeDeps> => {
       process.stdout.write(`Opening ${url}\n`);
       await defaultOpenBrowser(url);
     },
+    ...(base.fetchProjectNames
+      ? { fetchProjectNames: base.fetchProjectNames }
+      : {}),
   };
 };
 
@@ -497,6 +522,67 @@ export const isRemoteUseProposal = (
 ): proposal is StackRemoteUseProposal =>
   'source' in proposal && 'owner' in proposal.source;
 
+const isBootstrapPreview = (
+  proposal:
+    | StackUseProposal
+    | StackRemoteUseProposal
+    | StackOwnedUseProposal
+    | UseBootstrapPreview,
+): proposal is UseBootstrapPreview =>
+  'kind' in proposal && proposal.kind === 'bootstrap-preview';
+
+/** Narrows away `UseBootstrapPreview` — it is a `--dry-run`-only preview the command
+ *  layer always returns early on, so it should never reach `applyUse` for real. */
+const assertNotBootstrapPreview = (
+  proposal:
+    | StackUseProposal
+    | StackRemoteUseProposal
+    | StackOwnedUseProposal
+    | UseBootstrapPreview,
+): StackUseProposal | StackRemoteUseProposal | StackOwnedUseProposal => {
+  if (isBootstrapPreview(proposal))
+    throw new Error('A bootstrap preview cannot be applied.');
+  return proposal;
+};
+
+/**
+ * Fresh-machine `use` onboarding: a genuinely new machine with zero global Skills
+ * should not need to understand `main`/`stak init` before consuming its first STAK.
+ * If `main` is missing AND the same safe discovery `init`/`scan` already use finds
+ * zero valid Skills, bootstrap an empty `main` so the requested `use` can proceed —
+ * works identically for a public (@owner/name), the caller's own Cloud-named, or a
+ * local STAK. If `main` is missing but ONE OR MORE Skills ARE discovered, this does
+ * NOT bootstrap (preserves the existing safety boundary: those Skills must be
+ * captured intentionally via an explicit `stak init`) — the original
+ * "main does not exist. Run stak init first." error still surfaces unchanged.
+ * A no-op (zero extra writes) whenever `main` already exists.
+ *
+ * `dryRun: true` never writes anything, even when bootstrap conditions are met —
+ * `--dry-run` promises no persistent mutation. It returns `'preview'` instead so the
+ * caller can render an accurate preview without a real environment to diff against.
+ */
+export const bootstrapEmptyMainIfSkillFree = async (options: {
+  stackHome: string;
+  dryRun: boolean;
+}): Promise<'bootstrapped' | 'preview' | 'skipped'> => {
+  try {
+    await loadMainEnvironment({ stackHome: options.stackHome });
+    return 'skipped'; // main already exists — never touch it here
+  } catch (error) {
+    if (!(
+      error instanceof StackStateError && error.code === 'environment-not-found'
+    ))
+      throw error;
+  }
+  const scanResult = await scanSkills({
+    roots: resolveScanRoots({ includeProject: false }),
+  });
+  if (scanResult.skills.length > 0) return 'skipped'; // existing safety error surfaces
+  if (options.dryRun) return 'preview';
+  await initializeMainEnvironment({ stackHome: options.stackHome, scanResult });
+  return 'bootstrapped';
+};
+
 const defaultDependencies: ProgramDependencies = {
   scan: async ({ project }) =>
     scanSkills({ roots: resolveScanRoots({ includeProject: project }) }),
@@ -518,7 +604,13 @@ const defaultDependencies: ProgramDependencies = {
       }));
   },
   diff: async (scanResult) => diffMainEnvironment({ stackHome, scanResult }),
-  prepareUse: async (input) => {
+  prepareUse: async (input, options) => {
+    const bootstrap = await bootstrapEmptyMainIfSkillFree({
+      stackHome,
+      dryRun: options.dryRun,
+    });
+    if (bootstrap === 'preview')
+      return { kind: 'bootstrap-preview' as const, stak: input };
     if (isPublicStackRef(input)) {
       const source = await resolvePublicStackSource({
         client: await publicReadClient(cloudDeps),
@@ -544,15 +636,19 @@ const defaultDependencies: ProgramDependencies = {
       return prepareOwnedStackUse({ stackHome, source });
     }
   },
-  applyUse: async (proposal) =>
-    isOwnedUseProposal(proposal)
-      ? applyOwnedStackUse(proposal, { gitExecutor: spawnGit })
-      : isRemoteUseProposal(proposal)
-        ? applyRemoteStackUse(proposal, {
-            gitExecutor: spawnGit,
-            client: await publicReadClient(cloudDeps),
-          })
-        : applyStackUse(proposal),
+  applyUse: async (proposal) => {
+    // The command layer always returns early on a bootstrap preview (--dry-run only;
+    // no environment exists yet) — it is never actually applied.
+    const real = assertNotBootstrapPreview(proposal);
+    if (isOwnedUseProposal(real))
+      return applyOwnedStackUse(real, { gitExecutor: spawnGit });
+    if (isRemoteUseProposal(real))
+      return applyRemoteStackUse(real, {
+        gitExecutor: spawnGit,
+        client: await publicReadClient(cloudDeps),
+      });
+    return applyStackUse(real);
+  },
   prepareRemove: (identifier) => prepareStackRemove({ stackHome, identifier }),
   applyRemove: (proposal) => applyStackRemove(proposal),
   // `stak run` projects through the same paused-aware helper as `stak skill update`, so a

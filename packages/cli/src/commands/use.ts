@@ -12,8 +12,24 @@ import {
   renderRemoteStackUse,
 } from '../ui/cloud.js';
 
+/**
+ * `--dry-run` preview for the fresh-machine bootstrap (main missing, zero Skills
+ * discovered): an empty main WOULD be created and `stak` added to it. No environment
+ * exists yet to compute a real diff against, so this is an honest, minimal preview —
+ * never a persistent mutation — rather than a full composed proposal.
+ */
+export type UseBootstrapPreview = { kind: 'bootstrap-preview'; stak: string };
+
 export type AnyUseProposal =
-  StackUseProposal | StackRemoteUseProposal | StackOwnedUseProposal;
+  | StackUseProposal
+  | StackRemoteUseProposal
+  | StackOwnedUseProposal
+  | UseBootstrapPreview;
+
+const isBootstrapPreview = (
+  proposal: AnyUseProposal,
+): proposal is UseBootstrapPreview =>
+  'kind' in proposal && proposal.kind === 'bootstrap-preview';
 
 // Neither ResolvedOwnedStackSource nor ResolvedPublicStackSource carries a `kind` field, so
 // the discriminator uses a field unique to each: `owner` only exists on the public-ref
@@ -28,7 +44,10 @@ const isOwned = (proposal: AnyUseProposal): proposal is StackOwnedUseProposal =>
   'source' in proposal && 'stackId' in proposal.source;
 
 export type UseCommandDependencies = {
-  prepareUse(input: string): Promise<AnyUseProposal>;
+  prepareUse(
+    input: string,
+    options: { dryRun: boolean },
+  ): Promise<AnyUseProposal>;
   applyUse(proposal: AnyUseProposal): Promise<unknown>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
@@ -52,7 +71,29 @@ export const registerUseCommand = (
         input: string,
         options: { dryRun?: boolean; json?: boolean; yes?: boolean },
       ) => {
-        const proposal = await dependencies.prepareUse(input);
+        const proposal = await dependencies.prepareUse(input, {
+          dryRun: options.dryRun === true,
+        });
+        if (isBootstrapPreview(proposal)) {
+          // Fresh machine, zero Skills: `main` does not exist yet and only a
+          // `--dry-run` preview was requested, so nothing was created or written.
+          if (options.json) {
+            dependencies.writeOut(
+              `${JSON.stringify(
+                { dryRun: true, bootstrap: 'empty-main', stak: proposal.stak },
+                null,
+                2,
+              )}\n`,
+            );
+            return;
+          }
+          dependencies.writeOut(
+            `main does not exist yet and no existing Skills were found, so ` +
+              `running this without --dry-run will create an empty main and add ` +
+              `${proposal.stak} to it.\nNo changes were made.\n`,
+          );
+          return;
+        }
         if (options.json) {
           if (!options.dryRun)
             throw new Error('--json currently requires --dry-run.');

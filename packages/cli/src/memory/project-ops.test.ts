@@ -9,6 +9,8 @@ import {
   encodeClaudeProjectKey,
   hashBytes,
   memoryStorePaths,
+  nameHintFor,
+  nameHintIsExplicit,
   planMemoryBackupComposition,
   readLocalRegistry,
   readPortableSnapshot,
@@ -20,6 +22,7 @@ import {
 
 import { renderProjectList } from '../commands/project.js';
 import {
+  applyRecoveredProjectNames,
   listProjects,
   mapProject,
   setProjectDisplayName,
@@ -836,5 +839,105 @@ describe('setProjectDisplayName (stak project name — explicit, presentation-on
       lifecycle: 'archived',
       discoveredName: 'renamed',
     });
+  });
+});
+
+describe('applyRecoveredProjectNames (stak memory recover — Cloud-known names survive recovery)', () => {
+  const idOf = async (stackHome: string) =>
+    (await readLocalRegistry(stackHome)).projects[0]?.projectId as string;
+
+  it('seeds a Cloud-known name onto a recovered, unmapped Local project', async () => {
+    const stackHome = await seedRegistry([
+      localItem('C--Users-NT-Desktop-nexus', 'n.md'),
+    ]);
+    const id = await idOf(stackHome);
+
+    await applyRecoveredProjectNames({
+      stackHome,
+      names: [{ projectId: id, name: 'nexus' }],
+    });
+
+    const rows = await listProjects({ stackHome });
+    expect(rows[0]).toMatchObject({
+      discoveredName: 'nexus',
+      binding: null,
+      availability: 'unavailable',
+    });
+  });
+
+  it('is marked explicit, so a later discovery-time hint cannot overwrite it', async () => {
+    const stackHome = await seedRegistry([
+      localItem('C--Users-NT-Desktop-nexus', 'n.md'),
+    ]);
+    const id = await idOf(stackHome);
+    await applyRecoveredProjectNames({
+      stackHome,
+      names: [{ projectId: id, name: 'nexus' }],
+    });
+
+    const registry = await readLocalRegistry(stackHome);
+    expect(nameHintIsExplicit(registry, id)).toBe(true);
+  });
+
+  it('skips a Git-backed project (its name is already its canonical identity)', async () => {
+    const stackHome = await seedRegistry([
+      gitItem('github.com/usestak/stak', 'a.md'),
+    ]);
+    const id = await idOf(stackHome);
+    await applyRecoveredProjectNames({
+      stackHome,
+      names: [{ projectId: id, name: 'github.com/usestak/stak' }],
+    });
+    const registry = await readLocalRegistry(stackHome);
+    expect(nameHintFor(registry, id)).toBeUndefined();
+  });
+
+  it('skips an entry with no name and one for a projectId this registry does not know', async () => {
+    const stackHome = await seedRegistry([
+      localItem('C--Users-NT-Desktop-nexus', 'n.md'),
+    ]);
+    const id = await idOf(stackHome);
+    await applyRecoveredProjectNames({
+      stackHome,
+      names: [
+        { projectId: id },
+        { projectId: 'prj_zzzzzzzzzzzzzzzzzzzzzzzzzz', name: 'unrelated' },
+      ],
+    });
+    const registry = await readLocalRegistry(stackHome);
+    expect(nameHintFor(registry, id)).toBeUndefined();
+  });
+
+  it('never changes projectId, claims, bindings, or lifecycle', async () => {
+    const stackHome = await seedRegistry([
+      localItem('C--Users-NT-Desktop-nexus', 'n.md'),
+    ]);
+    const id = await idOf(stackHome);
+    const before = await readLocalRegistry(stackHome);
+
+    await applyRecoveredProjectNames({
+      stackHome,
+      names: [{ projectId: id, name: 'nexus' }],
+    });
+
+    const after = await readLocalRegistry(stackHome);
+    expect(after.projects).toEqual(before.projects);
+    expect(after.bindings).toEqual(before.bindings);
+  });
+
+  it('a nameless recovery entry does not erase an already-set local name', async () => {
+    const stackHome = await seedRegistry([
+      localItem('C--Users-NT-Desktop-nexus', 'n.md'),
+    ]);
+    const id = await idOf(stackHome);
+    await setProjectDisplayName({ stackHome, selector: id, name: 'nexus' });
+
+    await applyRecoveredProjectNames({
+      stackHome,
+      names: [{ projectId: id }],
+    });
+
+    const registry = await readLocalRegistry(stackHome);
+    expect(nameHintFor(registry, id)).toBe('nexus');
   });
 });

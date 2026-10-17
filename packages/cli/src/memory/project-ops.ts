@@ -361,3 +361,32 @@ export const setProjectDisplayName = async (deps: {
   );
   return { status: 'ok', projectId: record.projectId, name };
 };
+
+/**
+ * Seed a Cloud-known display name onto its recovered logical Project, so the name is
+ * visible on a fresh machine BEFORE any local directory is mapped (`stak memory
+ * recover`). Cloud's `name` column is the only source read here — never the Memory
+ * bundle (keeps bundle content privacy-pure) and never a local path/basename. Only
+ * applies to a Project this registry actually has a record for (i.e. one `recover`
+ * just reconciled); skips a Git-backed Project (its name is already its canonical
+ * identity, never overridable) and any entry with no name. Marked `explicit` so a
+ * later discovery-time basename on THIS machine can never silently clobber the
+ * Cloud-known name — the whole point of carrying it across the recovery. Idempotent,
+ * never touches claims/bindings/lifecycle, never mints or changes a `projectId`.
+ */
+export const applyRecoveredProjectNames = async (deps: {
+  stackHome: string;
+  names: { projectId: string; name?: string | undefined }[];
+}): Promise<void> => {
+  let registry = await readLocalRegistry(deps.stackHome);
+  let changed = false;
+  for (const { projectId, name } of deps.names) {
+    if (!name) continue;
+    const record = recordFor(registry, projectId);
+    if (!record) continue; // not a Project this machine's registry knows about
+    if (gitClaimOf(record)) continue; // Git identity already names itself
+    registry = setExplicitNameHint(registry, projectId, name);
+    changed = true;
+  }
+  if (changed) await writeLocalRegistry(deps.stackHome, registry);
+};

@@ -15,10 +15,14 @@ import {
 import {
   adoptReconciledProjectId,
   cloudRecover,
+  emptyRegistry,
   encodeClaudeProjectKey,
   generateMmk,
   hashBytes,
   memoryStorePaths,
+  mergePortableSnapshot,
+  nameHintFor,
+  nameHintIsExplicit,
   planMemoryBackupComposition,
   planMemoryRestore,
   protectedCloudBackup,
@@ -28,8 +32,10 @@ import {
   resolveOrMintProject,
   resolveProjectForIdentity,
   runMemoryBackup,
+  setExplicitNameHint,
   standardCloudBackup,
   syncRegistryForBackup,
+  toPortableSnapshot,
   writeMemoryManifest,
   writeMemoryObject,
   runMemoryRestore,
@@ -42,7 +48,10 @@ import {
 
 import { projectSyncPayloadFrom } from './cloud/checkin.js';
 import { stackCloudRemoteMemoryBackend } from './memory/cloud-backend.js';
-import { mapProject } from './memory/project-ops.js';
+import {
+  applyRecoveredProjectNames,
+  mapProject,
+} from './memory/project-ops.js';
 
 const USER = '00000000-0000-4000-8000-00000000000a';
 
@@ -817,5 +826,113 @@ describe('Git-canonical Project reconciliation end-to-end (CLI payload -> real C
     expect(resolveProjectForIdentity(registryA, gitIdentity).status).toBe(
       'resolved',
     );
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Recovered display names (production regression — Issue A)                  */
+/* -------------------------------------------------------------------------- */
+
+describe('A recovered Project shows its Cloud-known display name BEFORE mapping', () => {
+  it('Machine A sets an explicit name and syncs it; Machine B recovers the same projectId and sees the name, unmapped, before ever mapping', async () => {
+    const cloud = makeCloud();
+    const token = await cloud.signIn(USER);
+    const client = cloud.clientForToken(token);
+    const identity = {
+      kind: 'local' as const,
+      vendorKey: 'C--Users-NT-Desktop-nexus',
+    };
+    const mint = () => 'prj_p0000000000000000000000001';
+
+    // Machine A: local identity resolves to P, user explicitly names it, syncs to Cloud.
+    let registryA = resolveOrMintProject(
+      emptyRegistry(),
+      identity,
+      mint,
+    ).registry;
+    registryA = setExplicitNameHint(
+      registryA,
+      'prj_p0000000000000000000000001',
+      'nexus',
+    );
+    const syncA = await client.syncProjects({
+      projects: projectSyncPayloadFrom([
+        {
+          projectId: 'prj_p0000000000000000000000001',
+          identity: { kind: 'local' },
+          discoveredName: 'nexus',
+        },
+      ]),
+    });
+    expect(syncA).toEqual({ ok: true });
+
+    // Machine B: fresh state. Recovery reconciles identity from the portable snapshot
+    // (never a name — the snapshot carries no name field at all).
+    const snapshot = toPortableSnapshot(registryA);
+    expect(JSON.stringify(snapshot)).not.toContain('nexus');
+    const merged = mergePortableSnapshot(emptyRegistry(), snapshot);
+    expect(merged.conflicts).toEqual([]);
+    expect(
+      nameHintFor(merged.registry, 'prj_p0000000000000000000000001'),
+    ).toBeUndefined();
+
+    // The name is seeded from Cloud ONLY — this is the exact step `memory recover`
+    // performs via `seedRecoveredProjectNames`.
+    const stackHomeB = await tempDir('stack-B-');
+    await writeLocalRegistry(stackHomeB, merged.registry);
+    const { projects } = await client.getProjects();
+    await applyRecoveredProjectNames({
+      stackHome: stackHomeB,
+      names: projects,
+    });
+
+    const registryB = await readLocalRegistry(stackHomeB);
+    expect(registryB.projects.map((p) => p.projectId)).toEqual([
+      'prj_p0000000000000000000000001',
+    ]);
+    expect(nameHintFor(registryB, 'prj_p0000000000000000000000001')).toBe(
+      'nexus',
+    );
+    expect(
+      nameHintIsExplicit(registryB, 'prj_p0000000000000000000000001'),
+    ).toBe(true);
+    expect(registryB.bindings).toEqual([]); // not mapped yet
+
+    // Mapping does not change identity or name.
+    const mapResult = await mapProject({
+      stackHome: stackHomeB,
+      selector: 'prj_p0000000000000000000000001',
+      dir: await tempDir('nexus-new-dir-'),
+      gitOrigin: async () => undefined,
+    });
+    expect(mapResult.status).toBe('mapped');
+    const registryAfterMap = await readLocalRegistry(stackHomeB);
+    expect(registryAfterMap.projects).toEqual(registryB.projects);
+    expect(
+      nameHintFor(registryAfterMap, 'prj_p0000000000000000000000001'),
+    ).toBe('nexus');
+  });
+
+  it('a nameless sync (recovered, unmapped, before name-seeding) cannot erase the good Cloud name', async () => {
+    const cloud = makeCloud();
+    const token = await cloud.signIn(USER);
+    const client = cloud.clientForToken(token);
+
+    await client.syncProjects({
+      projects: [
+        { projectId: 'prj_p0000000000000000000000001', name: 'nexus' },
+      ],
+    });
+
+    // A machine that hasn't learned the name yet syncs presence with no name at all.
+    await client.syncProjects({
+      projects: [{ projectId: 'prj_p0000000000000000000000001' }],
+    });
+
+    const { projects } = await client.getProjects();
+    expect(
+      projects.find((p) => p.projectId === 'prj_p0000000000000000000000001')
+        ?.name,
+    ).toBe('nexus');
   });
 });

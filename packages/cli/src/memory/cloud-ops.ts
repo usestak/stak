@@ -14,6 +14,7 @@
  * fully testable without the network. The commands layer builds the real backend
  * from the authenticated cloud client.
  */
+import { applyRecoveredProjectNames } from './project-ops.js';
 import {
   CIPHER_VERSION,
   addRecoveryFileWrapper,
@@ -31,6 +32,7 @@ import {
   unwrapWithRecoveryKey,
   isHistoricalRecovery,
   readLocalRecoveryState,
+  readMemoryManifest,
   writeLocalRecoveryState,
   type BackupResult,
   type DiscoveredMemoryItem,
@@ -59,6 +61,14 @@ export type MemoryCloudDeps = {
   localKeyStore: LocalMemoryKeyStore;
   runLocalBackup: () => Promise<BackupResult>;
   now?: () => Date;
+  /**
+   * Read-only, best-effort: this account's Projects (id + safe display name), used
+   * ONLY to seed a recovered Project's Cloud-known name locally right after `memory
+   * recover` (see `seedRecoveredProjectNames`) — never read from the Memory bundle
+   * itself. Optional so existing recover tests that don't need this keep working
+   * unchanged; a failure here never fails the recovery it decorates.
+   */
+  fetchProjectNames?: () => Promise<{ projectId: string; name?: string }[]>;
 };
 
 export type CloudBackupOutcome =
@@ -129,6 +139,26 @@ const recordRecoveryProvenance = async (
   });
 };
 
+/**
+ * After a successful `cloudRecover`, seed each recovered Project's Cloud-known display
+ * name locally (so it is visible BEFORE any mapping — see `applyRecoveredProjectNames`).
+ * Read from Cloud's project list, never from the Memory bundle. Best-effort: recovery
+ * has already succeeded by the time this runs, and a failure here (offline, no
+ * `fetchProjectNames` deps, etc.) must never surface as a recovery failure.
+ */
+const seedRecoveredProjectNames = async (deps: {
+  stackHome: string;
+  fetchProjectNames?: () => Promise<{ projectId: string; name?: string }[]>;
+}): Promise<void> => {
+  if (!deps.fetchProjectNames) return;
+  try {
+    const names = await deps.fetchProjectNames();
+    await applyRecoveredProjectNames({ stackHome: deps.stackHome, names });
+  } catch {
+    // Best-effort only — the name re-appears on the next successful recover/backup.
+  }
+};
+
 /** backup: local first, then Cloud (never fails the local commit). */
 export const runMemoryCloudBackup = async (
   deps: MemoryCloudDeps,
@@ -182,12 +212,30 @@ export type CloudRecoverOutcome =
   | {
       status: 'recovered';
       privacyMode: 'standard' | 'protected';
+      /**
+       * Unique content-addressed BLOBS written by this recovery (after dedup — two
+       * logical Memory files with byte-identical content share one object). This is
+       * a storage-layer metric, not a user-facing file count; see `files`.
+       */
       objects: number;
+      /**
+       * Logical Memory files now present (the restored manifest's item count) — the
+       * number a user should read as "how many of my Memory files are here", distinct
+       * from `objects` (which can be LOWER when files share identical content; it is
+       * never evidence of loss by itself).
+       */
+      files: number;
       generation: number;
     }
   | { status: 'needs-recovery-method' }
   | { status: 'not-authenticated' }
   | { status: 'no-backup' };
+
+/** The restored manifest's logical item count, or 0 if unreadable (never thrown). */
+const recoveredFileCount = async (stackHome: string): Promise<number> => {
+  const manifest = await readMemoryManifest(stackHome);
+  return manifest?.items.length ?? 0;
+};
 
 /** Recover the private store from Cloud. Does not touch native agent files. */
 export const runMemoryCloudRecover = async (
@@ -216,10 +264,12 @@ export const runMemoryCloudRecover = async (
       privacyMode: 'standard',
       cloudLatest,
     });
+    await seedRecoveredProjectNames(deps);
     return {
       status: 'recovered',
       privacyMode: 'standard',
       objects: result.objects,
+      files: await recoveredFileCount(deps.stackHome),
       generation: result.generation,
     };
   }
@@ -249,10 +299,12 @@ export const runMemoryCloudRecover = async (
     privacyMode: 'protected',
     cloudLatest,
   });
+  await seedRecoveredProjectNames(deps);
   return {
     status: 'recovered',
     privacyMode: 'protected',
     objects: result.objects,
+    files: await recoveredFileCount(deps.stackHome),
     generation: result.generation,
   };
 };
@@ -498,6 +550,7 @@ export type PasskeyBridgeDeps = {
   ttlMs?: number;
   timeoutMs?: number;
   pollMs?: number;
+  fetchProjectNames?: () => Promise<{ projectId: string; name?: string }[]>;
 };
 
 const defaultSleep = (ms: number): Promise<void> =>
@@ -625,7 +678,7 @@ export type PasskeyRecoverResult =
   | { status: 'not-authenticated' }
   | { status: 'no-backup' }
   | { status: 'passkey-failed'; reason: PasskeyFailureReason }
-  | { status: 'recovered'; objects: number; generation: number };
+  | { status: 'recovered'; objects: number; files: number; generation: number };
 
 /**
  * Recover Protected Memory via a passkey: create a one-time recovery session, open
@@ -701,9 +754,11 @@ export const runPasskeyRecover = async (
     recoveredAt: now().toISOString(),
     privacyMode: 'protected',
   });
+  await seedRecoveredProjectNames(deps);
   return {
     status: 'recovered',
     objects: result.objects,
+    files: await recoveredFileCount(deps.stackHome),
     generation: result.generation,
   };
 };

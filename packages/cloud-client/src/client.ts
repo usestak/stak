@@ -15,6 +15,7 @@ import {
   machineCheckinResponseSchema,
   meResponseSchema,
   prepareSnapshotResponseSchema,
+  projectsReadModelSchema,
   publicProfileResponseSchema,
   publishPublicStackVersionResponseSchema,
   setProjectLifecycleResponseSchema,
@@ -49,6 +50,7 @@ import type {
   PrepareSnapshotResponse,
   PublicProfileResponse,
   ProjectLifecycle,
+  ProjectsReadModel,
   PublishPublicStackVersionRequest,
   PublishPublicStackVersionResponse,
   ReportSkillSourceCheckRequest,
@@ -130,6 +132,11 @@ export interface CloudClient {
     request: MachineCheckinRequest,
   ): Promise<MachineCheckinResponse>;
   listMachines(): Promise<ListMachinesResponse>;
+  /** Read-only: this account's Projects (id, safe display name, lifecycle, presence,
+   *  file count where derivable). Used by `stak memory recover` to seed a recovered
+   *  Project's Cloud-known display name locally, without embedding it in the Memory
+   *  bundle itself (keeps bundle content privacy-pure/provider-neutral). */
+  getProjects(): Promise<ProjectsReadModel>;
   /** Phase P3: discovery sync of this account's project registry (safe name only; no paths). */
   syncProjects(request: SyncProjectsRequest): Promise<SyncProjectsResponse>;
   /** Phase P3: explicit account-side lifecycle intent (archive/unarchive) for one Project. */
@@ -466,6 +473,11 @@ export const createCloudClient = (
       json(
         listMachinesResponseSchema,
         await request('GET', 'machines', { auth: true }),
+      ),
+    getProjects: async () =>
+      json(
+        projectsReadModelSchema,
+        await request('GET', 'projects', { auth: true }),
       ),
     syncProjects: async (body) =>
       json(

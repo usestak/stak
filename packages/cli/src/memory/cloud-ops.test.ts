@@ -149,6 +149,75 @@ describe('memory cloud operations', () => {
     await assertByteExact(source.stackHome, dest, source.hashes);
   });
 
+  it('recover reports the logical file count even when two files share identical content (dedup never implies loss)', async () => {
+    // Two logical manifest items, SAME bytes → one content-addressed object.
+    const stackHome = await temp('stack-ops-dedup-src-');
+    const bodyA = Buffer.from('shared content\n', 'utf8');
+    const bodyB = Buffer.from('different content\n', 'utf8');
+    const hashA = hashBytes(bodyA);
+    const hashB = hashBytes(bodyB);
+    await writeMemoryObject({ stackHome, contentHash: hashA, bytes: bodyA });
+    await writeMemoryObject({ stackHome, contentHash: hashB, bytes: bodyB });
+    const item = (rel: string, contentHash: string): ManifestItem => ({
+      provider: 'claude',
+      kind: 'auto-memory',
+      scope: 'project',
+      logicalId: `claude/auto-memory/local:C--dup/${rel}`,
+      project: { kind: 'local', vendorKey: 'C--dup' },
+      contentHash,
+      restoreTarget: { base: 'claude-project-memory', relativePath: rel },
+      capturedAt: '2026-09-25T12:00:00.000Z',
+      sensitivity: 'private',
+    });
+    await writeMemoryManifest({
+      stackHome,
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-09-25T12:00:00.000Z',
+        items: [
+          item('a1.md', hashA),
+          item('a2.md', hashA), // identical content to a1.md — same object
+          item('b1.md', hashB),
+        ],
+      },
+    });
+
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-ops-dedup-keys-'));
+    await runMemoryCloudBackup({
+      stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    });
+
+    const dest = await temp('stack-ops-dedup-dst-');
+    const rec = await runMemoryCloudRecover({
+      stackHome: dest,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    });
+    expect(rec.status).toBe('recovered');
+    if (rec.status !== 'recovered') return;
+    // 3 logical files, but only 2 unique content objects (a1.md and a2.md collapse).
+    expect(rec.files).toBe(3);
+    expect(rec.objects).toBe(2);
+    // No bytes are missing: both distinct contents are present and byte-exact.
+    expect(
+      Buffer.from(
+        await readMemoryObject({ stackHome: dest, contentHash: hashA }),
+      ).equals(bodyA),
+    ).toBe(true);
+    expect(
+      Buffer.from(
+        await readMemoryObject({ stackHome: dest, contentHash: hashB }),
+      ).equals(bodyB),
+    ).toBe(true);
+  });
+
   it('protect enables Protected, enrolls the device, and backs up Protected', async () => {
     const source = await writeStore();
     const store = new InMemoryRemoteMemoryStore();

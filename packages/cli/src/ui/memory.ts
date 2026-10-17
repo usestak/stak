@@ -149,7 +149,7 @@ export const renderMemoryRecover = (outcome: CloudRecoverOutcome): string => {
   return block([
     `Memory recovered from backup #${outcome.generation}.`,
     '',
-    `${plainFiles(outcome.objects)} available`,
+    `${plainFiles(outcome.files)} available`,
     `Privacy: ${outcome.privacyMode === 'protected' ? 'Protected' : 'Standard'}`,
     '',
     'Run `stak memory restore`.',

@@ -65,7 +65,12 @@ export type MemoryCommandDependencies = {
     | { status: 'not-authenticated' }
     | { status: 'no-backup' }
     | { status: 'passkey-failed'; reason: PasskeyFailureReason }
-    | { status: 'recovered'; objects: number; generation: number }
+    | {
+        status: 'recovered';
+        objects: number;
+        files: number;
+        generation: number;
+      }
   >;
   memoryCloudStatus(): Promise<MemoryCloudStatus>;
   confirm(message: string): Promise<boolean>;
@@ -377,6 +382,7 @@ export const registerMemoryCommand = (
                 ? {
                     status: result.status,
                     objects: result.objects,
+                    files: result.files,
                     backup: result.generation,
                   }
                 : result,
@@ -402,6 +408,7 @@ export const registerMemoryCommand = (
               status: 'recovered',
               privacyMode: 'protected',
               objects: result.objects,
+              files: result.files,
               generation: result.generation,
             }),
           );
@@ -421,6 +428,7 @@ export const registerMemoryCommand = (
                   status: outcome.status,
                   privacyMode: outcome.privacyMode,
                   objects: outcome.objects,
+                  files: outcome.files,
                   backup: outcome.generation,
                 }
               : outcome,

@@ -477,6 +477,57 @@ describe('`stak use` renders the right proposal kind (P10B)', () => {
   });
 });
 
+describe('stak use — fresh-machine bootstrap preview (empty main, --dry-run)', () => {
+  it('text: previews the bootstrap, confirms no changes were made, never calls applyUse', async () => {
+    let applied = false;
+    const result = await runProgram(
+      ['use', '@stephentony100/frontend-test', '--dry-run'],
+      {
+        prepareUse: async (input, options) => {
+          expect(options.dryRun).toBe(true);
+          return { kind: 'bootstrap-preview' as const, stak: input };
+        },
+        applyUse: async () => {
+          applied = true;
+          return undefined;
+        },
+      },
+    );
+    expect(result.output).toContain('empty main');
+    expect(result.output).toContain('@stephentony100/frontend-test');
+    expect(result.output).toContain('No changes were made.');
+    expect(applied).toBe(false);
+  });
+
+  it('--json: emits a structured bootstrap preview', async () => {
+    const result = await runProgram(
+      ['use', '@stephentony100/frontend-test', '--dry-run', '--json'],
+      {
+        prepareUse: async (input) => ({
+          kind: 'bootstrap-preview' as const,
+          stak: input,
+        }),
+      },
+    );
+    expect(JSON.parse(result.output)).toEqual({
+      dryRun: true,
+      bootstrap: 'empty-main',
+      stak: '@stephentony100/frontend-test',
+    });
+  });
+
+  it('a real (non-dry-run) use passes dryRun: false through to prepareUse', async () => {
+    let requestedDryRun: boolean | undefined;
+    await runProgram(['use', 'frontend'], {
+      prepareUse: async (input, options) => {
+        requestedDryRun = options.dryRun;
+        return { kind: 'bootstrap-preview' as const, stak: input };
+      },
+    });
+    expect(requestedDryRun).toBe(false);
+  });
+});
+
 describe('STAK CLI', () => {
   it('prints root help with cloud commands but without deferred commands', async () => {
     const result = await runProgram(['--help']);
@@ -1762,6 +1813,7 @@ describe('STAK CLI', () => {
           status: 'recovered',
           privacyMode: 'protected',
           objects: 27,
+          files: 29,
           generation: 3,
         }),
       },
@@ -1769,6 +1821,10 @@ describe('STAK CLI', () => {
     const parsed = JSON.parse(result.output);
     expect(parsed.backup).toBe(3);
     expect(parsed.generation).toBeUndefined();
+    // `objects` (deduped content blobs) stays for backward compatibility; `files`
+    // (logical Memory file count) is the new, additive, user-facing truth.
+    expect(parsed.objects).toBe(27);
+    expect(parsed.files).toBe(29);
   });
 
   it('hidden recover --generation --json returns the modern backup JSON', async () => {
@@ -1779,6 +1835,7 @@ describe('STAK CLI', () => {
           status: 'recovered',
           privacyMode: 'protected',
           objects: 27,
+          files: 29,
           generation: 3,
         }),
       },
@@ -1786,6 +1843,20 @@ describe('STAK CLI', () => {
     const parsed = JSON.parse(result.output);
     expect(parsed.backup).toBe(3);
     expect(parsed.generation).toBeUndefined();
+  });
+
+  it('recover (text) reports the logical file count, not the deduped blob count — never implies file loss', async () => {
+    const result = await runProgram(['memory', 'recover', '--backup', '3'], {
+      memoryCloudRecover: async () => ({
+        status: 'recovered',
+        privacyMode: 'standard',
+        objects: 27, // fewer unique content blobs than logical files (dedup)
+        files: 29,
+        generation: 3,
+      }),
+    });
+    expect(result.output).toContain('29 files available');
+    expect(result.output).not.toContain('27 files');
   });
 
   it('status --json exposes backup-named fields only', async () => {
@@ -2036,6 +2107,7 @@ describe('STAK CLI', () => {
           status: 'recovered',
           privacyMode: 'protected',
           objects: 27,
+          files: 29,
           generation: 3,
         };
       },
@@ -2053,6 +2125,7 @@ describe('STAK CLI', () => {
           status: 'recovered',
           privacyMode: 'protected',
           objects: 27,
+          files: 29,
           generation: 3,
         };
       },
