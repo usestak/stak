@@ -583,9 +583,24 @@ export const bootstrapEmptyMainIfSkillFree = async (options: {
   return 'bootstrapped';
 };
 
+/**
+ * The postAction check-in hook (below) needs a global (non-project) ScanResult to compute
+ * `installedSkills`, and several CHECKIN_COMMANDS (`scan`, `status`, …) already perform that
+ * exact same scan — same roots, same process, moments earlier — as part of their own action.
+ * Re-scanning from disk a second time would redo the expensive hashing/Git-provenance work for
+ * nothing new, so the global scan result is cached here within this single CLI invocation and
+ * reused by the check-in if still fresh. It is never read across process invocations.
+ */
+let lastGlobalScan: { result: ScanResult } | undefined;
+
 const defaultDependencies: ProgramDependencies = {
-  scan: async ({ project }) =>
-    scanSkills({ roots: resolveScanRoots({ includeProject: project }) }),
+  scan: async ({ project }) => {
+    const result = await scanSkills({
+      roots: resolveScanRoots({ includeProject: project }),
+    });
+    if (!project) lastGlobalScan = { result };
+    return result;
+  },
   initialize: async (scanResult) =>
     initializeMainEnvironment({ stackHome, scanResult }),
   status: async (scanResult) =>
@@ -959,6 +974,19 @@ const defaultDependencies: ProgramDependencies = {
       ...(credential.apiUrl ? { storedApiUrl: credential.apiUrl } : {}),
     });
     const client = createCloudClient({ baseUrl, token: credential.token });
+    // `listProjects`/`resolveMemoryProjects` (which shells out to Git per candidate project
+    // directory for origin detection) is needed both for the check-in's `projectPresence`
+    // field and for the project-registry sync below. Compute it once and share it — the two
+    // call sites previously ran this independently, paying the Git-subprocess cost twice.
+    const projectRows = await listProjects({
+      stackHome,
+      projects: await resolveMemoryProjects({
+        cwd: process.cwd(),
+        platform: process.platform,
+        listDirs: listChildDirs,
+        gitOrigin: gitOriginOf,
+      }),
+    });
     const inputs = await gatherCheckinInputs({
       machine: () => getOrCreateMachineIdentity({ stackHome }),
       // TRUE only when every current native Memory item is byte-identical in the latest
@@ -978,26 +1006,17 @@ const defaultDependencies: ProgramDependencies = {
       // keyed by the STABLE entry id. From the desired-vs-current status join; missing or
       // uncertain skills are not installed.
       installedSkills: async () => {
-        const scanResult = await scanSkills({
-          roots: resolveScanRoots({ includeProject: false }),
-        });
+        const scanResult =
+          lastGlobalScan?.result ??
+          (await scanSkills({
+            roots: resolveScanRoots({ includeProject: false }),
+          }));
         const status = await statusMainEnvironment({ stackHome, scanResult });
         return installedSkillsFrom(status.skills);
       },
       // TRUE availability from the Phase 15 resolver (binding OR canonical-Git match),
       // reusing the candidate discovery `stak project` uses. Presence only, no paths.
-      projectPresence: async () => {
-        const rows = await listProjects({
-          stackHome,
-          projects: await resolveMemoryProjects({
-            cwd: process.cwd(),
-            platform: process.platform,
-            listDirs: listChildDirs,
-            gitOrigin: gitOriginOf,
-          }),
-        });
-        return projectPresenceFrom(rows);
-      },
+      projectPresence: async () => projectPresenceFrom(projectRows),
       agentsDetected: async () => {
         const detections = await Promise.all(
           [codex, cursor, claude].map((adapter) =>
@@ -1009,28 +1028,31 @@ const defaultDependencies: ProgramDependencies = {
           .map((d) => d.agent);
       },
     });
-    await reportCheckin({ client, inputs });
+    // The check-in and the project-registry sync are independent network calls to the same
+    // Cloud API, so they run concurrently rather than paying two sequential round trips.
+    // Connectivity failures in the sync are non-fatal (like check-in) and swallowed inline; a
+    // 401/403 from the check-in itself still propagates via `Promise.all` so a revoked
+    // machine remains explicit.
+    const [, response] = await Promise.all([
+      reportCheckin({ client, inputs }),
+      (async () => {
+        try {
+          return await client.syncProjects({
+            projects: projectSyncPayloadFrom(projectRows),
+          });
+        } catch {
+          return undefined;
+        }
+      })(),
+    ]);
     // Best-effort P3 project-registry sync: lifecycle + safe identity only, never a path or
-    // machine-local binding. Connectivity failures are non-fatal (like check-in); a 401/403
-    // from the check-in above already surfaced, so this extra call is swallowed.
+    // machine-local binding.
     try {
-      const rows = await listProjects({
-        stackHome,
-        projects: await resolveMemoryProjects({
-          cwd: process.cwd(),
-          platform: process.platform,
-          listDirs: listChildDirs,
-          gitOrigin: gitOriginOf,
-        }),
-      });
-      const response = await client.syncProjects({
-        projects: projectSyncPayloadFrom(rows),
-      });
       // Cloud-side Git-canonical reconciliation (never by displayName/path text):
       // adopt the authoritative projectId locally NOW, in this same invocation, so
       // the next backup/check-in never re-sends the just-retired id and recreates the
       // duplicate Cloud refused to create.
-      if (response.reconciled && response.reconciled.length > 0) {
+      if (response?.reconciled && response.reconciled.length > 0) {
         let registry = await readLocalRegistry(stackHome);
         for (const { fromProjectId, toProjectId } of response.reconciled)
           registry = adoptReconciledProjectId(
