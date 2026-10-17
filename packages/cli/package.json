@@ -19,7 +19,7 @@
     "access": "public"
   },
   "bin": {
-    "stak": "./dist/bin.js"
+    "stak": "dist/bin.js"
   },
   "files": [
     "dist",
