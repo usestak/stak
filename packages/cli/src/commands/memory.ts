@@ -59,9 +59,7 @@ export type MemoryCommandDependencies = {
     | { status: 'passkey-failed'; reason: PasskeyFailureReason }
     | { status: 'protected'; migrated: number }
   >;
-  memoryRecoverPasskey(options: {
-    generation?: number;
-  }): Promise<
+  memoryRecoverPasskey(options: { generation?: number }): Promise<
     | { status: 'not-authenticated' }
     | { status: 'no-backup' }
     | { status: 'passkey-failed'; reason: PasskeyFailureReason }

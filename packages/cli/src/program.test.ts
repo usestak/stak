@@ -589,6 +589,30 @@ describe('STAK CLI', () => {
     expect(result.output).not.toContain('auth');
   });
 
+  it('help text matches the real required syntax: `<stak> <agent>`, not an optional `[agent]`', async () => {
+    const help = await runProgram(['try', '--help']);
+    expect(help.output).toContain('Usage: stak try [options] <stak> <agent>');
+    expect(help.output).not.toContain('[agent]');
+  });
+
+  it('omitting the agent fails via a clean CommanderError, not an uncaught raw Node stack trace', async () => {
+    const result = await runProgram(['try', './trial', '--dry-run']);
+    // Commander's own built-in required-argument validation now catches this —
+    // not the internal `agent !== 'codex'` check, which previously threw a raw,
+    // unrescued `Error` here (bin.ts only rescues 5 specific typed error classes;
+    // a plain `Error` propagates as an uncaught exception with a full stack trace).
+    expect(result.exit).toBeInstanceOf(CommanderError);
+    expect(result.exit?.code).toBe('commander.missingArgument');
+    expect(result.output).not.toContain('at _Command');
+    expect(result.output).not.toContain('.js:');
+  });
+
+  it('an unsupported (non-codex) agent fails cleanly, not with a raw Node stack trace', async () => {
+    await expect(
+      runProgram(['try', './trial', '--', 'claude']),
+    ).rejects.toThrow(/Codex-only/);
+  });
+
   it('preserves, prepares, launches, and reports cleanup for a normal try', async () => {
     const calls: string[] = [];
     const result = await runProgram(['try', './trial', '--', 'codex'], {

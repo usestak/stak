@@ -1,6 +1,7 @@
 import type { Command } from 'commander';
 
 import { AgentNotInstalledError } from '@stack/adapters';
+import { StackCompositionError } from '@stack/core';
 import type { RemoteTrialResolution, TrialStackResolution } from '@stack/core';
 import type {
   AgentDetection,
@@ -30,7 +31,13 @@ export const registerTryCommand = (
   dependencies: TryCommandDependencies,
 ) => {
   program
-    .command('try <stak> [agent]')
+    // `agent` is REQUIRED (Codex-only in V0.1, but still required rather than
+    // defaulted — matches `stak try <stak> -- codex`, see README/web onboarding).
+    // A missing argument now fails via commander's own clean built-in validation
+    // ("error: missing required argument 'agent'", exit 1) instead of reaching the
+    // internal `agent !== 'codex'` check below as a raw, uncaught `Error` — which
+    // previously surfaced as a full Node stack trace for ordinary CLI misuse.
+    .command('try <stak> <agent>')
     .description(
       'Run a local or public (@owner/name) STAK in an isolated scratch Codex session',
     )
@@ -43,10 +50,15 @@ export const registerTryCommand = (
     .action(
       async (
         input: string,
-        agent: string | undefined,
+        agent: string,
         options: { dryRun?: boolean; json?: boolean; verbose?: boolean },
       ) => {
-        if (agent !== 'codex') throw new Error('Use: stak try <stak> -- codex');
+        if (agent !== 'codex')
+          throw new StackCompositionError(
+            'try-unsupported-agent',
+            `Unsupported agent: ${agent}. "stak try" is Codex-only in V0.1 — ` +
+              'use: stak try <stak> -- codex',
+          );
         const verbose = options.verbose === true;
         const detection = await dependencies.detectCodex();
         if (!detection.installed) throw new AgentNotInstalledError();
