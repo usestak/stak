@@ -26,6 +26,63 @@ const sourceRank: Record<SkillSource['type'], number> = {
 };
 export type ScanSkillsOptions = { roots: SkillRoot[] };
 
+/**
+ * Hashing a Skill's content and detecting its Git provenance are the two
+ * expensive steps of inspecting an occurrence (full-tree read+hash, and a
+ * `git` subprocess spawn). Symlinked duplicates resolve to the same physical
+ * `contentPath`, so this cache makes sure that work runs once per unique
+ * physical directory within a scan, not once per discovered location.
+ */
+type ContentInspection = {
+  parsed: ReturnType<typeof parseSkillFile>;
+  hashed: { hash: string; nestedSymlinks: string[] };
+  source: SkillSource;
+};
+
+const inspectContent = (
+  contentPath: string,
+  cache: Map<string, Promise<ContentInspection>>,
+): Promise<ContentInspection> => {
+  const cached = cache.get(contentPath);
+  if (cached) return cached;
+  const computed = (async (): Promise<ContentInspection> => {
+    const parsed = parseSkillFile(
+      await readFile(path.join(contentPath, 'SKILL.md'), 'utf8'),
+    );
+    const hashed = await hashSkillDirectory(contentPath);
+    const source = await detectProvenance(contentPath);
+    return { parsed, hashed, source };
+  })();
+  cache.set(contentPath, computed);
+  return computed;
+};
+
+/**
+ * Runs `fn` over `items` with at most `limit` in flight at once, returning
+ * results in input order. Occurrence inspection is I/O- and subprocess-bound
+ * (file reads, `git` spawns), so overlapping them cuts wall-clock scan time
+ * without changing what gets computed.
+ */
+const mapWithConcurrency = async <T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> => {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index] as T);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
+  return results;
+};
+
 const discoverPaths = async (
   root: SkillRoot,
   diagnostics: ScanDiagnostic[],
@@ -82,15 +139,15 @@ const discoverPaths = async (
 const inspectOccurrence = async (
   root: SkillRoot,
   visiblePath: string,
-  resolvedPath?: string,
+  resolvedPath: string | undefined,
+  contentCache: Map<string, Promise<ContentInspection>>,
 ) => {
   const contentPath = resolvedPath ?? visiblePath;
   const diagnostics: ScanDiagnostic[] = [];
-  const parsed = parseSkillFile(
-    await readFile(path.join(contentPath, 'SKILL.md'), 'utf8'),
+  const { parsed, hashed, source } = await inspectContent(
+    contentPath,
+    contentCache,
   );
-  const hashed = await hashSkillDirectory(contentPath);
-  const source = await detectProvenance(contentPath);
   const location: SkillLocation = {
     path: visiblePath,
     rootPath: root.path,
@@ -162,12 +219,20 @@ const summarize = (
   },
 });
 
+const occurrenceConcurrency = 8;
+
 export const scanSkills = async ({
   roots,
 }: ScanSkillsOptions): Promise<ScanResult> => {
   const scannedRoots: ScannedRoot[] = [];
   const diagnostics: ScanDiagnostic[] = [];
   const byHash = new Map<string, DiscoveredSkill>();
+  const contentCache = new Map<string, Promise<ContentInspection>>();
+  const pending: Array<{
+    root: SkillRoot;
+    path: string;
+    realPath?: string;
+  }> = [];
   for (const root of roots) {
     try {
       const rootStats = await lstat(root.path);
@@ -179,32 +244,7 @@ export const scanSkills = async ({
         status: 'scanned',
         skillLocations: paths.length,
       });
-      for (const skillPath of paths) {
-        try {
-          const occurrence = await inspectOccurrence(
-            root,
-            skillPath.path,
-            skillPath.realPath,
-          );
-          diagnostics.push(...occurrence.diagnostics);
-          const existing = byHash.get(occurrence.skill.contentHash);
-          if (existing) {
-            existing.locations.push(...occurrence.skill.locations);
-            if (
-              sourceRank[occurrence.skill.source.type] >
-              sourceRank[existing.source.type]
-            )
-              existing.source = occurrence.skill.source;
-          } else byHash.set(occurrence.skill.contentHash, occurrence.skill);
-        } catch (error) {
-          diagnostics.push({
-            severity: 'error',
-            code: 'skill-scan-failed',
-            message: error instanceof Error ? error.message : String(error),
-            path: skillPath.path,
-          });
-        }
-      }
+      for (const skillPath of paths) pending.push({ root, ...skillPath });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT')
         scannedRoots.push({ ...root, status: 'missing', skillLocations: 0 });
@@ -224,6 +264,51 @@ export const scanSkills = async ({
         });
       }
     }
+  }
+  const outcomes = await mapWithConcurrency(
+    pending,
+    occurrenceConcurrency,
+    async (skillPath) => {
+      try {
+        return {
+          occurrence: await inspectOccurrence(
+            skillPath.root,
+            skillPath.path,
+            skillPath.realPath,
+            contentCache,
+          ),
+        };
+      } catch (error) {
+        return {
+          error: {
+            severity: 'error' as const,
+            code: 'skill-scan-failed' as const,
+            message: error instanceof Error ? error.message : String(error),
+            path: skillPath.path,
+          },
+        };
+      }
+    },
+  );
+  for (const outcome of outcomes) {
+    if ('error' in outcome) {
+      diagnostics.push(outcome.error);
+      continue;
+    }
+    diagnostics.push(...outcome.occurrence.diagnostics);
+    const existing = byHash.get(outcome.occurrence.skill.contentHash);
+    if (existing) {
+      existing.locations.push(...outcome.occurrence.skill.locations);
+      if (
+        sourceRank[outcome.occurrence.skill.source.type] >
+        sourceRank[existing.source.type]
+      )
+        existing.source = outcome.occurrence.skill.source;
+    } else
+      byHash.set(
+        outcome.occurrence.skill.contentHash,
+        outcome.occurrence.skill,
+      );
   }
   const skills = [...byHash.values()].sort((a, b) =>
     a.contentHash < b.contentHash ? -1 : a.contentHash > b.contentHash ? 1 : 0,
