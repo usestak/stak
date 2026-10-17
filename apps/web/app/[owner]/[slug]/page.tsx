@@ -159,9 +159,14 @@ export default async function StackPage({
           <p className="stak-public-muted">Capabilities not declared.</p>
         )}
 
-        <h2>Try or use it</h2>
+        <h2>Add to your STAK</h2>
         <pre className="stak-cmd">
-          <code>{`stak use ${ref}\nstak try ${ref} -- codex`}</code>
+          <code>{`stak use ${ref}\nstak run codex`}</code>
+        </pre>
+
+        <h2>Try without changing your STAK</h2>
+        <pre className="stak-cmd">
+          <code>{`stak try ${ref} -- codex`}</code>
         </pre>
         <p className="stak-public-muted">
           Supported agents: Codex, Cursor, Claude. Isolated{' '}
@@ -198,9 +203,14 @@ export default async function StackPage({
         <p className="stak-public-muted">{stack.description}</p>
       ) : null}
 
-      <h2>Install</h2>
+      <h2>Add to your STAK</h2>
       <pre className="stak-cmd">
-        <code>{`stak use ${ref}\nstak try ${ref} -- codex`}</code>
+        <code>{`stak use ${ref}\nstak run codex`}</code>
+      </pre>
+
+      <h2>Try without changing your STAK</h2>
+      <pre className="stak-cmd">
+        <code>{`stak try ${ref} -- codex`}</code>
       </pre>
       <p className="stak-public-muted">
         Supported agents: Codex, Cursor, Claude. Isolated <code>stak try</code>{' '}
