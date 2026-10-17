@@ -6,7 +6,6 @@ import {
   mkdir,
   readFile,
   readdir,
-  rename,
   rm,
   rmdir,
   writeFile,
@@ -21,11 +20,7 @@ import {
   pathIsWithin,
   pathsEqual,
 } from '@stack/shared';
-import {
-  tryExitResultSchema,
-  tryPreparationResultSchema,
-  trySessionSchema,
-} from '@stack/spec';
+import { tryExitResultSchema, tryPreparationResultSchema } from '@stack/spec';
 import type {
   AgentDetection,
   TryCleanupComponent,
@@ -45,11 +40,20 @@ import {
   TryRuntimePreparationFailedError,
   UnsafeRuntimePathError,
 } from './errors.js';
+import {
+  defaultRemoveRuntimeEntry,
+  isOwnedMetadataEntry,
+  readSessionMarker,
+  realSleep,
+  removeOwnedRuntimePath,
+  removeWithBoundedRetry,
+  safeCleanupDiagnostic,
+  secureDirectory,
+  writeSession,
+  type TryCleanupControls,
+  type TryCleanupOutcome,
+} from './trial-runtime-shared.js';
 
-const secureDirectory = async (directory: string) => {
-  await mkdir(directory, { recursive: true });
-  if (process.platform !== 'win32') await chmod(directory, 0o700);
-};
 const bridgeNames = (names: string[]) =>
   names.filter(
     (name) =>
@@ -161,95 +165,6 @@ export const bridgeCodexRuntimeState = async (options: {
   }
 };
 
-// The ownership marker is written atomically (temp + rename) so it can never be
-// observed half-written during ready → running → cleaning → cleanup-failed.
-const writeSession = async (directory: string, session: TrySession) => {
-  const target = path.join(directory, 'session.json');
-  const temporary = path.join(directory, `.session.json.${randomUUID()}.tmp`);
-  const body = `${JSON.stringify(trySessionSchema.parse(session), null, 2)}\n`;
-  try {
-    await writeFile(temporary, body, 'utf8');
-    await rename(temporary, target);
-  } catch (error) {
-    await rm(temporary, { force: true }).catch(() => undefined);
-    throw error;
-  }
-};
-
-// Entries permitted to remain in a session root alongside owned children: the
-// marker itself, and any leftover atomic-write temp file we created.
-const isOwnedMetadataEntry = (name: string) =>
-  name === 'session.json' ||
-  (name.startsWith('.session.json.') && name.endsWith('.tmp'));
-
-// Deletion errors that are commonly transient on Windows (a virus scanner,
-// indexer, or just-closed handle briefly holding a file) and worth retrying.
-const transientDeleteCodes = new Set([
-  'EPERM',
-  'EBUSY',
-  'ENOTEMPTY',
-  'EACCES',
-  'EMFILE',
-  'ENFILE',
-]);
-
-export type RemoveRuntimeEntry = (target: string) => Promise<void>;
-export type TryCleanupControls = {
-  now?: () => Date;
-  removeEntry?: RemoveRuntimeEntry;
-  maxRetries?: number;
-  retryDelayMs?: number;
-  // Bounded grace period before the first delete attempt, giving any just-closed
-  // child's short-lived background descendants (e.g. a quick Git refresh) time to
-  // release handles on the runtime. Not a substitute for the bounded retries.
-  settleDelayMs?: number;
-  sleep?: (ms: number) => Promise<void>;
-};
-export type TryCleanupOutcome =
-  | { cleaned: true }
-  | { cleaned: false; diagnostic: TryCleanupDiagnostic; runtimePath: string };
-
-const realSleep = (ms: number) =>
-  new Promise<void>((resolve) => setTimeout(resolve, ms));
-// Node's `rm` also accepts maxRetries/retryDelay; we run our own bounded loop so
-// the identical policy covers injected removers (tests) and the specific
-// transient codes above, and never retries forever.
-const defaultRemoveRuntimeEntry: RemoveRuntimeEntry = (target) =>
-  rm(target, { recursive: true, force: true });
-
-const removeWithBoundedRetry = async (
-  target: string,
-  remove: RemoveRuntimeEntry,
-  maxAttempts: number,
-  retryDelayMs: number,
-  sleep: (ms: number) => Promise<void>,
-): Promise<void> => {
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      await remove(target);
-      return;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (attempt >= maxAttempts || !code || !transientDeleteCodes.has(code))
-        throw error;
-      await sleep(retryDelayMs);
-    }
-  }
-};
-
-const removeOwnedRuntimePath = async (
-  runtimeRoot: string,
-  target: string,
-): Promise<void> => {
-  await assertPathWithin({ ownedRoot: runtimeRoot, proposedPath: target });
-  await rm(target, {
-    recursive: true,
-    force: true,
-    maxRetries: 3,
-    retryDelay: 100,
-  });
-};
-
 const assertCodexTryIsolation = async (options: {
   runtimeRoot: string;
   sessionRoot: string;
@@ -322,15 +237,13 @@ const assertOwnedReadySession = async (options: {
     { left: options.session.workspacePath, right: expected.workspacePath },
     { left: options.session.runtimeHomePath, right: expected.runtimeHomePath },
     {
-      left: options.session.runtimeCodexHomePath,
+      left: options.session.runtimeCodexHomePath ?? '',
       right: expected.runtimeCodexHomePath,
     },
   ])
     if (!(await pathsEqual(pair))) throw new UnsafeRuntimePathError();
   await assertPathWithin({ ownedRoot: runtimeRoot, proposedPath: sessionRoot });
-  const marker = trySessionSchema.parse(
-    JSON.parse(await readFile(path.join(sessionRoot, 'session.json'), 'utf8')),
-  );
+  const marker = await readSessionMarker(sessionRoot);
   if (marker.status !== 'ready' || !isDeepStrictEqual(marker, options.session))
     throw new UnsafeRuntimePathError();
 };
@@ -467,7 +380,7 @@ export const cleanupCodexTryRuntime = async (
       right: expectedHome,
     })) &&
     (await pathsEqual({
-      left: session.runtimeCodexHomePath,
+      left: session.runtimeCodexHomePath ?? '',
       right: expectedCodexHome,
     }));
   if (!sessionPathsValid)
@@ -486,16 +399,14 @@ export const cleanupCodexTryRuntime = async (
   let marker: TrySession;
   try {
     await assertPathWithin({ ownedRoot: runtimeRoot, proposedPath: directory });
-    marker = trySessionSchema.parse(
-      JSON.parse(await readFile(path.join(directory, 'session.json'), 'utf8')),
-    );
+    marker = await readSessionMarker(directory);
     if (marker.sessionId !== session.sessionId)
       throw new Error('Runtime marker does not match the requested session.');
     for (const pair of [
       { left: marker.runtimeRootPath, right: runtimeRoot },
       { left: marker.workspacePath, right: expectedWorkspace },
       { left: marker.runtimeHomePath, right: expectedHome },
-      { left: marker.runtimeCodexHomePath, right: expectedCodexHome },
+      { left: marker.runtimeCodexHomePath ?? '', right: expectedCodexHome },
     ])
       if (!(await pathsEqual(pair)))
         throw new Error('Runtime marker does not match the requested session.');
@@ -509,12 +420,11 @@ export const cleanupCodexTryRuntime = async (
     component: TryCleanupComponent,
     error: unknown,
   ): Promise<TryCleanupOutcome> => {
-    const code = (error as NodeJS.ErrnoException | undefined)?.code;
-    const diagnostic: TryCleanupDiagnostic = {
+    const diagnostic: TryCleanupDiagnostic = safeCleanupDiagnostic(
       component,
-      ...(code && /^[A-Za-z0-9_-]{1,64}$/.test(code) ? { code } : {}),
-      at: now().toISOString(),
-    };
+      error,
+      now,
+    );
     // Marker is preserved (still provably Stack-owned); only safe metadata added.
     await writeSession(directory, {
       ...marker,
@@ -618,11 +528,7 @@ export const recoverStaleTryRuntimes = async (
     const directory = path.join(runtimeRoot, entry.name);
     let marker: TrySession;
     try {
-      marker = trySessionSchema.parse(
-        JSON.parse(
-          await readFile(path.join(directory, 'session.json'), 'utf8'),
-        ),
-      );
+      marker = await readSessionMarker(directory);
     } catch {
       continue; // unmarked / corrupt / forged — never touch
     }
@@ -657,7 +563,7 @@ export const launchCodexTryRuntime = async (options: {
     ...(options.env ?? process.env),
     HOME: session.runtimeHomePath,
     USERPROFILE: session.runtimeHomePath,
-    CODEX_HOME: session.runtimeCodexHomePath,
+    CODEX_HOME: session.runtimeCodexHomePath ?? '',
     ...(process.platform === 'win32'
       ? {
           HOMEDRIVE: root.replace(/[\\/]$/, ''),
@@ -691,7 +597,7 @@ export const launchCodexTryRuntime = async (options: {
       sessionRoot: path.dirname(session.workspacePath),
       workspacePath: session.workspacePath,
       runtimeHomePath: session.runtimeHomePath,
-      runtimeCodexHomePath: session.runtimeCodexHomePath,
+      runtimeCodexHomePath: session.runtimeCodexHomePath ?? '',
       skillRoot: path.join(session.workspacePath, '.agents', 'skills'),
       realHome,
       realCodexHome,

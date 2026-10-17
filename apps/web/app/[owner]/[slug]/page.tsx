@@ -161,17 +161,15 @@ export default async function StackPage({
 
         <h2>Add to your STAK</h2>
         <pre className="stak-cmd">
-          <code>{`stak use ${ref}\nstak run codex`}</code>
+          <code>{`stak use ${ref}\nstak run <agent>`}</code>
         </pre>
+        <p className="stak-public-muted">Agents: codex, claude, cursor</p>
 
         <h2>Try without changing your STAK</h2>
         <pre className="stak-cmd">
-          <code>{`stak try ${ref} -- codex`}</code>
+          <code>{`stak try ${ref} -- <agent>`}</code>
         </pre>
-        <p className="stak-public-muted">
-          Supported agents: Codex, Cursor, Claude. Isolated{' '}
-          <code>stak try</code> is Codex-only in V0.1.
-        </p>
+        <p className="stak-public-muted">Agents: codex, claude, cursor</p>
 
         <p
           className="stak-public-muted"
@@ -205,17 +203,15 @@ export default async function StackPage({
 
       <h2>Add to your STAK</h2>
       <pre className="stak-cmd">
-        <code>{`stak use ${ref}\nstak run codex`}</code>
+        <code>{`stak use ${ref}\nstak run <agent>`}</code>
       </pre>
+      <p className="stak-public-muted">Agents: codex, claude, cursor</p>
 
       <h2>Try without changing your STAK</h2>
       <pre className="stak-cmd">
-        <code>{`stak try ${ref} -- codex`}</code>
+        <code>{`stak try ${ref} -- <agent>`}</code>
       </pre>
-      <p className="stak-public-muted">
-        Supported agents: Codex, Cursor, Claude. Isolated <code>stak try</code>{' '}
-        is Codex-only in V0.1.
-      </p>
+      <p className="stak-public-muted">Agents: codex, claude, cursor</p>
 
       <h2>Skills</h2>
       {requirements.length === 0 ? (

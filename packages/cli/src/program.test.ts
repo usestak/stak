@@ -237,6 +237,7 @@ const runProgram = async (
     applyRemove: async () => undefined,
     loadRunEnvironment: async () => resolvedEnvironment,
     detectCodex: async () => detection,
+    detectAgent: async () => detection,
     planCodexBindings: async () => plan,
     applyCodexBindings: async () => applyResult,
     verifyCodexBindings: async () => verification,
@@ -607,11 +608,41 @@ describe('STAK CLI', () => {
     expect(result.output).not.toContain('.js:');
   });
 
-  it('an unsupported (non-codex) agent fails cleanly, not with a raw Node stack trace', async () => {
+  it('an unsupported agent fails cleanly, not with a raw Node stack trace', async () => {
     await expect(
-      runProgram(['try', './trial', '--', 'claude']),
-    ).rejects.toThrow(/Codex-only/);
+      runProgram(['try', './trial', '--', 'not-a-real-agent']),
+    ).rejects.toThrow(/Unsupported agent: not-a-real-agent/);
   });
+
+  it.each(['codex', 'claude', 'cursor'] as const)(
+    'preserves, prepares, launches, and reports cleanup for a normal %s try',
+    async (agent) => {
+      const calls: string[] = [];
+      const result = await runProgram(['try', './trial', '--', agent], {
+        preserveTry: async () => {
+          calls.push('preserve');
+        },
+        prepareTry: async () => {
+          calls.push('prepare');
+          return tryPreparation;
+        },
+        launchTry: async () => {
+          calls.push('launch');
+          return {
+            sessionId: 'try_12345678',
+            exitCode: 0,
+            signal: null,
+            cleaned: true,
+          };
+        },
+        cleanupTry: async () => {
+          calls.push('cleanup');
+        },
+      });
+      expect(calls).toEqual(['preserve', 'prepare', 'launch', 'cleanup']);
+      expect(result.output).toContain('Temporary files cleaned up.');
+    },
+  );
 
   it('preserves, prepares, launches, and reports cleanup for a normal try', async () => {
     const calls: string[] = [];
@@ -756,6 +787,7 @@ describe('STAK CLI', () => {
     await expect(
       runProgram(['run', 'codex'], {
         detectCodex: async () => ({ agent: 'codex', installed: false }),
+        detectAgent: async () => ({ agent: 'codex', installed: false }),
         planCodexBindings: async () => {
           planned = true;
           return plan;

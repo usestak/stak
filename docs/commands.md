@@ -45,11 +45,14 @@ without a shell and with argument-array semantics preserved (see
 [security](./security.md#windows-npm-shims)). `--dry-run` reconciles and previews
 without launching; add `--json` for structured output.
 
-### `stak try <stak> -- codex [--dry-run] [--json]`
+### `stak try <stak> -- codex|claude|cursor [--dry-run] [--json]`
 
-Run a STAK in an isolated scratch Codex session (temporary HOME/`CODEX_HOME`).
-`<stak>` may be local or public. `main` and normal bindings are untouched.
-Isolated `try` is Codex-only in V0.1.
+Run a STAK in an isolated scratch Codex, Claude, or Cursor session (temporary
+HOME plus a temporary agent config/state directory — `CODEX_HOME`,
+`CLAUDE_CONFIG_DIR`, or `CURSOR_CONFIG_DIR`). `<stak>` may be local or public.
+`main` and normal bindings are untouched. Cursor trials require
+`CURSOR_API_KEY` or `CURSOR_AUTH_TOKEN` to be set (interactive `agent login`
+sessions can't be safely isolated).
 
 ## Memory (private, local)
 
@@ -110,7 +113,7 @@ active local layer.
 ## Current V0.1 restrictions
 
 - One persistent Environment: `main` only. `stak switch` is deferred.
-- Isolated `try` supports Codex only.
+- Isolated `try` supports Codex, Claude, and Cursor.
 - Public STAKs are reference-only (snapshot-backed Skills cannot be published).
 - No automatic STAK updates; an already-active public STAK is not silently
   upgraded.

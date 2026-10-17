@@ -39,9 +39,17 @@ import {
   CodexAdapter,
   CursorAdapter,
   ClaudeAdapter,
+  cleanupClaudeTryRuntime,
   cleanupCodexTryRuntime,
+  cleanupCursorTryRuntime,
+  launchClaudeTryRuntime,
   launchCodexTryRuntime,
+  launchCursorTryRuntime,
+  prepareClaudeTryRuntime,
   prepareCodexTryRuntime,
+  prepareCursorTryRuntime,
+  recoverStaleClaudeTryRuntimes,
+  recoverStaleCursorTryRuntimes,
   recoverStaleTryRuntimes,
 } from '@stack/adapters';
 import type { InitializeMainEnvironmentResult } from '@stack/core';
@@ -232,7 +240,7 @@ export type ProgramDependencies = {
     environment: ResolvedLocalEnvironment,
   ): Promise<BindingVerification>;
   launchCodex(): Promise<LaunchResult>;
-  detectAgent?(agent: AgentId): Promise<AgentDetection>;
+  detectAgent(agent: AgentId): Promise<AgentDetection>;
   planAgentBindings?(
     agent: AgentId,
     environment: ResolvedLocalEnvironment,
@@ -254,10 +262,12 @@ export type ProgramDependencies = {
     trial: TrialStackResolution | RemoteTrialResolution,
   ): Promise<void>;
   prepareTry(
+    agent: AgentId,
     trial: TrialStackResolution | RemoteTrialResolution,
   ): Promise<TryPreparationResult>;
-  cleanupTry(preparation: TryPreparationResult): Promise<void>;
+  cleanupTry(agent: AgentId, preparation: TryPreparationResult): Promise<void>;
   launchTry(
+    agent: AgentId,
     preparation: TryPreparationResult,
     detection: AgentDetection,
   ): Promise<TryExitResult>;
@@ -700,22 +710,47 @@ const defaultDependencies: ProgramDependencies = {
           client: await publicReadClient(cloudDeps),
         })
       : preserveTrialStack({ stackHome, trial }),
-  prepareTry: async (trial) => {
+  prepareTry: async (agent, trial) => {
     // Conservatively retry any prior runtimes left in cleanup-failed before
     // creating a new one (best-effort; never blocks the trial).
-    await recoverStaleTryRuntimes({ stackHome }).catch(() => undefined);
-    return prepareCodexTryRuntime({
+    const recover =
+      agent === 'claude'
+        ? recoverStaleClaudeTryRuntimes
+        : agent === 'cursor'
+          ? recoverStaleCursorTryRuntimes
+          : recoverStaleTryRuntimes;
+    await recover({ stackHome }).catch(() => undefined);
+    const prepare =
+      agent === 'claude'
+        ? prepareClaudeTryRuntime
+        : agent === 'cursor'
+          ? prepareCursorTryRuntime
+          : prepareCodexTryRuntime;
+    return prepare({
       stackHome,
       trial: trial.resolved,
       homeDir: os.homedir(),
       env: process.env,
     });
   },
-  cleanupTry: async (preparation) => {
-    await cleanupCodexTryRuntime({ stackHome, session: preparation.session });
+  cleanupTry: async (agent, preparation) => {
+    const cleanup =
+      agent === 'claude'
+        ? cleanupClaudeTryRuntime
+        : agent === 'cursor'
+          ? cleanupCursorTryRuntime
+          : cleanupCodexTryRuntime;
+    await cleanup({ stackHome, session: preparation.session });
   },
-  launchTry: (preparation, detection) =>
-    launchCodexTryRuntime({ stackHome, preparation, detection }),
+  launchTry: (agent, preparation, detection) => {
+    const launch =
+      agent === 'claude'
+        ? launchClaudeTryRuntime
+        : agent === 'cursor'
+          ? launchCursorTryRuntime
+          : launchCodexTryRuntime;
+    return launch({ stackHome, preparation, detection });
+  },
   cloudLogin: (options) => performLogin(cloudDeps, options),
   cloudLogout: () => performLogout(cloudDeps),
   cloudWhoami: () => performWhoami(cloudDeps),

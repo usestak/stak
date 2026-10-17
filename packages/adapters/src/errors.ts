@@ -84,3 +84,14 @@ export class UnsafeRuntimePathError extends StackAdapterError {
     this.name = 'UnsafeRuntimePathError';
   }
 }
+export class CursorTryAuthRequiredError extends StackAdapterError {
+  constructor() {
+    super(
+      'cursor-try-auth-required',
+      'Cursor try requires CURSOR_API_KEY or CURSOR_AUTH_TOKEN to be set — ' +
+        'interactive "agent login" sessions can\'t be safely isolated. ' +
+        'Export one of those and retry.',
+    );
+    this.name = 'CursorTryAuthRequiredError';
+  }
+}

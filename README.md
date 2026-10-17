@@ -65,7 +65,7 @@ Then compose and project:
 ```bash
 stak use ./frontend-stak        # add a local STAK to main
 stak run codex                  # reconcile main into Codex's Skill directory
-stak try ./other-stak -- codex  # try a STAK in an isolated Codex session
+stak try ./other-stak -- codex  # try a STAK in an isolated Codex, Claude, or Cursor session
 ```
 
 And carry it across machines or share it:

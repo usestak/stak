@@ -64,9 +64,11 @@ shim; STAK launches it safely without a shell (see
 stak try ./some-stak -- codex
 ```
 
-Runs the STAK in an isolated scratch workspace with a temporary HOME and
-`CODEX_HOME`. `main` and your normal bindings are untouched. Isolated `try` is
-Codex-only in V0.1.
+Runs the STAK in an isolated scratch workspace with a temporary HOME and a
+temporary agent config/state directory (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, or
+`CURSOR_CONFIG_DIR`). `main` and your normal bindings are untouched. Isolated
+`try` supports Codex, Claude, and Cursor — swap the agent after `--`
+(`stak try ./some-stak -- claude`, `stak try ./some-stak -- cursor`).
 
 ## Across machines
 

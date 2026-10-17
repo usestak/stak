@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { agentIdSchema } from './adapter.js';
 import { resolvedEnvironmentSchema } from './stack.js';
 import { contentHashSchema } from './storage.js';
 
@@ -16,6 +17,9 @@ export const tryCleanupComponentSchema = z.enum([
   'workspace',
   'home',
   'codex-home',
+  // Generic agent-home component name used by non-Codex trial runtimes
+  // (Claude, Cursor), additive alongside the Codex-specific 'codex-home'.
+  'agent-home',
   'session-root',
   'unexpected-entry',
 ]);
@@ -40,7 +44,7 @@ export const trySessionSkillSchema = z.object({
 export const trySessionSchema = z.object({
   schemaVersion: z.literal(1),
   sessionId: z.string().regex(/^try_[A-Za-z0-9_-]{8,}$/),
-  agent: z.literal('codex'),
+  agent: agentIdSchema,
   createdAt: z.iso.datetime({ offset: true }),
   ownerPid: z.number().int().positive(),
   source: z.object({
@@ -50,14 +54,23 @@ export const trySessionSchema = z.object({
   runtimeRootPath: z.string().min(1),
   workspacePath: z.string().min(1),
   runtimeHomePath: z.string().min(1),
-  runtimeCodexHomePath: z.string().min(1),
+  // Codex's isolated CODEX_HOME. Kept as its own (optional) field rather than
+  // renamed, so every existing Codex trial session/test shape is unchanged.
+  runtimeCodexHomePath: z.string().min(1).optional(),
+  // Generic agent-home-equivalent path (CLAUDE_CONFIG_DIR / CURSOR_CONFIG_DIR)
+  // used by non-Codex trial runtimes. Additive alongside runtimeCodexHomePath,
+  // never both populated for the same session.
+  runtimeAgentHomePath: z.string().min(1).optional(),
   resolvedSkills: z.array(trySessionSkillSchema),
   status: trySessionStatusSchema,
   cleanup: tryCleanupDiagnosticSchema.optional(),
 });
 export const tryIsolationPlanSchema = z.object({
   temporaryHome: z.literal(true),
-  temporaryCodexHome: z.literal(true),
+  // Codex-specific marker, kept optional for backward compatibility; see
+  // temporaryAgentHome for the generic equivalent used by all three agents.
+  temporaryCodexHome: z.literal(true).optional(),
+  temporaryAgentHome: z.literal(true).optional(),
   scratchWorkspace: z.literal(true),
   normalBindingsUntouched: z.literal(true),
   mainUntouched: z.literal(true),

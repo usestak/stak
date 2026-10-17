@@ -94,6 +94,7 @@ export const resolveTrialStack = async (options: {
       isolation: {
         temporaryHome: true,
         temporaryCodexHome: true,
+        temporaryAgentHome: true,
         scratchWorkspace: true,
         normalBindingsUntouched: true,
         mainUntouched: true,
@@ -193,6 +194,7 @@ const buildTrialResolved = (
     isolation: {
       temporaryHome: true,
       temporaryCodexHome: true,
+      temporaryAgentHome: true,
       scratchWorkspace: true,
       normalBindingsUntouched: true,
       mainUntouched: true,
