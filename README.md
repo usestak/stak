@@ -1,104 +1,112 @@
-# Memory STAK
+[LOGO PLACEHOLDER — logo will be provided separately]
 
-**The control plane for portable AI agent environments.**
+# STAK
 
-Memory STAK discovers the Agent Skills you have accumulated across Codex, Cursor, and
-Claude Code, captures them as a portable **Environment**, restores them on any
-machine, safely composes additional **STAKs**, backs up your private agent
-**Memory**, and lets you try someone else's STAK without disturbing your
-existing setup.
+Portable Skills and Memory for your AI coding agents.
 
-> Your STAK should survive your laptop. Your skills, your memory, your setup —
-> any agent, any machine.
+AI coding agents increasingly depend on Skills, instructions, project
+context, and Memory. That environment normally lives on one machine and is
+hard to reproduce, move, or share. STAK gives it a portable identity: a
+canonical record of your Skills that you can carry, project into any
+supported agent, and share safely with others.
 
-> Status: 0.1.0 release candidate. See [docs/release-checklist.md](docs/release-checklist.md)
-> for the remaining human release steps.
-
-## Why STAK
-
-Agent Skills accumulate in vendor directories (`~/.agents/skills`,
-`~/.cursor/skills`, `~/.claude/skills`, `~/.codex/skills`). They drift between
-machines, get lost on a laptop swap, and are hard to share safely. STAK keeps a
-single canonical, content-addressed record of your desired setup and projects it
-into each agent's directory — without ever overwriting content it does not own.
-
-## Concepts in one breath
-
-- **Skill** — an existing Agent Skill directory (a `SKILL.md` plus its files).
-- **STAK** — a reusable, named collection of Skill requirements (defined by a
-  `stak.yaml`).
-- **Environment** — your desired local setup. V0.1 has one: `main`.
-- **Machine** — a computer with its own bindings and placements; Machine state
-  is never uploaded.
-
-See [docs/concepts.md](docs/concepts.md) for the full model.
+STAK is currently in beta. The CLI and Cloud model are actively evolving.
 
 ## Install
 
-STAK is distributed as a single self-contained CLI. During the 0.1.0 release
-candidate the public package `@memstk/cli` is **not yet published to npm**, so
-install from source:
-
 ```bash
-git clone https://github.com/usestak/stak.git
-cd stak
-corepack enable
-pnpm install --frozen-lockfile
-pnpm build
-node packages/cli/dist/bin.js --help
-```
-
-Once 0.1.0 is published, the package will install the `stak` command via
-`npm install -g @memstk/cli`. (`npx stack` is an unrelated project.) See
-[docs/getting-started.md](docs/getting-started.md).
-
-## First five minutes
-
-```bash
-stak scan      # discover Skills across your agents (read-only)
-stak init      # capture the desired Environment: main
-stak status    # see how this machine compares to main
-```
-
-Then compose and project:
-
-```bash
-stak use ./frontend-stak        # add a local STAK to main
-stak run codex                  # reconcile main into Codex's Skill directory
-stak try ./other-stak -- codex  # try a STAK in an isolated Codex, Claude, or Cursor session
-```
-
-And carry it across machines or share it:
-
-```bash
+npm install -g @memstk/cli
 stak login
-stak push                       # back up main to STAK Cloud (private)
-stak pull                       # restore main on another machine
-stak publish ./frontend-stak    # publish a reusable public @owner/name STAK
 ```
 
-Full reference: [docs/commands.md](docs/commands.md).
+(`npx stack` is an unrelated project — not Memory STAK.)
 
-## Safety, at a glance
+## 60-second quick start
 
-- Read-only discovery; unmanaged content is never overwritten without approval.
-- Content is content-addressed and hash-verified on every restore.
-- Trials run in an isolated scratch workspace with a temporary HOME.
-- Git references restore the exact revision and hash (`shell:false`, no shell
-  interpolation).
-- Private snapshots stay private; public STAKs are reference-only.
+Try a STAK without touching your normal setup:
 
-See [docs/security.md](docs/security.md).
+```bash
+stak try @stephentony100/frontend-test -- claude
+```
+
+This resolves the STAK, launches Claude Code with it projected into an
+isolated runtime, and cleans up afterward — your main setup is untouched.
+
+Like it? Add it for real:
+
+```bash
+stak use @stephentony100/frontend-test
+stak run codex
+```
+
+`use` resolves and adds the STAK to your main desired state — it does not
+launch an agent. `run` projects main into the agent you name and launches it.
+
+## Try vs. Use
+
+| | Try | Use |
+|---|---|---|
+| Changes main | No | Yes |
+| Launches an agent | Yes | No (pair with `stak run`) |
+| Runtime | Temporary, cleaned up after | Persistent |
+
+## Supported agents
+
+|              | run | try |
+|--------------|-----|-----|
+| Codex        | yes | yes |
+| Claude Code  | yes | yes |
+| Cursor       | yes | yes |
+
+## Skills, Memory, Projects, Machines
+
+- **Skills** — the portable instructions and context a STAK carries. They
+  resolve, verify, and project into any supported agent the same way.
+- **Memory** — private, Cloud-backed state for your agents. Memory is never
+  published with a public STAK.
+- **Project** — a stable logical Cloud identity for your desired setup. A
+  local directory is just one machine's binding to it.
+- **Machine** — one binding point (among potentially several) for the same
+  Project — its own local bindings and placements, never uploaded.
+
+## Sharing
+
+Public STAKs contain selected portable Skill snapshots. They never include
+Memory, Projects, machine state, credentials, or local filesystem paths.
+
+## Privacy & security
+
+STAK only owns content it created and tracks in a local binding registry;
+unmanaged or externally-modified content is never overwritten without
+approval. Private snapshots stay private — public STAKs are reference-only.
+See [docs/security.md](docs/security.md) for the full model.
+
+## How it works
+
+STAK keeps a single canonical, content-addressed record of your desired
+Skills and projects it into each agent's Skill directory without ever
+overwriting content it does not own. See [docs/architecture/](docs/architecture/)
+for design notes and ADRs.
 
 ## Documentation
 
-- [Getting started](docs/getting-started.md)
-- [Concepts](docs/concepts.md)
-- [Command reference](docs/commands.md)
-- [Cloud setup](docs/cloud-setup.md)
-- [Security](docs/security.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- [Contributing](docs/contributing.md)
+- Website: https://www.memstk.com
+- Docs: https://www.memstk.com/docs
+- CLI Reference: https://www.memstk.com/docs/cli
+- npm: [@memstk/cli](https://www.npmjs.com/package/@memstk/cli)
+
+## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and
+[docs/getting-started.md](docs/getting-started.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Security
+
+See [SECURITY.md](SECURITY.md).
 
 ## License
 
