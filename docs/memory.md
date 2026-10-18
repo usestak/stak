@@ -2,8 +2,8 @@
 
 STAK preserves two different things:
 
-- **Skills** — reusable capabilities. Potentially shareable, and publishable as
-  reference-only public Stacks.
+- **Skills** — reusable capabilities. Potentially shareable, and publishable
+  as immutable, content-addressed snapshot public Stacks.
 - **Memory** — the private, durable context an agent has learned or remembers.
   Always private; **never** shareable and never reachable from public publishing.
 

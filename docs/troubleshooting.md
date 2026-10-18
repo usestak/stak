@@ -8,7 +8,8 @@ and the safe next step. Below are common situations.
 - **Invalid `SKILL.md`** — a Skill missing `name`/`description` front matter is
   reported and skipped; scanning continues. Fix the front matter and re-scan.
 - **Unknown provenance** — a Skill with no clean Git source is preserved as a
-  private snapshot. It works locally but cannot be published (see below).
+  private snapshot. It works locally and can be published like any other
+  Skill once its content has been pushed (`stak push`; see below).
 - **Claude synced Skills not counted** — Skills under `~/.claude/skills/synced/`
   are Claude account Skills downloaded from claude.ai. STAK intentionally
   excludes them from `stak scan`/`status`/`init`, so they are neither counted
@@ -43,10 +44,10 @@ and the safe next step. Below are common situations.
 
 ## Publishing
 
-- **"Cannot publish … run `stak push` first"** — every Skill publishes as an
-  immutable, content-addressed snapshot, but the owner must have pushed that
-  content before it can be published. Run `stak push` for the Skill, then
-  retry the publish.
+- **"…content hasn't been uploaded to STAK Cloud yet. Run `stak push`
+  first…"** — every Skill publishes as an immutable, content-addressed
+  snapshot, but the owner must have pushed that content before it can be
+  published. Run `stak push` for the Skill, then retry the publish.
 - **"source remote contains embedded credentials" / unsafe remote** — remove the
   credential from the remote URL; publish from a clean https/ssh remote.
 - **Invalid slug** — pass `--slug <slug>` matching `[a-z0-9][a-z0-9-_]{0,62}`.

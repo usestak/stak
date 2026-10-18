@@ -72,8 +72,9 @@ launch an agent. `run` projects main into the agent you name and launches it.
 ## Sharing
 
 Public STAKs contain selected portable Skill snapshots (each Skill pinned by
-exact source revision/content hash at publish time). They never include
-Memory, Projects, machine state, credentials, or local filesystem paths.
+content hash at publish time; a Git source revision, when available, is
+preserved as metadata, not the pin itself). They never include Memory,
+Projects, machine state, credentials, or local filesystem paths.
 
 ## Privacy & security
 

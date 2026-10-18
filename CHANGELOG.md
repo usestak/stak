@@ -35,8 +35,8 @@ end to end.
   back up and reconstruct the private portable `main` across machines with
   matching Skill hashes, private snapshot transport, and exact Git reference
   reacquisition.
-- **Public stacks** — `stak publish` creates reference-only public stacks
-  addressed as `@owner/name`; `stak use @owner/name` and
+- **Public stacks** — `stak publish` creates immutable, content-hash snapshot
+  public stacks addressed as `@owner/name`; `stak use @owner/name` and
   `stak try @owner/name -- codex` consume them. Public reads never expose private
   Environments or snapshots.
 - **Distribution** — the CLI is bundled into a single self-contained binary.
@@ -79,6 +79,6 @@ end to end.
 
 ### Deferred from V0.1
 
-`stak switch` (only `main` exists), isolated `try` for Cursor/Claude, public
-snapshot publishing, automatic stack updates, force conflict overrides, hard
-Memory deletion / `forget`, teams/organizations, and marketplace features.
+`stak switch` (only `main` exists), isolated `try` for Cursor/Claude,
+automatic stack updates, force conflict overrides, hard Memory deletion /
+`forget`, teams/organizations, and marketplace features.
