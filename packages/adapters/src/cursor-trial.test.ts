@@ -2,6 +2,7 @@ import {
   access,
   mkdir as filesystemMkdir,
   readFile,
+  stat,
   writeFile as filesystemWriteFile,
 } from 'node:fs/promises';
 import path from 'node:path';
@@ -18,12 +19,18 @@ import type { TryResolvedEnvironment } from '@stack/spec';
 import { ingestSkill } from '@stack/store';
 
 import {
+  bridgeCursorLoginSession,
   bridgeCursorRuntimeState,
   cleanupCursorTryRuntime,
+  cursorLoginSessionExists,
   launchCursorTryRuntime,
   prepareCursorTryRuntime,
   recoverStaleCursorTryRuntimes,
+  resolveCursorAuthFilePath,
 } from './cursor-trial.js';
+
+const onWindows = process.platform === 'win32';
+const onMac = process.platform === 'darwin';
 
 const ownedRoots: OwnedTestRoot[] = [];
 const temp = async () => {
@@ -161,14 +168,15 @@ describe('Cursor trial runtime', () => {
     await cleanupCursorTryRuntime({ stackHome, session: preparation.session });
   });
 
-  it('refuses to launch when neither CURSOR_API_KEY nor CURSOR_AUTH_TOKEN is set, and still cleans up', async () => {
+  it('refuses to launch when neither CURSOR_API_KEY/CURSOR_AUTH_TOKEN nor a real `agent login` session exists, and still cleans up', async () => {
     const root = await temp();
     const stackHome = path.join(root, 'stack');
     const trial = await storedTrial(stackHome);
+    const realHome = path.join(root, 'real');
     const preparation = await prepareCursorTryRuntime({
       stackHome,
       trial,
-      homeDir: path.join(root, 'real'),
+      homeDir: realHome,
       idFactory: () => 'cursor003',
     });
     const sessionRoot = path.dirname(preparation.session.workspacePath);
@@ -182,7 +190,10 @@ describe('Cursor trial runtime', () => {
           installed: true,
           executablePath: '/fake',
         },
-        env: {},
+        // An isolated, guaranteed-empty HOME — proves the fallback to the
+        // *test runner's own* machine HOME can never leak a real login
+        // session into this assertion (see the next test for the opposite).
+        env: { HOME: realHome, USERPROFILE: realHome },
         spawnProcess: async () => {
           spawned = true;
           return { exitCode: 0, signal: null };
@@ -295,5 +306,168 @@ describe('Cursor trial runtime', () => {
     const result = await recoverStaleCursorTryRuntimes({ stackHome });
     expect(result.scanned).toBe(0);
     await cleanupCursorTryRuntime({ stackHome, session: preparation.session });
+  });
+});
+
+describe('Cursor `agent login` session detection and bridging', () => {
+  it('resolveCursorAuthFilePath prefers APPDATA over a homeDir-derived default on Windows', () => {
+    if (!onWindows) return;
+    expect(
+      resolveCursorAuthFilePath({
+        homeDir: 'C:\\Users\\nobody',
+        env: { APPDATA: 'C:\\Custom\\AppData' },
+      }),
+    ).toBe(path.join('C:\\Custom\\AppData', 'Cursor', 'auth.json'));
+    expect(
+      resolveCursorAuthFilePath({ homeDir: 'C:\\Users\\nobody', env: {} }),
+    ).toBe(
+      path.join(
+        'C:\\Users\\nobody',
+        'AppData',
+        'Roaming',
+        'Cursor',
+        'auth.json',
+      ),
+    );
+  });
+
+  it('resolveCursorAuthFilePath matches the macOS/Linux layout off this platform', () => {
+    if (onWindows) return;
+    if (onMac)
+      expect(
+        resolveCursorAuthFilePath({ homeDir: '/Users/nobody', env: {} }),
+      ).toBe(path.join('/Users/nobody', '.cursor', 'auth.json'));
+    else
+      expect(
+        resolveCursorAuthFilePath({ homeDir: '/home/nobody', env: {} }),
+      ).toBe(path.join('/home/nobody', '.config', 'cursor', 'auth.json'));
+  });
+
+  it('cursorLoginSessionExists is a pure existence check: true for a real file, false otherwise', async () => {
+    const root = await temp();
+    const present = path.join(root, 'present', 'auth.json');
+    await mkdir(path.dirname(present), { recursive: true });
+    await writeFile(present, '{"accessToken":"sentinel-should-never-be-read"}');
+    expect(await cursorLoginSessionExists(present)).toBe(true);
+    expect(
+      await cursorLoginSessionExists(path.join(root, 'missing.json')),
+    ).toBe(false);
+  });
+
+  it('bridgeCursorLoginSession is always a no-op on Windows, even when a real session exists', async () => {
+    if (!onWindows) return;
+    const root = await temp();
+    const realAuthFilePath = path.join(root, 'appdata', 'Cursor', 'auth.json');
+    await mkdir(path.dirname(realAuthFilePath), { recursive: true });
+    await writeFile(realAuthFilePath, '{"accessToken":"sentinel-secret"}');
+    const runtimeHomePath = path.join(root, 'runtime-home');
+    await mkdir(runtimeHomePath, { recursive: true });
+    expect(
+      await bridgeCursorLoginSession({ realAuthFilePath, runtimeHomePath }),
+    ).toBe(false);
+    await expect(
+      access(path.join(runtimeHomePath, 'AppData')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  (onWindows ? it.skip : it)(
+    'bridgeCursorLoginSession copies only the session file, mode 0600, off Windows',
+    async () => {
+      const root = await temp();
+      const realAuthFilePath = path.join(root, 'home', '.cursor', 'auth.json');
+      await mkdir(path.dirname(realAuthFilePath), { recursive: true });
+      await writeFile(realAuthFilePath, '{"accessToken":"sentinel-secret"}');
+      const runtimeHomePath = path.join(root, 'runtime-home');
+      await mkdir(runtimeHomePath, { recursive: true });
+      const bridged = await bridgeCursorLoginSession({
+        realAuthFilePath,
+        runtimeHomePath,
+      });
+      expect(bridged).toBe(true);
+      const target = onMac
+        ? path.join(runtimeHomePath, '.cursor', 'auth.json')
+        : path.join(runtimeHomePath, '.config', 'cursor', 'auth.json');
+      expect(await readFile(target, 'utf8')).toBe(
+        '{"accessToken":"sentinel-secret"}',
+      );
+      expect((await stat(target)).mode & 0o777).toBe(0o600);
+    },
+  );
+
+  it('bridgeCursorLoginSession returns false, and copies nothing, when no real session exists', async () => {
+    const root = await temp();
+    const runtimeHomePath = path.join(root, 'runtime-home');
+    await mkdir(runtimeHomePath, { recursive: true });
+    expect(
+      await bridgeCursorLoginSession({
+        realAuthFilePath: path.join(root, 'home', 'nonexistent', 'auth.json'),
+        runtimeHomePath,
+      }),
+    ).toBe(false);
+  });
+
+  it('launches without CURSOR_API_KEY/CURSOR_AUTH_TOKEN when a real `agent login` session is detected', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const trial = await storedTrial(stackHome);
+    const realHome = path.join(root, 'real');
+    // Simulate a genuine `agent login` session at exactly the path the real
+    // CLI (and our own resolver) would use for this platform — written
+    // *before* prepare, matching production order (login already happened).
+    const sharedEnv: NodeJS.ProcessEnv = onWindows
+      ? {
+          HOME: realHome,
+          USERPROFILE: realHome,
+          APPDATA: path.join(realHome, 'AppData', 'Roaming'),
+        }
+      : { HOME: realHome, USERPROFILE: realHome };
+    const realAuthFilePath = resolveCursorAuthFilePath({
+      homeDir: realHome,
+      env: sharedEnv,
+    });
+    await mkdir(path.dirname(realAuthFilePath), { recursive: true });
+    await writeFile(realAuthFilePath, '{"accessToken":"sentinel-secret"}');
+    const preparation = await prepareCursorTryRuntime({
+      stackHome,
+      trial,
+      homeDir: realHome,
+      env: sharedEnv,
+      idFactory: () => 'cursor-login-001',
+    });
+    if (!onWindows) {
+      // Bridged into the isolated HOME during prepare, since the real CLI's
+      // auth.json lookup there is HOME-relative and HOME is isolated.
+      const bridgedTarget = onMac
+        ? path.join(preparation.session.runtimeHomePath, '.cursor', 'auth.json')
+        : path.join(
+            preparation.session.runtimeHomePath,
+            '.config',
+            'cursor',
+            'auth.json',
+          );
+      expect(await readFile(bridgedTarget, 'utf8')).toBe(
+        '{"accessToken":"sentinel-secret"}',
+      );
+    }
+    let spawned = false;
+    let observedEnv: NodeJS.ProcessEnv | undefined;
+    const result = await launchCursorTryRuntime({
+      stackHome,
+      preparation,
+      detection: { agent: 'cursor', installed: true, executablePath: '/fake' },
+      env: sharedEnv,
+      spawnProcess: async (_file, _args, options) => {
+        spawned = true;
+        observedEnv = options.env;
+        return { exitCode: 0, signal: null };
+      },
+    });
+    expect(spawned).toBe(true);
+    expect(result).toMatchObject({ exitCode: 0, cleaned: true });
+    // No secret is ever forwarded as CURSOR_API_KEY/CURSOR_AUTH_TOKEN, logged,
+    // or otherwise surfaced — the official CLI finds the (possibly bridged)
+    // auth.json itself.
+    expect(observedEnv?.CURSOR_API_KEY).toBeUndefined();
+    expect(observedEnv?.CURSOR_AUTH_TOKEN).toBeUndefined();
   });
 });

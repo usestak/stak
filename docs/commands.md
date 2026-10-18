@@ -51,8 +51,8 @@ Run a STAK in an isolated scratch Codex, Claude, or Cursor session (temporary
 HOME plus a temporary agent config/state directory — `CODEX_HOME`,
 `CLAUDE_CONFIG_DIR`, or `CURSOR_CONFIG_DIR`). `<stak>` may be local or public.
 `main` and normal bindings are untouched. Cursor trials require
-`CURSOR_API_KEY` or `CURSOR_AUTH_TOKEN` to be set (interactive `agent login`
-sessions can't be safely isolated).
+authentication: a normal `agent login` session is detected and reused
+automatically, or set `CURSOR_API_KEY` or `CURSOR_AUTH_TOKEN`.
 
 ## Memory (private, local)
 

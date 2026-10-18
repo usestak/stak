@@ -52,10 +52,19 @@ import {
   type TryCleanupOutcome,
 } from './trial-runtime-shared.js';
 
-// Cursor's documented headless auth path is an env var, not a file — an
-// interactive `agent login` session's on-disk storage is undocumented, so it
-// is never read or bridged. Only `cli-config.json` (editor/model/permissions
-// settings, no credentials) is bridged, verbatim.
+// Cursor's documented headless auth path is an env var — `cli-config.json`
+// (editor/model/permissions settings, no credentials) is bridged, verbatim,
+// below. An interactive `agent login` session is stored separately in
+// `auth.json`, whose location the official CLI computes from HOME/APPDATA,
+// not from CURSOR_CONFIG_DIR (verified against the installed CLI's own
+// resolver): `%APPDATA%\Cursor\auth.json` on Windows, `~/.cursor/auth.json`
+// on macOS, `$XDG_CONFIG_HOME/cursor/auth.json` (or `~/.config/...`)
+// elsewhere. The isolated runtime overrides HOME/USERPROFILE but never
+// APPDATA, so on Windows the real `auth.json` stays reachable with no
+// copying at all. On macOS/Linux the HOME override hides it, so — mirroring
+// the Claude trial's `.credentials.json` bridge — exactly that one file is
+// copied into the isolated HOME's equivalent path by `bridgeCursorLoginSession`
+// below; its contents are never read, logged, or otherwise inspected.
 const bridgeNames = (names: string[]) =>
   names.filter((name) => name === 'cli-config.json');
 
@@ -67,6 +76,71 @@ export const resolveUserCursorHome = (options: {
     options.env?.CURSOR_CONFIG_DIR ??
       path.join(options.homeDir ?? os.homedir(), '.cursor'),
   );
+
+// Matches the official Cursor Agent CLI's own `getAuthFilePath` resolver
+// (same per-platform precedence: env override first, HOME-derived default
+// otherwise) so this can both detect a real `agent login` session and, on
+// platforms where HOME isolation hides it, bridge to exactly where the
+// isolated child process will look.
+export const resolveCursorAuthFilePath = (options: {
+  homeDir?: string;
+  env?: NodeJS.ProcessEnv;
+}): string => {
+  const env = options.env ?? {};
+  const homeDir = options.homeDir ?? os.homedir();
+  if (process.platform === 'win32')
+    return path.join(
+      env.APPDATA || path.join(homeDir, 'AppData', 'Roaming'),
+      'Cursor',
+      'auth.json',
+    );
+  if (process.platform === 'darwin')
+    return path.join(homeDir, '.cursor', 'auth.json');
+  return path.join(
+    env.XDG_CONFIG_HOME || path.join(homeDir, '.config'),
+    'cursor',
+    'auth.json',
+  );
+};
+
+// The isolated runtime never sets APPDATA, so on Windows the real auth.json
+// stays reachable unbridged (see resolveCursorAuthFilePath above) — this is
+// only ever used for macOS/Linux, where HOME is overridden.
+const resolveIsolatedCursorAuthFilePath = (runtimeHomePath: string): string =>
+  process.platform === 'darwin'
+    ? path.join(runtimeHomePath, '.cursor', 'auth.json')
+    : path.join(runtimeHomePath, '.config', 'cursor', 'auth.json');
+
+export const cursorLoginSessionExists = async (
+  authFilePath: string,
+): Promise<boolean> => {
+  try {
+    return (await lstat(authFilePath)).isFile();
+  } catch {
+    return false;
+  }
+};
+
+// Copies only the login-session file itself (never its contents, into logs or
+// elsewhere) into the isolated HOME so a normally-authenticated user is not
+// forced to export CURSOR_API_KEY/CURSOR_AUTH_TOKEN. A no-op on Windows,
+// where the real file is already reachable without copying anything.
+export const bridgeCursorLoginSession = async (options: {
+  realAuthFilePath: string;
+  runtimeHomePath: string;
+}): Promise<boolean> => {
+  if (process.platform === 'win32') return false;
+  if (!(await cursorLoginSessionExists(options.realAuthFilePath))) return false;
+  const target = resolveIsolatedCursorAuthFilePath(options.runtimeHomePath);
+  try {
+    await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+    await copyFile(options.realAuthFilePath, target);
+    await chmod(target, 0o600);
+    return true;
+  } catch (error) {
+    throw new TryAuthBridgeFailedError('Cursor', { cause: error });
+  }
+};
 
 export const bridgeCursorRuntimeState = async (options: {
   sourceCursorHome: string;
@@ -221,6 +295,13 @@ export const prepareCursorTryRuntime = async (options: {
     const bridgedFiles = await bridgeCursorRuntimeState({
       sourceCursorHome: realCursorHome,
       runtimeCursorHome: runtimeCursorHomePath,
+    });
+    await bridgeCursorLoginSession({
+      realAuthFilePath: resolveCursorAuthFilePath({
+        homeDir: realHome,
+        ...(options.env ? { env: options.env } : {}),
+      }),
+      runtimeHomePath,
     });
     const materialize = options.materialize ?? materializeStoredSkill;
     const skills: TrySession['resolvedSkills'] = [];
@@ -457,10 +538,10 @@ export const recoverStaleCursorTryRuntimes = async (
 };
 
 // Cursor's officially documented headless auth path is an env var — forward
-// it if present. If neither is set, fail fast and cleanly before launching
-// rather than starting an unauthenticated (or silently-stale) session: the
-// interactive `agent login` session file format/location is undocumented and
-// is never bridged (see bridgeCursorRuntimeState).
+// it if present. A normal `agent login` session (see resolveCursorAuthFilePath
+// / bridgeCursorLoginSession above) is also accepted. If none of the three
+// are available, fail fast and cleanly before launching rather than starting
+// an unauthenticated (or silently-stale) session.
 const cursorAuthEnv = (
   env: NodeJS.ProcessEnv,
 ): Partial<
@@ -506,13 +587,22 @@ export const launchCursorTryRuntime = async (options: {
   try {
     await assertOwnedReadySession({ stackHome: options.stackHome, session });
     ownershipVerified = true;
-    if (!authForward.CURSOR_API_KEY && !authForward.CURSOR_AUTH_TOKEN)
-      throw new CursorTryAuthRequiredError();
     const realHome = path.resolve(
       inheritedEnvironment.HOME ??
         inheritedEnvironment.USERPROFILE ??
         os.homedir(),
     );
+    if (
+      !authForward.CURSOR_API_KEY &&
+      !authForward.CURSOR_AUTH_TOKEN &&
+      !(await cursorLoginSessionExists(
+        resolveCursorAuthFilePath({
+          homeDir: realHome,
+          env: inheritedEnvironment,
+        }),
+      ))
+    )
+      throw new CursorTryAuthRequiredError();
     const realCursorHome = resolveUserCursorHome({
       homeDir: realHome,
       env: inheritedEnvironment,
