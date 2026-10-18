@@ -574,7 +574,10 @@ const FOOTER_GROUPS = [
   },
   {
     h: 'RESOURCES',
-    l: [{ t: 'CLI reference', u: 'https://github.com/usestak/stak#readme' }],
+    l: [
+      { t: 'Docs', u: '/docs' },
+      { t: 'CLI reference', u: '/docs/cli' },
+    ],
   },
 ];
 

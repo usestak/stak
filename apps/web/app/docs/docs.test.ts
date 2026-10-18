@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,4 +16,16 @@ describe('docs nav entries resolve to real routes', () => {
       expect(existsSync(pageFile)).toBe(true);
     });
   }
+});
+
+describe('sidebar links to real Docs and CLI Reference routes', () => {
+  it('app-sidebar.tsx has separate Docs and CLI Reference links, not a combined span', () => {
+    const sidebar = readFileSync(
+      path.join(appDir, '../_components/app-sidebar.tsx'),
+      'utf8',
+    );
+    expect(sidebar).not.toContain('Docs · CLI reference');
+    expect(sidebar).toContain("href=\"/docs\"");
+    expect(sidebar).toContain("href=\"/docs/cli\"");
+  });
 });

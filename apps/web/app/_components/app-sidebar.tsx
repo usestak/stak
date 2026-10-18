@@ -167,7 +167,12 @@ export function AppSidebar({
           >
             <span>Settings</span>
           </Link>
-          <span className="docs">Docs · CLI reference</span>
+          <Link href="/docs" className="stak-nav-item docs">
+            <span>Docs</span>
+          </Link>
+          <Link href="/docs/cli" className="stak-nav-item docs">
+            <span>CLI Reference</span>
+          </Link>
         </div>
       </div>
     </nav>
