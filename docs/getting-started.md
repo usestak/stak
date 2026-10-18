@@ -84,7 +84,7 @@ stak run codex        # then project it into agents
 ## Share a STAK publicly
 
 ```bash
-stak publish ./frontend-stak      # -> @you/frontend (reference-only)
+stak publish ./frontend-stak      # -> @you/frontend (content-addressed snapshot)
 # others:
 stak use @you/frontend
 stak try @you/frontend -- codex

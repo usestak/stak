@@ -79,9 +79,9 @@ Memory, Projects, machine state, credentials, or local filesystem paths.
 
 STAK only owns content it created and tracks in a local binding registry;
 unmanaged or externally-modified content is never overwritten without
-approval. Private snapshots stay private — public STAKs are reference-only for Skills
-that have no git-tracked source to pin (not a claim that nothing is copied;
-pinned Skills are published as-is).
+approval. Private snapshots stay private, but every published Skill — git-tracked or
+not — publishes as an immutable, content-addressed snapshot pinned by
+content hash; publishing requires that you've pushed that content first.
 See [docs/security.md](docs/security.md) for the full model.
 
 ## How it works

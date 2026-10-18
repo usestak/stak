@@ -239,7 +239,7 @@ const COMMAND_DETAILS: Record<string, CommandDetail> = {
   publish: {
     usage: 'stak publish <stak> [--slug <slug>] [--dry-run] [--json] [--yes]',
     purpose:
-      'Publish a reference-only public STAK as @owner/name from a local source or an active local layer.',
+      'Publish a public STAK as @owner/name from a local source or an active local layer.',
     options: [
       '--slug <slug> — choose the published slug explicitly',
       '--dry-run — preview without applying',

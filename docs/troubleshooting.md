@@ -43,9 +43,10 @@ and the safe next step. Below are common situations.
 
 ## Publishing
 
-- **"Cannot publish … Skills require private snapshots"** — public Stacks are
-  reference-only. Only Skills backed by a clean, portable Git reference can be
-  published. Commit and push the Skill to a portable remote first.
+- **"Cannot publish … run `stak push` first"** — every Skill publishes as an
+  immutable, content-addressed snapshot, but the owner must have pushed that
+  content before it can be published. Run `stak push` for the Skill, then
+  retry the publish.
 - **"source remote contains embedded credentials" / unsafe remote** — remove the
   credential from the remote URL; publish from a clean https/ssh remote.
 - **Invalid slug** — pass `--slug <slug>` matching `[a-z0-9][a-z0-9-_]{0,62}`.

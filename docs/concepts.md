@@ -65,8 +65,10 @@ Two separate cloud concepts with separate security domains:
 
 - **Push/pull** back up and restore your **private** portable `main` Environment
   (may include private snapshots).
-- **Publish** creates a **public**, reference-only STAK addressed as
-  `@owner/name`. Public STAKs never carry snapshot bytes, credentials, or
+- **Publish** creates a **public** STAK addressed as `@owner/name`. Every
+  Skill publishes as an immutable, content-addressed snapshot pinned by
+  content hash — Git provenance (when present) is kept only as
+  display/update-check metadata. Public STAKs never carry credentials or
   machine paths.
 
 The flow is always: Cloud Environment → local desired `main` → agent

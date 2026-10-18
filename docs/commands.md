@@ -198,7 +198,7 @@ download, all verified, then an atomic commit). Does not change agent bindings.
 
 ### `stak publish <stak> [--slug <slug>] [--dry-run] [--json] [--yes]`
 
-Publish a reference-only public STAK as `@owner/name` from a local source or an
+Publish a public STAK as `@owner/name` from a local source or an
 active local layer.
 
 ### `stak open [--print]`
@@ -213,7 +213,9 @@ its own (web sign-in is handled by the browser) and mutates nothing. Pass
 
 - One persistent Environment: `main` only. `stak switch` is deferred.
 - Isolated `try` supports Codex, Claude, and Cursor.
-- Public STAKs are reference-only (snapshot-backed Skills cannot be published).
+- Public STAKs publish every Skill as an immutable, content-addressed
+  snapshot (snapshot-backed Skills can be published; the content must have
+  been pushed first).
 - No automatic STAK updates; an already-active public STAK is not silently
   upgraded.
 - No force override for conflicts (`--force` does not exist); conflicts block

@@ -67,7 +67,7 @@ export default function DocsWorkflowsPage() {
 
       <h2>Publish a STAK</h2>
       <p>
-        Publish a reference-only public STAK as <code>@owner/name</code> from a
+        Publish a public STAK as <code>@owner/name</code> from a
         local source or an active local layer.
       </p>
       <pre>
