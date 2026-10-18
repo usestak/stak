@@ -3,11 +3,17 @@
 All notable changes to STAK are documented here. This project adheres to
 semantic versioning.
 
-## 0.1.0 — unreleased (release candidate)
+## 0.1.1 — 2026-10-18
+
+- fix(cli): reuse normal Cursor `agent login` sessions in isolated trials
+- fix(cli): support Cursor Agent shims on Windows
+- fix(cli): satisfy multi-agent trial lint
+- fix(cli): tighten multi-agent trial diagnostics
+
+## 0.1.0 — 2026-10-14
 
 First V0 release candidate: the core "my agent setup is portable" thesis,
-end to end. Everything below is part of the upcoming 0.1.0 (STAK has never
-shipped a public release; these are not separate published versions).
+end to end.
 
 ### Added — environment portability
 
