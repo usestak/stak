@@ -10,13 +10,25 @@ export type CursorDetectionOptions = {
   runVersion?: (file: string, args: string[]) => Promise<string | undefined>;
 };
 
+// The official Cursor Agent CLI's `--version` prints a bare dated build
+// version (e.g. `2026.10.16-e3cb207`), not anything containing "cursor" — the
+// same `YYYY.M.D(-HH-MM-SS)?-commit` shape its own installer scripts use to
+// pick the newest `versions/` directory. A plain `/cursor/i` check therefore
+// rejects genuine installs; accept either that literal signal (older/renamed
+// builds) or this version shape, which an unrelated `agent` binary on PATH is
+// very unlikely to coincidentally print.
+const cursorVersionPattern =
+  /^\d{4}\.\d{1,2}\.\d{1,2}(-\d{2}-\d{2}-\d{2})?-[0-9a-f]+$/i;
+export const isCursorVersionString = (version: string) =>
+  /cursor/i.test(version) || cursorVersionPattern.test(version.trim());
+
 export const detectCursor = (
   options: CursorDetectionOptions = {},
 ): Promise<AgentDetection> =>
   detectExecutableAgent({
     agent: 'cursor',
     candidates: ['agent', 'cursor-agent'],
-    validateVersion: (version) => /cursor/i.test(version),
+    validateVersion: isCursorVersionString,
     ...options,
   });
 

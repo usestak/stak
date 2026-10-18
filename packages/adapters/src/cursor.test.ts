@@ -78,6 +78,32 @@ describe('Cursor detection', () => {
     });
   });
 
+  it('accepts the official CLI\'s real `--version` output (a bare dated build, no "cursor" text)', async () => {
+    // Regression: the real Windows-installed Cursor Agent CLI prints exactly
+    // this shape (verified against an actual install) — no literal "cursor"
+    // substring, which the original /cursor/i-only check rejected outright.
+    const result = await detectCursor({
+      findExecutable: async (name) =>
+        name === 'agent' ? '/bin/agent' : undefined,
+      runVersion: async () => '2026.10.16-e3cb207',
+    });
+    expect(result).toMatchObject({
+      agent: 'cursor',
+      installed: true,
+      executablePath: '/bin/agent',
+      version: '2026.10.16-e3cb207',
+    });
+  });
+
+  it('accepts the newer timestamped build-version shape too', async () => {
+    const result = await detectCursor({
+      findExecutable: async (name) =>
+        name === 'agent' ? '/bin/agent' : undefined,
+      runVersion: async () => '2026.10.16-04-52-00-e3cb207',
+    });
+    expect(result.installed).toBe(true);
+  });
+
   it('rejects an unrelated `agent` and falls back to cursor-agent', async () => {
     const calls: string[] = [];
     const result = await detectCursor({
