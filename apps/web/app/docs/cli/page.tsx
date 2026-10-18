@@ -1,6 +1,9 @@
 import type { Metadata } from 'next';
 
-import { CLI_REFERENCE_COMMANDS, type CliCommandGroup } from './cli-reference.data';
+import {
+  CLI_REFERENCE_COMMANDS,
+  type CliCommandGroup,
+} from './cli-reference.data';
 
 export const metadata: Metadata = {
   title: 'CLI Reference',
@@ -56,7 +59,7 @@ const COMMAND_DETAILS: Record<string, CommandDetail> = {
   init: {
     usage: 'stak init',
     purpose:
-      "Capture the current global Skills as the desired Environment `main`.",
+      'Capture the current global Skills as the desired Environment `main`.',
     examples: ['stak init'],
   },
   status: {
@@ -89,8 +92,7 @@ const COMMAND_DETAILS: Record<string, CommandDetail> = {
   },
   open: {
     usage: 'stak open [--print]',
-    purpose:
-      "Open the STAK web app's Overview with this machine selected.",
+    purpose: "Open the STAK web app's Overview with this machine selected.",
     options: ['--print — print the URL instead of launching a browser'],
     examples: ['stak open', 'stak open --print'],
     notes: [
@@ -262,12 +264,12 @@ export default function CliReferencePage() {
       <h1>CLI Reference</h1>
       <p className="stak-docs-muted">
         Every command registered by the STAK CLI (<code>stak</code>). All
-        mutating commands follow: intent → plan → preview → approval → apply
-        → result. Mutations require confirmation; pass <code>--yes</code> for
-        non-interactive use — it never bypasses conflicts, integrity
-        failures, or privacy blocks. <code>--json</code> (where noted) prints
-        exactly one JSON document to stdout and nothing else; it never
-        contains tokens, secrets, or signed URLs.
+        mutating commands follow: intent → plan → preview → approval → apply →
+        result. Mutations require confirmation; pass <code>--yes</code> for
+        non-interactive use — it never bypasses conflicts, integrity failures,
+        or privacy blocks. <code>--json</code> (where noted) prints exactly one
+        JSON document to stdout and nothing else; it never contains tokens,
+        secrets, or signed URLs.
       </p>
 
       {GROUP_ORDER.map((group) => (
@@ -277,7 +279,11 @@ export default function CliReferencePage() {
             const detail = COMMAND_DETAILS[name];
             if (!detail) return null;
             return (
-              <div key={name} className="stak-docs-card" style={{ marginBottom: 10 }}>
+              <div
+                key={name}
+                className="stak-docs-card"
+                style={{ marginBottom: 10 }}
+              >
                 <div className="stak-docs-card-title">
                   <code>{name}</code>
                 </div>
@@ -303,7 +309,9 @@ export default function CliReferencePage() {
                   <>
                     <p className="stak-docs-muted">Notes:</p>
                     <ul>
-                      {detail.notes.map((note) => <li key={note}>{note}</li>)}
+                      {detail.notes.map((note) => (
+                        <li key={note}>{note}</li>
+                      ))}
                     </ul>
                   </>
                 ) : null}

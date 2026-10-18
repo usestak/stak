@@ -44,19 +44,19 @@ launch an agent. `run` projects main into the agent you name and launches it.
 
 ## Try vs. Use
 
-| | Try | Use |
-|---|---|---|
-| Changes main | No | Yes |
-| Launches an agent | Yes | No (pair with `stak run`) |
-| Runtime | Temporary, cleaned up after | Persistent |
+|                   | Try                         | Use                       |
+| ----------------- | --------------------------- | ------------------------- |
+| Changes main      | No                          | Yes                       |
+| Launches an agent | Yes                         | No (pair with `stak run`) |
+| Runtime           | Temporary, cleaned up after | Persistent                |
 
 ## Supported agents
 
-|              | run | try |
-|--------------|-----|-----|
-| Codex        | yes | yes |
-| Claude Code  | yes | yes |
-| Cursor       | yes | yes |
+|             | run | try |
+| ----------- | --- | --- |
+| Codex       | yes | yes |
+| Claude Code | yes | yes |
+| Cursor      | yes | yes |
 
 ## Skills, Memory, Projects, Machines
 

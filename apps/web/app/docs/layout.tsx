@@ -31,7 +31,11 @@ export default function DocsLayout({ children }: { children: ReactNode }) {
         <nav className="stak-docs-side" aria-label="Documentation">
           <div className="stak-docs-nav">
             {DOCS_NAV.map((entry) => (
-              <Link key={entry.href} href={entry.href} className="stak-docs-nav-item">
+              <Link
+                key={entry.href}
+                href={entry.href}
+                className="stak-docs-nav-item"
+              >
                 {entry.title}
               </Link>
             ))}

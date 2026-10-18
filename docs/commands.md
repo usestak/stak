@@ -102,7 +102,7 @@ confirmation unless `--yes` (or `--json`) is passed.
 
 Set a logical project's display name. Presentation metadata only — it never
 changes the Project ID, mapping, or restore behavior. Refused for
-Git-identified projects (whose name *is* their Git identity), and for empty,
+Git-identified projects (whose name _is_ their Git identity), and for empty,
 too-long (200 characters max), or path-like names.
 
 ### `stak project archive <project> [--json] [-y|--yes]`

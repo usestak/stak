@@ -23,7 +23,7 @@ locally.
 - Include tests for behavior changes.
 - Make sure `pnpm lint`, `pnpm typecheck`, and the relevant test suite pass
   before requesting review.
-- Describe *why* the change is needed, not just what changed.
+- Describe _why_ the change is needed, not just what changed.
 
 ## Reporting bugs
 

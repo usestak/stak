@@ -38,14 +38,14 @@ export default function DocsOpenSourcePage() {
         <a href={`${GITHUB_BLOB}/CONTRIBUTING.md`}>
           <code>CONTRIBUTING.md</code>
         </a>{' '}
-        at the repository root — it covers prerequisites, install, and the
-        local dev workflow.
+        at the repository root — it covers prerequisites, install, and the local
+        dev workflow.
       </p>
 
       <h2>Contributing</h2>
       <p>
-        Everything from coding conventions to how to open a pull request is
-        in the same{' '}
+        Everything from coding conventions to how to open a pull request is in
+        the same{' '}
         <a href={`${GITHUB_BLOB}/CONTRIBUTING.md`}>
           <code>CONTRIBUTING.md</code>
         </a>
@@ -62,9 +62,9 @@ export default function DocsOpenSourcePage() {
         <li>
           <code>packages/*</code> — the STAK CLI and its libraries:{' '}
           <code>cli</code>, <code>core</code>, <code>adapters</code>,{' '}
-          <code>memory</code>, <code>scanner</code>, <code>cloud-client</code>
-          , <code>cloud-server</code>, <code>store</code>,{' '}
-          <code>shared</code>, and <code>spec</code>.
+          <code>memory</code>, <code>scanner</code>, <code>cloud-client</code>,{' '}
+          <code>cloud-server</code>, <code>store</code>, <code>shared</code>,
+          and <code>spec</code>.
         </li>
       </ul>
 
@@ -74,8 +74,8 @@ export default function DocsOpenSourcePage() {
         <a href={`${GITHUB_BLOB}/SECURITY.md`}>
           <code>SECURITY.md</code>
         </a>{' '}
-        at the repository root — please don't file public issues for
-        security reports.
+        at the repository root — please don't file public issues for security
+        reports.
       </p>
     </>
   );
