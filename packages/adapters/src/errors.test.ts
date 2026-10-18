@@ -21,15 +21,11 @@ describe('multi-agent trial error wording', () => {
   });
 
   it('names the requesting agent in TryAuthBridgeFailedError, not Codex', () => {
-    expect(new TryAuthBridgeFailedError('Claude').message).toContain(
-      'Claude',
-    );
+    expect(new TryAuthBridgeFailedError('Claude').message).toContain('Claude');
     expect(new TryAuthBridgeFailedError('Claude').message).not.toContain(
       'Codex',
     );
-    expect(new TryAuthBridgeFailedError('Cursor').message).toContain(
-      'Cursor',
-    );
+    expect(new TryAuthBridgeFailedError('Cursor').message).toContain('Cursor');
     expect(new TryAuthBridgeFailedError('Cursor').message).not.toContain(
       'Codex',
     );

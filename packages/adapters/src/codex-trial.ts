@@ -6,7 +6,6 @@ import {
   mkdir,
   readFile,
   readdir,
-  rm,
   rmdir,
   writeFile,
 } from 'node:fs/promises';
@@ -336,7 +335,9 @@ export const prepareCodexTryRuntime = async (options: {
       try {
         await removeOwnedRuntimePath(runtimeRoot, finalDirectory);
       } catch (cleanupError) {
-        throw new TryRuntimeCleanupFailedError('Codex', { cause: cleanupError });
+        throw new TryRuntimeCleanupFailedError('Codex', {
+          cause: cleanupError,
+        });
       }
     if (
       error instanceof TryRuntimePreparationFailedError ||

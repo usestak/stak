@@ -1,10 +1,21 @@
-import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 import { assertPathWithin } from '@stack/shared';
 import { trySessionSchema } from '@stack/spec';
-import type { TryCleanupComponent, TryCleanupDiagnostic, TrySession } from '@stack/spec';
+import type {
+  TryCleanupComponent,
+  TryCleanupDiagnostic,
+  TrySession,
+} from '@stack/spec';
 
 // Agent-agnostic isolation/cleanup primitives shared by every agent's trial
 // runtime module (codex-trial.ts, claude-trial.ts, cursor-trial.ts). None of
@@ -31,7 +42,9 @@ export const writeSession = async (directory: string, session: TrySession) => {
   }
 };
 
-export const readSessionMarker = async (directory: string): Promise<TrySession> =>
+export const readSessionMarker = async (
+  directory: string,
+): Promise<TrySession> =>
   trySessionSchema.parse(
     JSON.parse(await readFile(path.join(directory, 'session.json'), 'utf8')),
   );

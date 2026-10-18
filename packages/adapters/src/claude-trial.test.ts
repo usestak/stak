@@ -126,9 +126,9 @@ describe('Claude trial runtime', () => {
         runtimeClaudeHome: target,
       }),
     ).toEqual(['.credentials.json', 'settings.json']);
-    expect(
-      await readFile(path.join(target, '.credentials.json'), 'utf8'),
-    ).toBe('sentinel-secret');
+    expect(await readFile(path.join(target, '.credentials.json'), 'utf8')).toBe(
+      'sentinel-secret',
+    );
     const settings = JSON.parse(
       await readFile(path.join(target, 'settings.json'), 'utf8'),
     );
@@ -183,10 +183,13 @@ describe('Claude trial runtime', () => {
       path.join(realHome, '.claude'),
     );
     const materialized = result.session.resolvedSkills.at(0);
-    expect(materialized?.targetPath).toContain(path.join('.claude', 'skills'));
-    expect(
-      (await hashSkillDirectory(materialized!.targetPath)).hash,
-    ).toBe(trial.environment.skills.at(0)!.contentHash);
+    if (!materialized) throw new Error('expected a materialized skill');
+    expect(materialized.targetPath).toContain(path.join('.claude', 'skills'));
+    const expectedSkill = trial.environment.skills.at(0);
+    if (!expectedSkill) throw new Error('expected a trial skill');
+    expect((await hashSkillDirectory(materialized.targetPath)).hash).toBe(
+      expectedSkill.contentHash,
+    );
     expect(await readFile(path.join(realSkill, 'SKILL.md'), 'utf8')).toBe(
       'normal',
     );
@@ -247,7 +250,11 @@ describe('Claude trial runtime', () => {
       launchClaudeTryRuntime({
         stackHome,
         preparation,
-        detection: { agent: 'claude', installed: true, executablePath: '/fake' },
+        detection: {
+          agent: 'claude',
+          installed: true,
+          executablePath: '/fake',
+        },
         spawnProcess: async () => {
           throw new Error('launch failed');
         },

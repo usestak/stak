@@ -265,7 +265,9 @@ export const prepareCursorTryRuntime = async (options: {
       try {
         await removeOwnedRuntimePath(runtimeRoot, finalDirectory);
       } catch (cleanupError) {
-        throw new TryRuntimeCleanupFailedError('Cursor', { cause: cleanupError });
+        throw new TryRuntimeCleanupFailedError('Cursor', {
+          cause: cleanupError,
+        });
       }
     if (
       error instanceof TryRuntimePreparationFailedError ||
@@ -461,7 +463,9 @@ export const recoverStaleCursorTryRuntimes = async (
 // is never bridged (see bridgeCursorRuntimeState).
 const cursorAuthEnv = (
   env: NodeJS.ProcessEnv,
-): Partial<Pick<NodeJS.ProcessEnv, 'CURSOR_API_KEY' | 'CURSOR_AUTH_TOKEN'>> => ({
+): Partial<
+  Pick<NodeJS.ProcessEnv, 'CURSOR_API_KEY' | 'CURSOR_AUTH_TOKEN'>
+> => ({
   ...(env.CURSOR_API_KEY ? { CURSOR_API_KEY: env.CURSOR_API_KEY } : {}),
   ...(env.CURSOR_AUTH_TOKEN
     ? { CURSOR_AUTH_TOKEN: env.CURSOR_AUTH_TOKEN }

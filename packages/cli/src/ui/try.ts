@@ -13,9 +13,7 @@ export type RenderOptions = { verbose?: boolean };
 // verbose output (e.g. "Temporary CODEX_HOME" vs "Temporary Claude
 // state/config" vs "Temporary Cursor state/config").
 const agentHomeLabel = (agent: AgentId): string =>
-  agent === 'codex'
-    ? 'CODEX_HOME'
-    : `${agentLabel(agent)} state/config`;
+  agent === 'codex' ? 'CODEX_HOME' : `${agentLabel(agent)} state/config`;
 
 export const renderTryDryRun = (
   trial: TryResolvedEnvironment,

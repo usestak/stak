@@ -72,8 +72,10 @@ const bridgeNames = (names: string[]) =>
 const excludedSettingsKeys = new Set(['hooks', 'plugins', 'mcpServers']);
 export const sanitizeClaudeSettingsJson = (text: string): string => {
   const parsed = JSON.parse(text) as Record<string, unknown>;
-  for (const key of excludedSettingsKeys) delete parsed[key];
-  return JSON.stringify(parsed, null, 2);
+  const sanitized = Object.fromEntries(
+    Object.entries(parsed).filter(([key]) => !excludedSettingsKeys.has(key)),
+  );
+  return JSON.stringify(sanitized, null, 2);
 };
 
 export const resolveUserClaudeHome = (options: {
@@ -287,7 +289,9 @@ export const prepareClaudeTryRuntime = async (options: {
       try {
         await removeOwnedRuntimePath(runtimeRoot, finalDirectory);
       } catch (cleanupError) {
-        throw new TryRuntimeCleanupFailedError('Claude', { cause: cleanupError });
+        throw new TryRuntimeCleanupFailedError('Claude', {
+          cause: cleanupError,
+        });
       }
     if (
       error instanceof TryRuntimePreparationFailedError ||

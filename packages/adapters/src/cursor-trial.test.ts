@@ -113,10 +113,7 @@ describe('Cursor trial runtime', () => {
     const source = path.join(root, 'source');
     const target = path.join(root, 'target');
     await mkdir(source, { recursive: true });
-    await writeFile(
-      path.join(source, 'cli-config.json'),
-      '{"editor":"vim"}',
-    );
+    await writeFile(path.join(source, 'cli-config.json'), '{"editor":"vim"}');
     await writeFile(path.join(source, 'auth-session.bin'), 'undocumented');
     expect(
       await bridgeCursorRuntimeState({
@@ -124,9 +121,9 @@ describe('Cursor trial runtime', () => {
         runtimeCursorHome: target,
       }),
     ).toEqual(['cli-config.json']);
-    expect(
-      await readFile(path.join(target, 'cli-config.json'), 'utf8'),
-    ).toBe('{"editor":"vim"}');
+    expect(await readFile(path.join(target, 'cli-config.json'), 'utf8')).toBe(
+      '{"editor":"vim"}',
+    );
     await expect(
       access(path.join(target, 'auth-session.bin')),
     ).rejects.toMatchObject({ code: 'ENOENT' });
@@ -180,7 +177,11 @@ describe('Cursor trial runtime', () => {
       launchCursorTryRuntime({
         stackHome,
         preparation,
-        detection: { agent: 'cursor', installed: true, executablePath: '/fake' },
+        detection: {
+          agent: 'cursor',
+          installed: true,
+          executablePath: '/fake',
+        },
         env: {},
         spawnProcess: async () => {
           spawned = true;
@@ -265,7 +266,11 @@ describe('Cursor trial runtime', () => {
       launchCursorTryRuntime({
         stackHome,
         preparation,
-        detection: { agent: 'cursor', installed: true, executablePath: '/fake' },
+        detection: {
+          agent: 'cursor',
+          installed: true,
+          executablePath: '/fake',
+        },
         env: { CURSOR_API_KEY: 'sk-test' },
         spawnProcess: async () => {
           throw new Error('launch failed');

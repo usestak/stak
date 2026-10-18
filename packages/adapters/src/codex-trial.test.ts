@@ -68,6 +68,11 @@ const writeFile = async (target: string, contents: string) => {
   await assertOwnedMutation(target);
   await filesystemWriteFile(target, contents);
 };
+const requireCodexHome = (session: TrySession) => {
+  if (!session.runtimeCodexHomePath)
+    throw new Error('expected a runtimeCodexHomePath on this session');
+  return session.runtimeCodexHomePath;
+};
 afterEach(async () => {
   await Promise.all(ownedRoots.splice(0).map((owned) => owned.cleanup()));
 });
@@ -825,7 +830,7 @@ describe('Codex trial runtime cleanup hardening', () => {
     const { stackHome, session } = await prepared(await temp(), 'permfail1');
     // A secret living in the runtime must never appear in the retained marker.
     await writeFile(
-      path.join(session.runtimeCodexHomePath!, 'auth.json'),
+      path.join(requireCodexHome(session), 'auth.json'),
       'sentinel-secret',
     );
     const outcome = await cleanupCodexTryRuntime({
@@ -1221,7 +1226,7 @@ describe('Codex config isolation (plugin marketplace leakage)', () => {
       idFactory: () => 'noplugins1',
     });
     const bridgedConfig = await readFile(
-      path.join(preparation.session.runtimeCodexHomePath!, 'config.toml'),
+      path.join(requireCodexHome(preparation.session), 'config.toml'),
       'utf8',
     );
     expect(bridgedConfig).not.toContain('marketplaces');
@@ -1232,7 +1237,7 @@ describe('Codex config isolation (plugin marketplace leakage)', () => {
     expect(preparation.session.resolvedSkills).toHaveLength(1);
     expect(
       await readFile(
-        path.join(preparation.session.runtimeCodexHomePath!, 'auth.json'),
+        path.join(requireCodexHome(preparation.session), 'auth.json'),
         'utf8',
       ),
     ).toBe('sentinel-secret');
