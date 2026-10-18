@@ -64,14 +64,22 @@ export default function DocsMemoryPage() {
 
       <h2>Moving to another computer</h2>
       <p>
-        On a new machine, sign in, reconstruct your desired Environment, and
-        recover Memory. Logical Projects reappear from recovered Memory, and you
-        map each one to wherever it lives locally on that machine — Project
-        identity itself never moves, only the binding does.
+        On a new machine, sign in, pull your desired Environment, and recover
+        Memory from STAK Cloud — <code>stak memory recover</code> downloads
+        your private memory store before there is anything local for{' '}
+        <code>stak memory restore</code> to restore from. Logical Projects
+        reappear from recovered Memory, and you map each one to wherever it
+        lives locally on that machine — Project identity itself never moves,
+        only the binding does.
       </p>
       <pre>
-        <code>{`stak login\nstak pull\nstak memory restore\nstak project map my-app ~/code/my-app`}</code>
+        <code>{`stak login\nstak pull\nstak memory recover\nstak memory restore\nstak project map my-app ~/code/my-app`}</code>
       </pre>
+
+      <p>
+        Memory is currently scoped to Claude Code; Codex and Cursor memory
+        support is planned.
+      </p>
     </>
   );
 }

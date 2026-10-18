@@ -195,15 +195,19 @@ const COMMAND_DETAILS: Record<string, CommandDetail> = {
   },
   memory: {
     usage:
-      'stak memory scan [--json] [--verbose] | stak memory backup [--json] | stak memory status [--json] [--verbose] | stak memory restore [--dry-run] [--json] [--verbose]',
+      'stak memory scan [--json] [--verbose] | stak memory backup [--json] | stak memory status [--json] [--verbose] | stak memory recover [--backup <n>] [--passkey] [--recovery-file <path>] [--json] | stak memory restore [--dry-run] [--json] [--verbose] | stak memory protect [--passkey] [--recovery-file <path>] [--json] | stak memory history [--json]',
     purpose:
       'Private, local, durable agent context — separate from shareable Skills and never publishable.',
     examples: ['stak memory scan', 'stak memory backup', 'stak memory status'],
     notes: [
       '`scan` is read-only discovery of portable Claude memory on this machine; changes nothing.',
-      '`backup` copies allowlisted memory into STAK’s private store (read-only capture; native Claude files are never modified). Commits the manifest last.',
+      '`backup` copies allowlisted memory into STAK’s private store (read-only capture; native Claude files are never modified) and, when signed in, also uploads it to STAK Cloud. Commits the manifest last.',
       '`status` shows the last memory backup.',
-      '`restore` only writes absent targets; a differing existing target is reported as a conflict and left untouched (never merged). Not uploaded to Cloud in V0.1.',
+      '`recover` downloads the private memory store from STAK Cloud onto this machine (requires sign-in); this is the step that populates a fresh machine before `restore` has anything local to use.',
+      '`restore` writes private memory into native agent Memory files. Local only — never talks to Cloud. Only writes absent targets; a differing existing target is reported as a conflict and left untouched (never merged).',
+      '`protect` enables client-side encrypted (Protected) Cloud backup, optionally with a passkey or recovery file.',
+      '`history` shows your Memory backup history (newest first).',
+      'Memory is currently scoped to Claude Code; Codex and Cursor memory support is planned.',
     ],
   },
   push: {

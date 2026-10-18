@@ -20,10 +20,15 @@ export default function DocsSharingPage() {
       <h2>Public STAKs</h2>
       <p>
         A public STAK is a named, versioned bundle published as{' '}
-        <code>@owner/name</code> — reference-only in V0.1 (snapshot-backed
-        Skills cannot be published). Anyone can <code>stak use</code> or{' '}
-        <code>stak try</code> it; using it never grants write access back to
-        your account or machine.
+        <code>@owner/name</code>. Publishing pins each Skill in the bundle by
+        its exact source revision and content hash — that pinned copy is the
+        &quot;snapshot&quot; that actually gets published. A Skill that exists
+        only as a private, snapshot-backed copy (not backed by a git-tracked
+        source) has no source revision to pin, so it cannot itself be
+        published — that is the &quot;reference-only in V0.1&quot; limit.
+        Anyone can <code>stak use</code> or <code>stak try</code> a published
+        STAK; using it never grants write access back to your account or
+        machine.
       </p>
       <pre>
         <code>stak publish ./my-stak --slug my-stak</code>

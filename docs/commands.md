@@ -66,17 +66,36 @@ Read-only discovery of portable Claude memory on this machine. Changes nothing.
 ### `stak memory backup [--json]`
 
 Copy allowlisted memory into STAK's private store (read-only capture; native
-Claude files are never modified). Commits the manifest last.
+Claude files are never modified) and, when signed in, upload it to STAK
+Cloud. Commits the manifest last.
 
 ### `stak memory status [--json] [--verbose]`
 
 Show the last memory backup.
 
+### `stak memory recover [--backup <n>] [--passkey] [--recovery-file <path>] [--json]`
+
+Download the private memory store from STAK Cloud onto this machine (requires
+sign-in). This is the step that populates a fresh machine before `restore` has
+anything local to use.
+
 ### `stak memory restore [--dry-run] [--json] [--verbose]`
 
-Restore private memory. Only writes absent targets; a differing existing target
-is reported as a conflict and left untouched (never merged). Not uploaded to
-Cloud in V0.1.
+Restore private memory into native agent Memory files. Local only — never
+talks to Cloud. Only writes absent targets; a differing existing target is
+reported as a conflict and left untouched (never merged).
+
+### `stak memory protect [--passkey] [--recovery-file <path>] [--json]`
+
+Enable client-side encrypted (Protected) Cloud backup, optionally with a
+passkey or recovery file.
+
+### `stak memory history [--json]`
+
+Show your Memory backup history (newest first).
+
+Memory is currently scoped to Claude Code; Codex and Cursor memory support is
+planned.
 
 ## Project
 

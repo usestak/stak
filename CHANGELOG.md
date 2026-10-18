@@ -12,7 +12,7 @@ semantic versioning.
 
 ## 0.1.0 — 2026-10-14
 
-First V0 release candidate: the core "my agent setup is portable" thesis,
+First V0 release: the core "my agent setup is portable" thesis,
 end to end.
 
 ### Added — environment portability

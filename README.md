@@ -71,14 +71,17 @@ launch an agent. `run` projects main into the agent you name and launches it.
 
 ## Sharing
 
-Public STAKs contain selected portable Skill snapshots. They never include
+Public STAKs contain selected portable Skill snapshots (each Skill pinned by
+exact source revision/content hash at publish time). They never include
 Memory, Projects, machine state, credentials, or local filesystem paths.
 
 ## Privacy & security
 
 STAK only owns content it created and tracks in a local binding registry;
 unmanaged or externally-modified content is never overwritten without
-approval. Private snapshots stay private — public STAKs are reference-only.
+approval. Private snapshots stay private — public STAKs are reference-only for Skills
+that have no git-tracked source to pin (not a claim that nothing is copied;
+pinned Skills are published as-is).
 See [docs/security.md](docs/security.md) for the full model.
 
 ## How it works

@@ -95,12 +95,14 @@ export default function DocsWorkflowsPage() {
 
       <h2>Recover Memory</h2>
       <p>
-        Restore private Memory on this machine. Existing targets are never
+        <code>stak memory recover</code> downloads your private memory store
+        from STAK Cloud; <code>stak memory restore</code> then writes it into
+        native agent Memory on this machine. Existing targets are never
         overwritten — a differing existing target is reported as a conflict and
         left untouched.
       </p>
       <pre>
-        <code>stak memory restore</code>
+        <code>{`stak memory recover\nstak memory restore`}</code>
       </pre>
 
       <h2>Map recovered Projects</h2>

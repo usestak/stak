@@ -576,7 +576,7 @@ const FOOTER_GROUPS = [
     h: 'RESOURCES',
     l: [
       { t: 'Docs', u: '/docs' },
-      { t: 'CLI reference', u: '/docs/cli' },
+      { t: 'CLI Reference', u: '/docs/cli' },
     ],
   },
 ];

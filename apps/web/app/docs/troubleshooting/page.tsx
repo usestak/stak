@@ -28,9 +28,13 @@ export default function DocsTroubleshootingPage() {
 
       <h2>STAK login</h2>
       <p>
-        Commands that touch Cloud state — Memory backup/restore, Project pull —
-        require a signed-in session. If a command reports you're not signed in,
-        run:
+        Commands that talk to STAK Cloud require a signed-in session —
+        notably <code>stak memory recover</code> and{' '}
+        <code>stak memory protect</code>. <code>stak memory backup</code>{' '}
+        works locally without signing in (uploading to Cloud is a bonus when
+        you are signed in, not a requirement), and{' '}
+        <code>stak memory restore</code> is purely local and never needs
+        sign-in. If a command reports you're not signed in, run:
       </p>
       <pre>
         <code>stak login</code>
