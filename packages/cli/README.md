@@ -32,9 +32,13 @@ stak login                # sign in to STAK Cloud
 stak push / stak pull     # sync your main setup with the Cloud
 stak memory backup        # back up private agent Memory (Standard or Protected)
 stak project              # review logical projects and map recovered memory
+stak skill update         # install approved Skill versions on this machine
+stak open                 # open the STAK web app with this machine selected
 ```
 
 Run `stak --help` or `stak <command> --help` for details.
+
+See the full CLI reference: https://www.memstk.com/docs/cli
 
 ## Links
 

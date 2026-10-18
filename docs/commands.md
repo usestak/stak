@@ -78,6 +78,78 @@ Restore private memory. Only writes absent targets; a differing existing target
 is reported as a conflict and left untouched (never merged). Not uploaded to
 Cloud in V0.1.
 
+## Project
+
+Logical projects are derived from recovered Memory. `stak project` reviews
+them and maps recovered Memory to a directory on this machine; lifecycle
+(`active`/`archived`) is independent of whether a project is currently
+available on this machine.
+
+### `stak project` / `stak project list [--json]`
+
+List logical projects STAK knows about (read-only). `list` is the default
+subcommand, so `stak project` on its own is equivalent to `stak project list`.
+
+### `stak project map <project> <directory> [--json] [-y|--yes]`
+
+Authorize a local directory as the restore destination for a project. This is
+a local binding only; the path is never shared as project identity. Refused
+when the directory belongs to a different repository (`git-conflict`) or
+already belongs to another logical project (`identity-conflict`). Prompts for
+confirmation unless `--yes` (or `--json`) is passed.
+
+### `stak project name <project> <name> [--json]`
+
+Set a logical project's display name. Presentation metadata only — it never
+changes the Project ID, mapping, or restore behavior. Refused for
+Git-identified projects (whose name *is* their Git identity), and for empty,
+too-long (200 characters max), or path-like names.
+
+### `stak project archive <project> [--json] [-y|--yes]`
+
+Archive a project without deleting its identity or Memory (reversible).
+Prompts for confirmation unless `--yes` (or `--json`) is passed. Mirrors the
+lifecycle change to STAK Cloud when signed in; if offline or unreachable it
+reports the propagation failure so you can re-run once connected.
+
+### `stak project unarchive <project> [--json]`
+
+Return an archived project to active. Non-destructive, so it proceeds without
+a confirmation prompt. Mirrors the lifecycle change to STAK Cloud the same way
+`archive` does.
+
+## Skill
+
+Manage the Skill lifecycle on this machine. `update` changes installed
+machine state (and checks in on success); `pause`/`resume` change only
+machine-local desired state — the projection effect is realised on the next
+`run` or `skill update`; `check` only contacts each checkable Skill's source
+remote and reports the result to Cloud, and never approves, installs, pauses,
+or resumes anything.
+
+### `stak skill update [skill] [--json]`
+
+Install approved Skill versions on this machine. With no `[skill]` selector,
+reconciles every Skill across every detected agent (Codex, Claude Code,
+Cursor); with a selector, narrows to that Skill's stable id.
+
+### `stak skill pause <skill> [--json]`
+
+Stop projecting a Skill to agents (keeps its version and provenance). Your
+agent files are unchanged until you reconcile this machine — run `stak run`
+or `stak skill update` to apply it.
+
+### `stak skill resume <skill> [--json]`
+
+Project a paused Skill to agents again. Like `pause`, the change is
+desired-state only until the next `run` or `skill update`.
+
+### `stak skill check [skill] [--json]`
+
+Check Skill sources for updates. Contacts each checkable Skill's source
+remote and reports the result to STAK Cloud; requires `stak login`. Never
+approves, installs, pauses, or resumes anything.
+
 ## Cloud
 
 Require `STAK_API_URL`; mutations require `stak login`.
@@ -109,6 +181,14 @@ download, all verified, then an atomic commit). Does not change agent bindings.
 
 Publish a reference-only public STAK as `@owner/name` from a local source or an
 active local layer.
+
+### `stak open [--print]`
+
+Open the STAK web app's Overview with this machine selected
+(`…/overview?machine=<machineId>`). The machine id is the only thing in the
+URL — no token, secret, or Memory is ever included. Makes no network call of
+its own (web sign-in is handled by the browser) and mutates nothing. Pass
+`--print` to print the URL instead of launching a browser.
 
 ## Current V0.1 restrictions
 
