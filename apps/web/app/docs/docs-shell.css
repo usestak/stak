@@ -1,0 +1,141 @@
+/* apps/web/app/docs/docs-shell.css — shared chrome for the conceptual/task-oriented
+   `/docs` hub (Getting Started, Core Concepts, Workflows, …). Same STAK Final Contract
+   tokens as the public share pages (overview/shell.css, loaded via the `.stak` class) —
+   dark graphite instrument panel, IBM Plex, orange accent. A left sidebar of section
+   links plus a content column; no account affordances, this is a reference surface.
+   Breakpoint mirrors the signed-in shell's existing 1023.98px rail breakpoint
+   (apps/web/app/overview/shell.css) rather than inventing a new one. */
+
+.stak-docs {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.stak-docs-topnav {
+  flex: none;
+  border-bottom: 1px solid var(--line);
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  height: 56px;
+}
+
+.stak-docs-wordmark {
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.18em;
+  color: var(--ink);
+}
+.stak-docs-wordmark:hover {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.stak-docs-frame {
+  flex: 1;
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 40px;
+  padding: 32px 24px 64px;
+}
+
+.stak-docs-side {
+  flex: none;
+  width: 196px;
+  position: sticky;
+  top: 32px;
+}
+
+.stak-docs-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stak-docs-nav-item {
+  display: block;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 13.5px;
+  color: var(--faint);
+}
+.stak-docs-nav-item:hover {
+  color: var(--ink);
+  text-decoration: none;
+  background: var(--panel);
+}
+.stak-docs-nav-item[aria-current='page'] {
+  color: var(--ink);
+  background: var(--panel);
+  font-weight: 600;
+}
+
+.stak-docs-main {
+  flex: 1;
+  min-width: 0;
+  max-width: 720px;
+}
+
+.stak-docs-main h1 {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 6px;
+}
+
+.stak-docs-main h2 {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+  margin: 32px 0 12px;
+}
+
+.stak-docs-main h2:first-of-type {
+  margin-top: 24px;
+}
+
+.stak-docs-main p {
+  margin: 10px 0;
+}
+
+@media (max-width: 1023.98px) {
+  .stak-docs-frame {
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .stak-docs-side {
+    width: 100%;
+    position: static;
+  }
+
+  .stak-docs-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .stak-docs-nav-item {
+    padding: 5px 9px;
+  }
+
+  .stak-docs-main {
+    max-width: none;
+  }
+}
+
+@media (max-width: 479.98px) {
+  .stak-docs-topnav {
+    padding: 0 16px;
+  }
+
+  .stak-docs-frame {
+    padding: 24px 16px 48px;
+  }
+}
