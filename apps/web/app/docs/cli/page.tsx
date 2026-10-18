@@ -1,7 +1,5 @@
 import type { Metadata } from 'next';
 
-import { PublicShell } from '@/app/_components/public-shell';
-
 import { CLI_REFERENCE_COMMANDS, type CliCommandGroup } from './cli-reference.data';
 
 export const metadata: Metadata = {
@@ -260,8 +258,9 @@ const commandsByGroup = (group: CliCommandGroup) =>
 
 export default function CliReferencePage() {
   return (
-    <PublicShell title="CLI Reference">
-      <p className="stak-public-muted">
+    <>
+      <h1>CLI Reference</h1>
+      <p className="stak-docs-muted">
         Every command registered by the STAK CLI (<code>stak</code>). All
         mutating commands follow: intent → plan → preview → approval → apply
         → result. Mutations require confirmation; pass <code>--yes</code> for
@@ -278,8 +277,8 @@ export default function CliReferencePage() {
             const detail = COMMAND_DETAILS[name];
             if (!detail) return null;
             return (
-              <div key={name} className="stak-public-card" style={{ marginBottom: 10 }}>
-                <div className="stak-public-card-title">
+              <div key={name} className="stak-docs-card" style={{ marginBottom: 10 }}>
+                <div className="stak-docs-card-title">
                   <code>{name}</code>
                 </div>
                 <p>{detail.purpose}</p>
@@ -288,7 +287,7 @@ export default function CliReferencePage() {
                 </pre>
                 {detail.options && detail.options.length > 0 ? (
                   <>
-                    <p className="stak-public-muted">Options:</p>
+                    <p className="stak-docs-muted">Options:</p>
                     <ul>
                       {detail.options.map((option) => (
                         <li key={option}>{option}</li>
@@ -296,13 +295,13 @@ export default function CliReferencePage() {
                     </ul>
                   </>
                 ) : null}
-                <p className="stak-public-muted">Examples:</p>
+                <p className="stak-docs-muted">Examples:</p>
                 <pre>
                   <code>{detail.examples.join('\n')}</code>
                 </pre>
                 {detail.notes && detail.notes.length > 0 ? (
                   <>
-                    <p className="stak-public-muted">Notes:</p>
+                    <p className="stak-docs-muted">Notes:</p>
                     <ul>
                       {detail.notes.map((note) => <li key={note}>{note}</li>)}
                     </ul>
@@ -351,6 +350,6 @@ Typical workflow:
   stak run claude`}</code>
         </pre>
       </section>
-    </PublicShell>
+    </>
   );
 }

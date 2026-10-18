@@ -104,6 +104,24 @@
   margin: 10px 0;
 }
 
+.stak-docs-muted {
+  color: var(--faint);
+}
+
+.stak-docs-card {
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 16px 18px;
+  color: inherit;
+}
+.stak-docs-card-title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
 @media (max-width: 1023.98px) {
   .stak-docs-frame {
     flex-direction: column;
