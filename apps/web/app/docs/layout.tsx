@@ -20,6 +20,12 @@ export default function DocsLayout({ children }: { children: ReactNode }) {
     <div className="stak stak-docs">
       <nav className="stak-docs-topnav" aria-label="Memory STAK">
         <Link href="/" className="stak-docs-wordmark">
+          <img
+            src="/brand/stak-symbol-dark.svg"
+            alt=""
+            width={18}
+            height={18}
+          />
           Memory STAK
         </Link>
       </nav>

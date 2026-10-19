@@ -34,6 +34,12 @@ export function PublicShell({
       <div className="stak stak-public">
         <nav className="stak-public-nav" aria-label="Memory STAK">
           <Link href="/" className="stak-public-wordmark">
+            <img
+              src="/brand/stak-symbol-dark.svg"
+              alt=""
+              width={18}
+              height={18}
+            />
             Memory STAK
           </Link>
         </nav>

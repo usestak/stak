@@ -62,12 +62,17 @@
   justify-content: space-between;
   padding: 4px 10px 0;
 }
+.stak-brand-mark {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .stak-brand b {
   font-weight: 700;
   font-size: 15px;
   letter-spacing: 0.18em;
 }
-.stak-brand span {
+.stak-brand-handle {
   font: 500 11px var(--mono);
   color: var(--dim);
 }

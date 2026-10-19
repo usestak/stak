@@ -22,6 +22,9 @@
 }
 
 .stak-docs-wordmark {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 700;
   font-size: 14px;
   letter-spacing: 0.18em;

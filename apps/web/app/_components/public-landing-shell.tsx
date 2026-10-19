@@ -84,6 +84,7 @@ function LandingNav() {
   return (
     <nav className="stak-landing-nav" aria-label="Memory STAK">
       <Link href="/" className="stak-landing-wordmark">
+        <img src="/brand/stak-symbol-dark.svg" alt="" width={18} height={18} />
         Memory STAK
       </Link>
       <div className="stak-landing-nav-links">
@@ -593,7 +594,15 @@ function SiteFooter() {
     <footer className="stak-landing-footer">
       <div className="stak-landing-footer-grid">
         <div className="stak-landing-footer-brand">
-          <span className="stak-landing-wordmark">Memory STAK</span>
+          <span className="stak-landing-wordmark">
+            <img
+              src="/brand/stak-symbol-dark.svg"
+              alt=""
+              width={18}
+              height={18}
+            />
+            Memory STAK
+          </span>
           <span className="stak-landing-footer-thesis">
             Portable Skills, Memory, and setup for AI coding agents.
           </span>

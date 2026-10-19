@@ -100,8 +100,16 @@ export function AppSidebar({
     <nav className="stak-side" aria-label="Primary">
       <div className="stak-side-topbar">
         <div className="stak-brand">
-          <b>STAK</b>
-          <span>{handle}</span>
+          <span className="stak-brand-mark">
+            <img
+              src="/brand/stak-symbol-dark.svg"
+              alt=""
+              width={16}
+              height={16}
+            />
+            <b>STAK</b>
+          </span>
+          <span className="stak-brand-handle">{handle}</span>
         </div>
         <button
           type="button"

@@ -4,6 +4,7 @@ import { SkipLink } from './_components/skip-link';
 import './globals.css';
 
 export const metadata = {
+  metadataBase: new URL('https://www.memstk.com'),
   title: {
     // `default` keeps the existing "STAK Cloud" service term as-is — P11 only
     // changes the public PRODUCT brand (Memory STAK), and "STAK Cloud" is used
@@ -14,6 +15,15 @@ export const metadata = {
     template: 'Memory STAK — %s',
   },
   description: 'Portable AI agent environments.',
+  applicationName: 'Memory STAK',
+  openGraph: {
+    siteName: 'Memory STAK',
+    type: 'website',
+    url: 'https://www.memstk.com',
+  },
+  twitter: {
+    card: 'summary_large_image',
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

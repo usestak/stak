@@ -1,4 +1,7 @@
-[LOGO PLACEHOLDER — logo will be provided separately]
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="apps/web/public/brand/stak-symbol-dark.svg">
+  <img src="apps/web/public/brand/stak-symbol-light.svg" alt="Memory STAK" width="64" height="64">
+</picture>
 
 # STAK
 

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 284 64">
+<svg width="64" height="64" viewBox="0 0 100 100"><g transform="translate(0 -1)">
+<polygon points="50,44 88,63 50,82 12,63" fill="#D9D4CC"></polygon>
+<polygon points="12,63 50,82 50,94 12,75" fill="#57524D"></polygon>
+<polygon points="50,82 88,63 88,75 50,94" fill="#2B2825"></polygon>
+<path d="M70 78L80 73" stroke="#F2A03A" stroke-width="3.4" stroke-linecap="round"></path>
+<polygon points="12,27 50,46 50,50 12,31" fill="#9E4719"></polygon>
+<polygon points="50,46 88,27 88,31 50,50" fill="#9E4719"></polygon>
+<path d="M50 8L88 27L50 46L12 27ZM50 16L72 27L50 38L28 27Z" fill-rule="evenodd" fill="#D96A2B"></path>
+</g></svg>
+<text x="78" y="43" font-family="'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif" font-size="30"><tspan font-weight="400" fill="#5E5952">Memory</tspan><tspan dx="8" font-weight="700" fill="#141311" letter-spacing="0.6">STAK</tspan></text>
+</svg>

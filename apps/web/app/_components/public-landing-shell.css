@@ -115,6 +115,9 @@
 .stak-landing-wordmark {
   grid-column: 1;
   justify-self: start;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 700;
   font-size: 15px;
   letter-spacing: 0.2em;
