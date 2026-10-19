@@ -1,5 +1,3 @@
-[LOGO PLACEHOLDER — logo will be provided separately]
-
 # STAK
 
 Portable Skills and Memory for your AI coding agents.
