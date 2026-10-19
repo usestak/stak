@@ -461,6 +461,23 @@ export const guardPublicSlugClaim = async (
  * (from an earlier publish, by this owner or republished content that happens to hash the
  * same) is never re-uploaded.
  */
+/**
+ * Whether a Skill's content already exists somewhere this account (or the public
+ * namespace) can publish from, without mutating anything. Factored out of
+ * `ensurePublicSnapshotUploaded` so a caller that needs to check MULTIPLE Skills up front
+ * (to report every missing one in a single error, not just the first) can reuse the exact
+ * same availability logic.
+ */
+export const hasPublishableSnapshot = async (
+  blobStore: CloudBlobStore,
+  ownerUserId: string,
+  contentHash: string,
+): Promise<boolean> => {
+  if (await blobStore.hasPublished(contentHash)) return true;
+  const bytes = await blobStore.get(ownerUserId, contentHash);
+  return bytes != null;
+};
+
 export const ensurePublicSnapshotUploaded = async (
   blobStore: CloudBlobStore,
   ownerUserId: string,
