@@ -1,6 +1,6 @@
 {
   "name": "@memstk/cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "Memory STAK — the control plane for portable AI agent environments.",
   "license": "MIT",
