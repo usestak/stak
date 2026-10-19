@@ -214,8 +214,10 @@ its own (web sign-in is handled by the browser) and mutates nothing. Pass
 - One persistent Environment: `main` only. `stak switch` is deferred.
 - Isolated `try` supports Codex, Claude, and Cursor.
 - Public STAKs publish every Skill as an immutable, content-addressed
-  snapshot (snapshot-backed Skills can be published; the content must have
-  been pushed first).
+  snapshot — regardless of whether that Skill's own private restoration is a
+  snapshot or a Git reference. Its content must already be in STAK Cloud: run
+  `stak push`, then publish (or try again if publishing says upload is
+  required).
 - No automatic STAK updates; an already-active public STAK is not silently
   upgraded.
 - No force override for conflicts (`--force` does not exist); conflicts block
