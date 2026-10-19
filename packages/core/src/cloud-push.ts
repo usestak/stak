@@ -104,7 +104,7 @@ export const preparePush = async (
     [];
   let snapshotsAlready = 0;
   if (!conflict && !noop)
-    for (const requirement of bundle.snapshotRequirements) {
+    for (const requirement of bundle.contentUploadRequirements) {
       const archive = await packStoreObject({
         stackHome: options.stackHome,
         contentHash: requirement.contentHash,

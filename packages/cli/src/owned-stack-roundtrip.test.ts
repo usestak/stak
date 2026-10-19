@@ -160,7 +160,7 @@ const pushMainWithSkill = async (
       },
     },
     importedStackVersions: [],
-    snapshotRequirements: [],
+    contentUploadRequirements: [],
     digest: `sha256:${'0'.repeat(64)}`,
   };
   await service.commitEnvironmentVersion(

@@ -97,7 +97,7 @@ const buildBundle = (
     environment,
     resolved,
     importedStackVersions: [],
-    snapshotRequirements: [],
+    contentUploadRequirements: [],
     digest,
   };
 };

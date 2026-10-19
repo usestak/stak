@@ -1281,7 +1281,7 @@ describe('STAK CLI', () => {
     },
     resolved: { schemaVersion: 1 as const, skills: {} },
     importedStackVersions: [],
-    snapshotRequirements: [],
+    contentUploadRequirements: [],
     digest: `sha256:${'a'.repeat(64)}`,
   };
   const basePushPlan: PushPlan = {

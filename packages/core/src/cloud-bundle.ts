@@ -7,8 +7,8 @@ import {
   importedStackVersionSchema,
 } from '@stack/spec';
 import type {
+  CloudContentUploadRequirement,
   CloudEnvironmentBundle,
-  CloudSnapshotRequirement,
   EnvironmentStackLayer,
   ImportedStackVersion,
   LockedSkill,
@@ -160,23 +160,22 @@ export const buildCloudEnvironmentBundle = async (
   for (const [entryId, skill] of Object.entries(state.lock.skills))
     resolvedSkills[entryId] = toPortableLockedSkill(skill);
 
-  const snapshotByHash = new Map<string, CloudSnapshotRequirement>();
+  // Every resolved Skill version's immutable content must be uploaded to STAK
+  // Cloud, regardless of its preferred private restoration strategy. A
+  // Git-backed Skill keeps `restoration.strategy === 'reference'` locally, but
+  // public/portable publication must never depend on Git being reachable, so
+  // its bytes are uploaded here too.
+  const contentHashes = new Set<string>();
   for (const skill of Object.values(state.lock.skills))
-    if (skill.restoration.strategy === 'snapshot')
-      snapshotByHash.set(skill.contentHash, {
-        contentHash: skill.contentHash,
-        reason: skill.restoration.reason,
-      });
+    contentHashes.add(skill.contentHash);
   for (const version of importedStackVersions)
     for (const requirement of version.requirements)
-      if (requirement.restoration.strategy === 'snapshot')
-        snapshotByHash.set(requirement.contentHash, {
-          contentHash: requirement.contentHash,
-          reason: requirement.restoration.reason,
-        });
-  const snapshotRequirements = [...snapshotByHash.values()].sort((a, b) =>
-    a.contentHash < b.contentHash ? -1 : a.contentHash > b.contentHash ? 1 : 0,
-  );
+      contentHashes.add(requirement.contentHash);
+  const contentUploadRequirements: CloudContentUploadRequirement[] = [
+    ...contentHashes,
+  ]
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+    .map((contentHash) => ({ contentHash }));
 
   const resolved = { schemaVersion: 1 as const, skills: resolvedSkills };
   const digest = computeEnvironmentDigest({
@@ -189,7 +188,7 @@ export const buildCloudEnvironmentBundle = async (
     environment: state.manifest,
     resolved,
     importedStackVersions,
-    snapshotRequirements,
+    contentUploadRequirements,
     digest,
   });
 };

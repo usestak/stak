@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { hashSkillDirectory } from '@stack/shared';
-import type { ScanResult } from '@stack/spec';
+import type { ScanResult, SkillSource } from '@stack/spec';
 
 import { buildCloudEnvironmentBundle } from './cloud-bundle.js';
 import {
@@ -159,6 +159,107 @@ describe('cloud environment bundle', () => {
     // Every manifest Skill entry id appears in the resolved lock.
     for (const entry of bundle.environment.skills)
       expect(bundle.resolved.skills[entry.id]).toBeDefined();
+  });
+
+  it('includes a Git-backed Skill in contentUploadRequirements even though its restoration strategy stays reference', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const sourcesDir = path.join(root, 'src');
+    const localDir = path.join(sourcesDir, 'local-skill');
+    const gitDir = path.join(sourcesDir, 'git-skill');
+    await mkdir(localDir, { recursive: true });
+    await mkdir(gitDir, { recursive: true });
+    await writeFile(
+      path.join(localDir, 'SKILL.md'),
+      '---\nname: local-skill\ndescription: local skill\n---\nlocal body\n',
+    );
+    await writeFile(
+      path.join(gitDir, 'SKILL.md'),
+      '---\nname: git-skill\ndescription: git skill\n---\ngit body\n',
+    );
+    const localHash = (await hashSkillDirectory(localDir)).hash;
+    const gitHash = (await hashSkillDirectory(gitDir)).hash;
+    const gitSource: SkillSource = {
+      type: 'git',
+      remote: 'https://example.test/repo.git',
+      revision: 'a'.repeat(40),
+      path: 'skills/git-skill',
+      clean: true,
+    };
+    const scanResult: ScanResult = {
+      roots: [
+        {
+          path: sourcesDir,
+          rootKind: 'agents',
+          scope: 'global',
+          status: 'scanned',
+          skillLocations: 2,
+        },
+      ],
+      skills: [
+        {
+          contentHash: localHash,
+          metadata: { name: 'local-skill', description: 'local skill' },
+          valid: true,
+          source: { type: 'local' as const },
+          locations: [
+            {
+              path: localDir,
+              rootKind: 'agents' as const,
+              scope: 'global' as const,
+              rootPath: sourcesDir,
+              isSymlink: false,
+              realPath: localDir,
+              source: { type: 'local' as const },
+            },
+          ],
+        },
+        {
+          contentHash: gitHash,
+          metadata: { name: 'git-skill', description: 'git skill' },
+          valid: true,
+          source: gitSource,
+          locations: [
+            {
+              path: gitDir,
+              rootKind: 'agents' as const,
+              scope: 'global' as const,
+              rootPath: sourcesDir,
+              isSymlink: false,
+              realPath: gitDir,
+              source: gitSource,
+            },
+          ],
+        },
+      ],
+      nameCollisions: [],
+      diagnostics: [],
+      summary: {
+        roots: { scanned: 1, missing: 0, failed: 0 },
+        uniqueSkillContents: 2,
+        locations: 2,
+        validSkills: 2,
+        invalidSkills: 0,
+        exactDuplicateContents: 0,
+        nameCollisions: 0,
+        diagnostics: { errors: 0, warnings: 0, info: 0 },
+        provenance: { git: 1, local: 1, unknown: 0 },
+      },
+    };
+    await initializeMainEnvironment({ stackHome, scanResult });
+
+    const bundle = await buildCloudEnvironmentBundle({ stackHome });
+    const gitSkill = Object.values(bundle.resolved.skills).find(
+      (skill) => skill.name === 'git-skill',
+    );
+    // Confirms the fixture actually exercises the reference path, not an accidental snapshot.
+    expect(gitSkill?.restoration.strategy).toBe('reference');
+
+    const uploadedHashes = bundle.contentUploadRequirements.map(
+      (requirement) => requirement.contentHash,
+    );
+    expect(uploadedHashes).toContain(localHash);
+    expect(uploadedHashes).toContain(gitHash);
   });
 
   it('never serializes Machine paths, home dirs, or credentials', async () => {

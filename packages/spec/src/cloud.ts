@@ -77,9 +77,17 @@ export const portableImportedStackVersionSchema = z.object({
   ),
 });
 
-export const cloudSnapshotRequirementSchema = z.object({
+/**
+ * A distinct immutable content artifact that must exist in STAK Cloud's
+ * private blob store for every Skill version included in a pushed
+ * Environment, regardless of that Skill's preferred private restoration
+ * strategy (snapshot or Git reference). This is separate from restoration
+ * metadata: a Git-backed Skill can keep `restoration.strategy === 'reference'`
+ * while its content bytes are still uploaded here so public, portable
+ * publication never depends on Git being reachable.
+ */
+export const cloudContentUploadRequirementSchema = z.object({
   contentHash: contentHashSchema,
-  reason: snapshotReasonSchema,
 });
 
 export const cloudEnvironmentBundleSchema = z.object({
@@ -87,7 +95,7 @@ export const cloudEnvironmentBundleSchema = z.object({
   environment: environmentManifestSchema,
   resolved: portableEnvironmentResolutionSchema,
   importedStackVersions: z.array(portableImportedStackVersionSchema),
-  snapshotRequirements: z.array(cloudSnapshotRequirementSchema),
+  contentUploadRequirements: z.array(cloudContentUploadRequirementSchema),
   digest: contentHashSchema,
 });
 
@@ -336,8 +344,8 @@ export type PortableEnvironmentResolution = z.infer<
 export type PortableImportedStackVersion = z.infer<
   typeof portableImportedStackVersionSchema
 >;
-export type CloudSnapshotRequirement = z.infer<
-  typeof cloudSnapshotRequirementSchema
+export type CloudContentUploadRequirement = z.infer<
+  typeof cloudContentUploadRequirementSchema
 >;
 export type CloudEnvironmentBundle = z.infer<
   typeof cloudEnvironmentBundleSchema

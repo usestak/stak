@@ -1,4 +1,12 @@
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -12,12 +20,18 @@ import {
 import type { SkillTreeEntry } from '@stack/shared';
 import type { ImportedStackVersion, SkillSource } from '@stack/spec';
 import {
+  applyPush,
   applyRemoteStackUse,
+  applyStackUse,
   buildPublicStackBundle,
   initializeMainEnvironment,
   loadMainEnvironment,
   prepareRemoteStackUse,
   prepareStackRemove,
+  prepareStackUse,
+  preparePublish,
+  applyPublish,
+  preparePush,
   preserveRemoteTrialStack,
   resolvePublicStackSource,
   resolveRemoteTrialStack,
@@ -669,6 +683,159 @@ describe('public Stack consumption', () => {
     await expect(stat(path.join(root, 'outside'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
+  });
+
+  it('CLI end-to-end: a real Git-backed authoring Stack scans, pushes, publishes, and is consumed with zero Git — no blobStore.put anywhere in this test', async () => {
+    // A REAL git repository on disk, so the scanner's own provenance detection (not a hand-
+    // built SkillSource fixture) classifies this Skill as Git-backed/clean/remote-tracked.
+    const repo = await temp();
+    execFileSync('git', ['-C', repo, 'init', '-q']);
+    execFileSync('git', [
+      '-C',
+      repo,
+      'config',
+      'user.email',
+      'test@example.com',
+    ]);
+    execFileSync('git', ['-C', repo, 'config', 'user.name', 'Test']);
+    execFileSync('git', ['-C', repo, 'remote', 'add', 'origin', REMOTE]);
+    await writeFile(
+      path.join(repo, 'stak.yaml'),
+      'schemaVersion: 1\nname: design-stack\ndescription: Design Stack\nskills:\n  - path: skills/design\n    requirement: required\n',
+      'utf8',
+    );
+    const skillDir = path.join(repo, 'skills', 'design');
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(path.join(skillDir, 'SKILL.md'), skillBody('e2e'), 'utf8');
+    execFileSync('git', ['-C', repo, 'add', '-A']);
+    execFileSync('git', ['-C', repo, 'commit', '-q', '-m', 'init']);
+    const expectedContentHash = (await hashSkillDirectory(skillDir)).hash;
+
+    // Owner side: `stak use <repo>` for real — genuine scan, git-provenance detection, and
+    // Store ingestion. No manual lock/fixture construction.
+    const ownerHome = await temp();
+    await initializeMainEnvironment({
+      stackHome: ownerHome,
+      scanResult: emptyScan(),
+    });
+    await applyStackUse(
+      await prepareStackUse({ stackHome: ownerHome, input: repo }),
+    );
+
+    // The owner's PRIVATE restoration metadata for this Skill is really `reference` (Git),
+    // never forced to snapshot locally — confirms the fix never mutates local semantics.
+    const lockPath = path.join(
+      ownerHome,
+      'environments',
+      'main',
+      'stack.lock.json',
+    );
+    const lock = JSON.parse(await readFile(lockPath, 'utf8')) as {
+      skills: Record<
+        string,
+        { name: string; contentHash: string; restoration: { strategy: string } }
+      >;
+    };
+    const lockedDesign = Object.values(lock.skills).find(
+      (skill) => skill.name === 'design',
+    );
+    expect(lockedDesign?.restoration.strategy).toBe('reference');
+    expect(lockedDesign?.contentHash).toBe(expectedContentHash);
+
+    const cloud = makeCloud();
+    const token = await mintToken(cloud.service, cloud.createClient);
+    const authedClient = cloud.createClient({
+      baseUrl: 'http://localhost',
+      token,
+    });
+
+    // Real `stak push`: no blobStore.put — content reaches Cloud only through the actual
+    // prepareSnapshot/uploadSnapshot/finalizeSnapshot ticket flow.
+    const pushPlan = await preparePush({
+      stackHome: ownerHome,
+      client: authedClient,
+    });
+    expect(pushPlan.snapshotsToUpload).toContain(expectedContentHash);
+    const pushResult = await applyPush({
+      stackHome: ownerHome,
+      plan: pushPlan,
+      client: authedClient,
+    });
+    expect(pushResult.uploaded).toBeGreaterThanOrEqual(1);
+    expect(
+      await cloud.blobStore.get(
+        '00000000-0000-4000-8000-00000000aaaa',
+        expectedContentHash,
+      ),
+    ).not.toBeNull();
+
+    // Real CLI `stak publish design-stack` (the "layer" origin — the Stack this repo became
+    // once `stak use` imported it), not a hand-built bundle. Succeeds only because the push
+    // above genuinely uploaded this content: before that upload, the server's
+    // `ensurePublicSnapshotUploaded` would reject this with "Run `stak push` first".
+    const publishPlan = await preparePublish({
+      stackHome: ownerHome,
+      input: 'design-stack',
+      client: authedClient,
+    });
+    const published = await applyPublish({
+      plan: publishPlan,
+      client: authedClient,
+    });
+    expect(published.owner).toBe('alice');
+
+    const anon = cloud.createClient({ baseUrl: 'http://localhost' });
+    const publicStack = await anon.getPublicStack('alice', 'design-stack');
+    const requirement = publicStack?.latest?.bundle.requirements[0];
+    expect(requirement?.name).toBe('design');
+    expect(requirement?.contentHash).toBe(expectedContentHash);
+    // Public publication is ALWAYS snapshot-backed, even though the owner's private
+    // restoration for this same Skill is `reference` — the two are intentionally decoupled.
+    expect(requirement?.restoration).toEqual({
+      strategy: 'snapshot',
+      contentHash: expectedContentHash,
+    });
+
+    // Consumer side: a completely separate Machine/stackHome, with NO Git executor passed at
+    // all. If this ever silently depended on Git, this would throw or hang; instead it
+    // resolves purely through the public snapshot.
+    const consumerHome = await temp();
+    await initializeMainEnvironment({
+      stackHome: consumerHome,
+      scanResult: emptyScan(),
+    });
+    const source = await resolvePublicStackSource({
+      client: anon,
+      ref: '@alice/design-stack',
+    });
+    const proposal = await prepareRemoteStackUse({
+      stackHome: consumerHome,
+      source,
+    });
+    expect(
+      (
+        await verifyStoredSkill({
+          stackHome: consumerHome,
+          contentHash: expectedContentHash,
+        })
+      ).state,
+    ).toBe('missing');
+    await applyRemoteStackUse(proposal, { client: anon }); // no gitExecutor
+    expect(
+      (
+        await verifyStoredSkill({
+          stackHome: consumerHome,
+          contentHash: expectedContentHash,
+        })
+      ).state,
+    ).toBe('available');
+    const consumerState = await loadMainEnvironment({
+      stackHome: consumerHome,
+    });
+    const consumerLocked = Object.values(consumerState.lock.skills)[0];
+    // The consumer's materialized Skill never carries a Git restoration — it was installed
+    // purely from the immutable public snapshot.
+    expect(consumerLocked?.restoration.strategy).toBe('snapshot');
   });
 });
 

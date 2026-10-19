@@ -74,7 +74,7 @@ const referenceBundle = (contentHash: string): CloudEnvironmentBundle => {
     environment,
     resolved,
     importedStackVersions: [],
-    snapshotRequirements: [],
+    contentUploadRequirements: [],
     digest: computeEnvironmentDigest({
       environment,
       resolved,

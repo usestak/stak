@@ -25,7 +25,7 @@ const makeBundle = (digestHex: string): CloudEnvironmentBundle => ({
   },
   resolved: { schemaVersion: 1, skills: {} },
   importedStackVersions: [],
-  snapshotRequirements: [],
+  contentUploadRequirements: [],
   digest: `sha256:${digestHex.padEnd(64, '0')}`,
 });
 
@@ -750,7 +750,7 @@ describe('named Stacks HTTP routes (P10B §11-14)', () => {
         },
       },
       importedStackVersions: [],
-      snapshotRequirements: [],
+      contentUploadRequirements: [],
       digest: `sha256:${'0'.repeat(64)}`,
     };
     await call('POST', 'environments/main/versions', {
