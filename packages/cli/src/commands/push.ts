@@ -4,13 +4,32 @@ import {
   LocalEnvironmentConflictError,
   RemoteEnvironmentConflictError,
 } from '@stack/cloud-client';
-import type { ApplyPushResult, PushPlan } from '@stack/core';
+import { StackCompositionError, type ApplyPushResult, type PushPlan } from '@stack/core';
 
-import { pushPlanJson, renderPushPlan, renderPushResult } from '../ui/cloud.js';
+import type { MemoryBackupOutcome } from '../memory/cloud-ops.js';
+import {
+  pushFailed,
+  pushPlanJson,
+  renderCombinedPushResult,
+  renderPushPlan,
+  type PushMemoryOutcome,
+  type PushSkillOutcome,
+} from '../ui/cloud.js';
+
+export type MemoryPushPreflight = { blocked: boolean; reason?: string };
 
 export type PushCommandDependencies = {
   cloudPreparePush(): Promise<PushPlan>;
   cloudApplyPush(plan: PushPlan): Promise<ApplyPushResult>;
+  /**
+   * Read-only check for a predictable Memory/Cloud conflict (e.g. this machine's local
+   * Memory was recovered from an older Cloud generation than the current latest). A
+   * `blocked` preflight stops push BEFORE mutating either domain — Skills included.
+   * Optional so existing Skills-only push wiring/tests keep working unchanged.
+   */
+  memoryPushPreflight?(): Promise<MemoryPushPreflight>;
+  /** Stage-then-sync Memory to Cloud (local backup, then Cloud when authenticated). */
+  applyMemoryPush?(): Promise<MemoryBackupOutcome>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -48,11 +67,21 @@ export const registerPushCommand = (
           throw plan.conflict.kind === 'remote-newer'
             ? new RemoteEnvironmentConflictError(plan.conflict.message)
             : new LocalEnvironmentConflictError(plan.conflict.message);
+        const memoryPreflight = dependencies.memoryPushPreflight
+          ? await dependencies.memoryPushPreflight()
+          : { blocked: false };
+        // Preflight for BOTH domains completes before either is mutated — a predictable
+        // Memory conflict stops the Skill push too, even though Skills had none.
+        if (memoryPreflight.blocked)
+          throw new LocalEnvironmentConflictError(
+            memoryPreflight.reason ??
+              'Memory has a predictable conflict with STAK Cloud. Resolve it before pushing.',
+          );
         if (options.dryRun) {
           dependencies.writeOut(renderPushPlan(plan, true, { verbose }));
           return;
         }
-        if (plan.noop) {
+        if (plan.noop && !dependencies.applyMemoryPush) {
           dependencies.writeOut(renderPushPlan(plan, false, { verbose }));
           return;
         }
@@ -61,11 +90,41 @@ export const registerPushCommand = (
           return;
         }
         dependencies.writeOut('Pushing main...\n\n');
-        dependencies.writeOut(
-          renderPushResult(await dependencies.cloudApplyPush(plan), {
-            verbose,
-          }),
-        );
+
+        let skill: PushSkillOutcome;
+        if (plan.noop) skill = { status: 'noop' };
+        else
+          try {
+            skill = { status: 'applied', result: await dependencies.cloudApplyPush(plan) };
+          } catch (error) {
+            skill = {
+              status: 'failed',
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+
+        let memory: PushMemoryOutcome;
+        if (!dependencies.applyMemoryPush) memory = { status: 'not-attempted' };
+        else
+          try {
+            memory = { status: 'applied', outcome: await dependencies.applyMemoryPush() };
+          } catch (error) {
+            memory = {
+              status: 'failed',
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+
+        dependencies.writeOut(renderCombinedPushResult(skill, memory));
+        // A runtime/network failure in either domain after apply began is partial
+        // success, not total failure — report it clearly above, then fail the command.
+        // Never claim "Cloud is up to date" in this path (renderCombinedPushResult
+        // never prints "Push complete." when pushFailed is true).
+        if (pushFailed(skill, memory))
+          throw new StackCompositionError(
+            'push-partial-failure',
+            'Push did not fully succeed — see the report above for which domain failed.',
+          );
       },
     );
 };

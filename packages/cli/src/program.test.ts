@@ -1545,8 +1545,8 @@ describe('STAK CLI', () => {
       }),
     });
     expect(applied.output).toContain('Pushing main...');
-    expect(applied.output).toContain('2 skills uploaded.');
-    expect(applied.output).toContain('main created in the cloud.');
+    expect(applied.output).toContain('2 skills uploaded; main created in the cloud.');
+    expect(applied.output).toContain('Push complete.');
   });
 
   it('applies a pull with a beginner-friendly summary and next step', async () => {
@@ -1566,8 +1566,108 @@ describe('STAK CLI', () => {
     });
     expect(result.output).toContain('Pulling main...');
     expect(result.output).toContain('31 skills downloaded.');
+    expect(result.output).toContain('Pull complete.');
     expect(result.output).toContain('main is ready.');
-    expect(result.output).toContain('Run `stak run codex` to set up Codex.');
+    expect(result.output).toContain('stak run codex');
+  });
+
+  it('push stops before mutating either domain when Memory preflight predicts a conflict', async () => {
+    const cloudApplyPush = vi.fn(async () => {
+      throw new Error('should never be called');
+    });
+    await expect(
+      runProgram(['push', '--yes'], {
+        cloudPreparePush: async () => basePushPlan,
+        cloudApplyPush,
+        memoryPushPreflight: async () => ({
+          blocked: true,
+          reason: 'local Memory was recovered from an older generation',
+        }),
+      }),
+    ).rejects.toThrow('older generation');
+    expect(cloudApplyPush).not.toHaveBeenCalled();
+  });
+
+  it('push reports a partial failure clearly and never claims success', async () => {
+    const chunks: string[] = [];
+    await expect(
+      runProgram(['push', '--yes'], {
+        cloudPreparePush: async () => basePushPlan,
+        cloudApplyPush: async () => {
+          throw new Error('upload failed');
+        },
+        applyMemoryPush: async () => ({
+          local: { provider: 'claude', files: 1, projects: 1, createdAt: '2026-01-01T00:00:00.000Z' },
+          cloud: { status: 'standard', generation: 1 },
+        }),
+        writeOut: (value) => chunks.push(value),
+      }),
+    ).rejects.toThrow('Push did not fully succeed');
+    const out = chunks.join('');
+    expect(out).toContain('FAILED: upload failed');
+    expect(out).toContain('synced to Cloud (generation 1)');
+    expect(out).not.toContain('Push complete.');
+  });
+
+  it('pull recovers Memory automatically on a fresh machine (no local Memory manifest)', async () => {
+    const applyMemoryPull = vi.fn(async () => ({
+      status: 'recovered' as const,
+      privacyMode: 'standard' as const,
+      objects: 5,
+      files: 7,
+      generation: 2,
+    }));
+    const chunks: string[] = [];
+    await runProgram(['pull', '--yes'], {
+      cloudPreparePull: async () => basePullPlan,
+      cloudApplyPull: async () => ({
+        status: 'restored',
+        environment: 'main',
+        desiredSkills: 2,
+        importedStackVersions: 1,
+        snapshotsDownloaded: 2,
+        referencesRestored: 0,
+        reusedFromStore: 0,
+        localSnapshotRecords: 2,
+        digest: basePullPlan.remoteDigest ?? `sha256:${'a'.repeat(64)}`,
+      }),
+      memoryPullPreflight: async () => ({ eligible: true }),
+      applyMemoryPull,
+      writeOut: (value) => chunks.push(value),
+    });
+    expect(applyMemoryPull).toHaveBeenCalledTimes(1);
+    expect(chunks.join('')).toContain('7 files recovered (generation 2)');
+  });
+
+  it('pull never overwrites Memory on an established machine — it explains why and points to the explicit command', async () => {
+    const applyMemoryPull = vi.fn(async () => {
+      throw new Error('should never be called');
+    });
+    const chunks: string[] = [];
+    await runProgram(['pull', '--yes'], {
+      cloudPreparePull: async () => basePullPlan,
+      cloudApplyPull: async () => ({
+        status: 'restored',
+        environment: 'main',
+        desiredSkills: 2,
+        importedStackVersions: 1,
+        snapshotsDownloaded: 2,
+        referencesRestored: 0,
+        reusedFromStore: 0,
+        localSnapshotRecords: 2,
+        digest: basePullPlan.remoteDigest ?? `sha256:${'a'.repeat(64)}`,
+      }),
+      memoryPullPreflight: async () => ({
+        eligible: false,
+        reason: 'Local Memory already exists on this machine.',
+      }),
+      applyMemoryPull,
+      writeOut: (value) => chunks.push(value),
+    });
+    expect(applyMemoryPull).not.toHaveBeenCalled();
+    const out = chunks.join('');
+    expect(out).toContain('Local Memory already exists on this machine.');
+    expect(out).toContain('stak memory recover');
   });
 
   it('emits parseable pull dry-run JSON', async () => {

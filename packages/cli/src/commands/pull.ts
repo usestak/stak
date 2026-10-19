@@ -1,13 +1,32 @@
 import type { Command } from 'commander';
 
 import { LocalEnvironmentConflictError } from '@stack/cloud-client';
-import type { ApplyPullResult, PullPlan } from '@stack/core';
+import { StackCompositionError, type ApplyPullResult, type PullPlan } from '@stack/core';
 
-import { pullPlanJson, renderPullPlan, renderPullResult } from '../ui/cloud.js';
+import type { CloudRecoverOutcome } from '../memory/cloud-ops.js';
+import {
+  pullFailed,
+  pullPlanJson,
+  renderCombinedPullResult,
+  renderPullPlan,
+  type PullMemoryOutcome,
+  type PullSkillOutcome,
+} from '../ui/cloud.js';
+
+export type MemoryPullPreflight = { eligible: boolean; reason?: string };
 
 export type PullCommandDependencies = {
   cloudPreparePull(): Promise<PullPlan>;
   cloudApplyPull(plan: PullPlan): Promise<ApplyPullResult>;
+  /**
+   * Read-only: whether it is safe to auto-recover Memory as part of this pull. Eligible
+   * ONLY on a genuinely fresh machine (no local Memory manifest yet) — an established
+   * machine's Memory is never silently overwritten by `stak pull`; `stak memory recover`
+   * remains available for an explicit, deliberate recovery. Optional so existing
+   * Skills-only pull wiring/tests keep working unchanged.
+   */
+  memoryPullPreflight?(): Promise<MemoryPullPreflight>;
+  applyMemoryPull?(): Promise<CloudRecoverOutcome>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -46,11 +65,14 @@ export const registerPullCommand = (
         // A local conflict blocks pull, and --yes never bypasses it.
         if (plan.conflict)
           throw new LocalEnvironmentConflictError(plan.conflict.message);
+        const memoryPreflight = dependencies.memoryPullPreflight
+          ? await dependencies.memoryPullPreflight()
+          : { eligible: false };
         if (options.dryRun) {
           dependencies.writeOut(renderPullPlan(plan, { verbose }));
           return;
         }
-        if (plan.mode === 'noop') {
+        if (plan.mode === 'noop' && !memoryPreflight.eligible) {
           dependencies.writeOut(renderPullPlan(plan, { verbose }));
           return;
         }
@@ -59,11 +81,40 @@ export const registerPullCommand = (
           return;
         }
         dependencies.writeOut('Pulling main...\n\n');
-        dependencies.writeOut(
-          renderPullResult(await dependencies.cloudApplyPull(plan), {
-            verbose,
-          }),
-        );
+
+        let skill: PullSkillOutcome;
+        if (plan.mode === 'noop') skill = { status: 'noop' };
+        else
+          try {
+            skill = { status: 'applied', result: await dependencies.cloudApplyPull(plan) };
+          } catch (error) {
+            skill = {
+              status: 'failed',
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+
+        let memory: PullMemoryOutcome;
+        if (!memoryPreflight.eligible || !dependencies.applyMemoryPull)
+          memory = memoryPreflight.reason
+            ? { status: 'skipped', reason: memoryPreflight.reason }
+            : { status: 'not-attempted' };
+        else
+          try {
+            memory = { status: 'applied', outcome: await dependencies.applyMemoryPull() };
+          } catch (error) {
+            memory = {
+              status: 'failed',
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+
+        dependencies.writeOut(renderCombinedPullResult(skill, memory));
+        if (pullFailed(skill, memory))
+          throw new StackCompositionError(
+            'pull-partial-failure',
+            'Pull did not fully succeed — see the report above for which domain failed.',
+          );
       },
     );
 };

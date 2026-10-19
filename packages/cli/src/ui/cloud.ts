@@ -8,6 +8,10 @@ import type {
   StackRemoteUseProposal,
 } from '@stack/core';
 import type { PublishPublicStackVersionResponse } from '@stack/spec';
+import type {
+  CloudRecoverOutcome,
+  MemoryBackupOutcome,
+} from '../memory/cloud-ops.js';
 
 import { block, skills } from './format.js';
 
@@ -356,3 +360,132 @@ export const ownedUseJson = (proposal: StackOwnedUseProposal) => ({
     versionHash: proposal.source.versionHash,
   },
 });
+
+/* -------------------------------------------------------------------------- */
+/* Unified push/pull (Skills + Memory) — Phase 3                               */
+/* -------------------------------------------------------------------------- */
+
+export type PushSkillOutcome =
+  | { status: 'applied'; result: ApplyPushResult }
+  | { status: 'noop' }
+  | { status: 'failed'; error: string };
+
+export type PushMemoryOutcome =
+  | { status: 'not-attempted' }
+  | { status: 'applied'; outcome: MemoryBackupOutcome }
+  | { status: 'failed'; error: string };
+
+/** True when any part of the push did not fully succeed — never say "Push complete." */
+export const pushFailed = (
+  skill: PushSkillOutcome,
+  memory: PushMemoryOutcome,
+): boolean =>
+  skill.status === 'failed' ||
+  memory.status === 'failed' ||
+  (memory.status === 'applied' && memory.outcome.cloud.status === 'failed');
+
+export const renderCombinedPushResult = (
+  skill: PushSkillOutcome,
+  memory: PushMemoryOutcome,
+): string => {
+  const lines: string[] = ['Skills'];
+  if (skill.status === 'noop') lines.push('  already up to date with main.');
+  else if (skill.status === 'failed') lines.push(`  FAILED: ${skill.error}`);
+  else {
+    const location = skill.result.versionNumber === 1 ? 'created' : 'updated';
+    lines.push(
+      skill.result.uploaded > 0
+        ? `  ${skills(skill.result.uploaded)} uploaded; main ${location} in the cloud.`
+        : `  main ${location} in the cloud.`,
+    );
+  }
+  lines.push('', 'Memory');
+  if (memory.status === 'not-attempted') lines.push('  not attempted.');
+  else if (memory.status === 'failed') lines.push(`  FAILED: ${memory.error}`);
+  else {
+    const cloud = memory.outcome.cloud;
+    if (cloud.status === 'skipped')
+      lines.push('  staged locally (sign in to sync Memory to Cloud).');
+    else if (cloud.status === 'protected-locked')
+      lines.push(
+        '  staged locally; Cloud sync needs this device unlocked (`stak memory protect`).',
+      );
+    else if (cloud.status === 'failed')
+      lines.push(`  staged locally; Cloud sync FAILED: ${cloud.message}`);
+    else lines.push(`  synced to Cloud (generation ${cloud.generation}).`);
+  }
+  lines.push(
+    '',
+    pushFailed(skill, memory) ? 'Push did not fully succeed.' : 'Push complete.',
+  );
+  return `${lines.join('\n')}\n`;
+};
+
+export type PullSkillOutcome =
+  | { status: 'applied'; result: ApplyPullResult }
+  | { status: 'noop' }
+  | { status: 'failed'; error: string };
+
+export type PullMemoryOutcome =
+  | { status: 'not-attempted' }
+  | { status: 'skipped'; reason: string }
+  | { status: 'applied'; outcome: CloudRecoverOutcome }
+  | { status: 'failed'; error: string };
+
+export const pullFailed = (
+  skill: PullSkillOutcome,
+  memory: PullMemoryOutcome,
+): boolean =>
+  skill.status === 'failed' ||
+  memory.status === 'failed' ||
+  (memory.status === 'applied' && memory.outcome.status !== 'recovered');
+
+export const renderCombinedPullResult = (
+  skill: PullSkillOutcome,
+  memory: PullMemoryOutcome,
+): string => {
+  const lines: string[] = ['Skills'];
+  if (skill.status === 'noop') lines.push('  already up to date with main.');
+  else if (skill.status === 'failed') lines.push(`  FAILED: ${skill.error}`);
+  else if (skill.result.status === 'noop')
+    lines.push('  already up to date with main.');
+  else lines.push(`  ${skills(skill.result.desiredSkills)} downloaded.`);
+
+  lines.push('', 'Memory');
+  if (memory.status === 'not-attempted') lines.push('  not attempted.');
+  else if (memory.status === 'skipped')
+    lines.push(
+      `  skipped — ${memory.reason}`,
+      '  Run `stak memory recover` explicitly if you want to overwrite it.',
+    );
+  else if (memory.status === 'failed') lines.push(`  FAILED: ${memory.error}`);
+  else {
+    const outcome = memory.outcome;
+    if (outcome.status === 'recovered')
+      lines.push(
+        `  ${outcome.files} file${outcome.files === 1 ? '' : 's'} recovered (generation ${outcome.generation}).`,
+      );
+    else if (outcome.status === 'no-backup')
+      lines.push('  no Cloud Memory backup exists yet.');
+    else if (outcome.status === 'not-authenticated')
+      lines.push('  not signed in — sign in to recover Memory.');
+    else
+      lines.push(
+        '  this device needs a recovery method to unlock Protected Memory (`stak memory recover`).',
+      );
+  }
+  lines.push(
+    '',
+    pullFailed(skill, memory) ? 'Pull did not fully succeed.' : 'Pull complete.',
+  );
+  if (
+    !pullFailed(skill, memory) &&
+    skill.status === 'applied' &&
+    skill.result.status === 'restored'
+  )
+    lines.push(
+      '',
+      'main is ready. Run `stak run <agent>` (e.g. `stak run codex`) to set it up here.',
+    );
+  return `${lines.join('\n')}\n`;
+};

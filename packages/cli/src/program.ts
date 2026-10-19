@@ -167,8 +167,14 @@ import { registerTryCommand } from './commands/try.js';
 import { registerLoginCommand } from './commands/login.js';
 import { registerLogoutCommand } from './commands/logout.js';
 import { registerWhoamiCommand } from './commands/whoami.js';
-import { registerPushCommand } from './commands/push.js';
-import { registerPullCommand } from './commands/pull.js';
+import {
+  registerPushCommand,
+  type MemoryPushPreflight,
+} from './commands/push.js';
+import {
+  registerPullCommand,
+  type MemoryPullPreflight,
+} from './commands/pull.js';
 import { registerPublishCommand } from './commands/publish.js';
 import { registerMemoryCommand } from './commands/memory.js';
 import {
@@ -300,8 +306,12 @@ export type ProgramDependencies = {
   cloudWhoami(): Promise<WhoamiResult>;
   cloudPreparePush(): Promise<PushPlan>;
   cloudApplyPush(plan: PushPlan): Promise<ApplyPushResult>;
+  memoryPushPreflight?(): Promise<MemoryPushPreflight>;
+  applyMemoryPush?(): Promise<MemoryBackupOutcome>;
   cloudPreparePull(): Promise<PullPlan>;
   cloudApplyPull(plan: PullPlan): Promise<ApplyPullResult>;
+  memoryPullPreflight?(): Promise<MemoryPullPreflight>;
+  applyMemoryPull?(): Promise<CloudRecoverOutcome>;
   cloudPreparePublish(options: {
     input: string;
     slug?: string;
@@ -823,6 +833,30 @@ const defaultDependencies: ProgramDependencies = {
   cloudApplyPush: (plan) => cloudApplyPush(cloudDeps, plan),
   cloudPreparePull: () => cloudPreparePull(cloudDeps),
   cloudApplyPull: (plan) => cloudApplyPull(cloudDeps, plan),
+  // Unified push (P3): Memory rides along with Skills, local-manifest-first then Cloud,
+  // reusing the exact same primitives `stak memory backup`/`stak memory status` use.
+  memoryPushPreflight: async () => {
+    const status = await readMemoryCloudStatus(await buildMemoryCloudDeps());
+    return status.historicalRecovery
+      ? {
+          blocked: true,
+          reason:
+            'Local Memory was recovered from an older STAK Cloud generation than the current latest. Run `stak memory recover` to catch up before pushing, or `stak memory backup` to accept the historical state deliberately.',
+        }
+      : { blocked: false };
+  },
+  applyMemoryPush: async () => runMemoryCloudBackup(await buildMemoryCloudDeps()),
+  // Unified pull (P3): Memory only auto-recovers on a genuinely fresh machine (no local
+  // manifest yet) — an established machine's Memory is never silently overwritten here;
+  // `stak memory recover` remains the explicit, deliberate path.
+  memoryPullPreflight: async () =>
+    (await readMemoryManifest(stackHome))
+      ? {
+          eligible: false,
+          reason: 'Local Memory already exists on this machine.',
+        }
+      : { eligible: true },
+  applyMemoryPull: async () => runMemoryCloudRecover(await buildMemoryCloudDeps()),
   cloudPreparePublish: (options) => cloudPreparePublish(cloudDeps, options),
   cloudApplyPublish: (plan) => cloudApplyPublish(cloudDeps, plan),
   memoryScan: async () => (await memoryAdapter()).discover(),
