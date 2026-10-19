@@ -1,8 +1,8 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   InMemoryRemoteMemoryStore,
@@ -12,17 +12,21 @@ import {
   hashBytes,
   inMemoryRemoteMemoryBackend,
   memoryStorePaths,
+  readMemoryManifest,
   readMemoryObject,
   resolveOrMintProject,
+  runMemoryBackup,
   writeMemoryManifest,
   writeMemoryObject,
   type BackupResult,
+  type DiscoveredMemoryItem,
   type ManifestItem,
   type MemoryManifest,
 } from '@stack/memory';
 
 import {
   freshRegistryRisksDuplication,
+  pushStagedMemory,
   readMemoryCloudStatus,
   runMemoryCloudBackup,
   runMemoryCloudProtect,
@@ -387,6 +391,117 @@ describe('memory cloud operations', () => {
     expect(await keys.hasKey()).toBe(false);
     // The Standard backup remains usable.
     expect((await backend.getLatest())?.privacyMode).toBe('standard');
+  });
+});
+
+describe('pushStagedMemory — push uploads only already-staged Memory, never native state', () => {
+  // Realistic regression test (real `runMemoryBackup`/`readMemoryManifest`/`readMemoryObject`,
+  // a real on-disk "native" file, and a real in-memory Cloud backend fake — nothing here is a
+  // mocked CLI dependency). Proves the locked MACHINE -> `stak add .` -> MAIN -> `stak push` ->
+  // CLOUD model: push must never implicitly perform an `add .`.
+  it('A staged, native changes to B without re-adding: push sends A, not B; status/second add . then pick up B', async () => {
+    const stackHome = await temp('stack-push-staged-');
+    const nativeHome = await temp('stack-push-staged-native-');
+    const filePath = path.join(nativeHome, 'notes.md');
+    await writeFile(filePath, 'content A\n', 'utf8');
+
+    const nativeItem = (): DiscoveredMemoryItem => ({
+      provider: 'claude',
+      kind: 'agent-memory',
+      scope: 'global',
+      logicalId: 'claude/agent-memory/notes.md',
+      // Placeholder — `runMemoryBackup` re-reads the file and recomputes this at commit
+      // time (backup.ts: "Re-read at backup time; the freshly read bytes are authoritative"),
+      // so this value is never trusted.
+      contentHash: hashBytes(Buffer.from('placeholder')),
+      restoreTarget: { base: 'claude-home', relativePath: 'notes.md' },
+      source: { path: filePath },
+      capturedAt: '2026-01-01T00:00:00.000Z',
+      sensitivity: 'private',
+    });
+
+    // A. native Memory = A. B. `stak add .` (runMemoryBackup is the real local-staging primitive).
+    await runMemoryBackup({ stackHome, items: [nativeItem()] });
+    const hashA = (await readMemoryManifest(stackHome))?.items[0]?.contentHash;
+    expect(hashA).toBe(hashBytes(Buffer.from('content A\n', 'utf8')));
+
+    // C. Change native Memory to B WITHOUT running add again.
+    await writeFile(filePath, 'content B\n', 'utf8');
+
+    // D. `stak push`'s Memory step. runLocalBackup is a spy that throws if ever called —
+    // the strongest possible proof push never rescans/re-stages native Memory.
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-push-staged-keys-'));
+    const runLocalBackup = vi.fn(async () => {
+      throw new Error('pushStagedMemory must never call runLocalBackup');
+    });
+    const pushOutcome = await pushStagedMemory({
+      stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup,
+    });
+    expect(runLocalBackup).not.toHaveBeenCalled();
+    expect(pushOutcome.status).toBe('standard');
+
+    // E. Assert Cloud received A, NOT B.
+    const destA = await temp('stack-push-staged-dest-a-');
+    const recoveredA = await runMemoryCloudRecover({
+      stackHome: destA,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup,
+    });
+    expect(recoveredA.status).toBe('recovered');
+    expect(runLocalBackup).not.toHaveBeenCalled();
+    const destAManifest = await readMemoryManifest(destA);
+    expect(destAManifest?.items[0]?.contentHash).toBe(hashA);
+    const destABytes = await readMemoryObject({
+      stackHome: destA,
+      contentHash: destAManifest?.items[0]?.contentHash ?? '',
+    });
+    expect(Buffer.from(destABytes).toString('utf8')).toBe('content A\n');
+
+    // F. Assert the local staged Memory manifest still represents A — push never rewrote it.
+    expect((await readMemoryManifest(stackHome))?.items[0]?.contentHash).toBe(
+      hashA,
+    );
+
+    // G. Native (B) vs staged (A) now disagree — this is exactly what `stak status`'s
+    // MACHINE-vs-MAIN Memory check must report as "changes not added".
+    const manifestAfterPush = await readMemoryManifest(stackHome);
+    expect(
+      manifestAfterPush?.items.find(
+        (item) => item.logicalId === 'claude/agent-memory/notes.md',
+      )?.contentHash,
+    ).not.toBe(hashBytes(Buffer.from('content B\n', 'utf8')));
+
+    // H. `stak add .` -> local manifest becomes B.
+    await runMemoryBackup({ stackHome, items: [nativeItem()] });
+    const hashB = (await readMemoryManifest(stackHome))?.items[0]?.contentHash;
+    expect(hashB).toBe(hashBytes(Buffer.from('content B\n', 'utf8')));
+    expect(hashB).not.toBe(hashA);
+
+    // I. `stak push` -> Cloud receives B.
+    const pushOutcome2 = await pushStagedMemory({
+      stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup,
+    });
+    expect(pushOutcome2.status).toBe('standard');
+    expect(runLocalBackup).not.toHaveBeenCalled();
+    const destB = await temp('stack-push-staged-dest-b-');
+    await runMemoryCloudRecover({
+      stackHome: destB,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup,
+    });
+    expect((await readMemoryManifest(destB))?.items[0]?.contentHash).toBe(
+      hashB,
+    );
   });
 });
 

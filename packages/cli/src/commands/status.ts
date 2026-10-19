@@ -2,10 +2,12 @@ import type { Command } from 'commander';
 
 import type { EnvironmentStatus, ScanResult } from '@stack/spec';
 
+import type { MemoryWorkingTreeStatus } from '../memory/working-tree-status.js';
 import {
   renderStatus,
   type AgentReadiness,
   type CloudSyncDisplayState,
+  type MemoryCloudDisplayState,
 } from '../ui/environment.js';
 
 export type StatusCommandDependencies = {
@@ -18,6 +20,14 @@ export type StatusCommandDependencies = {
    * `stak status` always succeeds locally regardless of Cloud reachability.
    */
   checkCloud?(): Promise<CloudSyncDisplayState>;
+  /**
+   * MACHINE (native Memory) vs MAIN (the staged local manifest) — read-only, no Cloud
+   * call, never mutates. MUST never throw for the same reason as `checkCloud`.
+   */
+  checkMemory?(): Promise<MemoryWorkingTreeStatus>;
+  /** Whether Memory has ever reached Cloud at all — deliberately not an "up to date"
+   * claim (see `MemoryCloudDisplayState`). MUST never throw. */
+  checkMemoryCloud?(): Promise<MemoryCloudDisplayState>;
   writeOut(value: string): void;
 };
 
@@ -41,9 +51,26 @@ export const registerStatusCommand = (
             () => ({ status: 'not-checked', reason: 'offline' }) as const,
           )
         : undefined;
+      const memory = dependencies.checkMemory
+        ? await dependencies.checkMemory().catch(() => undefined)
+        : undefined;
+      const memoryCloud = dependencies.checkMemoryCloud
+        ? await dependencies
+            .checkMemoryCloud()
+            .catch(() => ({ status: 'not-checked' }) as const)
+        : undefined;
       if (options.json) {
         dependencies.writeOut(
-          `${JSON.stringify(cloud ? { ...result, cloud } : result, null, 2)}\n`,
+          `${JSON.stringify(
+            {
+              ...result,
+              ...(cloud ? { cloud } : {}),
+              ...(memory ? { memory } : {}),
+              ...(memoryCloud ? { memoryCloud } : {}),
+            },
+            null,
+            2,
+          )}\n`,
         );
         return;
       }
@@ -56,6 +83,8 @@ export const registerStatusCommand = (
           verbose: options.verbose === true,
           ...(agents.length > 0 ? { agents } : {}),
           ...(cloud ? { cloud } : {}),
+          ...(memory ? { memory } : {}),
+          ...(memoryCloud ? { memoryCloud } : {}),
         }),
       );
     });

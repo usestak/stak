@@ -8,6 +8,7 @@ import type {
   EnvironmentStatus,
   SkillStatus,
 } from '@stack/spec';
+import type { MemoryWorkingTreeStatus } from '../memory/working-tree-status.js';
 
 import { agentLabel, block, changes, skills } from './format.js';
 
@@ -16,6 +17,18 @@ export type AgentReadiness = { agent: AgentId; ready: boolean };
 export type CloudSyncDisplayState =
   | EnvironmentCloudSyncState
   | { status: 'not-checked'; reason: 'offline' | 'unauthenticated' };
+
+/**
+ * Memory's Cloud awareness is deliberately narrower than Skills': there is no cheap
+ * digest to compare against (unlike Skills' environment version), so this only ever
+ * reports whether a Cloud backup exists at all — it never claims Memory is "up to date",
+ * which would overclaim what's actually known. Combined with the separate Memory
+ * (MACHINE-vs-MAIN) section, the user gets an honest picture without a new subsystem.
+ */
+export type MemoryCloudDisplayState =
+  | { status: 'not-checked' }
+  | { status: 'no-backup' }
+  | { status: 'backed-up'; generation: number; historicalRecovery: boolean };
 
 const cloudLine = (cloud: CloudSyncDisplayState): string => {
   switch (cloud.status) {
@@ -33,8 +46,48 @@ const cloudLine = (cloud: CloudSyncDisplayState): string => {
       return `not checked (${cloud.reason})`;
   }
 };
-const renderCloudSection = (cloud?: CloudSyncDisplayState): string[] =>
-  cloud ? ['', 'Cloud', `  ${cloudLine(cloud)}`] : [];
+const memoryCloudLine = (memoryCloud: MemoryCloudDisplayState): string => {
+  switch (memoryCloud.status) {
+    case 'not-checked':
+      return 'not checked';
+    case 'no-backup':
+      return 'nothing pushed yet';
+    case 'backed-up':
+      return memoryCloud.historicalRecovery
+        ? `backed up (generation ${memoryCloud.generation}) — behind the latest; run \`stak memory recover\``
+        : `backed up (generation ${memoryCloud.generation})`;
+  }
+};
+/**
+ * The Cloud section is always explicitly scoped per domain — Skills and Memory sync
+ * independently, so a combined "up to date with Cloud" claim would be misleading
+ * whenever one is synced and the other is not (e.g. staged Memory not yet pushed).
+ */
+const renderCloudSection = (
+  cloud?: CloudSyncDisplayState,
+  memoryCloud?: MemoryCloudDisplayState,
+): string[] =>
+  cloud
+    ? [
+        '',
+        'Cloud',
+        `  Skills   ${cloudLine(cloud)}`,
+        ...(memoryCloud ? [`  Memory   ${memoryCloudLine(memoryCloud)}`] : []),
+      ]
+    : [];
+
+const memoryLine = (memory: MemoryWorkingTreeStatus): string => {
+  switch (memory.state) {
+    case 'no-manifest':
+      return `${memory.discovered} file${memory.discovered === 1 ? '' : 's'} discovered`;
+    case 'clean':
+      return 'clean';
+    case 'changes-not-added':
+      return `${memory.changed} change${memory.changed === 1 ? '' : 's'} not added`;
+  }
+};
+const renderMemorySection = (memory?: MemoryWorkingTreeStatus): string[] =>
+  memory ? ['', 'Memory', `  ${memoryLine(memory)}`] : [];
 
 // ---------------------------------------------------------------------------
 // init
@@ -166,6 +219,8 @@ export const renderStatus = (
   options: RenderOptions & {
     agents?: AgentReadiness[];
     cloud?: CloudSyncDisplayState;
+    memory?: MemoryWorkingTreeStatus;
+    memoryCloud?: MemoryCloudDisplayState;
   } = {},
 ): string => {
   if (options.verbose) return renderStatusVerbose(status);
@@ -204,7 +259,8 @@ export const renderStatus = (
       '',
       `${status.invalidSkills.length} invalid discovered Skill${status.invalidSkills.length === 1 ? '' : 's'} (not addable; run \`stak scan --verbose\` for details)`,
     );
-  lines.push(...renderCloudSection(options.cloud));
+  lines.push(...renderMemorySection(options.memory));
+  lines.push(...renderCloudSection(options.cloud, options.memoryCloud));
   if (options.agents && options.agents.length > 0) {
     lines.push('');
     for (const agent of options.agents)

@@ -9,8 +9,8 @@ import type {
 } from '@stack/core';
 import type { PublishPublicStackVersionResponse } from '@stack/spec';
 import type {
+  CloudBackupOutcome,
   CloudRecoverOutcome,
-  MemoryBackupOutcome,
 } from '../memory/cloud-ops.js';
 
 import { block, skills } from './format.js';
@@ -370,9 +370,14 @@ export type PushSkillOutcome =
   | { status: 'noop' }
   | { status: 'failed'; error: string };
 
+/** What `applyMemoryPush` can return: a real Cloud attempt, or "nothing is staged yet"
+ * (no local Memory manifest — `stak add .` has never run) — distinct from `skipped`
+ * (not signed in), since the fix is different (`stak add .` vs. `stak login`). */
+export type MemoryPushOutcome = CloudBackupOutcome | { status: 'nothing-staged' };
+
 export type PushMemoryOutcome =
   | { status: 'not-attempted' }
-  | { status: 'applied'; outcome: MemoryBackupOutcome }
+  | { status: 'applied'; outcome: MemoryPushOutcome }
   | { status: 'failed'; error: string };
 
 /** True when any part of the push did not fully succeed — never say "Push complete." */
@@ -382,7 +387,7 @@ export const pushFailed = (
 ): boolean =>
   skill.status === 'failed' ||
   memory.status === 'failed' ||
-  (memory.status === 'applied' && memory.outcome.cloud.status === 'failed');
+  (memory.status === 'applied' && memory.outcome.status === 'failed');
 
 export const renderCombinedPushResult = (
   skill: PushSkillOutcome,
@@ -403,16 +408,18 @@ export const renderCombinedPushResult = (
   if (memory.status === 'not-attempted') lines.push('  not attempted.');
   else if (memory.status === 'failed') lines.push(`  FAILED: ${memory.error}`);
   else {
-    const cloud = memory.outcome.cloud;
-    if (cloud.status === 'skipped')
+    const outcome = memory.outcome;
+    if (outcome.status === 'nothing-staged')
+      lines.push('  nothing staged yet — run `stak add .` to stage Memory changes.');
+    else if (outcome.status === 'skipped')
       lines.push('  staged locally (sign in to sync Memory to Cloud).');
-    else if (cloud.status === 'protected-locked')
+    else if (outcome.status === 'protected-locked')
       lines.push(
         '  staged locally; Cloud sync needs this device unlocked (`stak memory protect`).',
       );
-    else if (cloud.status === 'failed')
-      lines.push(`  staged locally; Cloud sync FAILED: ${cloud.message}`);
-    else lines.push(`  synced to Cloud (generation ${cloud.generation}).`);
+    else if (outcome.status === 'failed')
+      lines.push(`  staged locally; Cloud sync FAILED: ${outcome.message}`);
+    else lines.push(`  synced to Cloud (generation ${outcome.generation}).`);
   }
   lines.push(
     '',

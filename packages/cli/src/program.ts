@@ -105,6 +105,7 @@ import { registerOpenCommand } from './commands/open.js';
 import { stackCloudRemoteMemoryBackend } from './memory/cloud-backend.js';
 import {
   freshRegistryRisksDuplication,
+  pushStagedMemory,
   readBackupSupersession,
   readMemoryCloudStatus,
   runMemoryCloudBackup,
@@ -152,7 +153,12 @@ import type {
 } from '@stack/core';
 
 import { registerAddCommand } from './commands/add.js';
-import type { CloudSyncDisplayState } from './ui/environment.js';
+import type {
+  CloudSyncDisplayState,
+  MemoryCloudDisplayState,
+} from './ui/environment.js';
+import { computeMemoryWorkingTreeStatus } from './memory/working-tree-status.js';
+import type { MemoryWorkingTreeStatus } from './memory/working-tree-status.js';
 import { registerDiffCommand } from './commands/diff.js';
 import { registerInitCommand } from './commands/init.js';
 import { registerScanCommand } from './commands/scan.js';
@@ -171,6 +177,7 @@ import {
   registerPushCommand,
   type MemoryPushPreflight,
 } from './commands/push.js';
+import type { MemoryPushOutcome } from './ui/cloud.js';
 import {
   registerPullCommand,
   type MemoryPullPreflight,
@@ -224,6 +231,8 @@ export type ProgramDependencies = {
   status(scanResult: ScanResult): Promise<EnvironmentStatus>;
   detectAgents?(): Promise<Array<{ agent: AgentId; ready: boolean }>>;
   checkCloud?(): Promise<CloudSyncDisplayState>;
+  checkMemory?(): Promise<MemoryWorkingTreeStatus>;
+  checkMemoryCloud?(): Promise<MemoryCloudDisplayState>;
   diff(scanResult: ScanResult): Promise<EnvironmentDiff>;
   prepareAdd(
     scanResult: ScanResult,
@@ -307,7 +316,7 @@ export type ProgramDependencies = {
   cloudPreparePush(): Promise<PushPlan>;
   cloudApplyPush(plan: PushPlan): Promise<ApplyPushResult>;
   memoryPushPreflight?(): Promise<MemoryPushPreflight>;
-  applyMemoryPush?(): Promise<MemoryBackupOutcome>;
+  applyMemoryPush?(): Promise<MemoryPushOutcome>;
   cloudPreparePull(): Promise<PullPlan>;
   cloudApplyPull(plan: PullPlan): Promise<ApplyPullResult>;
   memoryPullPreflight?(): Promise<MemoryPullPreflight>;
@@ -675,6 +684,31 @@ const defaultDependencies: ProgramDependencies = {
       return { status: 'not-checked', reason: 'offline' };
     }
   },
+  // MACHINE (native Memory) vs MAIN (the staged local manifest) — read-only, no Cloud
+  // call, never mutates. Reuses the same scan `stak memory scan` uses and the same
+  // comparison `runMemoryBackup` itself would make; never duplicates scanning/manifest
+  // construction.
+  checkMemory: async (): Promise<MemoryWorkingTreeStatus> => {
+    const nativeItems = await (await memoryAdapter()).discover();
+    return computeMemoryWorkingTreeStatus({ stackHome, nativeItems });
+  },
+  // Deliberately narrow (see MemoryCloudDisplayState): only "does a Cloud backup exist
+  // at all", reusing the existing readMemoryCloudStatus check — never a new subsystem,
+  // never claims Memory is "up to date" (that would overclaim what's cheaply knowable).
+  checkMemoryCloud: async (): Promise<MemoryCloudDisplayState> => {
+    try {
+      const status = await readMemoryCloudStatus(await buildMemoryCloudDeps());
+      if (!status.authenticated || status.latestGeneration === null)
+        return status.authenticated ? { status: 'no-backup' } : { status: 'not-checked' };
+      return {
+        status: 'backed-up',
+        generation: status.latestGeneration,
+        historicalRecovery: status.historicalRecovery,
+      };
+    } catch {
+      return { status: 'not-checked' };
+    }
+  },
   diff: async (scanResult) => diffMainEnvironment({ stackHome, scanResult }),
   prepareAdd: async (scanResult, selectors) =>
     prepareSkillAdd({ stackHome, scanResult, selectors }),
@@ -833,8 +867,12 @@ const defaultDependencies: ProgramDependencies = {
   cloudApplyPush: (plan) => cloudApplyPush(cloudDeps, plan),
   cloudPreparePull: () => cloudPreparePull(cloudDeps),
   cloudApplyPull: (plan) => cloudApplyPull(cloudDeps, plan),
-  // Unified push (P3): Memory rides along with Skills, local-manifest-first then Cloud,
-  // reusing the exact same primitives `stak memory backup`/`stak memory status` use.
+  // Unified push (P3): Memory rides along with Skills, but push uploads ONLY what
+  // `stak add .` already staged into the local manifest — it never rescans native Memory
+  // or re-stages it itself (that would make push an implicit `add .`, which the locked
+  // MACHINE -> add -> MAIN -> push -> CLOUD model forbids). Contrast with `stak memory
+  // backup` (`memoryCloudBackup` below), which intentionally still does its own local
+  // rescan first — that command's own behavior is unchanged.
   memoryPushPreflight: async () => {
     const status = await readMemoryCloudStatus(await buildMemoryCloudDeps());
     return status.historicalRecovery
@@ -845,7 +883,11 @@ const defaultDependencies: ProgramDependencies = {
         }
       : { blocked: false };
   },
-  applyMemoryPush: async () => runMemoryCloudBackup(await buildMemoryCloudDeps()),
+  applyMemoryPush: async () => {
+    if (!(await readMemoryManifest(stackHome)))
+      return { status: 'nothing-staged' };
+    return pushStagedMemory(await buildMemoryCloudDeps());
+  },
   // Unified pull (P3): Memory only auto-recovers on a genuinely fresh machine (no local
   // manifest yet) — an established machine's Memory is never silently overwritten here;
   // `stak memory recover` remains the explicit, deliberate path.

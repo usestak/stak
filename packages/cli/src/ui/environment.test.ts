@@ -48,12 +48,42 @@ const baseStatus = (overrides: Partial<EnvironmentStatus> = {}): EnvironmentStat
   ...overrides,
 });
 
+describe('renderStatus — Memory section (MACHINE vs MAIN, not Cloud)', () => {
+  const cleanStatus = baseStatus({ summary: { ...baseSummary, satisfied: 1 } });
+
+  it('reports files discovered before anything has been staged', () => {
+    const output = renderStatus(cleanStatus, {
+      memory: { state: 'no-manifest', discovered: 14 },
+    });
+    expect(output).toContain('Memory');
+    expect(output).toContain('14 files discovered');
+  });
+
+  it('reports clean when native Memory matches what was staged', () => {
+    const output = renderStatus(cleanStatus, { memory: { state: 'clean' } });
+    expect(output).toContain('clean');
+  });
+
+  it('reports changes not added when native Memory diverges from the staged manifest', () => {
+    const output = renderStatus(cleanStatus, {
+      memory: { state: 'changes-not-added', changed: 3 },
+    });
+    expect(output).toContain('3 changes not added');
+  });
+
+  it('omits the Memory section entirely when no Memory state was supplied', () => {
+    const output = renderStatus(cleanStatus);
+    expect(output).not.toContain('Memory');
+  });
+});
+
 describe('renderStatus — Cloud section', () => {
   const cleanStatus = baseStatus({ summary: { ...baseSummary, satisfied: 1 } });
 
-  it('shows up to date', () => {
+  it('shows up to date, explicitly scoped to Skills', () => {
     const output = renderStatus(cleanStatus, { cloud: { status: 'up-to-date' } });
     expect(output).toContain('Cloud');
+    expect(output).toContain('Skills');
     expect(output).toContain('up to date with main');
   });
 
@@ -94,6 +124,33 @@ describe('renderStatus — Cloud section', () => {
   it('omits the Cloud section entirely when no cloud state was supplied', () => {
     const output = renderStatus(cleanStatus);
     expect(output).not.toContain('Cloud');
+  });
+
+  it('never claims the overall STAK is up to date when Skills are synced but Memory is not — scopes each line separately', () => {
+    const output = renderStatus(cleanStatus, {
+      cloud: { status: 'up-to-date' },
+      memoryCloud: { status: 'backed-up', generation: 4, historicalRecovery: false },
+    });
+    expect(output).toContain('Skills');
+    expect(output).toContain('up to date with main');
+    expect(output).toContain('Memory');
+    expect(output).toContain('backed up (generation 4)');
+  });
+
+  it('shows nothing pushed yet for Memory distinctly from Skills', () => {
+    const output = renderStatus(cleanStatus, {
+      cloud: { status: 'up-to-date' },
+      memoryCloud: { status: 'no-backup' },
+    });
+    expect(output).toMatch(/Memory\s+nothing pushed yet/);
+  });
+
+  it('shows Memory Cloud state as not checked without failing', () => {
+    const output = renderStatus(cleanStatus, {
+      cloud: { status: 'not-checked', reason: 'offline' },
+      memoryCloud: { status: 'not-checked' },
+    });
+    expect(output).toMatch(/Memory\s+not checked/);
   });
 });
 

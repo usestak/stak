@@ -6,12 +6,12 @@ import {
 } from '@stack/cloud-client';
 import { StackCompositionError, type ApplyPushResult, type PushPlan } from '@stack/core';
 
-import type { MemoryBackupOutcome } from '../memory/cloud-ops.js';
 import {
   pushFailed,
   pushPlanJson,
   renderCombinedPushResult,
   renderPushPlan,
+  type MemoryPushOutcome,
   type PushMemoryOutcome,
   type PushSkillOutcome,
 } from '../ui/cloud.js';
@@ -28,8 +28,11 @@ export type PushCommandDependencies = {
    * Optional so existing Skills-only push wiring/tests keep working unchanged.
    */
   memoryPushPreflight?(): Promise<MemoryPushPreflight>;
-  /** Stage-then-sync Memory to Cloud (local backup, then Cloud when authenticated). */
-  applyMemoryPush?(): Promise<MemoryBackupOutcome>;
+  /**
+   * Upload whatever Memory is ALREADY staged (never rescans native Memory or stages it —
+   * that's `stak add .`'s job; this is push, not an implicit add).
+   */
+  applyMemoryPush?(): Promise<MemoryPushOutcome>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };

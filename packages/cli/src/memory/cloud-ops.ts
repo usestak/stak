@@ -159,18 +159,23 @@ const seedRecoveredProjectNames = async (deps: {
   }
 };
 
-/** backup: local first, then Cloud (never fails the local commit). */
-export const runMemoryCloudBackup = async (
+/**
+ * Upload whatever Memory is ALREADY staged in the local manifest (`memory/manifests/
+ * current.json`) to Cloud. Never calls `deps.runLocalBackup()` and never rescans native
+ * Memory or rewrites the local manifest — that is `stak add .`'s job, not push's. Shares
+ * every byte of logic with `runMemoryCloudBackup`'s Cloud branch below on purpose: the
+ * only difference from that function is skipping its forced local-rescan step.
+ */
+export const pushStagedMemory = async (
   deps: MemoryCloudDeps,
-): Promise<MemoryBackupOutcome> => {
-  const local = await deps.runLocalBackup();
-  if (!deps.backend) return { local, cloud: { status: 'skipped' } };
+): Promise<CloudBackupOutcome> => {
+  if (!deps.backend) return { status: 'skipped' };
   try {
     const profile = await deps.backend.getProfile();
     const mode = profile?.privacyMode ?? 'standard';
     if (mode === 'protected') {
       const mmk = await deps.localKeyStore.loadMmk();
-      if (!mmk) return { local, cloud: { status: 'protected-locked' } };
+      if (!mmk) return { status: 'protected-locked' };
       const result = await protectedCloudBackup({
         stackHome: deps.stackHome,
         backend: deps.backend,
@@ -184,10 +189,7 @@ export const runMemoryCloudBackup = async (
         privacyMode: 'protected',
         cloudLatest: result.generation,
       });
-      return {
-        local,
-        cloud: { status: 'protected', generation: result.generation },
-      };
+      return { status: 'protected', generation: result.generation };
     }
     const result = await standardCloudBackup({
       stackHome: deps.stackHome,
@@ -199,13 +201,18 @@ export const runMemoryCloudBackup = async (
       privacyMode: 'standard',
       cloudLatest: result.generation,
     });
-    return {
-      local,
-      cloud: { status: 'standard', generation: result.generation },
-    };
+    return { status: 'standard', generation: result.generation };
   } catch (error) {
-    return { local, cloud: { status: 'failed', message: errorMessage(error) } };
+    return { status: 'failed', message: errorMessage(error) };
   }
+};
+
+/** backup: local first, then Cloud (never fails the local commit). */
+export const runMemoryCloudBackup = async (
+  deps: MemoryCloudDeps,
+): Promise<MemoryBackupOutcome> => {
+  const local = await deps.runLocalBackup();
+  return { local, cloud: await pushStagedMemory(deps) };
 };
 
 export type CloudRecoverOutcome =

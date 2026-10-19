@@ -1,16 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import type { MemoryBackupOutcome } from '../memory/cloud-ops.js';
 import {
   renderCombinedPullResult,
   renderCombinedPushResult,
+  type MemoryPushOutcome,
   type PullMemoryOutcome,
   type PullSkillOutcome,
   type PushMemoryOutcome,
   type PushSkillOutcome,
 } from './cloud.js';
-
-const localBackup = { provider: 'claude' as const, files: 3, projects: 1, createdAt: '2026-01-01T00:00:00.000Z' };
 
 describe('renderCombinedPushResult', () => {
   it('reports a clean, fully-synced push', () => {
@@ -25,10 +23,7 @@ describe('renderCombinedPushResult', () => {
         uploaded: 0,
       },
     };
-    const outcome: MemoryBackupOutcome = {
-      local: localBackup,
-      cloud: { status: 'standard', generation: 5 },
-    };
+    const outcome: MemoryPushOutcome = { status: 'standard', generation: 5 };
     const memory: PushMemoryOutcome = { status: 'applied', outcome };
     const output = renderCombinedPushResult(skill, memory);
     expect(output).toContain('Skills');
@@ -61,12 +56,24 @@ describe('renderCombinedPushResult', () => {
     };
     const memory: PushMemoryOutcome = {
       status: 'applied',
-      outcome: { local: localBackup, cloud: { status: 'failed', message: 'offline' } },
+      outcome: { status: 'failed', message: 'offline' },
     };
     const output = renderCombinedPushResult(skill, memory);
     expect(output).toContain('main created in the cloud');
     expect(output).toContain('Cloud sync FAILED: offline');
     expect(output).not.toContain('Push complete.');
+  });
+
+  it('tells the user to `stak add .` when nothing is staged yet, and still calls it complete', () => {
+    const skill: PushSkillOutcome = { status: 'noop' };
+    const memory: PushMemoryOutcome = {
+      status: 'applied',
+      outcome: { status: 'nothing-staged' },
+    };
+    const output = renderCombinedPushResult(skill, memory);
+    expect(output).toContain('nothing staged yet');
+    expect(output).toContain('stak add .');
+    expect(output).toContain('Push complete.');
   });
 });
 

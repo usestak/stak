@@ -1271,6 +1271,52 @@ describe('STAK CLI', () => {
     expect(result.output).toContain('not set up');
   });
 
+  it('shows the Memory working-tree state (MACHINE vs MAIN) in status', async () => {
+    const result = await runProgram(['status'], {
+      checkMemory: async () => ({ state: 'changes-not-added', changed: 2 }),
+    });
+    expect(result.output).toContain('Memory');
+    expect(result.output).toContain('2 changes not added');
+  });
+
+  it('status never fails when checkMemory throws', async () => {
+    const result = await runProgram(['status'], {
+      checkMemory: async () => {
+        throw new Error('discovery failed');
+      },
+    });
+    expect(result.exit).toBeUndefined();
+    expect(result.output).not.toContain('Memory');
+  });
+
+  it('scopes Cloud sync state explicitly per domain — never implies Memory is synced just because Skills are', async () => {
+    const result = await runProgram(['status'], {
+      checkCloud: async () => ({ status: 'up-to-date' }),
+      checkMemoryCloud: async () => ({ status: 'no-backup' }),
+    });
+    expect(result.output).toMatch(/Skills\s+up to date with main/);
+    expect(result.output).toMatch(/Memory\s+nothing pushed yet/);
+  });
+
+  it('includes memory/memoryCloud in --json status output additively', async () => {
+    const result = await runProgram(['status', '--json'], {
+      checkMemory: async () => ({ state: 'clean' }),
+      checkMemoryCloud: async () => ({
+        status: 'backed-up',
+        generation: 2,
+        historicalRecovery: false,
+      }),
+    });
+    const parsed = JSON.parse(result.output);
+    expect(parsed.memory).toEqual({ state: 'clean' });
+    expect(parsed.memoryCloud).toEqual({
+      status: 'backed-up',
+      generation: 2,
+      historicalRecovery: false,
+    });
+    expect(parsed.environment).toBe(emptyStatus.environment);
+  });
+
   it('shows the Cloud sync state when checkCloud resolves', async () => {
     const result = await runProgram(['status'], {
       checkCloud: async () => ({ status: 'ahead' }),
@@ -1607,10 +1653,7 @@ describe('STAK CLI', () => {
         cloudApplyPush: async () => {
           throw new Error('upload failed');
         },
-        applyMemoryPush: async () => ({
-          local: { provider: 'claude', files: 1, projects: 1, createdAt: '2026-01-01T00:00:00.000Z' },
-          cloud: { status: 'standard', generation: 1 },
-        }),
+        applyMemoryPush: async () => ({ status: 'standard', generation: 1 }),
         writeOut: (value) => chunks.push(value),
       }),
     ).rejects.toThrow('Push did not fully succeed');
