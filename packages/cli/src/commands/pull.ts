@@ -37,7 +37,9 @@ export const registerPullCommand = (
 ): void => {
   program
     .command('pull')
-    .description('Download your main STAK from the Cloud')
+    .description(
+      'Pull the latest main (Skills + Memory) from STAK Cloud — the normal new-machine recovery path',
+    )
     .option(
       '--dry-run',
       'preview the pull without downloading or mutating main',

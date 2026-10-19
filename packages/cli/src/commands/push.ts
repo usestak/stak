@@ -40,7 +40,9 @@ export const registerPushCommand = (
 ): void => {
   program
     .command('push')
-    .description('Upload your main STAK to the Cloud')
+    .description(
+      'Push main (Skills + Memory) to STAK Cloud, creating a new version automatically',
+    )
     .option('--dry-run', 'preview the push without uploading or committing')
     .option('--json', 'emit structured JSON for dry-run')
     .option('--yes', 'create the cloud version non-interactively')

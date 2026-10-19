@@ -27,7 +27,9 @@ export const registerStatusCommand = (
 ): void => {
   program
     .command('status')
-    .description('Show whether your STAK is ready on this machine')
+    .description(
+      'Show machine vs. main vs. STAK Cloud: untracked/modified/missing Skills and sync state',
+    )
     .option('--json', 'emit structured JSON only')
     .option('--verbose', 'show detailed internal state')
     .action(async (options: { json?: boolean; verbose?: boolean }) => {

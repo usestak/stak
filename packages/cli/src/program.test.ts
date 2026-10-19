@@ -485,6 +485,17 @@ describe('`stak use` renders the right proposal kind (P10B)', () => {
     expect(result.output).toContain('your Cloud STAK: frontend');
     expect(result.output).not.toContain('public STAK');
   });
+
+  it('reminds the user to push after applying `use` — adoption never auto-pushes', async () => {
+    const applyUse = vi.fn(async () => undefined);
+    const result = await runProgram(['use', 'frontend', '--yes'], {
+      prepareUse: async () => ownedProposal,
+      applyUse,
+    });
+    expect(applyUse).toHaveBeenCalledTimes(1);
+    expect(result.output).toContain('added to main');
+    expect(result.output).toContain('Run `stak push` to sync this change to STAK Cloud.');
+  });
 });
 
 describe('stak use — fresh-machine bootstrap preview (empty main, --dry-run)', () => {

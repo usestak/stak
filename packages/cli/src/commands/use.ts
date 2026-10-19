@@ -132,7 +132,9 @@ export const registerUseCommand = (
         }
         await dependencies.applyUse(proposal);
         dependencies.writeOut(
-          `\n${proposal.layer.name} added to main.\nNo agent bindings were changed.\n`,
+          `\n${proposal.layer.name} added to main.\n` +
+            'No agent bindings were changed.\n' +
+            'Run `stak push` to sync this change to STAK Cloud.\n',
         );
       },
     );

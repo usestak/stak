@@ -15,7 +15,9 @@ export const registerScanCommand = (
 ): void => {
   program
     .command('scan')
-    .description('Discover installed Agent Skills without making changes')
+    .description(
+      'Diagnose Skill discovery on this machine (`stak status` already runs this automatically; use this for roots, provenance, or collision details)',
+    )
     .option('--json', 'emit structured JSON only')
     .option('--project', 'include Skill roots in the current project')
     .action(async (options: { json?: boolean; project?: boolean }) => {
