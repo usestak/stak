@@ -69,6 +69,21 @@ export const skillShareStatusSchema = z.discriminatedUnion('status', [
     versionNumber: z.number().int().positive(),
   }),
   z.object({ status: z.literal('not-shareable'), reason: z.string().min(1) }),
+  // Eligible by shape (restoration/source), but the content bytes this share would publish
+  // are not yet in STAK Cloud — calling `shareSkill` now is guaranteed to fail. The actionable
+  // fix is always the same: run `stak push`, then try again.
+  z.object({ status: z.literal('upload-required') }),
+  // The currently-published version exists but predates snapshot-first publication (its
+  // requirement is Git-reference-restored, not an immutable content snapshot) — still
+  // readable for backward compatibility (never deleted/rewritten), but not equivalent to a
+  // current portable publication. Shares again to produce a fresh snapshot-backed version.
+  z.object({
+    status: z.literal('portable-republish-needed'),
+    owner: publicHandleSchema,
+    slug: publicSlugSchema,
+    url: z.string().min(1),
+    versionNumber: z.number().int().positive(),
+  }),
 ]);
 export type SkillShareStatus = z.infer<typeof skillShareStatusSchema>;
 

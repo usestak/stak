@@ -134,6 +134,9 @@ export const publishUserStackRequestSchema = z.object({
  *  (see migration audit report) — only create/update/no-op-republish are supported today. */
 export const userStackPublicationStatusSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('private') }),
+  // Eligible by shape, but at least one Skill's content isn't yet in STAK Cloud — publishing
+  // now is guaranteed to fail. Mirrors the single-Skill share status of the same name.
+  z.object({ status: z.literal('upload-required') }),
   z.object({
     status: z.literal('published'),
     owner: publicHandleSchema,
@@ -143,6 +146,18 @@ export const userStackPublicationStatusSchema = z.discriminatedUnion('status', [
   }),
   z.object({
     status: z.literal('changed-since-published'),
+    owner: publicHandleSchema,
+    slug: publicSlugSchema,
+    url: z.string().min(1),
+    versionNumber: z.number().int().positive(),
+  }),
+  // The currently-published version exists but was published before snapshot-first
+  // publication (its requirements are Git-reference-restored, not immutable content
+  // snapshots) — still readable for backward compatibility (never deleted/rewritten), but
+  // not equivalent to a current portable publication. Republishing produces a fresh
+  // snapshot-backed version at the next version number.
+  z.object({
+    status: z.literal('portable-republish-needed'),
     owner: publicHandleSchema,
     slug: publicSlugSchema,
     url: z.string().min(1),

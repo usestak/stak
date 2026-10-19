@@ -4,6 +4,7 @@ import {
   userStackNameSchema,
   type CreateUserStackRequest,
   type CreateUserStackResponse,
+  type GetUserStackPublicationStatusResponse,
   type GetUserStackResponse,
   type ListUserStacksResponse,
   type PortableLockedSkill,
@@ -199,18 +200,24 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
         displayName: string;
         description: string;
       }
-    | { eligible: false; reason: string }
+    // `uploadRequired` is set when the ONLY reason publishing isn't possible right now is
+    // missing Cloud content (never when a shape/safety check also failed) — lets status
+    // callers distinguish "run `stak push`, then try again" from a genuine shape problem.
+    | { eligible: false; reason: string; uploadRequired: boolean }
   > => {
     if (!version || version.bundle.skills.length === 0)
       return {
         eligible: false,
         reason: `"${stack.name}" has no Skills yet — nothing to publish.`,
+        uploadRequired: false,
       };
     const ineligible: string[] = [];
+    let onlyMissingContent = true;
     for (const skill of version.bundle.skills) {
       const verdict = assessSkillShareEligibility(skill.restoration);
       if (!verdict.eligible) {
         ineligible.push(`${skill.name} (${verdict.reason})`);
+        onlyMissingContent = false;
         continue;
       }
       // Public-publication parity: every Skill will be published as a snapshot (see the
@@ -232,6 +239,7 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
       return {
         eligible: false,
         reason: `Cannot publish "${stack.name}". ${ineligible.length} Skill(s) can't be published: ${ineligible.join('; ')}.`,
+        uploadRequired: onlyMissingContent,
       };
 
     const displayName = displayNameOverride ?? stack.name;
@@ -509,34 +517,39 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
     getUserStackPublicationStatus: async (
       user: AuthenticatedUser,
       stackId: string,
-    ): Promise<{
-      stackId: string;
-      publication:
-        | { status: 'private' }
-        | {
-            status: 'published' | 'changed-since-published';
-            owner: string;
-            slug: string;
-            url: string;
-            versionNumber: number;
-          };
-    }> => {
+    ): Promise<GetUserStackPublicationStatusResponse> => {
       const stack = await requireOwnedStack(user.userId, stackId);
-      if (!stack.publishedSlug)
-        return { stackId: stack.stackId, publication: { status: 'private' } };
-      const published = await ctx.repository.getPublicStackByOwner(
-        user.userId,
-        stack.publishedSlug,
-      );
       // Active-share rule (§5/§9): `publishedSlug` is a stable identity binding, NOT an
-      // activity flag — an unpublished share (unpublishedAt set) reads back as 'private' here
-      // even though the slug binding is retained internally for a future republish/reactivate.
+      // activity flag — an unpublished share (unpublishedAt set) reads back the same as
+      // never-published here, even though the slug binding is retained internally for a
+      // future republish/reactivate.
+      const published = stack.publishedSlug
+        ? await ctx.repository.getPublicStackByOwner(
+            user.userId,
+            stack.publishedSlug,
+          )
+        : null;
       if (
         !published ||
         !published.latestVersionId ||
         published.unpublishedAt !== null
-      )
+      ) {
+        // Not currently published — the single-Skill share status model's "shareable" vs
+        // "upload-required" distinction applies identically here: don't report bare 'private'
+        // (implying a normal Publish action would work) when it's guaranteed to fail.
+        const version = await latestVersionOf(stack);
+        const candidate = await buildCandidateBundle(
+          user.userId,
+          stack,
+          version,
+        );
+        if (!candidate.eligible && candidate.uploadRequired)
+          return {
+            stackId: stack.stackId,
+            publication: { status: 'upload-required' },
+          };
         return { stackId: stack.stackId, publication: { status: 'private' } };
+      }
       const publishedVersion = await ctx.repository.getPublicStackVersionById(
         published.latestVersionId,
       );
@@ -546,15 +559,41 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
       const url = `${ctx.appUrl.replace(/\/+$/, '')}/${handle}/${stack.publishedSlug}`;
       const version = await latestVersionOf(stack);
       const candidate = await buildCandidateBundle(user.userId, stack, version);
+      // A legacy (pre-snapshot-first) publication is never treated as "current", even when
+      // its content hash happens to still match — the published artifact itself is a Git
+      // reference, not an immutable snapshot (legacy publication policy, shared with the
+      // single-Skill share status model).
+      const legacy = (publishedVersion?.bundle.requirements ?? []).some(
+        (requirement) => requirement.restoration.strategy !== 'snapshot',
+      );
       const upToDate =
+        !legacy &&
         candidate.eligible &&
         publishedVersion?.versionHash === candidate.bundle.stack.versionHash;
+      if (upToDate)
+        return {
+          stackId: stack.stackId,
+          publication: {
+            status: 'published',
+            owner: handle,
+            slug: stack.publishedSlug as string,
+            url,
+            versionNumber: publishedVersion?.versionNumber ?? 0,
+          },
+        };
+      if (!candidate.eligible && candidate.uploadRequired)
+        return {
+          stackId: stack.stackId,
+          publication: { status: 'upload-required' },
+        };
       return {
         stackId: stack.stackId,
         publication: {
-          status: upToDate ? 'published' : 'changed-since-published',
+          status: legacy
+            ? 'portable-republish-needed'
+            : 'changed-since-published',
           owner: handle,
-          slug: stack.publishedSlug,
+          slug: stack.publishedSlug as string,
           url,
           versionNumber: publishedVersion?.versionNumber ?? 0,
         },

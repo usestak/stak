@@ -10,12 +10,20 @@ import {
 } from '@stack/spec';
 
 import { notFound, publicationNotEligible } from './errors.js';
-import { guardPublicSlugClaim } from './public-service.js';
-import type { CloudRepository, PublicStackRepository } from './repository.js';
+import {
+  guardPublicSlugClaim,
+  hasPublishableSnapshot,
+} from './public-service.js';
+import type {
+  CloudBlobStore,
+  CloudRepository,
+  PublicStackRepository,
+} from './repository.js';
 import type { AuthenticatedUser } from './service.js';
 
 export type SkillShareServiceContext = {
   repository: CloudRepository & PublicStackRepository;
+  blobStore: CloudBlobStore;
   newId: () => string;
   appUrl: string;
   resolveHandle: (userId: string) => Promise<string>;
@@ -118,21 +126,46 @@ export const createSkillShareService = (ctx: SkillShareServiceContext) => {
           // local Git-reference/snapshot shape) would therefore never match for a Git-backed
           // Skill, permanently reporting "update-available" even immediately after sharing.
           // What "already-shared" actually means under content-pinned publication is: the
-          // content currently approved is the same content already published — i.e.
-          // contentHash equality is both necessary and sufficient.
+          // content currently approved is the same content already published AND that
+          // publication is itself snapshot-backed (not a pre-snapshot-first legacy reference
+          // row) — contentHash equality alone is no longer sufficient (§ legacy publication
+          // policy: a legacy reference-strategy publication is never treated as "current",
+          // even when its contentHash happens to match).
           const publishedRequirement = existing.latest.bundle.requirements[0];
+          const legacy =
+            publishedRequirement?.restoration.strategy !== 'snapshot';
           const upToDate =
-            publishedRequirement?.contentHash === skill.contentHash;
+            !legacy && publishedRequirement?.contentHash === skill.contentHash;
+          const shareMeta = {
+            owner: existingHandle,
+            slug: existing.stack.slug,
+            // Canonical browser share URL, not the `@owner/slug` CLI locator — see the
+            // matching comment in public-service.ts's `url()` helper.
+            url: `${ctx.appUrl.replace(/\/+$/, '')}/${existingHandle}/${existing.stack.slug}`,
+            versionNumber: existing.latest.versionNumber,
+          };
+          if (upToDate)
+            return {
+              skillId,
+              share: { status: 'already-shared', ...shareMeta },
+            };
+          // Either the publication is a legacy reference row (needs a portable republish) or
+          // the currently-approved content has changed since the last snapshot publish (needs
+          // an update). Both re-share through the same `shareSkill` call, and both are
+          // guaranteed to fail the same way if this content was never pushed — checked here
+          // too, same as the never-shared branch below.
+          const uploaded = await hasPublishableSnapshot(
+            ctx.blobStore,
+            user.userId,
+            skill.contentHash,
+          );
+          if (!uploaded)
+            return { skillId, share: { status: 'upload-required' } };
           return {
             skillId,
             share: {
-              status: upToDate ? 'already-shared' : 'update-available',
-              owner: existingHandle,
-              slug: existing.stack.slug,
-              // Canonical browser share URL, not the `@owner/slug` CLI locator — see the
-              // matching comment in public-service.ts's `url()` helper.
-              url: `${ctx.appUrl.replace(/\/+$/, '')}/${existingHandle}/${existing.stack.slug}`,
-              versionNumber: existing.latest.versionNumber,
+              status: legacy ? 'portable-republish-needed' : 'update-available',
+              ...shareMeta,
             },
           };
         }
@@ -143,6 +176,18 @@ export const createSkillShareService = (ctx: SkillShareServiceContext) => {
           skillId,
           share: { status: 'not-shareable', reason: eligibility.reason },
         };
+      // Public-publication parity: a share always publishes through the Skill's immutable
+      // content snapshot (see `shareSkill` below), regardless of restoration strategy, so the
+      // bytes must already be in STAK Cloud or the actual share attempt is guaranteed to fail
+      // with `ensurePublicSnapshotUploaded`'s error. Checked here too so the UI never shows a
+      // normal Share action it already knows would fail — it tells the owner to `stak push`
+      // first instead.
+      const uploaded = await hasPublishableSnapshot(
+        ctx.blobStore,
+        user.userId,
+        skill.contentHash,
+      );
+      if (!uploaded) return { skillId, share: { status: 'upload-required' } };
       return {
         skillId,
         share: {

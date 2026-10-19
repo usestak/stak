@@ -194,6 +194,7 @@ export const createCloudService = (config: CloudServiceConfig) => {
   // immutability guarantees are exactly `publicMethods.publishPublicStackVersion`'s.
   const skillShareMethods = createSkillShareService({
     repository: config.repository,
+    blobStore: config.blobStore,
     newId,
     appUrl,
     resolveHandle: publicMethods.resolveHandle,

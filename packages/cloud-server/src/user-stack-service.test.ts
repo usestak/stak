@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { sha256CanonicalJson } from '@stack/shared';
 import type { CloudEnvironmentBundle } from '@stack/spec';
 
 import {
@@ -93,7 +94,7 @@ const pushMainFor = async (
       ),
     },
     importedStackVersions: [],
-    snapshotRequirements: [],
+    contentUploadRequirements: [],
     digest: `sha256:${'0'.repeat(64)}`,
   };
   await service.commitEnvironmentVersion({ userId, tokenId: 'test' }, 'main', {
@@ -903,6 +904,191 @@ describe('Named Stacks (P10B §11-15)', () => {
       if (afterEdit.publication.status === 'changed-since-published') {
         expect(afterEdit.publication.url).not.toContain('@');
       }
+    });
+
+    it('a never-published Stack whose Skill content was never pushed reports upload-required, not a misleading private', async () => {
+      const { service, repository, blobStore, auth } = setup();
+      await repository.upsertProfile({
+        userId: USER_A,
+        githubUsername: 'alice',
+      });
+      // snapshot-strategy is the one `pushMain` deliberately leaves unseeded.
+      await pushMain(service, blobStore, {
+        [SKILL_ID]: {
+          name: 'design',
+          contentHash: CONTENT_HASH,
+          strategy: 'snapshot',
+        },
+      });
+      const created = await service.createUserStack(auth, {
+        name: 'frontend',
+        skillIds: [SKILL_ID],
+      });
+      const status = await service.getUserStackPublicationStatus(
+        auth,
+        created.stackId,
+      );
+      expect(status.publication.status).toBe('upload-required');
+      await expect(
+        service.publishUserStack(auth, {
+          stackId: created.stackId,
+          slug: 'frontend',
+        }),
+      ).rejects.toMatchObject({ code: 'publication-not-eligible' });
+    });
+
+    /** Simulates a named-Stack row published before snapshot-first publication existed —
+     *  built by hand, never through `publishUserStack` (which no longer emits this shape) —
+     *  written through the real `publishPublicStackVersion` write path, then bound to the
+     *  named Stack exactly as `publishUserStack` itself would via `markUserStackPublished`. */
+    const publishLegacyUserStack = async (
+      service: ReturnType<typeof createCloudService>,
+      repository: ReturnType<typeof createInMemoryRepository>,
+      auth: { userId: string; tokenId: string },
+      stackId: string,
+      slug: string,
+      contentHash: string,
+    ) => {
+      const requirements = [
+        {
+          id: 'req_design00001',
+          name: 'design',
+          requirement: 'required' as const,
+          contentHash,
+          metadata: { name: 'design', description: 'design description' },
+          restoration: {
+            strategy: 'reference' as const,
+            reference: {
+              remote: 'https://example.com/example/x.git',
+              revision: 'a'.repeat(40),
+              path: 'skills/design',
+              expectedContentHash: contentHash,
+            },
+          },
+          observedSources: [],
+          originStackName: 'frontend',
+        },
+      ];
+      const stack = {
+        name: 'frontend',
+        description: 'frontend description',
+        versionHash: sha256CanonicalJson({
+          name: 'frontend',
+          description: 'frontend description',
+          requirements,
+          inheritedStacks: [],
+          skippedOptional: [],
+        }),
+        kind: 'stack' as const,
+      };
+      const bundle = {
+        schemaVersion: 1 as const,
+        stack,
+        requirements,
+        inheritedStackMetadata: [],
+        digest: sha256CanonicalJson({
+          stack,
+          requirements,
+          inheritedStackMetadata: [],
+        }),
+      };
+      await service.publishPublicStackVersion(auth, {
+        slug,
+        bundle,
+        expectedLatestVersionId: null,
+      });
+      await repository.markUserStackPublished(auth.userId, stackId, slug);
+    };
+
+    it('a legacy reference-strategy publication with matching current content and bytes already present reports portable-republish-needed, not published', async () => {
+      const { service, repository, blobStore, auth } = setup();
+      await repository.upsertProfile({
+        userId: USER_A,
+        githubUsername: 'alice',
+      });
+      await pushMain(service, blobStore, {
+        [SKILL_ID]: {
+          name: 'design',
+          contentHash: CONTENT_HASH,
+          strategy: 'reference',
+        },
+      });
+      const created = await service.createUserStack(auth, {
+        name: 'frontend',
+        skillIds: [SKILL_ID],
+      });
+      await publishLegacyUserStack(
+        service,
+        repository,
+        auth,
+        created.stackId,
+        'frontend',
+        CONTENT_HASH,
+      );
+
+      const status = await service.getUserStackPublicationStatus(
+        auth,
+        created.stackId,
+      );
+      expect(status.publication.status).toBe('portable-republish-needed');
+
+      const republished = await service.publishUserStack(auth, {
+        stackId: created.stackId,
+        slug: 'frontend',
+      });
+      expect(republished.version.versionNumber).toBe(2);
+      const version2 = await service.getPublicStackVersion(
+        'alice',
+        'frontend',
+        2,
+      );
+      expect(version2.bundle.requirements[0]?.restoration).toEqual({
+        strategy: 'snapshot',
+        contentHash: CONTENT_HASH,
+      });
+      // The original legacy version remains readable, unmutated.
+      const version1 = await service.getPublicStackVersion(
+        'alice',
+        'frontend',
+        1,
+      );
+      expect(version1.bundle.requirements[0]?.restoration.strategy).toBe(
+        'reference',
+      );
+    });
+
+    it('a legacy reference-strategy publication whose current content was never pushed reports upload-required', async () => {
+      const { service, repository, blobStore, auth } = setup();
+      await repository.upsertProfile({
+        userId: USER_A,
+        githubUsername: 'alice',
+      });
+      // snapshot-strategy is deliberately left unseeded by `pushMain`.
+      await pushMain(service, blobStore, {
+        [SKILL_ID]: {
+          name: 'design',
+          contentHash: CONTENT_HASH,
+          strategy: 'snapshot',
+        },
+      });
+      const created = await service.createUserStack(auth, {
+        name: 'frontend',
+        skillIds: [SKILL_ID],
+      });
+      await publishLegacyUserStack(
+        service,
+        repository,
+        auth,
+        created.stackId,
+        'frontend',
+        CONTENT_HASH,
+      );
+
+      const status = await service.getUserStackPublicationStatus(
+        auth,
+        created.stackId,
+      );
+      expect(status.publication.status).toBe('upload-required');
     });
   });
 

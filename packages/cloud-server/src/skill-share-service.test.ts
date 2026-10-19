@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { CloudEnvironmentBundle } from '@stack/spec';
+import { sha256CanonicalJson } from '@stack/shared';
+import type { CloudEnvironmentBundle, PublicStackBundle } from '@stack/spec';
 
 import {
   createCloudService,
@@ -72,7 +73,7 @@ const skillBundle = (
       },
     },
     importedStackVersions: [],
-    snapshotRequirements: [],
+    contentUploadRequirements: [],
     digest: `sha256:${'0'.repeat(64)}`,
   };
 };
@@ -157,7 +158,7 @@ const setup = () => {
 };
 
 describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
-  it('Hybrid Public Skill Portability: a Local-origin (snapshot) Skill IS shareable, but still requires its content to already be pushed to Cloud', async () => {
+  it('Hybrid Public Skill Portability: a Local-origin (snapshot) Skill is eligible by shape, but status reports upload-required until its content is pushed to Cloud', async () => {
     const { service, signIn, pushEnvironment, auth } = setup();
     const skillId = 'skill_local0001';
     const token = await signIn(USER_A, 'temi');
@@ -166,12 +167,10 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
       skillBundle(skillId, { snapshot: true, snapshotReason: 'local' }),
     );
     const status = await service.getSkillShareStatus(auth, skillId);
-    expect(status.share).toEqual({
-      status: 'shareable',
-      suggestedSlug: 'design-helper',
-    });
     // Eligible (no longer rejected for being local/no-Git), but this content was never
-    // `stak push`ed to Cloud — `ensurePublicSnapshotUploaded` must fail closed, actionably.
+    // `stak push`ed to Cloud — the status must say so instead of offering a Share action
+    // that is guaranteed to fail.
+    expect(status.share).toEqual({ status: 'upload-required' });
     await expect(
       service.shareSkill(auth, { skillId, slug: 'design-helper' }),
     ).rejects.toMatchObject({ code: 'publication-not-eligible' });
@@ -235,7 +234,8 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
     await pushEnvironment(token, skillBundle(skillId));
 
     const before = await service.getSkillShareStatus(auth, skillId);
-    expect(before.share.status).toBe('shareable');
+    // The status endpoint catches this too, not just the actual publish attempt below.
+    expect(before.share.status).toBe('upload-required');
 
     await expect(
       service.shareSkill(auth, { skillId, slug: 'design-helper' }),
@@ -243,6 +243,11 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
       code: 'publication-not-eligible',
       message: expect.stringContaining('Run `stak push` first'),
     });
+    // No partial/fallback public version was created by the rejected attempt — no
+    // Git-reference fallback either.
+    await expect(
+      service.getPublicStack('temi', 'design-helper'),
+    ).rejects.toMatchObject({ code: 'public-stack-not-found' });
   });
 
   it('shares a Git-backed Skill whose content HAS been pushed to Cloud, publishing it as a snapshot', async () => {
@@ -385,6 +390,147 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
 
     const afterUpdate = await service.getSkillShareStatus(auth, skillId);
     expect(afterUpdate.share.status).toBe('already-shared');
+  });
+
+  it('a newer approved revision with new content that was never pushed reports upload-required, not a misleading update-available', async () => {
+    const { service, signIn, pushEnvironment, auth, blobStore } = setup();
+    const skillId = 'skill_upd00002';
+    const token = await signIn(USER_A, 'temi');
+    await pushEnvironment(
+      token,
+      skillBundle(skillId, { revision: 'a'.repeat(40) }),
+    );
+    await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([1, 2, 3]));
+    await service.shareSkill(auth, { skillId, slug: 'design-helper' });
+
+    // New content approved, but never `stak push`ed — re-sharing is guaranteed to fail.
+    await pushEnvironment(
+      token,
+      skillBundle(skillId, {
+        revision: 'b'.repeat(40),
+        contentHash: CONTENT_HASH_2,
+      }),
+    );
+    const status = await service.getSkillShareStatus(auth, skillId);
+    expect(status.share.status).toBe('upload-required');
+    await expect(
+      service.shareSkill(auth, { skillId, slug: 'design-helper' }),
+    ).rejects.toMatchObject({ code: 'publication-not-eligible' });
+  });
+
+  /** Simulates a row published before snapshot-first publication existed — built by hand,
+   *  never through `shareSkill` (which no longer emits this shape) — then written through
+   *  the real `publishPublicStackVersion` write path, exactly the technique the public-Stack
+   *  roundtrip suite already uses for its own legacy fixture. */
+  const publishLegacySkillShare = async (
+    service: ReturnType<typeof setup>['service'],
+    auth: { userId: string; tokenId: string },
+    skillId: string,
+    contentHash: string,
+  ) => {
+    const requirements: PublicStackBundle['requirements'] = [
+      {
+        id: `req_${skillId.replace(/^skill_/, '')}`,
+        name: 'design-helper',
+        requirement: 'required',
+        contentHash,
+        metadata: { name: 'design-helper', description: 'Helps design things' },
+        restoration: {
+          strategy: 'reference',
+          reference: {
+            remote: 'https://github.com/example/design.git',
+            revision: 'a'.repeat(40),
+            path: 'skills/design-helper',
+            expectedContentHash: contentHash,
+          },
+        },
+        observedSources: [],
+        originStackName: 'design-helper',
+      },
+    ];
+    const stack: PublicStackBundle['stack'] = {
+      name: 'design-helper',
+      description: 'Helps design things',
+      versionHash: sha256CanonicalJson({
+        name: 'design-helper',
+        description: 'Helps design things',
+        requirements,
+        inheritedStacks: [],
+        skippedOptional: [],
+      }),
+      kind: 'skill',
+      originSkillId: skillId,
+    };
+    const bundle: PublicStackBundle = {
+      schemaVersion: 1,
+      stack,
+      requirements,
+      inheritedStackMetadata: [],
+      digest: sha256CanonicalJson({
+        stack,
+        requirements,
+        inheritedStackMetadata: [],
+      }),
+    };
+    return service.publishPublicStackVersion(auth, {
+      slug: 'design-helper',
+      bundle,
+      expectedLatestVersionId: null,
+    });
+  };
+
+  it('a legacy reference-strategy publication with matching current content and bytes already present reports portable-republish-needed, not already-shared', async () => {
+    const { service, signIn, pushEnvironment, auth, blobStore } = setup();
+    const skillId = 'skill_legacy01';
+    const token = await signIn(USER_A, 'temi');
+    await pushEnvironment(token, skillBundle(skillId));
+    await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([1, 2, 3]));
+    await publishLegacySkillShare(service, auth, skillId, CONTENT_HASH);
+
+    // Same content as what's currently approved, but the published row is a legacy Git
+    // reference — never equivalent to a current portable (snapshot) publication.
+    const status = await service.getSkillShareStatus(auth, skillId);
+    expect(status.share.status).toBe('portable-republish-needed');
+
+    // Re-sharing produces a genuinely snapshot-backed version, upgrading the legacy row.
+    const republished = await service.shareSkill(auth, {
+      skillId,
+      slug: 'design-helper',
+    });
+    expect(republished.version.versionNumber).toBe(2);
+    const version = await service.getPublicStackVersion(
+      'temi',
+      'design-helper',
+      2,
+    );
+    expect(version.bundle.requirements[0]?.restoration).toEqual({
+      strategy: 'snapshot',
+      contentHash: CONTENT_HASH,
+    });
+    // The original legacy version remains readable, unmutated.
+    const legacyVersion = await service.getPublicStackVersion(
+      'temi',
+      'design-helper',
+      1,
+    );
+    expect(legacyVersion.bundle.requirements[0]?.restoration.strategy).toBe(
+      'reference',
+    );
+  });
+
+  it('a legacy reference-strategy publication whose current content was never pushed reports upload-required', async () => {
+    const { service, signIn, pushEnvironment, auth } = setup();
+    const skillId = 'skill_legacy02';
+    const token = await signIn(USER_A, 'temi');
+    await pushEnvironment(token, skillBundle(skillId));
+    // No push: bytes for CONTENT_HASH were never uploaded anywhere.
+    await publishLegacySkillShare(service, auth, skillId, CONTENT_HASH);
+
+    const status = await service.getSkillShareStatus(auth, skillId);
+    expect(status.share.status).toBe('upload-required');
+    await expect(
+      service.shareSkill(auth, { skillId, slug: 'design-helper' }),
+    ).rejects.toMatchObject({ code: 'publication-not-eligible' });
   });
 
   it('owner/consumer identity separation: another user cannot see this Skill as "already shared" for themselves', async () => {
