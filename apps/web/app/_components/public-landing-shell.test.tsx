@@ -30,7 +30,7 @@ test('nav renders the wordmark, the 4 in-page/external links, sign-in, install C
     { name: 'How it works', href: '#how' },
     { name: 'Memory & privacy', href: '#privacy' },
     { name: 'Machines', href: '#machines' },
-    { name: 'GitHub', href: 'https://github.com/usestak/stak' },
+    { name: 'Docs', href: '/docs' },
   ];
   for (const { name, href } of expectedLinks) {
     const link = within(nav).getAllByRole('link', { name })[0];

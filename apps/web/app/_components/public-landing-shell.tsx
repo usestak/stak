@@ -77,7 +77,7 @@ const NAV_LINKS = [
   { t: 'How it works', u: '#how', k: '→' },
   { t: 'Memory & privacy', u: '#privacy', k: '→' },
   { t: 'Machines', u: '#machines', k: '→' },
-  { t: 'GitHub', u: 'https://github.com/usestak/stak', k: '↗' },
+  { t: 'Docs', u: '/docs', k: '→' },
 ];
 
 function LandingNav() {
@@ -91,7 +91,7 @@ function LandingNav() {
         <a href="#how">How it works</a>
         <a href="#privacy">Memory &amp; privacy</a>
         <a href="#machines">Machines</a>
-        <a href="https://github.com/usestak/stak">GitHub</a>
+        <a href="/docs">Docs</a>
       </div>
       <div className="stak-landing-nav-right">
         <a href="/auth/login?next=/onboarding" className="stak-landing-signin">
