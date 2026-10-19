@@ -29,7 +29,10 @@ export default function DocsSharingPage() {
         metadata, but they are never required for restoration. The only
         requirement to publish is that you&apos;ve run{' '}
         <code>stak push</code> for that content first; otherwise publishing
-        fails with an actionable error. Anyone can <code>stak use</code> or{' '}
+        fails with an actionable error. This applies equally when publishing
+        or sharing a Skill from the web — if it hasn&apos;t been uploaded to
+        STAK Cloud yet, run <code>stak push</code> first. Anyone can{' '}
+        <code>stak use</code> or{' '}
         <code>stak try</code> a published STAK; using it never grants write
         access back to your account or machine.
       </p>

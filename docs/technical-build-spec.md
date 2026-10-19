@@ -2900,6 +2900,11 @@ teams, billing, and `stack switch` remain deferred to later phases.
 
 ## 91. Phase 9 Public Stack Publishing
 
+> **Superseded:** the public-publication behavior described in this section
+> (reference-only Stack requirements) predates Hybrid Public Skill Portability
+> (snapshot-first publication). See `docs/0.1.0-contract.md` and the current
+> `/docs/sharing` page for the actual, current publication model.
+
 Publication is not Environment sync. `stack push`/`stack pull` manage the user's
 private portable Environment; `stack publish <stack>` creates a separate, public,
 reusable Stack. `main` is never published automatically — publication always starts
