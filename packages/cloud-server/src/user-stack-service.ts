@@ -19,7 +19,10 @@ import {
 } from '@stack/spec';
 
 import { invalidRequest, notFound, publicationNotEligible } from './errors.js';
-import { guardPublicSlugClaim, hasPublishableSnapshot } from './public-service.js';
+import {
+  guardPublicSlugClaim,
+  hasPublishableSnapshot,
+} from './public-service.js';
 import {
   UserStackConflict,
   UserStackNameConflict,

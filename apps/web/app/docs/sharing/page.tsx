@@ -21,20 +21,19 @@ export default function DocsSharingPage() {
       <p>
         A public STAK is a named, versioned bundle published as{' '}
         <code>@owner/name</code>. Every Skill in the bundle publishes the same
-        way: as an immutable, content-addressed snapshot pinned by content
-        hash. That holds whether or not the Skill has a git-tracked source —
-        a consumer never needs the original repository to exist to use a
-        published STAK. When a Skill does have a git-tracked source, its
-        remote/revision/path are preserved as display and update-check
-        metadata, but they are never required for restoration. The only
-        requirement to publish is that you&apos;ve run{' '}
-        <code>stak push</code> for that content first; otherwise publishing
-        fails with an actionable error. This applies equally when publishing
-        or sharing a Skill from the web — if it hasn&apos;t been uploaded to
-        STAK Cloud yet, run <code>stak push</code> first. Anyone can{' '}
-        <code>stak use</code> or{' '}
-        <code>stak try</code> a published STAK; using it never grants write
-        access back to your account or machine.
+        way: as an immutable, content-addressed snapshot pinned by content hash.
+        That holds whether or not the Skill has a git-tracked source — a
+        consumer never needs the original repository to exist to use a published
+        STAK. When a Skill does have a git-tracked source, its
+        remote/revision/path are preserved as display and update-check metadata,
+        but they are never required for restoration. The only requirement to
+        publish is that you&apos;ve run <code>stak push</code> for that content
+        first; otherwise publishing fails with an actionable error. This applies
+        equally when publishing or sharing a Skill from the web — if it
+        hasn&apos;t been uploaded to STAK Cloud yet, run <code>stak push</code>{' '}
+        first. Anyone can <code>stak use</code> or <code>stak try</code> a
+        published STAK; using it never grants write access back to your account
+        or machine.
       </p>
       <pre>
         <code>stak publish ./my-stak --slug my-stak</code>

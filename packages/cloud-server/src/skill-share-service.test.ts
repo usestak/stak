@@ -35,9 +35,7 @@ const skillBundle = (
     environment: {
       schemaVersion: 1,
       name: 'main',
-      skills: [
-        { id: skillId, name: 'design-helper', requirement: 'required' },
-      ],
+      skills: [{ id: skillId, name: 'design-helper', requirement: 'required' }],
       stacks: [],
       overrides: {},
     },
@@ -64,8 +62,7 @@ const skillBundle = (
                 strategy: 'reference',
                 reference: {
                   remote:
-                    overrides.remote ??
-                    'https://github.com/example/design.git',
+                    overrides.remote ?? 'https://github.com/example/design.git',
                   revision: overrides.revision ?? 'a'.repeat(40),
                   path: 'skills/design-helper',
                   expectedContentHash: contentHash,
@@ -382,9 +379,9 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
     expect(updated.version.versionNumber).toBe(2);
 
     const republished = await service.getPublicStack('temi', 'design-helper');
-    expect(republished.latest?.bundle.requirements[0]?.restoration).toMatchObject(
-      { strategy: 'snapshot', contentHash: CONTENT_HASH_2 },
-    );
+    expect(
+      republished.latest?.bundle.requirements[0]?.restoration,
+    ).toMatchObject({ strategy: 'snapshot', contentHash: CONTENT_HASH_2 });
 
     const afterUpdate = await service.getSkillShareStatus(auth, skillId);
     expect(afterUpdate.share.status).toBe('already-shared');
@@ -533,9 +530,9 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
       });
       expect(second.version.versionId).not.toBe(first.version.versionId);
       const published = await service.getPublicStack('temi', 'design-helper');
-      expect(published.latest?.bundle.requirements[0]?.restoration).toMatchObject(
-        { strategy: 'snapshot', contentHash: CONTENT_HASH_2 },
-      );
+      expect(
+        published.latest?.bundle.requirements[0]?.restoration,
+      ).toMatchObject({ strategy: 'snapshot', contentHash: CONTENT_HASH_2 });
     });
 
     it('unshare never mutates public_stack_versions; only the active-state flag changes', async () => {
