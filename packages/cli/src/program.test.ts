@@ -1260,6 +1260,40 @@ describe('STAK CLI', () => {
     expect(result.output).toContain('not set up');
   });
 
+  it('shows the Cloud sync state when checkCloud resolves', async () => {
+    const result = await runProgram(['status'], {
+      checkCloud: async () => ({ status: 'ahead' }),
+    });
+    expect(result.output).toContain('Cloud');
+    expect(result.output).toContain('main has changes to push');
+  });
+
+  it('status never fails when checkCloud throws, and shows not-checked', async () => {
+    const result = await runProgram(['status'], {
+      checkCloud: async () => {
+        throw new Error('network down');
+      },
+    });
+    expect(result.exit).toBeUndefined();
+    expect(result.output).toContain('not checked');
+  });
+
+  it('includes cloud in --json status output additively, without altering existing fields', async () => {
+    const result = await runProgram(['status', '--json'], {
+      checkCloud: async () => ({ status: 'up-to-date' }),
+    });
+    const parsed = JSON.parse(result.output);
+    expect(parsed.cloud).toEqual({ status: 'up-to-date' });
+    expect(parsed.environment).toBe(emptyStatus.environment);
+    expect(parsed.summary).toEqual(emptyStatus.summary);
+  });
+
+  it('status --json omits cloud entirely when checkCloud is not wired (back-compat)', async () => {
+    const result = await runProgram(['status', '--json']);
+    const parsed = JSON.parse(result.output);
+    expect(parsed).toEqual(emptyStatus);
+  });
+
   it('summarizes missing skills by name and points to remove', async () => {
     const missingSkill = (entryId: string, name: string): EnvironmentStatus['skills'][number] => ({
       entryId,

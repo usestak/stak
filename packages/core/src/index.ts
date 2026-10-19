@@ -103,6 +103,11 @@ export type {
   CloudRestorePlan,
   CloudRestoreResult,
 } from './cloud-restore.js';
+export { checkEnvironmentCloudSync } from './cloud-status.js';
+export type {
+  CheckEnvironmentCloudSyncOptions,
+  EnvironmentCloudSyncState,
+} from './cloud-status.js';
 export { applyPush, preparePush } from './cloud-push.js';
 export type {
   ApplyPushOptions,

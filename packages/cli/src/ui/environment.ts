@@ -1,4 +1,7 @@
-import type { InitializeMainEnvironmentResult } from '@stack/core';
+import type {
+  EnvironmentCloudSyncState,
+  InitializeMainEnvironmentResult,
+} from '@stack/core';
 import type {
   AgentId,
   EnvironmentDiff,
@@ -10,6 +13,28 @@ import { agentLabel, block, changes, skills } from './format.js';
 
 export type RenderOptions = { verbose?: boolean };
 export type AgentReadiness = { agent: AgentId; ready: boolean };
+export type CloudSyncDisplayState =
+  | EnvironmentCloudSyncState
+  | { status: 'not-checked'; reason: 'offline' | 'unauthenticated' };
+
+const cloudLine = (cloud: CloudSyncDisplayState): string => {
+  switch (cloud.status) {
+    case 'up-to-date':
+      return 'up to date with main';
+    case 'ahead':
+      return 'main has changes to push';
+    case 'behind':
+      return `newer version available (v${cloud.remoteVersionNumber}) — run \`stak pull\``;
+    case 'no-remote':
+      return 'nothing pushed yet';
+    case 'diverged':
+      return 'diverged from main — review with `stak diff`, then `stak pull` or `stak push`';
+    case 'not-checked':
+      return `not checked (${cloud.reason})`;
+  }
+};
+const renderCloudSection = (cloud?: CloudSyncDisplayState): string[] =>
+  cloud ? ['', 'Cloud', `  ${cloudLine(cloud)}`] : [];
 
 // ---------------------------------------------------------------------------
 // init
@@ -138,7 +163,10 @@ const renderStatusVerbose = (status: EnvironmentStatus): string => {
 
 export const renderStatus = (
   status: EnvironmentStatus,
-  options: RenderOptions & { agents?: AgentReadiness[] } = {},
+  options: RenderOptions & {
+    agents?: AgentReadiness[];
+    cloud?: CloudSyncDisplayState;
+  } = {},
 ): string => {
   if (options.verbose) return renderStatusVerbose(status);
   const summary = status.summary;
@@ -176,6 +204,7 @@ export const renderStatus = (
       '',
       `${status.invalidSkills.length} invalid discovered Skill${status.invalidSkills.length === 1 ? '' : 's'} (not addable; run \`stak scan --verbose\` for details)`,
     );
+  lines.push(...renderCloudSection(options.cloud));
   if (options.agents && options.agents.length > 0) {
     lines.push('');
     for (const agent of options.agents)

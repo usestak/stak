@@ -48,6 +48,55 @@ const baseStatus = (overrides: Partial<EnvironmentStatus> = {}): EnvironmentStat
   ...overrides,
 });
 
+describe('renderStatus — Cloud section', () => {
+  const cleanStatus = baseStatus({ summary: { ...baseSummary, satisfied: 1 } });
+
+  it('shows up to date', () => {
+    const output = renderStatus(cleanStatus, { cloud: { status: 'up-to-date' } });
+    expect(output).toContain('Cloud');
+    expect(output).toContain('up to date with main');
+  });
+
+  it('shows main has changes to push', () => {
+    const output = renderStatus(cleanStatus, { cloud: { status: 'ahead' } });
+    expect(output).toContain('main has changes to push');
+  });
+
+  it('shows a newer version is available and points to pull', () => {
+    const output = renderStatus(cleanStatus, {
+      cloud: { status: 'behind', remoteVersionNumber: 4 },
+    });
+    expect(output).toContain('newer version available');
+    expect(output).toContain('stak pull');
+  });
+
+  it('shows nothing pushed yet', () => {
+    const output = renderStatus(cleanStatus, { cloud: { status: 'no-remote' } });
+    expect(output).toContain('nothing pushed yet');
+  });
+
+  it('shows diverged with guidance', () => {
+    const output = renderStatus(cleanStatus, { cloud: { status: 'diverged' } });
+    expect(output).toContain('diverged');
+  });
+
+  it('shows not checked and never fails when offline/unauthenticated', () => {
+    const offline = renderStatus(cleanStatus, {
+      cloud: { status: 'not-checked', reason: 'offline' },
+    });
+    expect(offline).toContain('not checked');
+    const unauth = renderStatus(cleanStatus, {
+      cloud: { status: 'not-checked', reason: 'unauthenticated' },
+    });
+    expect(unauth).toContain('not checked');
+  });
+
+  it('omits the Cloud section entirely when no cloud state was supplied', () => {
+    const output = renderStatus(cleanStatus);
+    expect(output).not.toContain('Cloud');
+  });
+});
+
 describe('renderStatus (default, non-verbose)', () => {
   it('reports a clean tree when nothing is untracked, modified, or missing', () => {
     const status = baseStatus({

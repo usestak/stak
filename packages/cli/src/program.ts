@@ -37,6 +37,7 @@ import {
   prepareSkillAdd,
   applySkillRemove,
   prepareSkillRemove,
+  checkEnvironmentCloudSync,
 } from '@stack/core';
 import {
   BindingConflictError,
@@ -151,6 +152,7 @@ import type {
 } from '@stack/core';
 
 import { registerAddCommand } from './commands/add.js';
+import type { CloudSyncDisplayState } from './ui/environment.js';
 import { registerDiffCommand } from './commands/diff.js';
 import { registerInitCommand } from './commands/init.js';
 import { registerScanCommand } from './commands/scan.js';
@@ -215,6 +217,7 @@ export type ProgramDependencies = {
   initialize(scanResult: ScanResult): Promise<InitializeMainEnvironmentResult>;
   status(scanResult: ScanResult): Promise<EnvironmentStatus>;
   detectAgents?(): Promise<Array<{ agent: AgentId; ready: boolean }>>;
+  checkCloud?(): Promise<CloudSyncDisplayState>;
   diff(scanResult: ScanResult): Promise<EnvironmentDiff>;
   prepareAdd(
     scanResult: ScanResult,
@@ -644,6 +647,23 @@ const defaultDependencies: ProgramDependencies = {
         agent: detection.agent,
         ready: detection.installed,
       }));
+  },
+  // Cheap (metadata-only) Cloud ahead/behind check for `stak status`. Never throws: any
+  // failure (not signed in, offline, Cloud error) resolves to `not-checked` so status
+  // always succeeds locally regardless of Cloud reachability — it never fetches a bundle
+  // or snapshot, the same `getEnvironment` call push/pull already make for conflict checks.
+  checkCloud: async (): Promise<CloudSyncDisplayState> => {
+    let client;
+    try {
+      client = await authenticatedClient(cloudDeps);
+    } catch {
+      return { status: 'not-checked', reason: 'unauthenticated' };
+    }
+    try {
+      return await checkEnvironmentCloudSync({ stackHome, client });
+    } catch {
+      return { status: 'not-checked', reason: 'offline' };
+    }
   },
   diff: async (scanResult) => diffMainEnvironment({ stackHome, scanResult }),
   prepareAdd: async (scanResult, selectors) =>
