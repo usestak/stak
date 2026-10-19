@@ -1,6 +1,11 @@
 import { CommanderError } from 'commander';
 import { describe, expect, it, vi } from 'vitest';
 
+// Read from package.json rather than hardcoding, so this never drifts out of sync with a
+// version bump — the exact failure this replaced.
+import packageMetadata from '../package.json' with { type: 'json' };
+const CLI_VERSION = packageMetadata.version;
+
 import type {
   AgentDetection,
   BindingApplyResult,
@@ -564,7 +569,7 @@ describe('STAK CLI', () => {
     // takes a `<stak>` argument (`stak use <stak>`).
     expect(help.output).toMatch(/use .*<stak>/);
     const version = await runProgram(['--version']);
-    expect(version.output.trim()).toBe('0.1.0');
+    expect(version.output.trim()).toBe(CLI_VERSION);
   });
 
   it('supports canonical try dry-run syntax with parseable secret-free JSON', async () => {
@@ -1267,7 +1272,7 @@ describe('STAK CLI', () => {
     const result = await runProgram(['--version']);
 
     expect(result.exit?.exitCode).toBe(0);
-    expect(result.output).toBe('0.1.0\n');
+    expect(result.output).toBe(`${CLI_VERSION}\n`);
   });
 
   const cloudBundle = {
