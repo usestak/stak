@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import type {
   GetUserStackPublicationStatusResponse,
@@ -81,10 +81,15 @@ export function EditStakForm({
     setPublication(initialPublication);
   }, [initialPublication]);
   const [publishing, setPublishing] = useState(false);
+  // Only a published (or legacy/republishable) status actually carries a slug — `private`
+  // and `upload-required` intentionally don't, so any other status falls back to the
+  // Stack's current name as a safe unpublished default.
   const [publishSlug, setPublishSlug] = useState(
-    initialPublication.status === 'private'
-      ? detail.name
-      : initialPublication.slug,
+    initialPublication.status === 'published' ||
+      initialPublication.status === 'changed-since-published' ||
+      initialPublication.status === 'portable-republish-needed'
+      ? initialPublication.slug
+      : detail.name,
   );
   const [publishError, setPublishError] = useState<string | null>(null);
 
@@ -462,11 +467,88 @@ function PublishSection({
   setConfirmingUnpublish: (value: boolean) => void;
   unpublish: () => void;
 }) {
-  return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <h2 style={{ margin: 0, fontSize: 14 }}>Publish</h2>
-      {publication.status === 'published' ||
-      publication.status === 'changed-since-published' ? (
+  const unpublishControl = confirmingUnpublish ? (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
+        Stop publishing this STAK? The public link will stop working. Your saved
+        STAK stays unchanged.
+      </span>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button
+          type="button"
+          className="stak-pill"
+          onClick={unpublish}
+          disabled={publishing}
+        >
+          {publishing ? 'Stopping…' : 'Stop publishing'}
+        </button>
+        <button
+          type="button"
+          className="stak-pill"
+          onClick={() => setConfirmingUnpublish(false)}
+          disabled={publishing}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  ) : (
+    <button
+      type="button"
+      className="stak-pill"
+      style={{ alignSelf: 'flex-start' }}
+      onClick={() => setConfirmingUnpublish(true)}
+    >
+      Unpublish
+    </button>
+  );
+
+  const publishForm = (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+      <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>you/</span>
+      <input
+        value={publishSlug}
+        onChange={(e) => setPublishSlug(e.target.value)}
+        aria-label="Public slug"
+        style={{ fontFamily: 'var(--mono)', fontSize: 13 }}
+        pattern="[a-z0-9][a-z0-9-_]{0,62}"
+      />
+      <button
+        type="button"
+        className="stak-pill"
+        style={{ cursor: 'pointer' }}
+        onClick={publish}
+        disabled={publishing}
+      >
+        {publishing ? 'Publishing…' : 'Publish'}
+      </button>
+    </div>
+  );
+
+  // Every publication status has deliberate UI behavior — no state falls through to a
+  // generic "else" that might assume fields (slug/url/owner/versionNumber) a given status
+  // doesn't carry. `private` and `upload-required` are the only two that legitimately don't.
+  let body: ReactNode;
+  switch (publication.status) {
+    case 'private':
+      body = publishForm;
+      break;
+    case 'upload-required':
+      // No slug/url/owner/versionNumber on this status by design — this Skill's content
+      // isn't fully in STAK Cloud yet, so publishing now is guaranteed to fail. Never render
+      // an enabled Publish action for it.
+      body = (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={{ fontSize: 13 }}>Upload required</span>
+          <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
+            Run <code>stak push</code>, then try again.
+          </span>
+        </div>
+      );
+      break;
+    case 'published':
+    case 'changed-since-published':
+      body = (
         <>
           <span style={{ fontSize: 13 }}>
             {publication.status === 'published'
@@ -506,63 +588,63 @@ function PublishSection({
               </button>
             </>
           )}
-          {confirmingUnpublish ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
-                Stop publishing this STAK? The public link will stop working.
-                Your saved STAK stays unchanged.
-              </span>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  type="button"
-                  className="stak-pill"
-                  onClick={unpublish}
-                  disabled={publishing}
-                >
-                  {publishing ? 'Stopping…' : 'Stop publishing'}
-                </button>
-                <button
-                  type="button"
-                  className="stak-pill"
-                  onClick={() => setConfirmingUnpublish(false)}
-                  disabled={publishing}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="stak-pill"
-              style={{ alignSelf: 'flex-start' }}
-              onClick={() => setConfirmingUnpublish(true)}
-            >
-              Unpublish
-            </button>
-          )}
+          {unpublishControl}
         </>
-      ) : (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>you/</span>
-          <input
-            value={publishSlug}
-            onChange={(e) => setPublishSlug(e.target.value)}
-            aria-label="Public slug"
-            style={{ fontFamily: 'var(--mono)', fontSize: 13 }}
-            pattern="[a-z0-9][a-z0-9-_]{0,62}"
-          />
+      );
+      break;
+    case 'portable-republish-needed':
+      // Legacy (pre-snapshot-first) publication — still readable/linkable, but republishing
+      // produces a current, portable, snapshot-backed version. By the time status resolves
+      // to this (rather than `upload-required`), the content needed to do that is already
+      // available, so the Republish action here is never guaranteed to fail.
+      body = (
+        <>
+          <span style={{ fontSize: 13 }}>Portable republish needed</span>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
+            <a
+              href={publication.url}
+              style={{ fontSize: 12.5, fontFamily: 'var(--mono)' }}
+            >
+              {publication.url}
+            </a>
+            <a
+              href={publication.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: 12.5 }}
+            >
+              Open public page
+            </a>
+          </div>
+          <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
+            This STAK is still published in a legacy format. Republish to
+            upgrade it to a portable snapshot.
+          </span>
           <button
             type="button"
             className="stak-pill"
-            style={{ cursor: 'pointer' }}
+            style={{ alignSelf: 'flex-start', cursor: 'pointer' }}
             onClick={publish}
             disabled={publishing}
           >
-            {publishing ? 'Publishing…' : 'Publish'}
+            {publishing ? 'Republishing…' : 'Republish'}
           </button>
-        </div>
-      )}
+          {unpublishControl}
+        </>
+      );
+      break;
+    default: {
+      const exhaustive: never = publication;
+      throw new Error(
+        `Unhandled publication status: ${JSON.stringify(exhaustive)}`,
+      );
+    }
+  }
+
+  return (
+    <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <h2 style={{ margin: 0, fontSize: 14 }}>Publish</h2>
+      {body}
       <span style={{ fontSize: 12, color: 'var(--dim)', maxWidth: 480 }}>
         Publishing makes this STAK&apos;s current saved version public at a URL
         anyone can read — including the contents of any Local Skill in it,

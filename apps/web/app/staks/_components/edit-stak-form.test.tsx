@@ -158,6 +158,64 @@ test('changed-since-published surfaces "Unpublished changes" with a Republish ac
   ).toBeInTheDocument();
 });
 
+test('private renders a safe Publish action using the STAK name as the initial slug, nothing else', () => {
+  render(
+    <EditStakForm
+      detail={detail}
+      approvedSkills={approvedSkills}
+      initialPublication={{ status: 'private' }}
+    />,
+  );
+
+  expect(screen.getByLabelText(/public slug/i)).toHaveValue(detail.name);
+  expect(
+    screen.getByRole('button', { name: /^publish$/i }),
+  ).toBeInTheDocument();
+});
+
+/** Regression for the Vercel release-blocking type error: `upload-required` intentionally
+ *  carries no owner/slug/url/versionNumber, so the UI must never assume them — not even for
+ *  the initial slug input's default value. */
+test('upload-required renders without accessing slug/url metadata, tells the user to push, and offers no Publish action', () => {
+  render(
+    <EditStakForm
+      detail={detail}
+      approvedSkills={approvedSkills}
+      initialPublication={{ status: 'upload-required' }}
+    />,
+  );
+
+  expect(screen.getByText(/upload required/i)).toBeInTheDocument();
+  expect(screen.getByText('stak push').tagName).toBe('CODE');
+  expect(
+    screen.queryByRole('button', { name: /^publish$/i }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByLabelText(/public slug/i)).not.toBeInTheDocument();
+});
+
+test('portable-republish-needed uses its existing publication metadata and offers a Republish action', () => {
+  render(
+    <EditStakForm
+      detail={detail}
+      approvedSkills={approvedSkills}
+      initialPublication={{
+        status: 'portable-republish-needed',
+        owner: 'stephentony100',
+        slug: 'frontend-test',
+        url: PUBLISHED_URL,
+        versionNumber: 1,
+      }}
+    />,
+  );
+
+  expect(screen.getByText(/portable republish needed/i)).toBeInTheDocument();
+  const link = screen.getByRole('link', { name: PUBLISHED_URL });
+  expect(link).toHaveAttribute('href', PUBLISHED_URL);
+  expect(
+    screen.getByRole('button', { name: /republish/i }),
+  ).toBeInTheDocument();
+});
+
 test('Unpublish still calls the existing unpublish action', async () => {
   unpublishUserStackAction.mockResolvedValue({ ok: true });
   render(

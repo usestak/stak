@@ -46,24 +46,51 @@ export function SkillShareSection({
     router.refresh();
   };
 
+  // Eligible by shape, but the content this share would publish isn't in STAK Cloud yet —
+  // never render an enabled Share action for it (it's guaranteed to fail).
+  if (!unshared && share.status === 'upload-required' && !sharedUrl)
+    return (
+      <section
+        style={{ display: 'flex', flexDirection: 'column', gap: 5 }}
+        aria-label="Sharing"
+      >
+        <h2>Sharing</h2>
+        <span style={{ fontSize: 13 }}>Upload required</span>
+        <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
+          Run <code>stak push</code>, then try again.
+        </span>
+      </section>
+    );
+
+  // already-shared / update-available / portable-republish-needed all carry an existing
+  // public URL and support re-sharing through the same action; `sharedUrl` is the ephemeral
+  // "just shared/updated in this session" override shown before the next server round-trip.
   if (
     !unshared &&
     (share.status === 'already-shared' ||
       share.status === 'update-available' ||
+      share.status === 'portable-republish-needed' ||
       sharedUrl)
   ) {
     const resolvedUrl =
       sharedUrl ??
-      (share.status === 'already-shared' || share.status === 'update-available'
+      (share.status === 'already-shared' ||
+      share.status === 'update-available' ||
+      share.status === 'portable-republish-needed'
         ? share.url
         : '');
+    const canReshare =
+      share.status === 'update-available' ||
+      share.status === 'portable-republish-needed';
     // sharedUrl means we just updated it in this session — re-rendering with a fresh
     // router.refresh() will re-resolve status server-side, but show the up-to-date state
     // immediately rather than a stale "update available" until that refresh lands.
     const showUpdateAvailable =
       !sharedUrl && share.status === 'update-available';
+    const showPortableRepublishNeeded =
+      !sharedUrl && share.status === 'portable-republish-needed';
     const updateNow = async () => {
-      if (pending || share.status !== 'update-available') return;
+      if (pending || !canReshare) return;
       setPending(true);
       setError(null);
       const result = await shareSkillAction({ skillId, slug: share.slug });
@@ -85,7 +112,9 @@ export function SkillShareSection({
         <span style={{ fontSize: 13 }}>
           {showUpdateAvailable
             ? 'Update available to the shared version'
-            : 'Shared'}
+            : showPortableRepublishNeeded
+              ? 'Portable republish needed'
+              : 'Shared'}
         </span>
         <a
           href={resolvedUrl}
@@ -97,6 +126,23 @@ export function SkillShareSection({
           <>
             <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
               The approved Skill has a newer revision than what's published.
+            </span>
+            <button
+              type="button"
+              className="stak-pill"
+              onClick={updateNow}
+              disabled={pending}
+              style={{ alignSelf: 'flex-start' }}
+            >
+              {pending ? 'Updating…' : 'Update shared version'}
+            </button>
+          </>
+        )}
+        {showPortableRepublishNeeded && (
+          <>
+            <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
+              This share is still published in a legacy format. Share again to
+              upgrade it to a portable snapshot.
             </span>
             <button
               type="button"

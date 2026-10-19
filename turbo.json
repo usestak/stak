@@ -6,6 +6,7 @@
       "outputs": ["dist/**"],
       "env": [
         "SUPABASE_SERVICE_ROLE_KEY",
+        "STAK_APP_URL",
         "STACK_APP_URL",
         "STACK_TICKET_SECRET",
         "STACK_SNAPSHOT_BUCKET",
