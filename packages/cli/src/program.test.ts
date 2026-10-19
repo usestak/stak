@@ -232,6 +232,10 @@ const runProgram = async (
     }),
     status: async () => emptyStatus,
     diff: async () => emptyDiff,
+    prepareAdd: async () => {
+      throw new Error('not configured');
+    },
+    applyAdd: async () => undefined,
     prepareUse: async () => {
       throw new Error('not configured');
     },
@@ -1226,7 +1230,7 @@ describe('STAK CLI', () => {
     const status = await runProgram(['status']);
     const diff = await runProgram(['diff']);
     expect(status.output).toContain('STAK: main');
-    expect(status.output).toContain('0 skills ready');
+    expect(status.output).toContain('Nothing to add');
     expect(status.output).not.toContain('Local preservation');
     expect(status.output).not.toContain('Restoration strategy');
     expect(status.output).not.toContain('placement');
@@ -1256,16 +1260,118 @@ describe('STAK CLI', () => {
     expect(result.output).toContain('not set up');
   });
 
-  it('summarizes missing skills and points to diff', async () => {
+  it('summarizes missing skills by name and points to remove', async () => {
+    const missingSkill = (entryId: string, name: string): EnvironmentStatus['skills'][number] => ({
+      entryId,
+      name,
+      state: 'missing',
+      desiredHash: 'sha256:0'.padEnd(71, '0'),
+      baselineLocations: [],
+      currentLocations: [],
+      uncertaintyRoots: [],
+      preservation: {
+        state: 'available',
+        contentHash: 'sha256:0'.padEnd(71, '0'),
+        objectPath: '/x',
+      },
+      restorationStrategy: 'snapshot',
+    });
     const result = await runProgram(['status'], {
       status: async () => ({
         ...emptyStatus,
+        skills: [missingSkill('skill_a', 'alpha'), missingSkill('skill_b', 'beta')],
         summary: { ...emptyStatus.summary, satisfied: 29, missing: 2 },
       }),
     });
-    expect(result.output).toContain('29 skills ready');
-    expect(result.output).toContain('2 skills missing');
-    expect(result.output).toContain('Run `stak diff` to see what changed.');
+    expect(result.output).toContain('Changes not added');
+    expect(result.output).toContain('! alpha');
+    expect(result.output).toContain('! beta');
+    expect(result.output).toContain('tracked in main, missing on disk');
+    expect(result.output).toContain('stak remove');
+  });
+
+  it('add <skill> stages a resolved target and applies it', async () => {
+    const proposal = {
+      stackHome: '/tmp/stack',
+      current: {} as never,
+      manifest: {} as never,
+      lock: {} as never,
+      baseline: {} as never,
+      targets: [
+        {
+          kind: 'new' as const,
+          name: 'new-skill',
+          contentHash: `sha256:${'a'.repeat(64)}`,
+          sourcePath: '/home/.claude/skills/new-skill',
+          globalLocations: [],
+        },
+      ],
+      issues: [],
+      snapshotRecords: [],
+      ingestions: [],
+    };
+    const applyAdd = vi.fn(async () => undefined);
+    const result = await runProgram(['add', 'new-skill'], {
+      prepareAdd: async () => proposal,
+      applyAdd,
+    });
+    expect(applyAdd).toHaveBeenCalledWith(proposal);
+    expect(result.output).toContain('Added 1 skill to main.');
+    expect(result.output).toContain('+ new-skill');
+    expect(result.output).toContain('stak push');
+  });
+
+  it('add . also stages Memory locally, but a single add <skill> never does', async () => {
+    const proposal = {
+      stackHome: '/tmp/stack',
+      current: {} as never,
+      manifest: {} as never,
+      lock: {} as never,
+      baseline: {} as never,
+      targets: [],
+      issues: [],
+      snapshotRecords: [],
+      ingestions: [],
+    };
+    const stageMemory = vi.fn(async () => ({ files: 14, projects: 3 }));
+    const allResult = await runProgram(['add', '.'], {
+      prepareAdd: async () => proposal,
+      applyAdd: async () => undefined,
+      stageMemory,
+    });
+    expect(stageMemory).toHaveBeenCalledTimes(1);
+    expect(allResult.output).toContain('Memory');
+    expect(allResult.output).toContain('staged 14 files across 3 projects');
+
+    stageMemory.mockClear();
+    await runProgram(['add', 'some-skill'], {
+      prepareAdd: async () => proposal,
+      applyAdd: async () => undefined,
+      stageMemory,
+    });
+    expect(stageMemory).not.toHaveBeenCalled();
+  });
+
+  it('add <skill> reports an issue and never calls apply when nothing resolves', async () => {
+    const proposal = {
+      stackHome: '/tmp/stack',
+      current: {} as never,
+      manifest: {} as never,
+      lock: {} as never,
+      baseline: {} as never,
+      targets: [],
+      issues: [{ status: 'not-found' as const, selector: 'does-not-exist' }],
+      snapshotRecords: [],
+      ingestions: [],
+    };
+    const applyAdd = vi.fn(async () => undefined);
+    const result = await runProgram(['add', 'does-not-exist'], {
+      prepareAdd: async () => proposal,
+      applyAdd,
+    });
+    expect(applyAdd).not.toHaveBeenCalled();
+    expect(result.output).toContain('Not added:');
+    expect(result.output).toContain('does-not-exist');
   });
 
   it('prints the package version', async () => {

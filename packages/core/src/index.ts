@@ -17,6 +17,14 @@ export type {
 } from './initialize.js';
 export { diffMainEnvironment, statusMainEnvironment } from './status.js';
 export type { ObserveMainEnvironmentOptions } from './status.js';
+export { applySkillAdd, prepareSkillAdd } from './add.js';
+export type {
+  ApplySkillAddOptions,
+  PrepareSkillAddOptions,
+  SkillAddIssue,
+  SkillAddProposal,
+  SkillAddTarget,
+} from './add.js';
 export { selectRestorationStrategy } from './restoration.js';
 export type { SelectRestorationStrategyOptions } from './restoration.js';
 export { StackStoreError } from '@stack/store';
@@ -33,12 +41,15 @@ export {
   applyStackUse,
   prepareStackRemove,
   applyStackRemove,
+  prepareSkillRemove,
+  applySkillRemove,
   resolveSkillSelector,
   setSkillPaused,
 } from './composition.js';
 export type {
   StackUseProposal,
   StackRemoveProposal,
+  SkillRemoveProposal,
   SkillSelectorResult,
   SetSkillPausedResult,
 } from './composition.js';

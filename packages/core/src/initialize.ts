@@ -89,7 +89,7 @@ const portableSource = (source: SkillSource): SkillSource => {
   };
 };
 
-const sourceEvidence = (sources: SkillSource[]) => {
+export const sourceEvidence = (sources: SkillSource[]) => {
   const portableSources = sources.map(portableSource);
   const byKey = new Map(
     portableSources.map((source) => [stableSourceKey(source), source]),
@@ -104,7 +104,7 @@ const sourceEvidence = (sources: SkillSource[]) => {
   };
 };
 
-const locationWithHash = (
+export const locationWithHash = (
   location: ScanResult['skills'][number]['locations'][number],
   contentHash: string,
 ): BaselineLocation => ({ ...location, contentHash });

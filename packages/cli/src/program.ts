@@ -33,6 +33,10 @@ import {
   statusMainEnvironment,
   preserveTrialStack,
   resolveTrialStack,
+  applySkillAdd,
+  prepareSkillAdd,
+  applySkillRemove,
+  prepareSkillRemove,
 } from '@stack/core';
 import {
   BindingConflictError,
@@ -56,6 +60,8 @@ import type { InitializeMainEnvironmentResult } from '@stack/core';
 import type {
   RemoteTrialResolution,
   SetSkillPausedResult,
+  SkillAddProposal,
+  SkillRemoveProposal,
   StackOwnedUseProposal,
   StackRemoteUseProposal,
   StackRemoveProposal,
@@ -144,6 +150,7 @@ import type {
   PushPlan,
 } from '@stack/core';
 
+import { registerAddCommand } from './commands/add.js';
 import { registerDiffCommand } from './commands/diff.js';
 import { registerInitCommand } from './commands/init.js';
 import { registerScanCommand } from './commands/scan.js';
@@ -209,6 +216,12 @@ export type ProgramDependencies = {
   status(scanResult: ScanResult): Promise<EnvironmentStatus>;
   detectAgents?(): Promise<Array<{ agent: AgentId; ready: boolean }>>;
   diff(scanResult: ScanResult): Promise<EnvironmentDiff>;
+  prepareAdd(
+    scanResult: ScanResult,
+    selectors: string[] | '.',
+  ): Promise<SkillAddProposal>;
+  applyAdd(proposal: SkillAddProposal): Promise<unknown>;
+  stageMemory?(): Promise<{ files: number; projects: number }>;
   prepareUse(
     input: string,
     options: { dryRun: boolean },
@@ -225,8 +238,12 @@ export type ProgramDependencies = {
       | StackOwnedUseProposal
       | UseBootstrapPreview,
   ): Promise<unknown>;
-  prepareRemove(identifier: string): Promise<StackRemoveProposal>;
-  applyRemove(proposal: StackRemoveProposal): Promise<unknown>;
+  prepareRemove(
+    identifier: string,
+  ): Promise<StackRemoveProposal | SkillRemoveProposal>;
+  applyRemove(
+    proposal: StackRemoveProposal | SkillRemoveProposal,
+  ): Promise<unknown>;
   loadRunEnvironment(): Promise<ResolvedLocalEnvironment>;
   detectCodex(): Promise<AgentDetection>;
   planCodexBindings(
@@ -629,6 +646,16 @@ const defaultDependencies: ProgramDependencies = {
       }));
   },
   diff: async (scanResult) => diffMainEnvironment({ stackHome, scanResult }),
+  prepareAdd: async (scanResult, selectors) =>
+    prepareSkillAdd({ stackHome, scanResult, selectors }),
+  applyAdd: (proposal) => applySkillAdd(proposal),
+  // Local-only: the same provider-agnostic Memory adapter `stak memory backup` uses,
+  // called directly so it never reaches Cloud — `stak add .` only ever stages into the
+  // local Memory manifest (and, via its registry sync, local portable Project state).
+  stageMemory: async () => {
+    const result = await (await memoryAdapter()).backup();
+    return { files: result.files, projects: result.projects };
+  },
   prepareUse: async (input, options) => {
     const bootstrap = await bootstrapEmptyMainIfSkillFree({
       stackHome,
@@ -674,8 +701,26 @@ const defaultDependencies: ProgramDependencies = {
       });
     return applyStackUse(real);
   },
-  prepareRemove: (identifier) => prepareStackRemove({ stackHome, identifier }),
-  applyRemove: (proposal) => applyStackRemove(proposal),
+  prepareRemove: async (identifier) => {
+    try {
+      return await prepareStackRemove({ stackHome, identifier });
+    } catch (error) {
+      // Fall back to a direct Skill only when no STAK layer matches at all — any other
+      // error (ambiguous layer match, etc.) must surface as-is, never masked.
+      if (
+        !(
+          error instanceof StackCompositionError &&
+          error.code === 'stack-layer-not-found'
+        )
+      )
+        throw error;
+      return prepareSkillRemove({ stackHome, selector: identifier });
+    }
+  },
+  applyRemove: (proposal) =>
+    'layer' in proposal
+      ? applyStackRemove(proposal)
+      : applySkillRemove(proposal),
   // `stak run` projects through the same paused-aware helper as `stak skill update`, so a
   // paused Skill is excluded from the real agent projection path (contract §6).
   loadRunEnvironment: async () =>
@@ -1121,6 +1166,7 @@ export const createProgram = (
   registerInitCommand(program, dependencies);
   registerStatusCommand(program, dependencies);
   registerDiffCommand(program, dependencies);
+  registerAddCommand(program, dependencies);
   registerUseCommand(program, dependencies);
   registerRemoveCommand(program, dependencies);
   registerRunCommand(program, dependencies);

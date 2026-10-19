@@ -1,0 +1,166 @@
+import { describe, expect, it } from 'vitest';
+
+import type { EnvironmentDiff, EnvironmentStatus, SkillStatus } from '@stack/spec';
+
+import { renderDiff, renderStatus } from './environment.js';
+
+const baseSummary: EnvironmentStatus['summary'] = {
+  satisfied: 0,
+  modified: 0,
+  missing: 0,
+  uncertain: 0,
+  untracked: 0,
+  placementAdded: 0,
+  placementRemoved: 0,
+  placementChanged: 0,
+  invalid: 0,
+  rootFailures: 0,
+  preservation: { available: 0, missing: 0, corrupt: 0 },
+  restoration: { reference: 0, snapshot: 0 },
+};
+
+const skillStatus = (
+  overrides: Partial<SkillStatus> & Pick<SkillStatus, 'entryId' | 'name' | 'state'>,
+): SkillStatus => ({
+  desiredHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000'.slice(
+    0,
+    71,
+  ),
+  baselineLocations: [],
+  currentLocations: [],
+  uncertaintyRoots: [],
+  preservation: { state: 'available', contentHash: 'sha256:0'.padEnd(71, '0'), objectPath: '/x' },
+  restorationStrategy: 'snapshot',
+  ...overrides,
+});
+
+const baseStatus = (overrides: Partial<EnvironmentStatus> = {}): EnvironmentStatus => ({
+  schemaVersion: 1,
+  environment: 'main',
+  observedAt: new Date(0).toISOString(),
+  desiredCount: 0,
+  skills: [],
+  untracked: [],
+  placementDrift: [],
+  invalidSkills: [],
+  rootFailures: [],
+  summary: baseSummary,
+  ...overrides,
+});
+
+describe('renderStatus (default, non-verbose)', () => {
+  it('reports a clean tree when nothing is untracked, modified, or missing', () => {
+    const status = baseStatus({
+      desiredCount: 31,
+      skills: Array.from({ length: 31 }, (_, index) =>
+        skillStatus({ entryId: `skill_${index}`, name: `skill-${index}`, state: 'satisfied' }),
+      ),
+      summary: { ...baseSummary, satisfied: 31 },
+    });
+    const output = renderStatus(status);
+    expect(output).toContain('Nothing to add');
+    expect(output).not.toContain('Changes not added');
+  });
+
+  it('surfaces an untracked Skill by name — the confirmed renderer-bug regression case', () => {
+    // Regression test for the "32 scanned / 31 tracked / status says no changes" bug: status
+    // already computes `untracked`, the default renderer just has to show it.
+    const status = baseStatus({
+      desiredCount: 31,
+      skills: Array.from({ length: 31 }, (_, index) =>
+        skillStatus({ entryId: `skill_${index}`, name: `skill-${index}`, state: 'satisfied' }),
+      ),
+      untracked: [
+        {
+          name: 'new-skill',
+          contentHash: 'sha256:1'.padEnd(71, '0'),
+          source: { type: 'local' },
+          locations: [],
+        },
+      ],
+      summary: { ...baseSummary, satisfied: 31, untracked: 1 },
+    });
+    const output = renderStatus(status);
+    expect(output).toContain('Changes not added');
+    expect(output).toContain('+ new-skill');
+    expect(output).toMatch(/31 tracked/);
+    expect(output).toMatch(/1 untracked/);
+  });
+
+  it('surfaces a modified tracked Skill by name', () => {
+    const status = baseStatus({
+      desiredCount: 1,
+      skills: [
+        skillStatus({
+          entryId: 'skill_a',
+          name: 'frontend-design',
+          state: 'modified',
+          currentHash: 'sha256:2'.padEnd(71, '0'),
+        }),
+      ],
+      summary: { ...baseSummary, modified: 1 },
+    });
+    const output = renderStatus(status);
+    expect(output).toContain('Changes not added');
+    expect(output).toContain('~ frontend-design');
+  });
+
+  it('surfaces a missing tracked Skill by name with guidance to use remove', () => {
+    const status = baseStatus({
+      desiredCount: 1,
+      skills: [skillStatus({ entryId: 'skill_a', name: 'impeccable', state: 'missing' })],
+      summary: { ...baseSummary, missing: 1 },
+    });
+    const output = renderStatus(status);
+    expect(output).toContain('! impeccable');
+    expect(output).toMatch(/tracked in main, missing on disk/);
+    expect(output).toContain('stak remove');
+  });
+
+  it('never claims a clean tree when untracked Skills are present', () => {
+    const status = baseStatus({
+      untracked: [
+        {
+          name: 'x',
+          contentHash: 'sha256:3'.padEnd(71, '0'),
+          source: { type: 'local' },
+          locations: [],
+        },
+      ],
+      summary: { ...baseSummary, untracked: 1 },
+    });
+    const output = renderStatus(status);
+    expect(output).not.toContain('Nothing to add');
+  });
+});
+
+describe('renderDiff (default, non-verbose)', () => {
+  const baseDiff = (overrides: Partial<EnvironmentDiff> = {}): EnvironmentDiff => ({
+    ...baseStatus(),
+    entries: [],
+    ...overrides,
+  });
+
+  it('reports no changes only when untracked is also empty', () => {
+    const diff = baseDiff();
+    expect(renderDiff(diff)).toContain('No changes.');
+  });
+
+  it('includes untracked Skills in the change count and listing — same regression as status', () => {
+    const diff = baseDiff({
+      untracked: [
+        {
+          name: 'new-skill',
+          contentHash: 'sha256:4'.padEnd(71, '0'),
+          source: { type: 'local' },
+          locations: [],
+        },
+      ],
+      summary: { ...baseSummary, untracked: 1 },
+    });
+    const output = renderDiff(diff);
+    expect(output).not.toContain('No changes.');
+    expect(output).toContain('Untracked');
+    expect(output).toContain('new-skill');
+  });
+});

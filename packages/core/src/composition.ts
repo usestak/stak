@@ -492,6 +492,86 @@ export const applyStackRemove = async (
 };
 
 /* -------------------------------------------------------------------------- */
+/* Direct Skill removal — a single `manifest.skills` entry, not a whole STAK    */
+/* layer. Deliberate (never automatic): `add .` must never drop a missing      */
+/* tracked Skill on its own, so this is the only path that removes one.        */
+/* -------------------------------------------------------------------------- */
+
+export type SkillRemoveProposal = {
+  stackHome: string;
+  current: LoadedEnvironmentState;
+  entryId: string;
+  name: string;
+  manifest: EnvironmentManifest;
+  resolved: ResolvedEnvironment;
+};
+
+export const prepareSkillRemove = async (options: {
+  stackHome: string;
+  selector: string;
+  idFactory?: () => string;
+}): Promise<SkillRemoveProposal> => {
+  const current = await loadMainEnvironment({ stackHome: options.stackHome });
+  const selected = resolveSkillSelector(current.lock, options.selector);
+  if (selected.status === 'ambiguous')
+    throw new StackCompositionError(
+      'skill-ambiguous',
+      `Multiple Skills match ${options.selector}: ${selected.matches.join(', ')}`,
+    );
+  if (selected.status === 'not-found')
+    throw new StackCompositionError(
+      'skill-not-found',
+      `No Skill in main matches ${options.selector}.`,
+    );
+  const { entryId } = selected;
+  const manifestEntry = current.manifest.skills.find(
+    (item) => item.id === entryId,
+  );
+  if (!manifestEntry)
+    throw new StackCompositionError(
+      'skill-not-direct',
+      `${options.selector} comes from an active STAK layer, not a direct Skill in main. Remove the STAK layer instead (\`stak remove <stak>\`).`,
+    );
+  const manifest: EnvironmentManifest = {
+    ...current.manifest,
+    skills: current.manifest.skills.filter((item) => item.id !== entryId),
+  };
+  const versions = await loadVersions(options.stackHome, manifest.stacks);
+  const resolved = resolveEnvironment({
+    manifest,
+    lock: current.lock,
+    versions,
+    idFactory: options.idFactory ?? randomUUID,
+  });
+  return {
+    stackHome: options.stackHome,
+    current,
+    entryId,
+    name: manifestEntry.name,
+    manifest,
+    resolved,
+  };
+};
+
+export const applySkillRemove = async (
+  proposal: SkillRemoveProposal,
+  options: { now?: () => Date } = {},
+): Promise<SkillRemoveProposal> => {
+  await withMainMutationLock(proposal.stackHome, proposal.current, () =>
+    persistMainState(
+      proposal.stackHome,
+      buildState(
+        proposal.current,
+        proposal.manifest,
+        proposal.resolved,
+        (options.now ?? (() => new Date()))().toISOString(),
+      ),
+    ),
+  );
+  return proposal;
+};
+
+/* -------------------------------------------------------------------------- */
 /* Skill pause / resume (P2)                                                   */
 /* -------------------------------------------------------------------------- */
 

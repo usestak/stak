@@ -142,14 +142,40 @@ export const renderStatus = (
 ): string => {
   if (options.verbose) return renderStatusVerbose(status);
   const summary = status.summary;
-  const problems = summary.modified + summary.missing;
-  const lines: Array<string | false> = [
-    `STAK: ${status.environment}`,
-    '',
-    `${skills(summary.satisfied)} ready`,
-    summary.modified > 0 && `${skills(summary.modified)} modified`,
-    summary.missing > 0 && `${skills(summary.missing)} missing`,
-  ];
+  const named = (state: SkillStatus['state']) =>
+    status.skills.filter((skill) => skill.state === state);
+  const modified = named('modified');
+  const missing = named('missing');
+  const uncertain = named('uncertain');
+  const hasChanges =
+    summary.untracked > 0 ||
+    modified.length > 0 ||
+    missing.length > 0 ||
+    uncertain.length > 0;
+
+  const lines: Array<string | false> = [`STAK: ${status.environment}`, ''];
+  if (!hasChanges) {
+    lines.push(`Nothing to add. ${skills(summary.satisfied)} tracked.`);
+  } else {
+    lines.push('Changes not added', '', 'Skills');
+    for (const skill of modified) lines.push(`  ~ ${skill.name}`);
+    for (const skill of missing) lines.push(`  ! ${skill.name}  (tracked in main, missing on disk)`);
+    for (const skill of uncertain) lines.push(`  ? ${skill.name}  (could not be verified)`);
+    for (const skill of status.untracked) lines.push(`  + ${skill.name}`);
+    lines.push(
+      '',
+      `${summary.satisfied} tracked`,
+      summary.untracked > 0 && `${summary.untracked} untracked`,
+    );
+    if (missing.length > 0)
+      lines.push('', 'Run `stak remove <skill>` to deliberately drop a missing Skill from main.');
+    lines.push('', 'Run `stak add <skill>` or `stak add .` to stage changes.');
+  }
+  if (status.invalidSkills.length > 0)
+    lines.push(
+      '',
+      `${status.invalidSkills.length} invalid discovered Skill${status.invalidSkills.length === 1 ? '' : 's'} (not addable; run \`stak scan --verbose\` for details)`,
+    );
   if (options.agents && options.agents.length > 0) {
     lines.push('');
     for (const agent of options.agents)
@@ -157,7 +183,6 @@ export const renderStatus = (
         `${agentLabel(agent.agent).padEnd(9)}${agent.ready ? 'ready' : 'not set up'}`,
       );
   }
-  if (problems > 0) lines.push('', 'Run `stak diff` to see what changed.');
   return block(lines);
 };
 
@@ -274,12 +299,17 @@ export const renderDiff = (
   const missing = groupNames(diff, 'missing');
   const modified = groupNames(diff, 'modified');
   const uncertain = groupNames(diff, 'uncertain');
-  const total = missing.length + modified.length + uncertain.length;
+  const untracked = diff.untracked
+    .map((item) => item.name)
+    .sort((a, b) => a.localeCompare(b));
+  const total =
+    missing.length + modified.length + uncertain.length + untracked.length;
   if (total === 0) return block(['No changes.']);
   const group = (title: string, names: string[]) =>
     names.length > 0 ? ['', title, ...names.map((name) => `  ${name}`)] : [];
   return block([
     changes(total),
+    ...group('Untracked', untracked),
     ...group('Missing', missing),
     ...group('Modified', modified),
     ...group('Uncertain', uncertain),
