@@ -12,6 +12,7 @@ import {
 
 const USER_A = '00000000-0000-4000-8000-00000000000a';
 const CONTENT_HASH = `sha256:${'a'.repeat(64)}`;
+const CONTENT_HASH_2 = `sha256:${'b'.repeat(64)}`;
 
 const skillBundle = (
   skillId: string,
@@ -25,52 +26,59 @@ const skillBundle = (
       | 'ambiguous-source'
       | 'modified-source'
       | 'non-portable-source';
+    contentHash: string;
   }> = {},
-): CloudEnvironmentBundle => ({
-  schemaVersion: 1,
-  environment: {
+): CloudEnvironmentBundle => {
+  const contentHash = overrides.contentHash ?? CONTENT_HASH;
+  return {
     schemaVersion: 1,
-    name: 'main',
-    skills: [{ id: skillId, name: 'design-helper', requirement: 'required' }],
-    stacks: [],
-    overrides: {},
-  },
-  resolved: {
-    schemaVersion: 1,
-    skills: {
-      [skillId]: {
-        name: 'design-helper',
-        description: 'Helps design things',
-        contentHash: CONTENT_HASH,
-        metadata: {
+    environment: {
+      schemaVersion: 1,
+      name: 'main',
+      skills: [
+        { id: skillId, name: 'design-helper', requirement: 'required' },
+      ],
+      stacks: [],
+      overrides: {},
+    },
+    resolved: {
+      schemaVersion: 1,
+      skills: {
+        [skillId]: {
           name: 'design-helper',
           description: 'Helps design things',
-          capabilities: { readFiles: true, network: false },
-        },
-        observedSources: [],
-        restoration: overrides.snapshot
-          ? {
-              strategy: 'snapshot',
-              contentHash: CONTENT_HASH,
-              reason: overrides.snapshotReason ?? 'local',
-            }
-          : {
-              strategy: 'reference',
-              reference: {
-                remote:
-                  overrides.remote ?? 'https://github.com/example/design.git',
-                revision: overrides.revision ?? 'a'.repeat(40),
-                path: 'skills/design-helper',
-                expectedContentHash: CONTENT_HASH,
+          contentHash,
+          metadata: {
+            name: 'design-helper',
+            description: 'Helps design things',
+            capabilities: { readFiles: true, network: false },
+          },
+          observedSources: [],
+          restoration: overrides.snapshot
+            ? {
+                strategy: 'snapshot',
+                contentHash,
+                reason: overrides.snapshotReason ?? 'local',
+              }
+            : {
+                strategy: 'reference',
+                reference: {
+                  remote:
+                    overrides.remote ??
+                    'https://github.com/example/design.git',
+                  revision: overrides.revision ?? 'a'.repeat(40),
+                  path: 'skills/design-helper',
+                  expectedContentHash: contentHash,
+                },
               },
-            },
+        },
       },
     },
-  },
-  importedStackVersions: [],
-  snapshotRequirements: [],
-  digest: `sha256:${'0'.repeat(64)}`,
-});
+    importedStackVersions: [],
+    snapshotRequirements: [],
+    digest: `sha256:${'0'.repeat(64)}`,
+  };
+};
 
 const setup = () => {
   const repository = createInMemoryRepository();
@@ -220,7 +228,10 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
     ).rejects.toMatchObject({ code: 'publication-not-eligible' });
   });
 
-  it('shares an eligible Git-backed Skill, exposing it via the existing public-Stack read path', async () => {
+  it('rejects sharing a Git-backed Skill whose content was never pushed to Cloud', async () => {
+    // Same Git-backed Skill fixture as before, but no blobStore.put — the owner never ran
+    // `stak push` for this content. Snapshot-first parity (this plan) means this must now
+    // fail closed instead of silently publishing a Git-reference bundle.
     const { service, signIn, pushEnvironment, auth } = setup();
     const skillId = 'skill_ok000001';
     const token = await signIn(USER_A, 'temi');
@@ -228,6 +239,21 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
 
     const before = await service.getSkillShareStatus(auth, skillId);
     expect(before.share.status).toBe('shareable');
+
+    await expect(
+      service.shareSkill(auth, { skillId, slug: 'design-helper' }),
+    ).rejects.toMatchObject({
+      code: 'publication-not-eligible',
+      message: expect.stringContaining('Run `stak push` first'),
+    });
+  });
+
+  it('shares a Git-backed Skill whose content HAS been pushed to Cloud, publishing it as a snapshot', async () => {
+    const { service, signIn, pushEnvironment, auth, blobStore } = setup();
+    const skillId = 'skill_ok000001';
+    const token = await signIn(USER_A, 'temi');
+    await pushEnvironment(token, skillBundle(skillId));
+    await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([1, 2, 3]));
 
     const result = await service.shareSkill(auth, {
       skillId,
@@ -246,7 +272,7 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
     expect(published.latest?.bundle.stack.originSkillId).toBe(skillId);
     expect(published.latest?.bundle.requirements).toHaveLength(1);
     expect(published.latest?.bundle.requirements[0]?.restoration).toMatchObject(
-      { strategy: 'reference' },
+      { strategy: 'snapshot', contentHash: CONTENT_HASH },
     );
 
     // Already-shared detection now reports the existing link, not "shareable" again.
@@ -262,28 +288,47 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
     }
   });
 
+  it('creates no public version row when sharing is rejected for a missing snapshot', async () => {
+    const { service, signIn, pushEnvironment, auth, repository } = setup();
+    const skillId = 'skill_ok000002';
+    const token = await signIn(USER_A, 'temi');
+    await pushEnvironment(token, skillBundle(skillId));
+
+    await expect(
+      service.shareSkill(auth, { skillId, slug: 'no-partial-share' }),
+    ).rejects.toThrow();
+    const existing = await repository.getPublicStackByOwner(
+      USER_A,
+      'no-partial-share',
+    );
+    expect(existing).toBeNull();
+  });
+
   it('an upstream remote moving after publish does not alter the already-published version', async () => {
-    const { service, signIn, pushEnvironment, auth } = setup();
+    const { service, signIn, pushEnvironment, auth, blobStore } = setup();
     const skillId = 'skill_pin00001';
     const token = await signIn(USER_A, 'temi');
     await pushEnvironment(
       token,
       skillBundle(skillId, { revision: 'a'.repeat(40) }),
     );
+    await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([1, 2, 3]));
     await service.shareSkill(auth, { skillId, slug: 'design-helper' });
     const publishedBefore = await service.getPublicStack(
       'temi',
       'design-helper',
     );
-    const revisionBefore =
-      publishedBefore.latest?.bundle.requirements[0]?.restoration.strategy ===
-      'reference'
-        ? publishedBefore.latest.bundle.requirements[0].restoration.reference
-            .revision
-        : null;
+    const restorationBefore =
+      publishedBefore.latest?.bundle.requirements[0]?.restoration;
+    expect(restorationBefore).toMatchObject({
+      strategy: 'snapshot',
+      contentHash: CONTENT_HASH,
+    });
 
     // Simulate the local source moving to a new revision and re-pushing the environment —
-    // the already-published Skill version must stay exactly what it was at publish time.
+    // the already-published Skill version must stay exactly what it was at publish time
+    // (snapshot-first parity: the published restoration is pinned to content, not to the
+    // local Skill's current Git reference, so it is unaffected by the revision move).
     await pushEnvironment(
       token,
       skillBundle(skillId, { revision: 'b'.repeat(40) }),
@@ -292,35 +337,40 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
       'temi',
       'design-helper',
     );
-    const revisionAfter =
-      publishedAfter.latest?.bundle.requirements[0]?.restoration.strategy ===
-      'reference'
-        ? publishedAfter.latest.bundle.requirements[0].restoration.reference
-            .revision
-        : null;
-    expect(revisionAfter).toBe(revisionBefore);
-    expect(revisionAfter).toBe('a'.repeat(40));
+    const restorationAfter =
+      publishedAfter.latest?.bundle.requirements[0]?.restoration;
+    expect(restorationAfter).toEqual(restorationBefore);
   });
 
-  it('a newer approved revision flips status to update-available, then re-sharing updates the published version (spec P10 correction §3)', async () => {
-    const { service, signIn, pushEnvironment, auth } = setup();
+  it('a newer approved revision with new content flips status to update-available, then re-sharing updates the published version (spec P10 correction §3)', async () => {
+    // Snapshot-first parity: content pinning (contentHash), not the Git pointer, is what
+    // "already-shared" tracks now (see the updated comment on `upToDate` in
+    // `getSkillShareStatus`) — a bare revision move with IDENTICAL content is a no-op (the
+    // published snapshot is already that exact content), so this test pairs the newer
+    // approved revision with new content to actually exercise the update-available path.
+    const { service, signIn, pushEnvironment, auth, blobStore } = setup();
     const skillId = 'skill_upd00001';
     const token = await signIn(USER_A, 'temi');
     await pushEnvironment(
       token,
       skillBundle(skillId, { revision: 'a'.repeat(40) }),
     );
+    await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([1, 2, 3]));
     await service.shareSkill(auth, { skillId, slug: 'design-helper' });
 
     const stillCurrent = await service.getSkillShareStatus(auth, skillId);
     expect(stillCurrent.share.status).toBe('already-shared');
 
-    // The user re-approves the Skill at a newer revision in `main` — this is a truthful
-    // lifecycle transition, not a terminal "already-shared" forever.
+    // The user re-approves the Skill at a newer revision WITH new content in `main` — this
+    // is a truthful lifecycle transition, not a terminal "already-shared" forever.
     await pushEnvironment(
       token,
-      skillBundle(skillId, { revision: 'b'.repeat(40) }),
+      skillBundle(skillId, {
+        revision: 'b'.repeat(40),
+        contentHash: CONTENT_HASH_2,
+      }),
     );
+    await blobStore.put(USER_A, CONTENT_HASH_2, new Uint8Array([4, 5, 6]));
     const afterNewRevision = await service.getSkillShareStatus(auth, skillId);
     expect(afterNewRevision.share.status).toBe('update-available');
 
@@ -332,23 +382,20 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
     expect(updated.version.versionNumber).toBe(2);
 
     const republished = await service.getPublicStack('temi', 'design-helper');
-    const revision =
-      republished.latest?.bundle.requirements[0]?.restoration.strategy ===
-      'reference'
-        ? republished.latest.bundle.requirements[0].restoration.reference
-            .revision
-        : null;
-    expect(revision).toBe('b'.repeat(40));
+    expect(republished.latest?.bundle.requirements[0]?.restoration).toMatchObject(
+      { strategy: 'snapshot', contentHash: CONTENT_HASH_2 },
+    );
 
     const afterUpdate = await service.getSkillShareStatus(auth, skillId);
     expect(afterUpdate.share.status).toBe('already-shared');
   });
 
   it('owner/consumer identity separation: another user cannot see this Skill as "already shared" for themselves', async () => {
-    const { service, signIn, pushEnvironment, auth } = setup();
+    const { service, signIn, pushEnvironment, auth, blobStore } = setup();
     const skillId = 'skill_sep00001';
     const token = await signIn(USER_A, 'temi');
     await pushEnvironment(token, skillBundle(skillId));
+    await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([1, 2, 3]));
     await service.shareSkill(auth, { skillId, slug: 'design-helper' });
 
     const USER_B = '00000000-0000-4000-8000-00000000000b';
@@ -361,10 +408,12 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
   });
 
   it('no P5a review-artifact text is ever reachable through the public read path', async () => {
-    const { service, signIn, pushEnvironment, auth, repository } = setup();
+    const { service, signIn, pushEnvironment, auth, repository, blobStore } =
+      setup();
     const skillId = 'skill_review001';
     const token = await signIn(USER_A, 'temi');
     await pushEnvironment(token, skillBundle(skillId));
+    await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([1, 2, 3]));
     // Owner-private P5a state, keyed (userId, skillId) — must stay unreachable from any
     // public call this suite makes.
     await repository.putSkillReviewCheck({
@@ -389,10 +438,11 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
 
   describe('unshare/re-share lifecycle (spec P10 final lifecycle pass §7/§10/§11)', () => {
     it('unshare deactivates the public share; the URL 404s; the local Skill is untouched', async () => {
-      const { service, signIn, pushEnvironment, auth } = setup();
+      const { service, signIn, pushEnvironment, auth, blobStore } = setup();
       const skillId = 'skill_unshare01';
       const token = await signIn(USER_A, 'temi');
       await pushEnvironment(token, skillBundle(skillId));
+      await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([1, 2, 3]));
       await service.shareSkill(auth, { skillId, slug: 'design-helper' });
 
       await service.unshareSkill(auth, skillId);
@@ -405,10 +455,11 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
     });
 
     it('unshare is idempotent — calling it twice (or on a never-shared Skill) is a safe no-op', async () => {
-      const { service, signIn, pushEnvironment, auth } = setup();
+      const { service, signIn, pushEnvironment, auth, blobStore } = setup();
       const skillId = 'skill_unshare02';
       const token = await signIn(USER_A, 'temi');
       await pushEnvironment(token, skillBundle(skillId));
+      await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([1, 2, 3]));
       // Never shared at all.
       await expect(
         service.unshareSkill(auth, skillId),
@@ -422,10 +473,11 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
     });
 
     it('share -> unshare -> share again reactivates the SAME slug/history (identical content: no new version)', async () => {
-      const { service, signIn, pushEnvironment, auth } = setup();
+      const { service, signIn, pushEnvironment, auth, blobStore } = setup();
       const skillId = 'skill_reshare01';
       const token = await signIn(USER_A, 'temi');
       await pushEnvironment(token, skillBundle(skillId));
+      await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([1, 2, 3]));
       const first = await service.shareSkill(auth, {
         skillId,
         slug: 'design-helper',
@@ -441,14 +493,20 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
       expect(published.latest?.version.versionId).toBe(first.version.versionId);
     });
 
-    it('share -> unshare -> newer approved revision -> share again creates a new version and reactivates', async () => {
-      const { service, signIn, pushEnvironment, auth } = setup();
+    it('share -> unshare -> newer approved revision with new content -> share again creates a new version and reactivates', async () => {
+      // Snapshot-first parity: a bare Git revision move with IDENTICAL content is a no-op
+      // under the new contract (content is what's pinned, not the Git pointer — see the
+      // "identical content: no new version" test above). A genuinely new version requires
+      // new CONTENT, so this test now pairs the newer approved revision with a new
+      // contentHash (the realistic case: a new revision almost always carries new content).
+      const { service, signIn, pushEnvironment, auth, blobStore } = setup();
       const skillId = 'skill_reshare02';
       const token = await signIn(USER_A, 'temi');
       await pushEnvironment(
         token,
         skillBundle(skillId, { revision: 'a'.repeat(40) }),
       );
+      await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([1, 2, 3]));
       const first = await service.shareSkill(auth, {
         skillId,
         slug: 'design-helper',
@@ -456,8 +514,12 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
       await service.unshareSkill(auth, skillId);
       await pushEnvironment(
         token,
-        skillBundle(skillId, { revision: 'b'.repeat(40) }),
+        skillBundle(skillId, {
+          revision: 'b'.repeat(40),
+          contentHash: CONTENT_HASH_2,
+        }),
       );
+      await blobStore.put(USER_A, CONTENT_HASH_2, new Uint8Array([4, 5, 6]));
       const statusAfterRevision = await service.getSkillShareStatus(
         auth,
         skillId,
@@ -471,20 +533,18 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
       });
       expect(second.version.versionId).not.toBe(first.version.versionId);
       const published = await service.getPublicStack('temi', 'design-helper');
-      expect(
-        published.latest?.bundle.requirements[0]?.restoration.strategy ===
-          'reference'
-          ? published.latest.bundle.requirements[0].restoration.reference
-              .revision
-          : null,
-      ).toBe('b'.repeat(40));
+      expect(published.latest?.bundle.requirements[0]?.restoration).toMatchObject(
+        { strategy: 'snapshot', contentHash: CONTENT_HASH_2 },
+      );
     });
 
     it('unshare never mutates public_stack_versions; only the active-state flag changes', async () => {
-      const { service, signIn, pushEnvironment, auth, repository } = setup();
+      const { service, signIn, pushEnvironment, auth, repository, blobStore } =
+        setup();
       const skillId = 'skill_unshare03';
       const token = await signIn(USER_A, 'temi');
       await pushEnvironment(token, skillBundle(skillId));
+      await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([1, 2, 3]));
       const shared = await service.shareSkill(auth, {
         skillId,
         slug: 'design-helper',
@@ -505,15 +565,18 @@ describe('Skill sharing — eligibility (spec P10A §4, §8)', () => {
     });
 
     it('user B cannot unshare user A Skill, and B publishing the same slug text is an independent identity', async () => {
-      const { service, signIn, pushEnvironment, auth, repository } = setup();
+      const { service, signIn, pushEnvironment, auth, repository, blobStore } =
+        setup();
       const skillId = 'skill_crossacct1';
       const token = await signIn(USER_A, 'temi');
       await pushEnvironment(token, skillBundle(skillId));
+      await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([1, 2, 3]));
       await service.shareSkill(auth, { skillId, slug: 'design-helper' });
 
       const USER_B = '00000000-0000-4000-8000-00000000000b';
       await signIn(USER_B, 'other');
       const otherAuth = { userId: USER_B, tokenId: 'test' };
+      await blobStore.put(USER_B, CONTENT_HASH, new Uint8Array([1, 2, 3]));
       // `pushEnvironment` is closed over USER_A's `auth` for its no-op-conflict lookup, so
       // push B's own environment directly against B's own identity instead.
       await service.commitEnvironmentVersion(otherAuth, 'main', {

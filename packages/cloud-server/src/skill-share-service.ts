@@ -109,18 +109,20 @@ export const createSkillShareService = (ctx: SkillShareServiceContext) => {
         // "Shareable" again — even though `findExistingShare` (deliberately unfiltered) can
         // still find it internally so re-sharing reactivates the SAME slug/history (§10/§11).
         if (existing && existing.stack.unpublishedAt === null) {
-          // Truthful lifecycle (spec P10 correction §3): "already-shared" is only true while
-          // the published requirement's restoration still matches the CURRENTLY approved
-          // Skill's — contentHash alone isn't enough, since a pinned Git revision can move
-          // (a newly approved revision) without the declared contentHash changing in every
-          // caller's bookkeeping. A newer approved revision flips this to "update-available"
-          // rather than staying silently stale forever — re-sharing (shareSkill) is the same
-          // call either way.
+          // Truthful lifecycle (spec P10 correction §3), updated for public-publication
+          // parity: `shareSkill` now ALWAYS publishes through the Skill's immutable content
+          // snapshot (see `shareSkill` below), so the published requirement's restoration is
+          // always `{ strategy: 'snapshot', contentHash }` regardless of whether the
+          // currently-approved Skill is itself Git-backed or local. Comparing the full
+          // `restoration` object against the currently-approved Skill's (which keeps its own
+          // local Git-reference/snapshot shape) would therefore never match for a Git-backed
+          // Skill, permanently reporting "update-available" even immediately after sharing.
+          // What "already-shared" actually means under content-pinned publication is: the
+          // content currently approved is the same content already published — i.e.
+          // contentHash equality is both necessary and sufficient.
           const publishedRequirement = existing.latest.bundle.requirements[0];
           const upToDate =
-            publishedRequirement?.contentHash === skill.contentHash &&
-            JSON.stringify(publishedRequirement?.restoration) ===
-              JSON.stringify(skill.restoration);
+            publishedRequirement?.contentHash === skill.contentHash;
           return {
             skillId,
             share: {
@@ -165,14 +167,17 @@ export const createSkillShareService = (ctx: SkillShareServiceContext) => {
       const eligibility = assessSkillShareEligibility(skill.restoration);
       if (!eligibility.eligible)
         throw publicationNotEligible(eligibility.reason);
-      // Hybrid Public Skill Portability: a snapshot-backed Skill becomes publicly portable
-      // through its immutable content snapshot (contentHash only); a reference-backed Skill
-      // keeps publishing its Git reference unchanged. The actual snapshot upload happens
-      // below, before `publishPublicStackVersion` is called.
-      const restoration: PublicStackRequirement['restoration'] =
-        skill.restoration.strategy === 'snapshot'
-          ? { strategy: 'snapshot', contentHash: skill.restoration.contentHash }
-          : skill.restoration;
+      // Public-publication parity: every Skill publishes through its immutable content
+      // snapshot, whether its LOCAL restoration is Git-backed or not — exactly like the
+      // CLI's `buildPublicStackBundle` (packages/core/src/public-stack.ts). There is no
+      // Git-reference public-publication path anymore; `ensurePublicSnapshotUploaded`
+      // (inside `publishPublicStackVersion`, which this bundle is handed to below) enforces
+      // that the owner has already run `stak push` for this exact content, failing closed
+      // with an actionable message if not.
+      const restoration: PublicStackRequirement['restoration'] = {
+        strategy: 'snapshot',
+        contentHash: skill.contentHash,
+      };
 
       const handle = await ctx.resolveHandle(user.userId);
       const existing = await findExistingShare(
