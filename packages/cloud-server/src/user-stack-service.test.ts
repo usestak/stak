@@ -274,6 +274,129 @@ describe('Named Stacks (P10B §11-15)', () => {
     ).rejects.toMatchObject({ code: 'publication-not-eligible' });
   });
 
+  it("rejects publishing a Stack when one Skill's content was never pushed, naming it in the combined error", async () => {
+    // Snapshot-first parity for named-Stack publish (this task): a snapshot-strategy Skill
+    // always passes `assessSkillShareEligibility`, but its bytes still have to actually be
+    // in Cloud (`stak push`) before it can be published. design-pushed is auto-seeded by
+    // `pushMain`'s reference-strategy placeholder; local-unpushed is deliberately left
+    // unseeded.
+    const { service, blobStore, auth } = setup();
+    await pushMain(service, blobStore, {
+      [SKILL_ID]: {
+        name: 'design-pushed',
+        contentHash: CONTENT_HASH,
+        strategy: 'reference',
+      },
+      [SKILL_ID_2]: {
+        name: 'local-unpushed',
+        contentHash: CONTENT_HASH_2,
+        strategy: 'snapshot',
+      },
+    });
+    const created = await service.createUserStack(auth, {
+      name: 'frontend',
+      skillIds: [SKILL_ID, SKILL_ID_2],
+    });
+    const error = await service
+      .publishUserStack(auth, { stackId: created.stackId, slug: 'frontend' })
+      .catch((e) => e);
+    expect(error).toMatchObject({ code: 'publication-not-eligible' });
+    expect(error.message).toContain('local-unpushed');
+    expect(error.message).toContain('run `stak push` first');
+    expect(error.message).not.toContain('design-pushed (');
+  });
+
+  it('rejects publishing when multiple Skills are missing snapshots, naming all of them in one combined error', async () => {
+    const { service, blobStore, auth } = setup();
+    await pushMain(service, blobStore, {
+      [SKILL_ID]: {
+        name: 'local-unpushed-a',
+        contentHash: CONTENT_HASH,
+        strategy: 'snapshot',
+      },
+      [SKILL_ID_2]: {
+        name: 'local-unpushed-b',
+        contentHash: CONTENT_HASH_2,
+        strategy: 'snapshot',
+      },
+    });
+    const created = await service.createUserStack(auth, {
+      name: 'frontend',
+      skillIds: [SKILL_ID, SKILL_ID_2],
+    });
+    const error = await service
+      .publishUserStack(auth, { stackId: created.stackId, slug: 'frontend' })
+      .catch((e) => e);
+    expect(error).toMatchObject({ code: 'publication-not-eligible' });
+    expect(error.message).toContain('2 Skill(s)');
+    expect(error.message).toContain('local-unpushed-a');
+    expect(error.message).toContain('local-unpushed-b');
+  });
+
+  it("publishes successfully when every Skill's content has been pushed, all as snapshot-strategy", async () => {
+    const { service, repository, blobStore, auth } = setup();
+    await repository.upsertProfile({ userId: USER_A, githubUsername: 'alice' });
+    await pushMain(service, blobStore, {
+      [SKILL_ID]: {
+        name: 'design-pushed',
+        contentHash: CONTENT_HASH,
+        strategy: 'reference',
+      },
+      [SKILL_ID_2]: {
+        name: 'local-pushed',
+        contentHash: CONTENT_HASH_2,
+        strategy: 'snapshot',
+      },
+    });
+    // Equivalent to `stak push`: the local-snapshot Skill's bytes exist in Cloud too (the
+    // reference-strategy Skill's are already auto-seeded by `pushMain`).
+    await blobStore.put(USER_A, CONTENT_HASH_2, new Uint8Array([4, 5, 6]));
+    const created = await service.createUserStack(auth, {
+      name: 'frontend',
+      skillIds: [SKILL_ID, SKILL_ID_2],
+    });
+    const result = await service.publishUserStack(auth, {
+      stackId: created.stackId,
+      slug: 'frontend',
+    });
+    expect(result.createdNew).toBe(true);
+    const published = await service.getPublicStack(result.owner, 'frontend');
+    expect(published.latest?.bundle.requirements).toHaveLength(2);
+    for (const requirement of published.latest?.bundle.requirements ?? [])
+      expect(requirement.restoration.strategy).toBe('snapshot');
+  });
+
+  it('creates no public version row when publication is rejected for a missing snapshot (no partial publish)', async () => {
+    const { service, repository, blobStore, auth } = setup();
+    await pushMain(service, blobStore, {
+      [SKILL_ID]: {
+        name: 'design-pushed',
+        contentHash: CONTENT_HASH,
+        strategy: 'reference',
+      },
+      [SKILL_ID_2]: {
+        name: 'local-unpushed',
+        contentHash: CONTENT_HASH_2,
+        strategy: 'snapshot',
+      },
+    });
+    const created = await service.createUserStack(auth, {
+      name: 'frontend',
+      skillIds: [SKILL_ID, SKILL_ID_2],
+    });
+    await expect(
+      service.publishUserStack(auth, {
+        stackId: created.stackId,
+        slug: 'no-partial',
+      }),
+    ).rejects.toThrow();
+    const existing = await repository.getPublicStackByOwner(
+      USER_A,
+      'no-partial',
+    );
+    expect(existing).toBeNull();
+  });
+
   it('publishes an all-eligible named Stack via the existing public-Stack pipeline', async () => {
     const { service, repository, blobStore, auth } = setup();
     await repository.upsertProfile({ userId: USER_A, githubUsername: 'alice' });

@@ -19,10 +19,11 @@ import {
 } from '@stack/spec';
 
 import { invalidRequest, notFound, publicationNotEligible } from './errors.js';
-import { guardPublicSlugClaim } from './public-service.js';
+import { guardPublicSlugClaim, hasPublishableSnapshot } from './public-service.js';
 import {
   UserStackConflict,
   UserStackNameConflict,
+  type CloudBlobStore,
   type CloudRepository,
   type PublicStackRepository,
   type UserStackRepository,
@@ -33,6 +34,7 @@ import type { AuthenticatedUser } from './service.js';
 
 export type UserStackServiceContext = {
   repository: CloudRepository & UserStackRepository & PublicStackRepository;
+  blobStore: CloudBlobStore;
   newId: () => string;
   nowIso: () => string;
   appUrl: string;
@@ -181,19 +183,21 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
    * know eligible-or-not to compare version hashes) so there is exactly one place this logic
    * lives.
    */
-  const buildCandidateBundle = (
+  const buildCandidateBundle = async (
+    userId: string,
     stack: UserStackRecord,
     version: UserStackVersionRecord | null,
     displayNameOverride?: string,
     descriptionOverride?: string,
-  ):
+  ): Promise<
     | {
         eligible: true;
         bundle: PublicStackBundle;
         displayName: string;
         description: string;
       }
-    | { eligible: false; reason: string } => {
+    | { eligible: false; reason: string }
+  > => {
     if (!version || version.bundle.skills.length === 0)
       return {
         eligible: false,
@@ -202,8 +206,24 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
     const ineligible: string[] = [];
     for (const skill of version.bundle.skills) {
       const verdict = assessSkillShareEligibility(skill.restoration);
-      if (!verdict.eligible)
+      if (!verdict.eligible) {
         ineligible.push(`${skill.name} (${verdict.reason})`);
+        continue;
+      }
+      // Public-publication parity: every Skill will be published as a snapshot (see the
+      // restoration-building step below), so its content must already be uploaded —
+      // checked here, up front, so ALL missing Skills are named in one combined error
+      // instead of failing on whichever happens to be checked first inside
+      // `publishPublicStackVersion`.
+      const available = await hasPublishableSnapshot(
+        ctx.blobStore,
+        userId,
+        skill.contentHash,
+      );
+      if (!available)
+        ineligible.push(
+          `${skill.name} (content not yet uploaded to STAK Cloud — run \`stak push\` first)`,
+        );
     }
     if (ineligible.length > 0)
       return {
@@ -215,21 +235,12 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
     const description = descriptionOverride ?? version.bundle.description;
     const requirements: PublicStackRequirement[] = version.bundle.skills.map(
       (skill) => {
-        // Hybrid Public Skill Portability: every skill above passed
-        // assessSkillShareEligibility, which now accepts BOTH restoration strategies. A
-        // snapshot-backed skill becomes publicly portable through its immutable content
-        // snapshot (contentHash only — no owner-local snapshotId ever leaves this process);
-        // a reference-backed skill keeps publishing its Git reference unchanged. The actual
-        // snapshot upload (publish-time I/O) happens separately in `publishUserStack`, before
-        // this bundle is handed to `publishPublicStackVersion` — this function stays a pure
-        // bundle builder.
-        const restoration: PublicStackRequirement['restoration'] =
-          skill.restoration.strategy === 'snapshot'
-            ? {
-                strategy: 'snapshot',
-                contentHash: skill.restoration.contentHash,
-              }
-            : skill.restoration;
+        // Public-publication parity: always snapshot-strategy (see the pre-check above,
+        // which already guaranteed this skill's content is uploaded before we reach here).
+        const restoration: PublicStackRequirement['restoration'] = {
+          strategy: 'snapshot',
+          contentHash: skill.contentHash,
+        };
         return {
           // Deterministic, not `ctx.newId()` (bug fixed by this correction pass): a random
           // id made the published bundle's hash non-reproducible between calls, which broke
@@ -438,7 +449,8 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
     ): Promise<PublishPublicStackVersionResponse> => {
       const stack = await requireOwnedStack(user.userId, request.stackId);
       const version = await latestVersionOf(stack);
-      const candidate = buildCandidateBundle(
+      const candidate = await buildCandidateBundle(
+        user.userId,
         stack,
         version,
         request.displayName,
@@ -530,7 +542,7 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
       // matching comment in public-service.ts's `url()` helper.
       const url = `${ctx.appUrl.replace(/\/+$/, '')}/${handle}/${stack.publishedSlug}`;
       const version = await latestVersionOf(stack);
-      const candidate = buildCandidateBundle(stack, version);
+      const candidate = await buildCandidateBundle(user.userId, stack, version);
       const upToDate =
         candidate.eligible &&
         publishedVersion?.versionHash === candidate.bundle.stack.versionHash;

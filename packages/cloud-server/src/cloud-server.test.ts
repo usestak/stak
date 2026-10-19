@@ -760,9 +760,13 @@ describe('named Stacks HTTP routes (P10B §11-14)', () => {
   };
 
   it('creates, lists, fetches, updates, and publishes through HTTP only — never touching another user', async () => {
-    const { call, signIn } = setup();
+    const { call, signIn, blobStore } = setup();
     const token = await signIn(USER_A, 'alice');
     await pushMain(call, token);
+    // Snapshot-first publication parity: even a Git-backed Skill now publishes through its
+    // immutable content snapshot, so its bytes must already be in Cloud (`stak push`)
+    // before `publish` below can succeed.
+    await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([1, 2, 3]));
 
     const create = await call('POST', 'user-stacks', {
       token,

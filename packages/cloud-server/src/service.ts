@@ -204,6 +204,7 @@ export const createCloudService = (config: CloudServiceConfig) => {
   // Named Stacks (P10B) — publishing one reuses the same public-Stack pipeline (§15).
   const userStackMethods = createUserStackService({
     repository: config.repository,
+    blobStore: config.blobStore,
     newId,
     nowIso,
     appUrl,
