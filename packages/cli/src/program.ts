@@ -107,6 +107,7 @@ import {
 } from './cloud/config.js';
 import { registerOpenCommand } from './commands/open.js';
 import { stackCloudRemoteMemoryBackend } from './memory/cloud-backend.js';
+import { stageMemoryWithProjectDedup } from './memory/stage-memory.js';
 import {
   freshRegistryRisksDuplication,
   pushStagedMemory,
@@ -416,22 +417,24 @@ const isDirectoryAt = async (candidate: string): Promise<boolean> => {
   }
 };
 
-const memoryAdapter = async () =>
-  createClaudeMemoryAdapter({
-    stackHome,
-    claudeHome,
+const memoryDiscoveryOptions = async () => ({
+  stackHome,
+  claudeHome,
+  platform: process.platform,
+  // Resolve strong Git identity from each project's own checkout so scan and
+  // backup agree regardless of the current working directory (Phase 15B.4).
+  gitRemoteOf: gitOriginOf,
+  isDirectory: isDirectoryAt,
+  projects: await resolveMemoryProjects({
+    cwd: process.cwd(),
     platform: process.platform,
-    // Resolve strong Git identity from each project's own checkout so scan and
-    // backup agree regardless of the current working directory (Phase 15B.4).
-    gitRemoteOf: gitOriginOf,
-    isDirectory: isDirectoryAt,
-    projects: await resolveMemoryProjects({
-      cwd: process.cwd(),
-      platform: process.platform,
-      listDirs: listChildDirs,
-      gitOrigin: gitOriginOf,
-    }),
-  });
+    listDirs: listChildDirs,
+    gitOrigin: gitOriginOf,
+  }),
+});
+
+const memoryAdapter = async () =>
+  createClaudeMemoryAdapter(await memoryDiscoveryOptions());
 
 const stackHome = resolveStackHome();
 const codex = new CodexAdapter({ stackHome, homeDir: os.homedir() });
@@ -700,7 +703,8 @@ const defaultDependencies: ProgramDependencies = {
   // construction.
   checkMemory: async (): Promise<MemoryWorkingTreeStatus> => {
     const nativeItems = await (await memoryAdapter()).discover();
-    return computeMemoryWorkingTreeStatus({ stackHome, nativeItems });
+    const registry = await readLocalRegistry(stackHome);
+    return computeMemoryWorkingTreeStatus({ stackHome, nativeItems, registry });
   },
   // Deliberately narrow (see MemoryCloudDisplayState): only "does a Cloud backup exist
   // at all", reusing the existing readMemoryCloudStatus check — never a new subsystem,
@@ -723,11 +727,14 @@ const defaultDependencies: ProgramDependencies = {
   prepareAdd: async (scanResult, selectors) =>
     prepareSkillAdd({ stackHome, scanResult, selectors }),
   applyAdd: (proposal) => applySkillAdd(proposal),
-  // Local-only: the same provider-agnostic Memory adapter `stak memory backup` uses,
-  // called directly so it never reaches Cloud — `stak add .` only ever stages into the
-  // local Memory manifest (and, via its registry sync, local portable Project state).
+  // Local-only, never reaches Cloud — `stak add .` only ever stages into the local
+  // Memory manifest (and, via its registry sync, local portable Project state).
+  // Mirrors `stak memory backup`'s own discovery/composition/commit exactly, with one
+  // addition: native discoveries are normalized through the stable Project registry
+  // first, so a relocated/re-cloned project's stale-but-still-discovered old directory
+  // never creates a second manifest record for Memory that already has one.
   stageMemory: async () => {
-    const result = await (await memoryAdapter()).backup();
+    const result = await stageMemoryWithProjectDedup(await memoryDiscoveryOptions());
     return { files: result.files, projects: result.projects };
   },
   prepareUse: async (input, options) => {
