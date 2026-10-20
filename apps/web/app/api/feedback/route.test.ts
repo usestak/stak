@@ -4,9 +4,9 @@ vi.mock('../../../lib/session', () => ({
   getSessionUser: vi.fn(async () => null),
 }));
 
-const insertMock = vi.fn(async (_row: Record<string, unknown>) => ({
-  error: null,
-}));
+const insertMock = vi.fn<
+  (row: Record<string, unknown>) => Promise<{ error: null }>
+>(async () => ({ error: null }));
 vi.mock('../../../lib/supabase', () => ({
   serviceClient: () => ({ from: () => ({ insert: insertMock }) }),
 }));
