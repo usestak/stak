@@ -48,4 +48,31 @@ describe('getAdminUser', () => {
     const result = await getAdminUser();
     expect(result).toEqual({ id: 'user-1', displayName: 'Ada', role: 'owner' });
   });
+
+  it('returns null (never throws) when the admin_users query returns an error', async () => {
+    getSessionUserMock.mockResolvedValue({ id: 'user-1', displayName: 'Ada' });
+    const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: { message: 'boom' } });
+    const eq = vi.fn().mockReturnValue({ maybeSingle });
+    const select = vi.fn().mockReturnValue({ eq });
+    fromMock.mockReturnValue({ select });
+
+    const result = await getAdminUser();
+    expect(result).toBeNull();
+  });
+
+  it('returns null (never throws) when getSessionUser itself throws', async () => {
+    getSessionUserMock.mockRejectedValue(new Error('supabaseServerClient misconfigured'));
+    const result = await getAdminUser();
+    expect(result).toBeNull();
+  });
+
+  it('returns null (never throws) when the admin_users query throws', async () => {
+    getSessionUserMock.mockResolvedValue({ id: 'user-1', displayName: 'Ada' });
+    fromMock.mockImplementation(() => {
+      throw new Error('service client misconfigured');
+    });
+
+    const result = await getAdminUser();
+    expect(result).toBeNull();
+  });
 });
