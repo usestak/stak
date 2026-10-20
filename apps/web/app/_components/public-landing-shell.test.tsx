@@ -27,9 +27,9 @@ test('nav renders the wordmark, the 4 in-page/external links, sign-in, install C
   ).toHaveAttribute('href', '/');
 
   const expectedLinks = [
-    { name: 'How it works', href: '#how' },
-    { name: 'Memory & privacy', href: '#privacy' },
-    { name: 'Machines', href: '#machines' },
+    { name: 'How it works', href: '/#how' },
+    { name: 'Memory & privacy', href: '/#privacy' },
+    { name: 'Machines', href: '/#machines' },
     { name: 'Docs', href: '/docs' },
   ];
   for (const { name, href } of expectedLinks) {
@@ -43,7 +43,7 @@ test('nav renders the wordmark, the 4 in-page/external links, sign-in, install C
   );
   expect(
     within(nav).getAllByRole('link', { name: 'Install the CLI' })[0],
-  ).toHaveAttribute('href', '#install');
+  ).toHaveAttribute('href', '/#install');
 
   const menuToggle = within(nav).getByRole('button', { name: 'Menu' });
   expect(menuToggle).toHaveAttribute('aria-expanded', 'false');
@@ -210,8 +210,11 @@ test('Close section has the 2-step copyable install+login command bar', () => {
 
 test('shows an understated Public Beta pill linking to /beta', () => {
   render(<PublicLandingShell />);
-  const pill = screen.getByRole('link', { name: /public beta/i });
+  // "Public Beta" also appears as a plain footer link now (site-wide
+  // discoverability) - the pill itself is identified by its own class.
+  const pill = document.querySelector('.stak-landing-beta-pill');
   expect(pill).toHaveAttribute('href', '/beta');
+  expect(pill).toHaveTextContent('Public Beta');
 });
 
 test('leads the daily workflow story with status, add, push', () => {
@@ -257,7 +260,7 @@ test('footer omits the nonexistent /app link and keeps only real destinations', 
   const footer = screen.getByRole('contentinfo');
   expect(within(footer).getByText('How it works').closest('a')).toHaveAttribute(
     'href',
-    '#how',
+    '/#how',
   );
   expect(within(footer).getByText('Sign in').closest('a')).toHaveAttribute(
     'href',
