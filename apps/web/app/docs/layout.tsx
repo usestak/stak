@@ -2,8 +2,10 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 
 import '../overview/shell.css';
+import '../_components/public-landing-shell.css';
 import './docs-shell.css';
 
+import { BetaPill } from '../_components/beta-pill';
 import { DOCS_NAV } from './docs-nav';
 
 /**
@@ -19,15 +21,18 @@ export default function DocsLayout({ children }: { children: ReactNode }) {
   return (
     <div className="stak stak-docs">
       <nav className="stak-docs-topnav" aria-label="Memory STAK">
-        <Link href="/" className="stak-docs-wordmark">
-          <img
-            src="/brand/stak-symbol-dark.svg"
-            alt=""
-            width={18}
-            height={18}
-          />
-          Memory STAK
-        </Link>
+        <div className="stak-docs-topnav-brand">
+          <Link href="/" className="stak-docs-wordmark">
+            <img
+              src="/brand/stak-symbol-dark.svg"
+              alt=""
+              width={18}
+              height={18}
+            />
+            Memory STAK
+          </Link>
+          <BetaPill />
+        </div>
       </nav>
       <div className="stak-docs-frame">
         <nav className="stak-docs-side" aria-label="Documentation">
