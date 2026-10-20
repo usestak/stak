@@ -20,5 +20,6 @@ describe('/beta page', () => {
   it('does not overclaim memory portability across every agent', () => {
     render(<BetaPage />);
     expect(screen.queryByText(/memory.{0,20}every agent/i)).not.toBeInTheDocument();
+    expect(screen.getByText('During the public beta, Project Memory portability supports Claude Code.')).toBeInTheDocument();
   });
 });
