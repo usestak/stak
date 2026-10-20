@@ -4,10 +4,10 @@ import path from 'node:path';
 import { computeEnvironmentBundleDigest } from '@stack/shared';
 import {
   cloudEnvironmentBundleSchema,
+  deriveContentUploadRequirements,
   importedStackVersionSchema,
 } from '@stack/spec';
 import type {
-  CloudContentUploadRequirement,
   CloudEnvironmentBundle,
   EnvironmentStackLayer,
   ImportedStackVersion,
@@ -160,24 +160,17 @@ export const buildCloudEnvironmentBundle = async (
   for (const [entryId, skill] of Object.entries(state.lock.skills))
     resolvedSkills[entryId] = toPortableLockedSkill(skill);
 
+  const resolved = { schemaVersion: 1 as const, skills: resolvedSkills };
   // Every resolved Skill version's immutable content must be uploaded to STAK
   // Cloud, regardless of its preferred private restoration strategy. A
   // Git-backed Skill keeps `restoration.strategy === 'reference'` locally, but
   // public/portable publication must never depend on Git being reachable, so
-  // its bytes are uploaded here too.
-  const contentHashes = new Set<string>();
-  for (const skill of Object.values(state.lock.skills))
-    contentHashes.add(skill.contentHash);
-  for (const version of importedStackVersions)
-    for (const requirement of version.requirements)
-      contentHashes.add(requirement.contentHash);
-  const contentUploadRequirements: CloudContentUploadRequirement[] = [
-    ...contentHashes,
-  ]
-    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
-    .map((contentHash) => ({ contentHash }));
-
-  const resolved = { schemaVersion: 1 as const, skills: resolvedSkills };
+  // its bytes are uploaded here too. Shared with the schema's own legacy-bundle
+  // normalization so both computations can never drift apart.
+  const contentUploadRequirements = deriveContentUploadRequirements(
+    resolved,
+    importedStackVersions,
+  );
   const digest = computeEnvironmentDigest({
     environment: state.manifest,
     resolved,

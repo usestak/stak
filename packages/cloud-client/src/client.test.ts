@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CloudResponseInvalidError,
   CloudUnavailableError,
   NotAuthenticatedError,
   StackCloudError,
@@ -101,6 +102,85 @@ describe('cloud client', () => {
       fetchImpl,
     });
     expect(await client.getEnvironment('main')).toBeNull();
+  });
+
+  const resolvedSkills = {
+    schemaVersion: 1,
+    skills: {
+      skill_aaaaaaaa: {
+        name: 'alpha',
+        description: 'alpha skill',
+        contentHash: `sha256:${'a'.repeat(64)}`,
+        observedSources: [],
+        restoration: {
+          strategy: 'snapshot',
+          contentHash: `sha256:${'a'.repeat(64)}`,
+          reason: 'local',
+        },
+      },
+    },
+  };
+  const environmentManifest = {
+    schemaVersion: 1,
+    name: 'main',
+    skills: [{ id: 'skill_aaaaaaaa', name: 'alpha', requirement: 'required' }],
+    stacks: [],
+    overrides: {},
+  };
+  const okEnvironmentResponse = (bundle: Record<string, unknown>) =>
+    jsonResponse(200, {
+      environmentId: '00000000-0000-4000-8000-000000000000',
+      name: 'main',
+      latest: {
+        version: {
+          versionId: '00000000-0000-4000-8000-000000000001',
+          versionNumber: 1,
+          digest: `sha256:${'b'.repeat(64)}`,
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+        bundle,
+      },
+    });
+
+  it('reads a legacy Environment bundle (no contentUploadRequirements) without throwing', async () => {
+    const fetchImpl = (async () =>
+      okEnvironmentResponse({
+        schemaVersion: 1,
+        environment: environmentManifest,
+        resolved: resolvedSkills,
+        importedStackVersions: [],
+        digest: `sha256:${'b'.repeat(64)}`,
+        // No contentUploadRequirements at all — the pre-eec8c26 production shape.
+      })) as unknown as FetchLike;
+    const client = createCloudClient({
+      baseUrl: 'http://localhost:3000',
+      token: 'stk_test',
+      fetchImpl,
+    });
+    const result = await client.getEnvironment('main');
+    expect(result?.latest?.bundle.contentUploadRequirements).toEqual([
+      { contentHash: `sha256:${'a'.repeat(64)}` },
+    ]);
+  });
+
+  it('wraps a genuinely malformed Environment bundle in CloudResponseInvalidError, not a raw ZodError', async () => {
+    const fetchImpl = (async () =>
+      okEnvironmentResponse({
+        schemaVersion: 1,
+        environment: environmentManifest,
+        // `resolved` is missing entirely — not recoverable by the legacy-compat
+        // normalization, which only ever fills in `contentUploadRequirements`.
+        importedStackVersions: [],
+        digest: `sha256:${'b'.repeat(64)}`,
+      })) as unknown as FetchLike;
+    const client = createCloudClient({
+      baseUrl: 'http://localhost:3000',
+      token: 'stk_test',
+      fetchImpl,
+    });
+    await expect(client.getEnvironment('main')).rejects.toBeInstanceOf(
+      CloudResponseInvalidError,
+    );
   });
 
   it('surfaces transport failures as CloudUnavailable', async () => {

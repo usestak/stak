@@ -84,7 +84,11 @@ import {
   type RemoteMemoryBackend,
   type RestorePlan,
 } from '@stack/memory';
-import { createCloudClient, NotAuthenticatedError } from '@stack/cloud-client';
+import {
+  CloudResponseInvalidError,
+  createCloudClient,
+  NotAuthenticatedError,
+} from '@stack/cloud-client';
 import { runSkillCheck, type SkillCheckResult } from './skill-check-runner.js';
 import {
   CHECKIN_COMMANDS,
@@ -668,9 +672,12 @@ const defaultDependencies: ProgramDependencies = {
       }));
   },
   // Cheap (metadata-only) Cloud ahead/behind check for `stak status`. Never throws: any
-  // failure (not signed in, offline, Cloud error) resolves to `not-checked` so status
-  // always succeeds locally regardless of Cloud reachability — it never fetches a bundle
-  // or snapshot, the same `getEnvironment` call push/pull already make for conflict checks.
+  // failure (not signed in, offline, Cloud error) resolves to a degraded display state so
+  // status always succeeds locally regardless of Cloud reachability — it never fetches a
+  // bundle or snapshot, the same `getEnvironment` call push/pull already make for conflict
+  // checks. A data/compatibility problem (`CloudResponseInvalidError` — reached Cloud, got
+  // a response, couldn't read it) is reported distinctly from a genuine network failure:
+  // collapsing both into "offline" would be misleading when the network is fine.
   checkCloud: async (): Promise<CloudSyncDisplayState> => {
     let client;
     try {
@@ -680,7 +687,9 @@ const defaultDependencies: ProgramDependencies = {
     }
     try {
       return await checkEnvironmentCloudSync({ stackHome, client });
-    } catch {
+    } catch (error) {
+      if (error instanceof CloudResponseInvalidError)
+        return { status: 'unavailable' };
       return { status: 'not-checked', reason: 'offline' };
     }
   },

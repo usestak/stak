@@ -90,14 +90,60 @@ export const cloudContentUploadRequirementSchema = z.object({
   contentHash: contentHashSchema,
 });
 
-export const cloudEnvironmentBundleSchema = z.object({
-  schemaVersion: z.literal(1),
-  environment: environmentManifestSchema,
-  resolved: portableEnvironmentResolutionSchema,
-  importedStackVersions: z.array(portableImportedStackVersionSchema),
-  contentUploadRequirements: z.array(cloudContentUploadRequirementSchema),
-  digest: contentHashSchema,
-});
+/**
+ * `contentUploadRequirements` is derived, non-durable state: every entry is just a
+ * resolved Skill or imported-Stack requirement's own `contentHash`, recomputable at
+ * any time from `resolved`/`importedStackVersions`. It exists purely as a push-time
+ * worklist (which blobs need uploading) — it carries no information a stored
+ * Environment version needs to be reconstructed. Exported so every reader of an
+ * already-parsed bundle (not just the schema's own transform below) can rebuild it
+ * the same way if ever needed.
+ */
+export const deriveContentUploadRequirements = (
+  resolved: PortableEnvironmentResolution,
+  importedStackVersions: PortableImportedStackVersion[],
+): CloudContentUploadRequirement[] => {
+  const hashes = new Set<string>();
+  for (const skill of Object.values(resolved.skills)) hashes.add(skill.contentHash);
+  for (const version of importedStackVersions)
+    for (const requirement of version.requirements)
+      hashes.add(requirement.contentHash);
+  return [...hashes]
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+    .map((contentHash) => ({ contentHash }));
+};
+
+/**
+ * `contentUploadRequirements` was introduced (as a rename of the removed
+ * `snapshotRequirements` field) after STAK Cloud already held Environment versions
+ * pushed by older CLI releases, which never wrote it — immutable historical rows
+ * that must stay readable forever. Since the field is derivable from `resolved` and
+ * `importedStackVersions` (see `deriveContentUploadRequirements`), parsing tolerates
+ * its absence and fills it in here, so `CloudEnvironmentBundle` (the schema's
+ * inferred, POST-transform type) always has a complete array for every reader —
+ * nothing downstream needs to special-case a legacy bundle. This never rewrites the
+ * stored row itself; it only normalizes the in-memory value after a read.
+ */
+export const cloudEnvironmentBundleSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    environment: environmentManifestSchema,
+    resolved: portableEnvironmentResolutionSchema,
+    importedStackVersions: z.array(portableImportedStackVersionSchema),
+    contentUploadRequirements: z
+      .array(cloudContentUploadRequirementSchema)
+      .optional(),
+    digest: contentHashSchema,
+  })
+  .transform((bundle) => ({
+    ...bundle,
+    contentUploadRequirements:
+      bundle.contentUploadRequirements ??
+      deriveContentUploadRequirements(
+        bundle.resolved,
+        bundle.importedStackVersions,
+      ),
+  }));
 
 /* -------------------------------------------------------------------------- */
 /* Cloud API DTOs (versioned under /api/v1)                                   */

@@ -16,7 +16,11 @@ export type RenderOptions = { verbose?: boolean };
 export type AgentReadiness = { agent: AgentId; ready: boolean };
 export type CloudSyncDisplayState =
   | EnvironmentCloudSyncState
-  | { status: 'not-checked'; reason: 'offline' | 'unauthenticated' };
+  | { status: 'not-checked'; reason: 'offline' | 'unauthenticated' }
+  /** STAK Cloud responded, but this CLI version could not read it (e.g. a
+   * compatibility/schema problem) — distinct from "offline": the network and auth are
+   * fine, the DATA is the problem. Never collapse this into "offline". */
+  | { status: 'unavailable' };
 
 /**
  * Memory's Cloud awareness is deliberately narrower than Skills': there is no cheap
@@ -44,6 +48,8 @@ const cloudLine = (cloud: CloudSyncDisplayState): string => {
       return 'diverged from main — review with `stak diff`, then `stak pull` or `stak push`';
     case 'not-checked':
       return `not checked (${cloud.reason})`;
+    case 'unavailable':
+      return 'unavailable (Cloud response could not be read)';
   }
 };
 const memoryCloudLine = (memoryCloud: MemoryCloudDisplayState): string => {

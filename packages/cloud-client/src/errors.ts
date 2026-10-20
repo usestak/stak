@@ -95,6 +95,23 @@ export class CloudBundleInvalidError extends StackCloudError {
     this.name = 'CloudBundleInvalidError';
   }
 }
+/**
+ * STAK Cloud returned a response this CLI version could not parse — e.g. a shape it
+ * doesn't recognize. Distinct from `CloudBundleInvalidError` (which is the SERVER
+ * rejecting a bundle the CLIENT sent): this is the CLIENT failing to understand what
+ * the server sent back. Wraps the underlying parse error (never shown raw to the user)
+ * so it is caught by the same bounded, sanitized CLI error path as every other
+ * `StackCloudError` instead of propagating as an uncaught exception.
+ */
+export class CloudResponseInvalidError extends StackCloudError {
+  constructor(
+    message = 'STAK Cloud returned a response this CLI version could not read.',
+    options?: ErrorOptions,
+  ) {
+    super('cloud-response-invalid', message, options);
+    this.name = 'CloudResponseInvalidError';
+  }
+}
 export class CloudVersionCommitFailedError extends StackCloudError {
   constructor(message: string, options?: ErrorOptions) {
     super('cloud-version-commit-failed', message, options);

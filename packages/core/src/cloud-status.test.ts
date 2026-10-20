@@ -211,4 +211,28 @@ describe('checkEnvironmentCloudSync', () => {
     });
     expect(result).toEqual({ status: 'diverged' });
   });
+
+  it('propagates a Cloud read/compatibility error unchanged — never swallows it as a sync state', async () => {
+    // The CLI layer (program.ts's `checkCloud`) distinguishes a data/compatibility
+    // failure (CloudResponseInvalidError) from a genuine network failure and must never
+    // see the data-error case collapsed into "offline" — that distinction only works if
+    // this function propagates whatever `client.getEnvironment` throws, unchanged.
+    const home = await temp();
+    const stackHome = await temp();
+    await initializeMainEnvironment({
+      stackHome,
+      scanResult: await scanSkills({ roots: [claudeRoot(home)] }),
+    });
+    class FakeCloudResponseInvalidError extends Error {}
+    await expect(
+      checkEnvironmentCloudSync({
+        stackHome,
+        client: {
+          getEnvironment: async () => {
+            throw new FakeCloudResponseInvalidError('could not read bundle');
+          },
+        },
+      }),
+    ).rejects.toBeInstanceOf(FakeCloudResponseInvalidError);
+  });
 });

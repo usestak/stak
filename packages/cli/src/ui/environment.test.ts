@@ -121,6 +121,13 @@ describe('renderStatus — Cloud section', () => {
     expect(unauth).toContain('not checked');
   });
 
+  it('reports a data/compatibility read failure distinctly from offline', () => {
+    const output = renderStatus(cleanStatus, { cloud: { status: 'unavailable' } });
+    expect(output).toContain('unavailable');
+    expect(output).toContain('Cloud response could not be read');
+    expect(output).not.toContain('offline');
+  });
+
   it('omits the Cloud section entirely when no cloud state was supplied', () => {
     const output = renderStatus(cleanStatus);
     expect(output).not.toContain('Cloud');

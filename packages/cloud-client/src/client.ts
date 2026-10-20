@@ -63,6 +63,7 @@ import type {
 } from '@stack/spec';
 
 import {
+  CloudResponseInvalidError,
   CloudUnavailableError,
   NotAuthenticatedError,
   SnapshotDownloadFailedError,
@@ -529,12 +530,12 @@ export const createCloudClient = (
         ),
       ),
     getEnvironment: async (name) => {
+      let payload;
       try {
-        return json(
-          getEnvironmentResponseSchema,
-          await request('GET', `environments/${encodeURIComponent(name)}`, {
-            auth: true,
-          }),
+        payload = await request(
+          'GET',
+          `environments/${encodeURIComponent(name)}`,
+          { auth: true },
         );
       } catch (error) {
         if (
@@ -543,6 +544,20 @@ export const createCloudClient = (
         )
           return null;
         throw error;
+      }
+      // A failure HERE (vs. the request itself) means we reached STAK Cloud and got a
+      // response, but this CLI version could not make sense of it — most likely an old,
+      // genuinely malformed, or future-shaped bundle the schema's own legacy-compat
+      // normalization doesn't cover. Never let a raw ZodError propagate: wrap it as a
+      // typed, sanitized StackCloudError so the normal CLI error path (never "offline")
+      // reports it accurately instead of crashing uncaught.
+      try {
+        return json(getEnvironmentResponseSchema, payload);
+      } catch (error) {
+        throw new CloudResponseInvalidError(
+          'STAK Cloud returned an Environment this CLI version could not read.',
+          { cause: error },
+        );
       }
     },
     commitEnvironmentVersion: async (name, body) =>
