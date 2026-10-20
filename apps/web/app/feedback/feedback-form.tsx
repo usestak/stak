@@ -39,61 +39,92 @@ export function FeedbackForm() {
 
   if (status === 'sent') {
     return (
-      <p role="status">Thanks. This directly helps shape the public beta.</p>
+      <div className="stak-feedback-success">
+        <span className="stak-feedback-success-title" role="status">
+          Thanks. This directly helps shape the public beta.
+        </span>
+        <span className="stak-feedback-success-body">
+          We read every submission. If you left an email, we may follow up.
+        </span>
+      </div>
     );
   }
 
   return (
-    <form onSubmit={submit}>
-      <label htmlFor="feedback-type">Type</label>
-      <select
-        id="feedback-type"
-        value={type}
-        onChange={(e) => setType(e.target.value as FeedbackType)}
-      >
-        <option value="bug">Bug</option>
-        <option value="confusing">Something confusing</option>
-        <option value="idea">Idea</option>
-        <option value="other">Other</option>
-      </select>
+    <form className="stak-feedback-card" onSubmit={submit}>
+      <div className="stak-feedback-field">
+        <label className="stak-feedback-label" htmlFor="feedback-type">
+          Type
+        </label>
+        <select
+          id="feedback-type"
+          className="stak-feedback-select"
+          value={type}
+          onChange={(e) => setType(e.target.value as FeedbackType)}
+        >
+          <option value="idea">Idea</option>
+          <option value="bug">Bug</option>
+          <option value="confusing">Something confusing</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
 
-      <label htmlFor="feedback-message">
-        What happened, or what would you change?
-      </label>
-      <textarea
-        id="feedback-message"
-        required
-        value={message}
-        onChange={(e) => setMessage(e.target.value)}
-      />
+      <div className="stak-feedback-field">
+        <label className="stak-feedback-label" htmlFor="feedback-message">
+          What happened, or what would you change?
+        </label>
+        <textarea
+          id="feedback-message"
+          className="stak-feedback-textarea"
+          required
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+        />
+      </div>
 
-      <label htmlFor="feedback-goal">
-        What were you trying to do? (optional)
-      </label>
-      <input
-        id="feedback-goal"
-        value={goal}
-        onChange={(e) => setGoal(e.target.value)}
-      />
+      <div className="stak-feedback-field">
+        <label className="stak-feedback-label" htmlFor="feedback-goal">
+          What were you trying to do?{' '}
+          <span className="stak-feedback-optional">Optional</span>
+        </label>
+        <textarea
+          id="feedback-goal"
+          className="stak-feedback-textarea"
+          style={{ minHeight: 72 }}
+          value={goal}
+          onChange={(e) => setGoal(e.target.value)}
+        />
+      </div>
 
-      <label htmlFor="feedback-email">Email (optional)</label>
-      <input
-        id="feedback-email"
-        type="email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
+      <div className="stak-feedback-field">
+        <label className="stak-feedback-label" htmlFor="feedback-email">
+          Email <span className="stak-feedback-optional">Optional</span>
+        </label>
+        <input
+          id="feedback-email"
+          className="stak-feedback-input"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+      </div>
 
-      <p>
+      <p className="stak-feedback-privacy">
         Please don&apos;t include credentials, secrets, or private Memory
         content.
       </p>
 
-      <button type="submit" disabled={status === 'sending'}>
-        Send feedback
+      <button
+        type="submit"
+        className="stak-feedback-submit"
+        disabled={status === 'sending'}
+      >
+        {status === 'sending' ? 'Sending…' : 'Send feedback'}
       </button>
       {status === 'error' ? (
-        <p role="alert">Something went wrong. Try again.</p>
+        <p className="stak-feedback-error" role="alert">
+          Something went wrong. Try again.
+        </p>
       ) : null}
     </form>
   );

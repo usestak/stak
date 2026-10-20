@@ -1616,3 +1616,308 @@
     transform: none !important;
   }
 }
+
+/* =====================================================================
+   /beta and /feedback - share the landing page's tokens, section rhythm,
+   eyebrow/CopyRow/move/note patterns (.stak-landing-section,
+   .stak-landing-eyebrow, .stak-landing-moves/-move, .stak-landing-note*)
+   directly. These rules cover only what those patterns don't already
+   provide: a non-interactive hero badge row, a secondary CTA button, a
+   compact "what we're testing" item grid, and the feedback form controls.
+   ===================================================================== */
+
+/* ---- Focused page hero (badge row + CTA pair) ----
+   Unlike the homepage hero, these pages have one plain heading at every
+   width - no rotating word, so they don't need the .stak-landing-h1--desktop
+   / --mobile split (that pair is purpose-built for HeroWord and is display:
+   none below 640px container width without its --mobile sibling). */
+.stak-focuspage-h1 {
+  margin: 0;
+  width: 100%;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  font-size: clamp(34px, 6.4cqi, 72px);
+  line-height: 1.04;
+  text-wrap: balance;
+}
+
+.stak-focuspage-badgerow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.stak-focuspage-version {
+  font: 500 12px var(--mono);
+  color: var(--dim);
+}
+.stak-focuspage-ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 28px;
+}
+.stak-landing-cta-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--panel);
+  font-weight: 600;
+  font-size: 14px;
+  transition: transform 150ms ease;
+}
+.stak-landing-cta-primary:focus-visible {
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+.stak-landing-cta-primary:active {
+  transform: scale(0.97);
+}
+@media (hover: hover) and (pointer: fine) {
+  .stak-landing-cta-primary:hover {
+    text-decoration: none;
+    transform: translateY(-1px);
+  }
+}
+.stak-landing-cta-secondary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 20px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+  transition:
+    border-color 250ms ease,
+    background 250ms ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .stak-landing-cta-secondary:hover {
+    border-color: var(--chip);
+    background: var(--panel);
+  }
+}
+
+.stak-landing-limitations-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.stak-landing-limitations-list li {
+  padding-left: 16px;
+  position: relative;
+}
+.stak-landing-limitations-list li::before {
+  content: '—';
+  position: absolute;
+  left: 0;
+  color: var(--dim);
+}
+
+.stak-beta-flow-label {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.stak-beta-flow-subtitle {
+  font-size: 13px;
+  color: var(--faint);
+}
+
+/* ---- Compact "what we want tested" items ---- */
+.stak-beta-testgrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+.stak-beta-testitem {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 14.5px;
+  color: var(--muted);
+  transition: border-color 250ms ease;
+}
+.stak-beta-testitem-n {
+  flex: none;
+  font: 500 11px var(--mono);
+  color: var(--dim);
+}
+@media (hover: hover) and (pointer: fine) {
+  .stak-beta-testitem:hover {
+    border-color: var(--chip);
+  }
+}
+@container stak-landing (min-width: 640px) {
+  .stak-beta-testgrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container stak-landing (min-width: 1024px) {
+  .stak-beta-testgrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* ---- Feedback page layout ---- */
+.stak-feedback-section {
+  max-width: 720px;
+}
+.stak-feedback-intro {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: clamp(28px, 4cqi, 44px);
+}
+.stak-feedback-intro .stak-landing-eyebrow {
+  margin-bottom: 0;
+}
+.stak-feedback-h1 {
+  margin: 0;
+  font-size: clamp(28px, 4.2cqi, 40px);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+}
+.stak-feedback-intro p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15.5px;
+}
+
+/* ---- Feedback form ---- */
+.stak-feedback-card {
+  max-width: 640px;
+  margin: 0 auto;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: clamp(24px, 4cqi, 40px);
+}
+.stak-feedback-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 22px;
+}
+.stak-feedback-field:last-of-type {
+  margin-bottom: 0;
+}
+.stak-feedback-label {
+  font: 500 13px var(--sans);
+  color: var(--ink);
+}
+.stak-feedback-optional {
+  font-weight: 400;
+  color: var(--dim);
+}
+.stak-feedback-select,
+.stak-feedback-input,
+.stak-feedback-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 14.5px var(--sans);
+  padding: 12px 14px;
+  transition: border-color 150ms ease;
+}
+.stak-feedback-textarea {
+  resize: vertical;
+  min-height: 120px;
+  line-height: 1.5;
+}
+.stak-feedback-select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23A19D94' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 36px;
+}
+.stak-feedback-select:focus-visible,
+.stak-feedback-input:focus-visible,
+.stak-feedback-textarea:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 1px;
+  border-color: var(--orange);
+}
+.stak-feedback-privacy {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--faint);
+  margin: 22px 0;
+}
+.stak-feedback-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--panel);
+  font: 500 14.5px var(--sans);
+  cursor: pointer;
+  transition:
+    opacity 150ms ease,
+    transform 150ms ease;
+}
+.stak-feedback-submit:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+@media (hover: hover) and (pointer: fine) {
+  .stak-feedback-submit:not(:disabled):hover {
+    opacity: 0.88;
+  }
+}
+.stak-feedback-submit:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.stak-feedback-error {
+  margin-top: 14px;
+  font-size: 13.5px;
+  color: var(--orange);
+}
+.stak-feedback-success {
+  max-width: 640px;
+  margin: 0 auto;
+  border: 1px solid color-mix(in srgb, var(--green) 45%, var(--line-2));
+  border-radius: 12px;
+  background: var(--panel);
+  padding: clamp(32px, 5cqi, 48px);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.stak-feedback-success-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.stak-feedback-success-body {
+  font-size: 14.5px;
+  color: var(--muted);
+  max-width: 440px;
+}

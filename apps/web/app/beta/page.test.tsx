@@ -16,9 +16,11 @@ describe('/beta page', () => {
 
   it('links to the feedback page', () => {
     render(<BetaPage />);
-    expect(screen.getByRole('link', { name: /feedback/i })).toHaveAttribute(
-      'href',
-      '/feedback',
+    // "Feedback" also appears as a footer link now (site-wide chrome), so
+    // scope to the page's own CTA rather than asserting a single match.
+    const links = screen.getAllByRole('link', { name: /feedback/i });
+    expect(links.some((l) => l.getAttribute('href') === '/feedback')).toBe(
+      true,
     );
   });
 
