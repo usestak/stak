@@ -67,3 +67,27 @@
     border-bottom: 1px solid var(--line);
   }
 }
+
+.stak-admin-range-pills {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.stak-admin-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.stak-admin-metric-grid dt {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.stak-admin-metric-grid dd {
+  font-size: 28px;
+  font-weight: 600;
+  margin: 0;
+}
