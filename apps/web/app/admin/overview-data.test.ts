@@ -12,6 +12,7 @@ function fakeDb(responses: Record<string, unknown>) {
       builder.is = chain;
       builder.not = chain;
       builder.in = chain;
+      builder.eq = chain;
       // Each table's final await resolves to its canned response.
       builder.then = (resolve: (v: unknown) => void) =>
         resolve(responses[table] ?? { count: 0, data: [], error: null });
@@ -56,5 +57,28 @@ describe('loadOverviewMetrics', () => {
 
     const result = await loadOverviewMetrics(db, 'all');
     expect(result.activationRate).toBeNull();
+  });
+
+  it('computes activatedUsers/activationRate as all-time regardless of the selected range', async () => {
+    // Narrow range ("24h") must not change activatedUsers/activationRate --
+    // only newUsers is range-scoped. Previously these were mixed: a
+    // range-filtered numerator over an all-time denominator.
+    const db = fakeDb({
+      profiles: { count: 10, data: [], error: null },
+      environment_versions: { count: 4, data: [{ user_id: 'u1' }, { user_id: 'u2' }], error: null },
+      machines: { count: 0, data: [], error: null },
+      feedback: { count: 0, data: [], error: null },
+    });
+
+    const result = await loadOverviewMetrics(db, '24h');
+    expect(result.activatedUsers).toBe(2);
+    expect(result.activationRate).toBe(0.2);
+  });
+
+  it('throws when a query returns an error, instead of silently reporting zero', async () => {
+    const db = fakeDb({
+      profiles: { count: null, data: [], error: { message: 'boom' } },
+    });
+    await expect(loadOverviewMetrics(db, 'all')).rejects.toBeTruthy();
   });
 });

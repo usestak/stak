@@ -17,6 +17,10 @@ function fakeDb() {
       const chain = () => builder;
       builder.select = chain;
       builder.ilike = chain;
+      builder.order = chain;
+      builder.limit = chain;
+      builder.or = chain;
+      builder.is = chain;
       builder.then = (resolve: (v: unknown) => void) => {
         const map: Record<string, unknown> = { profiles, environment_versions: versions, machines, feedback };
         resolve({ data: map[table] ?? [], error: null });
@@ -33,5 +37,21 @@ describe('loadUsers', () => {
       { userId: 'u1', displayName: 'Ada', joinedAt: '2026-01-01T00:00:00Z', pushCount: 2, machineCount: 1, feedbackCount: 1 },
       { userId: 'u2', displayName: 'Bo', joinedAt: '2026-02-01T00:00:00Z', pushCount: 0, machineCount: 0, feedbackCount: 0 },
     ]);
+  });
+
+  it('throws when a query returns an error, instead of silently reporting zero users', async () => {
+    const db = {
+      from: () => ({
+        select: () => ({
+          order: () => ({
+            limit: () => ({
+              then: (resolve: (v: unknown) => void) =>
+                resolve({ data: null, error: { message: 'boom' } }),
+            }),
+          }),
+        }),
+      }),
+    } as never;
+    await expect(loadUsers(db)).rejects.toBeTruthy();
   });
 });

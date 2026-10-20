@@ -1,5 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { loadActiveMachinesByUser } from '@/lib/admin-metrics';
+
 export type AdminUserRow = {
   userId: string;
   displayName: string;
@@ -11,13 +13,42 @@ export type AdminUserRow = {
 
 type ProfileRow = { user_id: string; display_name: string | null; github_username: string | null; created_at: string };
 
-export const loadUsers = async (db: SupabaseClient, search?: string): Promise<AdminUserRow[]> => {
-  const profilesQuery = db.from('profiles').select('user_id, display_name, github_username, created_at');
-  const { data: profiles } = await (search ? profilesQuery.ilike('display_name', `%${search}%`) : profilesQuery);
+// A hard cap until a proper server-side aggregate (RPC/view) replaces this
+// per-table-fetch approach — see Phase 2 final-review Important #4. Keeps a
+// pathological user count from pulling an unbounded number of rows into Node.
+const MAX_ROWS = 500;
 
-  const { data: versions } = await db.from('environment_versions').select('user_id');
-  const { data: machines } = await db.from('machines').select('user_id, machine_id');
-  const { data: feedbackRows } = await db.from('feedback').select('user_id');
+// ilike's pattern syntax treats % and _ as wildcards; escape them so a
+// search term containing either matches literally instead of surprisingly
+// matching extra rows.
+const escapeLikePattern = (value: string): string => value.replace(/[%_]/g, (c) => `\\${c}`);
+
+export const loadUsers = async (db: SupabaseClient, search?: string): Promise<AdminUserRow[]> => {
+  let profilesQuery = db
+    .from('profiles')
+    .select('user_id, display_name, github_username, created_at')
+    .order('created_at', { ascending: false })
+    .limit(MAX_ROWS);
+  if (search) {
+    const pattern = `%${escapeLikePattern(search)}%`;
+    profilesQuery = profilesQuery.or(`display_name.ilike.${pattern},github_username.ilike.${pattern}`);
+  }
+  const { data: profiles, error: profilesError } = await profilesQuery;
+  if (profilesError) throw profilesError;
+
+  const { data: versions, error: versionsError } = await db
+    .from('environment_versions')
+    .select('user_id')
+    .limit(MAX_ROWS * 20);
+  if (versionsError) throw versionsError;
+
+  const { data: feedbackRows, error: feedbackError } = await db
+    .from('feedback')
+    .select('user_id')
+    .limit(MAX_ROWS * 20);
+  if (feedbackError) throw feedbackError;
+
+  const machinesByUser = await loadActiveMachinesByUser(db);
 
   const countBy = (rows: { user_id: string }[] | null) => {
     const counts = new Map<string, number>();
@@ -28,19 +59,12 @@ export const loadUsers = async (db: SupabaseClient, search?: string): Promise<Ad
   const pushCounts = countBy(versions as { user_id: string }[] | null);
   const feedbackCounts = countBy((feedbackRows ?? []).filter((r: { user_id: string | null }) => r.user_id) as { user_id: string }[]);
 
-  const machineCounts = new Map<string, Set<string>>();
-  for (const row of (machines ?? []) as { user_id: string; machine_id: string }[]) {
-    const set = machineCounts.get(row.user_id) ?? new Set<string>();
-    set.add(row.machine_id);
-    machineCounts.set(row.user_id, set);
-  }
-
   return ((profiles ?? []) as ProfileRow[]).map((p) => ({
     userId: p.user_id,
     displayName: p.display_name ?? p.github_username ?? 'Unnamed',
     joinedAt: p.created_at,
     pushCount: pushCounts.get(p.user_id) ?? 0,
-    machineCount: machineCounts.get(p.user_id)?.size ?? 0,
+    machineCount: machinesByUser.get(p.user_id)?.size ?? 0,
     feedbackCount: feedbackCounts.get(p.user_id) ?? 0,
   }));
 };
