@@ -129,10 +129,10 @@ export const NEW_MACHINE_STEPS: {
     hint: 'approve the machine',
   },
   {
-    title: 'stak memory recover',
-    syntax: 'stak memory recover',
+    title: 'stak pull',
+    syntax: 'stak pull',
     copyable: true,
-    hint: 'Cloud → this machine (passkey or recovery file)',
+    hint: 'main, Skills, and your latest staged Memory → this machine',
   },
   {
     title: 'stak memory restore',

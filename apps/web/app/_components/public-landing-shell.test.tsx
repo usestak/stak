@@ -66,16 +66,16 @@ test('hero renders the exact headline lines, lead copy, and a copy-anywhere inst
 
   expect(
     screen.getByText(
-      'Carry your Skills, Memory, and setup as one portable STAK. Inspect it on one machine, bring it back on the next.',
+      'Your AI coding environment should move with you. STAK carries portable Skills and Project Memory across machines with a familiar Git-like workflow.',
     ),
   ).toBeInTheDocument();
 
   // The same install command also appears as a copy row in the Close
   // section below; the hero's is the first one in document order.
   const installRow = screen.getAllByRole('button', {
-    name: 'Copy command: npm install -g @memstk/cli',
+    name: 'Copy command: npm install -g @memstk/cli@beta',
   })[0];
-  expect(installRow).toHaveTextContent('npm install -g @memstk/cli');
+  expect(installRow).toHaveTextContent('npm install -g @memstk/cli@beta');
   fireEvent.click(installRow);
   expect(installRow).toHaveTextContent('Copied ✓');
 });
@@ -112,7 +112,15 @@ test('This Is Your STAK shows a 4-way tab control and all 4 object cards with th
   // also has a "review-pr" row, so these appear more than once too.
   expect(screen.getAllByText('review-pr').length).toBeGreaterThan(0);
   expect(screen.getAllByText('Update available').length).toBeGreaterThan(0);
-  expect(screen.getAllByText(/stak scan/).length).toBeGreaterThan(0);
+  // Scope the scroll-story assertion to its own stage container to verify the
+  // scroll-story's "stak add ." step renders, not just the static "How it works" section's.
+  const scrollStoryCaption = screen.getByText('Choose what belongs in main.');
+  const scrollStoryStage = scrollStoryCaption.closest(
+    '.stak-landing-story-stage',
+  ) as HTMLElement;
+  expect(
+    within(scrollStoryStage).getAllByText('stak add .').length,
+  ).toBeGreaterThan(0);
 
   // Switching tabs changes which card is marked active (structural, not
   // just visual - the mobile-only recomposition CSS keys off this).
@@ -121,19 +129,22 @@ test('This Is Your STAK shows a 4-way tab control and all 4 object cards with th
   expect(memoryTab).toHaveAttribute('aria-selected', 'true');
 });
 
-test('Move to another machine lists the 4 real steps with the real CLI commands, and the corrected stak run note', () => {
+test('How it works lists the 5 real steps of the Machine -> Main -> Cloud workflow, and the corrected stak run note', () => {
   render(<PublicLandingShell />);
 
   expect(
-    screen.getByRole('heading', { name: 'Bring your STAK to a new machine.' }),
+    screen.getByRole('heading', { name: 'Machine → Main → Cloud.' }),
   ).toBeInTheDocument();
-  // The hero's scroll-story also renders "stak login"/"stak pull"/"stak
-  // memory recover"/"stak memory restore" among its 7 (always-mounted, CSS-
-  // driven) steps, so these also appear more than once in the document.
-  expect(screen.getAllByText(/stak login/).length).toBeGreaterThan(0);
-  expect(screen.getAllByText(/stak pull/).length).toBeGreaterThan(0);
-  expect(screen.getAllByText(/stak memory recover/).length).toBeGreaterThan(0);
-  expect(screen.getAllByText(/stak memory restore/).length).toBeGreaterThan(0);
+  // The hero's scroll-story also renders "stak status"/"stak add ."/"stak push"/"stak
+  // login"/"stak pull"/"stak project" among its 7 (always-mounted, CSS-driven) steps, so
+  // these also appear more than once in the document.
+  expect(screen.getAllByText(/stak status/).length).toBeGreaterThan(0);
+  expect(screen.getAllByText('stak add .').length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/stak push/).length).toBeGreaterThan(0);
+  expect(screen.getAllByText('stak login && stak pull').length).toBeGreaterThan(
+    0,
+  );
+  expect(screen.getAllByText('stak project').length).toBeGreaterThan(0);
 
   // The design's bare, nonexistent `stak run` is corrected to the real
   // `run <agent>` CLI form (packages/cli/src/commands/run.ts).
@@ -195,6 +206,49 @@ test('Close section has the 2-step copyable install+login command bar', () => {
   });
   fireEvent.click(loginRow);
   expect(loginRow).toHaveTextContent('Copied ✓');
+});
+
+test('shows an understated Public Beta pill linking to /beta', () => {
+  render(<PublicLandingShell />);
+  const pill = screen.getByRole('link', { name: /public beta/i });
+  expect(pill).toHaveAttribute('href', '/beta');
+});
+
+test('leads the daily workflow story with status, add, push', () => {
+  render(<PublicLandingShell />);
+  // Scoped to the "How it works" section: "stak status" also appears in the
+  // (unchanged, out of scope) hero scroll-story and the "This Is Your STAK"
+  // strip, so an unscoped lookup would find more than one match.
+  const howSection = screen
+    .getByRole('heading', { name: 'Machine → Main → Cloud.' })
+    .closest('section');
+  expect(within(howSection!).getByText('stak status')).toBeInTheDocument();
+  expect(within(howSection!).getByText('stak add .')).toBeInTheDocument();
+  expect(within(howSection!).getByText('stak push')).toBeInTheDocument();
+});
+
+test('shows memory restore (not memory recover) as the step right after pull', () => {
+  render(<PublicLandingShell />);
+  // The new combined "stak login && stak pull" command means "stak pull"
+  // never appears as its own standalone text node in the Move list (it only
+  // does, unrelatedly, inside the unchanged hero scroll-story's multi-line
+  // command rendering) - so find the actual list item by substring instead.
+  const howSection = screen
+    .getByRole('heading', { name: 'Machine → Main → Cloud.' })
+    .closest('section');
+  const pullStep = within(howSection!)
+    .getAllByRole('listitem')
+    .find((li) => /stak pull/.test(li.textContent ?? ''));
+  expect(pullStep).toBeDefined();
+  expect(pullStep?.textContent).not.toMatch(/stak memory recover/);
+});
+
+test('links Feedback in the footer', () => {
+  render(<PublicLandingShell />);
+  expect(screen.getByRole('link', { name: 'Feedback' })).toHaveAttribute(
+    'href',
+    '/feedback',
+  );
 });
 
 test('footer omits the nonexistent /app link and keeps only real destinations', () => {

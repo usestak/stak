@@ -105,15 +105,21 @@ export default async function OnboardingPage() {
         <div>
           <p>Your STAK already has Cloud Memory. On the new machine, run:</p>
           <pre className="stak-cmd">
-            <code>{`stak login\nstak memory recover\nstak memory restore`}</code>
+            <code>{`stak login\nstak pull\nstak memory restore`}</code>
           </pre>
           <p>
-            <code style={{ fontFamily: 'var(--mono)' }}>recover</code> brings
-            your Memory down from Cloud to this machine.{' '}
-            <code style={{ fontFamily: 'var(--mono)' }}>restore</code> writes it
-            into your agents&apos; files — it never overwrites anything already
-            there. If your Memory is Protected, recover needs a passkey or your
-            recovery file from this account.
+            <code style={{ fontFamily: 'var(--mono)' }}>pull</code> brings down{' '}
+            <code style={{ fontFamily: 'var(--mono)' }}>main</code>, Skills, and
+            your latest staged Memory generation.{' '}
+            <code style={{ fontFamily: 'var(--mono)' }}>restore</code> writes
+            that Memory into your agents&apos; files — it never overwrites
+            anything already there. If you need an older generation or your
+            Memory is Protected, use{' '}
+            <code style={{ fontFamily: 'var(--mono)' }}>
+              stak memory recover
+            </code>{' '}
+            instead — it needs a passkey or your recovery file from this account
+            when Protected.
           </p>
           <p>
             Map projects if needed — any project not already present on this

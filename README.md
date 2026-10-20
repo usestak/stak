@@ -13,14 +13,18 @@ hard to reproduce, move, or share. STAK gives it a portable identity: a
 canonical record of your Skills that you can carry, project into any
 supported agent, and share safely with others.
 
-STAK is currently in beta. The CLI and Cloud model are actively evolving.
+**Public Beta · v0.2.0-beta.1.** The CLI and Cloud model are actively evolving during the beta.
 
 ## Install
 
 ```bash
-npm install -g @memstk/cli
+npm install -g @memstk/cli@beta
 stak login
+stak init
+stak status
 ```
+
+`npm` `latest` intentionally still points at `0.1.2` — the Public Beta lives on the `@beta` dist-tag.
 
 (`npx stack` is an unrelated project — not Memory STAK.)
 
@@ -60,6 +64,27 @@ launch an agent. `run` projects main into the agent you name and launches it.
 | Codex       | yes | yes |
 | Claude Code | yes | yes |
 | Cursor      | yes | yes |
+
+## Everyday workflow
+
+```bash
+stak status
+stak add .
+stak push
+```
+
+## Move to another machine
+
+```bash
+npm install -g @memstk/cli@beta
+stak login
+stak pull
+stak status
+```
+
+Skills move across Claude Code, Cursor, and Codex. During the Public Beta,
+Project Memory portability supports Claude Code — see
+[`docs/memory.md`](docs/memory.md).
 
 ## Skills, Memory, Projects, Machines
 
@@ -101,6 +126,7 @@ for design notes and ADRs.
 - Docs: https://www.memstk.com/docs
 - CLI Reference: https://www.memstk.com/docs/cli
 - npm: [@memstk/cli](https://www.npmjs.com/package/@memstk/cli)
+- Feedback: use the in-app feedback form at [memstk.com/feedback](https://www.memstk.com/feedback) or [open an issue](https://github.com/usestak/stak/issues)
 
 ## Development
 

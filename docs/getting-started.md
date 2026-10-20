@@ -7,38 +7,39 @@
 - One or more agents installed for `stak run`: Codex, Cursor (`agent` /
   `cursor-agent`), or Claude Code (`claude`)
 
-## Install (V0.1 from source)
+## Install (Public Beta)
 
 ```bash
-git clone https://github.com/usestak/stak.git
-cd stak
-corepack enable          # provides the pinned pnpm
-pnpm install --frozen-lockfile
-pnpm build
+npm install -g @memstk/cli@beta
+stak login
+stak init
+stak status
 ```
 
-The CLI entry point is `packages/cli/dist/bin.js`. For convenience you can link
-it locally:
-
-```bash
-node packages/cli/dist/bin.js --help
-# or, from packages/cli:  npm link   (installs the `stak` binary)
-```
-
-> The public npm package name is being finalized. `npx stack` runs an unrelated
-> package and is **not** Memory STAK. Installation via `npm install -g @memstk/cli`
-> will be documented once the name is chosen (see the release checklist).
+`npm install -g @memstk/cli@beta` installs the Public Beta — npm's `latest`
+tag intentionally still points at `0.1.2`. Building from source remains
+possible for contributors; see `CONTRIBUTING.md`.
 
 ## Your first Environment
 
 ```bash
-stak scan               # read-only discovery across agent Skill roots
 stak init               # create the desired Environment "main"
 stak status             # compare this machine against main
 stak diff               # detailed per-Skill differences
 ```
 
+Optional diagnostic: `stak scan` is read-only discovery across agent Skill
+roots — not required before `init`.
+
 `scan`, `init`, `status`, and `diff` never modify agent directories.
+
+## Everyday workflow
+
+```bash
+stak status
+stak add .
+stak push
+```
 
 ## Compose and project
 
@@ -74,10 +75,11 @@ temporary agent config/state directory (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, or
 
 ```bash
 stak login            # browser device authorization
-stak push             # back up main (private) to STAK Cloud
+stak push             # synchronize staged main (Skills + Memory) to STAK Cloud
 # ... on another machine ...
 stak login
 stak pull             # reconstruct main with matching Skill hashes
+stak status           # verify what landed
 stak run codex        # then project it into agents
 ```
 

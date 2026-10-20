@@ -181,17 +181,17 @@ type Step = [
 const STEPS: Step[] = [
   [
     'Windows',
-    'stak scan',
+    'stak status',
     '',
     'Your agent setup starts on Windows.',
     'Skills, Memory and local setup accumulate as you work.',
   ],
-  ['Windows', 'stak status', '', 'STAK makes the portable parts visible.', ''],
+  ['Windows', 'stak add .', '', 'Choose what belongs in main.', ''],
   [
     'Windows',
-    'stak push\nstak memory backup',
+    'stak push',
     '',
-    'You choose what goes to STAK Cloud, and when.',
+    'Sync it to STAK Cloud.',
     'Your STAK and Memory move only when you tell STAK to move them.',
   ],
   [
@@ -203,17 +203,17 @@ const STEPS: Step[] = [
   ],
   [
     'macOS',
-    'stak login\nstak pull\nstak memory recover',
+    'stak login\nstak pull',
     '',
-    'On macOS, pull your STAK and recover your Memory.',
+    'On macOS, pull your STAK — Skills, main, and your latest staged Memory come with it.',
     '',
   ],
   [
     'macOS',
-    'stak memory restore',
+    'stak project\nstak memory restore',
     '',
     'Restore Memory into the agents that use it.',
-    'Recover brings the backup to this machine. Restore puts it back into native agent Memory.',
+    'Pull already brought Memory down — restore writes it into native agent Memory on this machine.',
   ],
   // Design source's step 7 command is the bare `stak run`, which the real
   // CLI doesn't accept (packages/cli/src/commands/run.ts: `run <agent>` is
@@ -325,8 +325,7 @@ export function ScrollStory() {
         `rotate(${ang}deg) translateY(-6px)`,
       ];
   const tfS = ['translate(-8px,8px)', 'translate(0,0)', 'translate(8px,-8px)'];
-  const mem =
-    s < 4 ? 'on Windows' : s < 5 ? 'local STAK store' : 'Claude Code · Codex';
+  const mem = s < 4 ? 'on Windows' : s < 5 ? 'local STAK store' : 'Claude Code';
 
   const zones = [
     {

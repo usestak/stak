@@ -1,5 +1,7 @@
 # @memstk/cli
 
+Public Beta · v0.2.0-beta.1.
+
 **STAK — the control plane for portable AI agent environments.**
 
 STAK discovers the Agent Skills you have accumulated across Codex, Cursor, and
@@ -7,13 +9,10 @@ Claude Code, captures them as a portable environment, restores them on any
 machine, safely composes additional stacks, backs up your private agent Memory,
 and lets you try someone else's stack without disturbing your setup.
 
-> **Status: 0.1.0 release candidate.** This package is not yet published to npm.
-> Until the public 0.1.0 release, install from source — see the repository.
-
-## Install (after 0.1.0 is published)
+## Install
 
 ```bash
-npm install -g @memstk/cli
+npm install -g @memstk/cli@beta
 ```
 
 The package installs a single self-contained `stak` command (no runtime
@@ -46,6 +45,7 @@ On a new machine:
 ```bash
 stak login
 stak pull                 # restore Skills + Memory + Projects from STAK Cloud
+stak status               # verify what landed
 stak run claude
 ```
 

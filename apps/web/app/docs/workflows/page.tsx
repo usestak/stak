@@ -17,10 +17,35 @@ export default function DocsWorkflowsPage() {
         <Link href="/docs/cli">CLI Reference</Link>.
       </p>
 
+      <h2>See what changed</h2>
+      <p>
+        Read-only — compares this machine against <code>main</code>. Nothing
+        moves yet.
+      </p>
+      <pre>
+        <code>stak status</code>
+      </pre>
+
+      <h2>Choose what belongs in main</h2>
+      <p>
+        Stage the Skills and Memory you want to keep in <code>main</code>.
+      </p>
+      <pre>
+        <code>stak add .</code>
+      </pre>
+
+      <h2>Sync it</h2>
+      <p>
+        Synchronize staged <code>main</code> Skills and Memory to STAK Cloud.
+      </p>
+      <pre>
+        <code>stak push</code>
+      </pre>
+
       <h2>Discover existing Skills</h2>
       <p>
-        Before capturing a desired state, see what Skills already exist across
-        your agent roots. This is read-only and changes nothing.
+        A diagnostic, read-only discovery across agent Skill roots — not where
+        the daily workflow starts (that&apos;s <code>stak status</code>).
       </p>
       <pre>
         <code>stak scan</code>
@@ -67,8 +92,8 @@ export default function DocsWorkflowsPage() {
 
       <h2>Publish a STAK</h2>
       <p>
-        Publish a public STAK as <code>@owner/name</code> from a
-        local source or an active local layer.
+        Publish a public STAK as <code>@owner/name</code> from a local source or
+        an active local layer.
       </p>
       <pre>
         <code>stak publish ./my-stak --slug my-stak</code>
@@ -87,7 +112,10 @@ export default function DocsWorkflowsPage() {
       <h2>Back up Memory</h2>
       <p>
         Copy allowlisted Memory into STAK's private store. This is a read-only
-        capture — native agent memory files are never modified.
+        capture — native agent memory files are never modified. This is the
+        explicit, manual backup command — the normal <code>stak push</code> flow
+        already syncs staged Memory; use this when you want an out-of-band
+        backup.
       </p>
       <pre>
         <code>stak memory backup</code>
@@ -99,7 +127,9 @@ export default function DocsWorkflowsPage() {
         from STAK Cloud; <code>stak memory restore</code> then writes it into
         native agent Memory on this machine. Existing targets are never
         overwritten — a differing existing target is reported as a conflict and
-        left untouched.
+        left untouched. This is explicit, history-based recovery — not part of
+        the normal new-machine flow, which uses <code>stak pull</code> instead
+        (see below).
       </p>
       <pre>
         <code>{`stak memory recover\nstak memory restore`}</code>
@@ -115,16 +145,23 @@ export default function DocsWorkflowsPage() {
         <code>{`stak project\nstak project map my-app ~/code/my-app`}</code>
       </pre>
 
-      <h2>Move/use STAK on another machine</h2>
+      <h2>Move to another machine</h2>
       <p>
-        On a new machine, sign in and reconstruct <code>main</code> from STAK
-        Cloud before reconciling it into an agent. See{' '}
-        <Link href="/docs/memory">Memory &amp; Projects</Link> for how Project
-        identity and Memory follow you across machines.
+        On a new machine, sign in and pull — this restores <code>main</code>,
+        Skills, and your latest staged private Memory generation:
       </p>
       <pre>
-        <code>{`stak login\nstak pull\nstak run claude`}</code>
+        <code>{`stak login\nstak pull\nstak status`}</code>
       </pre>
+      <p>If you use Claude Code, materialize recovered Memory into it:</p>
+      <pre>
+        <code>{`stak project\nstak memory restore --dry-run\nstak memory restore`}</code>
+      </pre>
+      <p>
+        <code>stak memory recover</code> remains available for explicit or
+        history-based recovery (see <Link href="/docs/cli">CLI Reference</Link>)
+        but is not part of this normal flow.
+      </p>
     </>
   );
 }

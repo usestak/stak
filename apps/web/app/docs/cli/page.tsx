@@ -63,12 +63,26 @@ const COMMAND_DETAILS: Record<string, CommandDetail> = {
     examples: ['stak init'],
   },
   status: {
-    usage: 'stak status [--json]',
-    purpose: 'Compare this machine to `main`.',
-    options: ['--json — print exactly one JSON document to stdout'],
+    usage: 'stak status [--json] [--verbose]',
+    purpose:
+      'Show machine vs. `main` vs. STAK Cloud: untracked/modified/missing Skills and sync state.',
+    options: [
+      '--json — print exactly one JSON document to stdout',
+      '--verbose — show detailed internal state',
+    ],
     examples: ['stak status', 'stak status --json'],
     notes: [
       'Reports satisfied, modified, missing, uncertain, untracked, and drift states.',
+    ],
+  },
+  add: {
+    usage: 'stak add <selector...>',
+    purpose:
+      'Stage untracked or modified Skills (and, with `.`, Memory/Projects) into `main`, like `git add`.',
+    examples: ['stak add some-skill', 'stak add .'],
+    notes: [
+      '`stak add .` also stages all eligible current Memory (and, via the same local registry sync, portable Project state) into the local Memory manifest — never contacting Cloud.',
+      'Staging is local only; nothing reaches STAK Cloud until `stak push`.',
     ],
   },
   diff: {
@@ -203,7 +217,7 @@ const COMMAND_DETAILS: Record<string, CommandDetail> = {
       '`scan` is read-only discovery of portable Claude memory on this machine; changes nothing.',
       '`backup` copies allowlisted memory into STAK’s private store (read-only capture; native Claude files are never modified) and, when signed in, also uploads it to STAK Cloud. Commits the manifest last.',
       '`status` shows the last memory backup.',
-      '`recover` downloads the private memory store from STAK Cloud onto this machine (requires sign-in); this is the step that populates a fresh machine before `restore` has anything local to use.',
+      '`recover` downloads the private memory store from STAK Cloud onto this machine (requires sign-in). Use `recover` for explicit or history-based recovery, or when Memory is Protected; a fresh machine normally gets its Memory from `stak pull` instead.',
       '`restore` writes private memory into native agent Memory files. Local only — never talks to Cloud. Only writes absent targets; a differing existing target is reported as a conflict and left untouched (never merged).',
       '`protect` enables client-side encrypted (Protected) Cloud backup, optionally with a passkey or recovery file.',
       '`history` shows your Memory backup history (newest first).',
@@ -211,29 +225,34 @@ const COMMAND_DETAILS: Record<string, CommandDetail> = {
     ],
   },
   push: {
-    usage: 'stak push [--dry-run] [--json] [--yes]',
-    purpose: 'Back up the private portable `main` Environment.',
+    usage: 'stak push [--dry-run] [--json] [--yes] [--verbose]',
+    purpose:
+      'Push main (Skills + staged Memory) to STAK Cloud, creating a new version automatically.',
     options: [
-      '--dry-run — preview without applying',
-      '--json — print exactly one JSON document to stdout',
-      '--yes — skip the confirmation prompt (non-interactive use)',
+      '--dry-run — preview the push without uploading or committing',
+      '--json — emit structured JSON for dry-run',
+      '--yes — create the cloud version non-interactively',
+      '--verbose — show detailed cloud internals',
     ],
     examples: ['stak push', 'stak push --dry-run'],
     notes: [
+      'Synchronizes STAGED Skills and Memory only — nothing unstaged moves silently; run `stak add .` first to stage Memory.',
       'Optimistic conflict protection; no-op when unchanged. Does not change agent bindings.',
     ],
   },
   pull: {
-    usage: 'stak pull [--dry-run] [--json] [--yes]',
-    purpose: 'Reconstruct `main` on this machine.',
+    usage: 'stak pull [--dry-run] [--json] [--yes] [--verbose]',
+    purpose:
+      'Pull the latest main (Skills + Memory) from STAK Cloud — the normal new-machine recovery path.',
     options: [
-      '--dry-run — preview without applying',
-      '--json — print exactly one JSON document to stdout',
-      '--yes — skip the confirmation prompt (non-interactive use)',
+      '--dry-run — preview the pull without downloading or mutating main',
+      '--json — emit structured JSON for dry-run',
+      '--yes — restore local main non-interactively',
+      '--verbose — show detailed cloud internals',
     ],
     examples: ['stak pull', 'stak pull --yes'],
     notes: [
-      'Reference reacquisition plus a private snapshot download, all verified, then an atomic commit. Does not change agent bindings.',
+      'Restores `main`, Skills, and the latest staged private Memory generation. Reference reacquisition plus a private snapshot download, all verified, then an atomic commit. Does not change agent bindings. Memory is restored on a machine with no local Memory yet; if local Memory already exists here, use `stak memory recover` instead.',
     ],
   },
   publish: {

@@ -1,6 +1,7 @@
 export * from './adapter.js';
 export * from './cloud.js';
 export * from './environment.js';
+export * from './feedback.js';
 export * from './memory.js';
 export * from './product.js';
 export * from './public.js';
