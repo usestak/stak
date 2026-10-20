@@ -3,6 +3,7 @@ import Link from 'next/link';
 import '../overview/shell.css';
 import './public-landing-shell.css';
 
+import { BetaPill } from './beta-pill';
 import {
   CopyRow,
   MachinesPanel,
@@ -83,10 +84,18 @@ const NAV_LINKS = [
 function LandingNav() {
   return (
     <nav className="stak-landing-nav" aria-label="Memory STAK">
-      <Link href="/" className="stak-landing-wordmark">
-        <img src="/brand/stak-symbol-dark.svg" alt="" width={18} height={18} />
-        Memory STAK
-      </Link>
+      <div className="stak-landing-nav-brand">
+        <Link href="/" className="stak-landing-wordmark">
+          <img
+            src="/brand/stak-symbol-dark.svg"
+            alt=""
+            width={18}
+            height={18}
+          />
+          Memory STAK
+        </Link>
+        <BetaPill />
+      </div>
       <div className="stak-landing-nav-links">
         <a href="#how">How it works</a>
         <a href="#privacy">Memory &amp; privacy</a>
@@ -150,8 +159,9 @@ function Hero() {
         </span>
       </h1>
       <p className="stak-landing-lead">
-        Carry your Skills, Memory, and setup as one portable STAK. Inspect it on
-        one machine, bring it back on the next.
+        Your AI coding environment should move with you. STAK carries portable
+        Skills and Project Memory across machines with a familiar Git-like
+        workflow.
       </p>
       <div id="install" className="stak-landing-install-anchor" />
       <CopyRow command="npm install -g @memstk/cli" />
@@ -315,10 +325,10 @@ function YourStakSection() {
       <ObjectsGrid objs={OBJS} />
       <div className="stak-landing-strip">
         <span className="stak-landing-strip-cmd">
-          <span className="stak-landing-tone-dim">$ </span>stak scan
+          <span className="stak-landing-tone-dim">$ </span>stak status
         </span>
         <span className="stak-landing-strip-note">
-          Start by seeing what Memory STAK can carry.
+          See what&apos;s changed before anything moves.
         </span>
       </div>
     </section>
@@ -328,27 +338,33 @@ function YourStakSection() {
 const MOVES = [
   {
     n: '1',
-    t: 'CONNECT THIS MACHINE',
-    cmd: 'stak login',
-    d: 'Approve it in your browser.',
+    t: 'SEE WHAT CHANGED',
+    cmd: 'stak status',
+    d: 'Read-only — compares this machine against main.',
   },
   {
     n: '2',
-    t: 'GET YOUR SETUP',
-    cmd: 'stak pull',
-    d: 'Pull down the STAK you already approved.',
+    t: 'CHOOSE WHAT BELONGS IN MAIN',
+    cmd: 'stak add .',
+    d: 'Stage the Skills and Memory you want to keep.',
   },
   {
     n: '3',
-    t: 'BRING YOUR MEMORY BACK',
-    cmd: 'stak memory recover',
-    d: 'Recover the Memory you backed up from your other machine.',
+    t: 'SYNC IT',
+    cmd: 'stak push',
+    d: 'Synchronize staged main Skills and Memory to STAK Cloud.',
   },
   {
     n: '4',
-    t: 'PUT IT BACK WHERE YOUR AGENTS USE IT',
-    cmd: 'stak memory restore',
-    d: 'Restore recovered Memory into your agents.',
+    t: 'ON ANOTHER MACHINE',
+    cmd: 'stak login && stak pull',
+    d: 'Bring main and Skills down to a new machine.',
+  },
+  {
+    n: '5',
+    t: 'RESTORE CLAUDE MEMORY WHEN NEEDED',
+    cmd: 'stak project',
+    d: 'Review recovered Projects, then stak memory restore to write Memory back into Claude Code.',
   },
 ];
 
@@ -360,8 +376,8 @@ function MoveSection() {
     >
       <div className="stak-landing-section-head stak-landing-section-head--narrow">
         <div>
-          <span className="stak-landing-eyebrow">MOVE TO ANOTHER MACHINE</span>
-          <h2>Bring your STAK to a new machine.</h2>
+          <span className="stak-landing-eyebrow">HOW IT WORKS</span>
+          <h2>Machine → Main → Cloud.</h2>
         </div>
         <p>You choose when it moves. Nothing happens in the background.</p>
       </div>
@@ -578,6 +594,7 @@ const FOOTER_GROUPS = [
     l: [
       { t: 'Docs', u: '/docs' },
       { t: 'CLI Reference', u: '/docs/cli' },
+      { t: 'Feedback', u: '/feedback' },
     ],
   },
 ];

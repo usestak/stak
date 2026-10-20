@@ -112,9 +112,15 @@
   border-bottom: 1px solid var(--line);
   min-height: 56px;
 }
-.stak-landing-wordmark {
+.stak-landing-nav-brand {
   grid-column: 1;
   justify-self: start;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.stak-landing-wordmark {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -122,6 +128,23 @@
   font-size: 15px;
   letter-spacing: 0.2em;
   color: var(--ink);
+}
+.stak-landing-beta-pill {
+  display: inline-flex;
+  align-items: center;
+  font: 500 11px var(--mono);
+  letter-spacing: 0.04em;
+  color: var(--dim);
+  background: var(--chip);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+.stak-landing-beta-pill:hover,
+.stak-landing-beta-pill:focus-visible {
+  color: var(--ink);
+  text-decoration: none;
 }
 .stak-landing-wordmark:hover {
   color: var(--ink);
