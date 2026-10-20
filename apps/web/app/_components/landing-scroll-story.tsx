@@ -326,7 +326,7 @@ export function ScrollStory() {
       ];
   const tfS = ['translate(-8px,8px)', 'translate(0,0)', 'translate(8px,-8px)'];
   const mem =
-    s < 4 ? 'on Windows' : s < 5 ? 'local STAK store' : 'Claude Code · Codex';
+    s < 4 ? 'on Windows' : s < 5 ? 'local STAK store' : 'Claude Code';
 
   const zones = [
     {
