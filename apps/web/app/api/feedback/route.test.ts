@@ -43,4 +43,50 @@ describe('POST /api/feedback', () => {
     expect(res.status).toBe(400);
     expect(insertMock).not.toHaveBeenCalled();
   });
+
+  it('returns storage-failed and logs the Supabase error when insert fails', async () => {
+    insertMock.mockClear();
+    insertMock.mockResolvedValueOnce({
+      error: {
+        code: 'PGRST205',
+        message: "Could not find the table 'public.feedback'",
+        details: null,
+        hint: null,
+      },
+    } as never);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const res = await POST(req({ type: 'idea', message: 'Test.' }));
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ ok: false, error: 'storage-failed' });
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[api/feedback] insert failed:',
+      'PGRST205',
+      "Could not find the table 'public.feedback'",
+      null,
+      null,
+    );
+    errorSpy.mockRestore();
+  });
+
+  it('returns storage-failed and logs the error when the service client itself throws', async () => {
+    insertMock.mockClear();
+    insertMock.mockImplementationOnce(() => {
+      throw new Error(
+        'Missing required environment variable: SUPABASE_SERVICE_ROLE_KEY',
+      );
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const res = await POST(req({ type: 'idea', message: 'Test.' }));
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ ok: false, error: 'storage-failed' });
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[api/feedback] service client/config error:',
+      expect.any(Error),
+    );
+    errorSpy.mockRestore();
+  });
 });
