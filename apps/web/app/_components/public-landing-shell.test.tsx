@@ -112,7 +112,11 @@ test('This Is Your STAK shows a 4-way tab control and all 4 object cards with th
   // also has a "review-pr" row, so these appear more than once too.
   expect(screen.getAllByText('review-pr').length).toBeGreaterThan(0);
   expect(screen.getAllByText('Update available').length).toBeGreaterThan(0);
-  expect(screen.getAllByText('stak add .').length).toBeGreaterThan(0);
+  // Scope the scroll-story assertion to its own stage container to verify the
+  // scroll-story's "stak add ." step renders, not just the static "How it works" section's.
+  const scrollStoryCaption = screen.getByText('Choose what belongs in main.');
+  const scrollStoryStage = scrollStoryCaption.closest('.stak-landing-story-stage')!;
+  expect(within(scrollStoryStage).getAllByText('stak add .').length).toBeGreaterThan(0);
 
   // Switching tabs changes which card is marked active (structural, not
   // just visual - the mobile-only recomposition CSS keys off this).
