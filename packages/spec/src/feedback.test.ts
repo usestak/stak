@@ -31,7 +31,10 @@ describe('feedbackRequestSchema', () => {
   });
 
   it('rejects an empty message', () => {
-    const result = feedbackRequestSchema.safeParse({ type: 'other', message: '' });
+    const result = feedbackRequestSchema.safeParse({
+      type: 'other',
+      message: '',
+    });
     expect(result.success).toBe(false);
   });
 

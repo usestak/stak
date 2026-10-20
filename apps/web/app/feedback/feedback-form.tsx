@@ -9,7 +9,9 @@ export function FeedbackForm() {
   const [message, setMessage] = useState('');
   const [goal, setGoal] = useState('');
   const [email, setEmail] = useState('');
-  const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>(
+    'idle',
+  );
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,7 +25,10 @@ export function FeedbackForm() {
           message,
           goal: goal || undefined,
           email: email || undefined,
-          pageUrl: typeof window !== 'undefined' ? window.location.pathname : undefined,
+          pageUrl:
+            typeof window !== 'undefined'
+              ? window.location.pathname
+              : undefined,
         }),
       });
       setStatus(res.ok ? 'sent' : 'error');
@@ -33,7 +38,9 @@ export function FeedbackForm() {
   };
 
   if (status === 'sent') {
-    return <p role="status">Thanks. This directly helps shape the public beta.</p>;
+    return (
+      <p role="status">Thanks. This directly helps shape the public beta.</p>
+    );
   }
 
   return (
@@ -50,7 +57,9 @@ export function FeedbackForm() {
         <option value="other">Other</option>
       </select>
 
-      <label htmlFor="feedback-message">What happened, or what would you change?</label>
+      <label htmlFor="feedback-message">
+        What happened, or what would you change?
+      </label>
       <textarea
         id="feedback-message"
         required
@@ -58,7 +67,9 @@ export function FeedbackForm() {
         onChange={(e) => setMessage(e.target.value)}
       />
 
-      <label htmlFor="feedback-goal">What were you trying to do? (optional)</label>
+      <label htmlFor="feedback-goal">
+        What were you trying to do? (optional)
+      </label>
       <input
         id="feedback-goal"
         value={goal}
@@ -73,12 +84,17 @@ export function FeedbackForm() {
         onChange={(e) => setEmail(e.target.value)}
       />
 
-      <p>Please don&apos;t include credentials, secrets, or private Memory content.</p>
+      <p>
+        Please don&apos;t include credentials, secrets, or private Memory
+        content.
+      </p>
 
       <button type="submit" disabled={status === 'sending'}>
         Send feedback
       </button>
-      {status === 'error' ? <p role="alert">Something went wrong. Try again.</p> : null}
+      {status === 'error' ? (
+        <p role="alert">Something went wrong. Try again.</p>
+      ) : null}
     </form>
   );
 }

@@ -32,10 +32,9 @@ export default function DocsSecurityPage() {
         Cloud storage is what lets Memory and Projects follow you across
         machines — sign in on a new machine, run <code>stak pull</code>, which
         also restores your latest staged private Memory generation;{' '}
-        <code>stak memory recover</code> remains available for
-        explicit/history recovery — see{' '}
-        <Link href="/docs/workflows">Workflows</Link> for the current
-        sequence.
+        <code>stak memory recover</code> remains available for explicit/history
+        recovery — see <Link href="/docs/workflows">Workflows</Link> for the
+        current sequence.
       </p>
 
       <h2>Public STAK contents</h2>

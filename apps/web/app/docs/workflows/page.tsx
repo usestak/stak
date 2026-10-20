@@ -92,8 +92,8 @@ export default function DocsWorkflowsPage() {
 
       <h2>Publish a STAK</h2>
       <p>
-        Publish a public STAK as <code>@owner/name</code> from a
-        local source or an active local layer.
+        Publish a public STAK as <code>@owner/name</code> from a local source or
+        an active local layer.
       </p>
       <pre>
         <code>stak publish ./my-stak --slug my-stak</code>
@@ -113,9 +113,9 @@ export default function DocsWorkflowsPage() {
       <p>
         Copy allowlisted Memory into STAK's private store. This is a read-only
         capture — native agent memory files are never modified. This is the
-        explicit, manual backup command — the normal <code>stak push</code>{' '}
-        flow already syncs staged Memory; use this when you want an
-        out-of-band backup.
+        explicit, manual backup command — the normal <code>stak push</code> flow
+        already syncs staged Memory; use this when you want an out-of-band
+        backup.
       </p>
       <pre>
         <code>stak memory backup</code>
@@ -157,8 +157,8 @@ export default function DocsWorkflowsPage() {
       </pre>
       <p>
         <code>stak memory recover</code> remains available for explicit or
-        history-based recovery (see <Link href="/docs/cli">CLI Reference</Link>
-        ) but is not part of this normal flow.
+        history-based recovery (see <Link href="/docs/cli">CLI Reference</Link>)
+        but is not part of this normal flow.
       </p>
     </>
   );

@@ -111,11 +111,13 @@ export default async function OnboardingPage() {
             <code style={{ fontFamily: 'var(--mono)' }}>pull</code> brings down{' '}
             <code style={{ fontFamily: 'var(--mono)' }}>main</code>, Skills, and
             your latest staged Memory generation.{' '}
-            <code style={{ fontFamily: 'var(--mono)' }}>restore</code> writes that
-            Memory into your agents&apos; files — it never overwrites anything
-            already there. If you need an older generation or your Memory is
-            Protected, use{' '}
-            <code style={{ fontFamily: 'var(--mono)' }}>stak memory recover</code>{' '}
+            <code style={{ fontFamily: 'var(--mono)' }}>restore</code> writes
+            that Memory into your agents&apos; files — it never overwrites
+            anything already there. If you need an older generation or your
+            Memory is Protected, use{' '}
+            <code style={{ fontFamily: 'var(--mono)' }}>
+              stak memory recover
+            </code>{' '}
             instead — it needs a passkey or your recovery file from this account
             when Protected.
           </p>

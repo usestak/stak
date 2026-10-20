@@ -186,13 +186,7 @@ const STEPS: Step[] = [
     'Your agent setup starts on Windows.',
     'Skills, Memory and local setup accumulate as you work.',
   ],
-  [
-    'Windows',
-    'stak add .',
-    '',
-    'Choose what belongs in main.',
-    '',
-  ],
+  ['Windows', 'stak add .', '', 'Choose what belongs in main.', ''],
   [
     'Windows',
     'stak push',

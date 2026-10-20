@@ -115,8 +115,12 @@ test('This Is Your STAK shows a 4-way tab control and all 4 object cards with th
   // Scope the scroll-story assertion to its own stage container to verify the
   // scroll-story's "stak add ." step renders, not just the static "How it works" section's.
   const scrollStoryCaption = screen.getByText('Choose what belongs in main.');
-  const scrollStoryStage = scrollStoryCaption.closest('.stak-landing-story-stage')!;
-  expect(within(scrollStoryStage).getAllByText('stak add .').length).toBeGreaterThan(0);
+  const scrollStoryStage = scrollStoryCaption.closest(
+    '.stak-landing-story-stage',
+  ) as HTMLElement;
+  expect(
+    within(scrollStoryStage).getAllByText('stak add .').length,
+  ).toBeGreaterThan(0);
 
   // Switching tabs changes which card is marked active (structural, not
   // just visual - the mobile-only recomposition CSS keys off this).
@@ -137,9 +141,9 @@ test('How it works lists the 5 real steps of the Machine -> Main -> Cloud workfl
   expect(screen.getAllByText(/stak status/).length).toBeGreaterThan(0);
   expect(screen.getAllByText('stak add .').length).toBeGreaterThan(0);
   expect(screen.getAllByText(/stak push/).length).toBeGreaterThan(0);
-  expect(
-    screen.getAllByText('stak login && stak pull').length,
-  ).toBeGreaterThan(0);
+  expect(screen.getAllByText('stak login && stak pull').length).toBeGreaterThan(
+    0,
+  );
   expect(screen.getAllByText('stak project').length).toBeGreaterThan(0);
 
   // The design's bare, nonexistent `stak run` is corrected to the real

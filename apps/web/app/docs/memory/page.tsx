@@ -66,17 +66,16 @@ export default function DocsMemoryPage() {
       <p>
         On a new machine, sign in and pull — this restores your desired
         Environment and your latest staged private Memory generation in one
-        step. If you use Claude Code, materialize that Memory into it, then
-        map any Project that can&apos;t reconcile automatically:
+        step. If you use Claude Code, materialize that Memory into it, then map
+        any Project that can&apos;t reconcile automatically:
       </p>
       <pre>
         <code>{`stak login\nstak pull\nstak project\nstak memory restore --dry-run\nstak memory restore\nstak project map my-app ~/code/my-app`}</code>
       </pre>
       <p>
-        <code>stak memory recover</code> is the explicit/history recovery
-        path — reach for it when you need an older generation or Memory
-        outside the normal pull flow, not as a routine step after{' '}
-        <code>pull</code>.
+        <code>stak memory recover</code> is the explicit/history recovery path —
+        reach for it when you need an older generation or Memory outside the
+        normal pull flow, not as a routine step after <code>pull</code>.
       </p>
 
       <p>

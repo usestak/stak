@@ -33,7 +33,10 @@ export async function POST(request: Request): Promise<Response> {
     });
 
   if (error) {
-    return Response.json({ ok: false, error: 'storage-failed' }, { status: 500 });
+    return Response.json(
+      { ok: false, error: 'storage-failed' },
+      { status: 500 },
+    );
   }
 
   return Response.json({ ok: true }, { status: 202 });

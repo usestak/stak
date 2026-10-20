@@ -73,8 +73,8 @@ export default function DocsGettingStartedPage() {
         <code>stak status</code> is read-only and shows what changed.{' '}
         <code>stak add .</code> stages the Skills and Memory you want in{' '}
         <code>main</code>. <code>stak push</code> synchronizes staged{' '}
-        <code>main</code> Skills and Memory to STAK Cloud — nothing unstaged
-        is pushed silently.
+        <code>main</code> Skills and Memory to STAK Cloud — nothing unstaged is
+        pushed silently.
       </p>
 
       <h2>Move to another machine</h2>
@@ -84,8 +84,8 @@ export default function DocsGettingStartedPage() {
       </pre>
       <p>
         <code>stak pull</code> restores <code>main</code>, Skills, and your
-        latest staged private Memory generation. If you use Claude Code,
-        Memory may still need materializing into it:
+        latest staged private Memory generation. If you use Claude Code, Memory
+        may still need materializing into it:
       </p>
       <pre>
         <code>{`stak project\nstak memory restore --dry-run\nstak memory restore`}</code>

@@ -8,18 +8,29 @@ afterEach(() => cleanup());
 describe('/beta page', () => {
   it('surfaces the @beta install command and current version', () => {
     render(<BetaPage />);
-    expect(screen.getByText('npm install -g @memstk/cli@beta')).toBeInTheDocument();
+    expect(
+      screen.getByText('npm install -g @memstk/cli@beta'),
+    ).toBeInTheDocument();
     expect(screen.getByText(/v0\.2\.0-beta\.1/)).toBeInTheDocument();
   });
 
   it('links to the feedback page', () => {
     render(<BetaPage />);
-    expect(screen.getByRole('link', { name: /feedback/i })).toHaveAttribute('href', '/feedback');
+    expect(screen.getByRole('link', { name: /feedback/i })).toHaveAttribute(
+      'href',
+      '/feedback',
+    );
   });
 
   it('does not overclaim memory portability across every agent', () => {
     render(<BetaPage />);
-    expect(screen.queryByText(/memory.{0,20}every agent/i)).not.toBeInTheDocument();
-    expect(screen.getByText('During the public beta, Project Memory portability supports Claude Code.')).toBeInTheDocument();
+    expect(
+      screen.queryByText(/memory.{0,20}every agent/i),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'During the public beta, Project Memory portability supports Claude Code.',
+      ),
+    ).toBeInTheDocument();
   });
 });

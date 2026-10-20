@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../lib/session', () => ({ getSessionUser: vi.fn(async () => null) }));
+vi.mock('../../../lib/session', () => ({
+  getSessionUser: vi.fn(async () => null),
+}));
 
-const insertMock = vi.fn(async () => ({ error: null }));
+const insertMock = vi.fn(async (_row: Record<string, unknown>) => ({
+  error: null,
+}));
 vi.mock('../../../lib/supabase', () => ({
   serviceClient: () => ({ from: () => ({ insert: insertMock }) }),
 }));
