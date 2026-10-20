@@ -1,5 +1,7 @@
 # @memstk/cli
 
+Public Beta · v0.2.0-beta.1.
+
 **STAK — the control plane for portable AI agent environments.**
 
 STAK discovers the Agent Skills you have accumulated across Codex, Cursor, and
@@ -13,7 +15,7 @@ and lets you try someone else's stack without disturbing your setup.
 ## Install (after 0.1.0 is published)
 
 ```bash
-npm install -g @memstk/cli
+npm install -g @memstk/cli@beta
 ```
 
 The package installs a single self-contained `stak` command (no runtime
