@@ -7,7 +7,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { ManifestItem, MemoryManifest } from './domain.js';
 import { encodeClaudeProjectKey } from './project-identity.js';
 import {
+  adoptReconciledProjectId,
   emptyRegistry,
+  resolveOrMintProject,
+  resolveProjectForIdentity,
   setBinding,
   type LocalRegistry,
 } from './project/registry.js';
@@ -342,5 +345,272 @@ describe('registry-driven restore resolution', () => {
     );
     expect(byRel['a.md']).toBe('restorable'); // git resolves
     expect(byRel['n.md']).toBe('project-not-found'); // legacy stays unresolved
+  });
+});
+
+/**
+ * Realistic regression coverage for a real production bug: a project captured first
+ * under a local path identity, later strengthened to a Git identity (the ORIGINAL
+ * machine's `syncRegistryForBackup` "Local -> Git identity-strengthening" path, which
+ * calls the real `adoptReconciledProjectId` — reproduced here exactly, not hand-rolled)
+ * ends up as ONE registry record with BOTH claims. `stak project` already aggregates
+ * both claims' files under that one record and reports it "available" via a live Git
+ * directory match (`listProjects`'s `gitAutoMatch`). Restore did not use the same
+ * reconciliation: a legacy-locator Memory item under a reconciled-but-not-explicitly-
+ * bound local identity stayed `project-not-found` even though the SAME logical project
+ * was plainly available through its Git claim.
+ */
+describe('restore follows canonical (reconciled) Project identity, not the historical locator', () => {
+  const reconciledRegistry = (localVendorKey: string, gitCanonical: string) => {
+    const minted = resolveOrMintProject(
+      emptyRegistry(),
+      { kind: 'local', vendorKey: localVendorKey },
+      () => 'prj_localoriginal000000000001',
+    );
+    const withGit = resolveOrMintProject(
+      minted.registry,
+      gitProject(gitCanonical),
+      () => 'prj_gitcanonical00000000000001',
+    );
+    // The exact real mechanism: adopt the stale local Project ID into the Git one.
+    return adoptReconciledProjectId(
+      withGit.registry,
+      minted.projectId,
+      withGit.projectId,
+    );
+  };
+
+  it('A: a reconciled registry record carries both the legacy and Git claims under one Project ID', () => {
+    const registry = reconciledRegistry('C--Users-NT-Desktop-stack', 'github.com/usestak/stak');
+    expect(registry.projects).toHaveLength(1);
+    const record = registry.projects[0];
+    expect(record?.claims).toEqual(
+      expect.arrayContaining([
+        { type: 'git', canonical: 'github.com/usestak/stak' },
+        { type: 'legacy-compat', key: expect.stringContaining('compat:') },
+      ]),
+    );
+    // Sanity the production symptom's premise: both identities DO resolve to the same ID.
+    expect(
+      resolveProjectForIdentity(registry, {
+        kind: 'local',
+        vendorKey: 'C--Users-NT-Desktop-stack',
+      }),
+    ).toEqual({ status: 'resolved', projectId: record?.projectId });
+    expect(
+      resolveProjectForIdentity(registry, gitProject('github.com/usestak/stak')),
+    ).toEqual({ status: 'resolved', projectId: record?.projectId });
+  });
+
+  it('B/C: fresh machine, no binding — a legacy-locator item follows the live Git checkout of the SAME reconciled Project', async () => {
+    const registry = reconciledRegistry('C--Users-NT-Desktop-stack', 'github.com/usestak/stak');
+    const stackHome = await seed([
+      {
+        project: gitProject('github.com/usestak/stak'),
+        rel: 'MEMORY.md',
+        body: 'canonical memory',
+      },
+      {
+        project: { kind: 'local', vendorKey: 'C--Users-NT-Desktop-stack' },
+        rel: 'pnpm-native-binary-fix.md',
+        body: 'legacy-only note',
+      },
+    ]);
+    const claudeHome = await tempDir('stack-ch-');
+    const stakDir = await tempDir('stak-checkout-');
+
+    const plan = await runMemoryRestore({
+      stackHome,
+      claudeHome,
+      apply: true,
+      registry, // reconciled, exactly as recovered from a portable snapshot
+      projects: [
+        { dir: stakDir, gitRemote: 'https://github.com/usestak/stak.git' },
+      ],
+      // NO binding at all — a genuinely fresh machine.
+    });
+    const byRel = Object.fromEntries(
+      plan.items.map((item) => [item.logicalId.split('/').pop(), item.status]),
+    );
+    expect(byRel['MEMORY.md']).toBe('restored');
+    // The actual regression: the legacy-locator item must follow the SAME reconciled
+    // Project to the SAME live directory, not strand as project-not-found.
+    expect(byRel['pnpm-native-binary-fix.md']).toBe('restored');
+    expect(
+      await readFile(
+        autoMemoryPath(claudeHome, stakDir, 'pnpm-native-binary-fix.md'),
+        'utf8',
+      ),
+    ).toBe('legacy-only note');
+  });
+
+  it('D: legacy and canonical entries with the SAME relative path and SAME content dedupe safely (one restored, the other identical — never a spurious conflict)', async () => {
+    const registry = reconciledRegistry('C--Users-NT-Desktop-stack', 'github.com/usestak/stak');
+    const stackHome = await seed([
+      {
+        project: gitProject('github.com/usestak/stak'),
+        rel: 'MEMORY.md',
+        body: 'same content either way',
+      },
+      {
+        project: { kind: 'local', vendorKey: 'C--Users-NT-Desktop-stack' },
+        rel: 'MEMORY.md',
+        body: 'same content either way',
+      },
+    ]);
+    const claudeHome = await tempDir('stack-ch-');
+    const stakDir = await tempDir('stak-checkout-');
+
+    const plan = await runMemoryRestore({
+      stackHome,
+      claudeHome,
+      apply: true,
+      registry,
+      projects: [
+        { dir: stakDir, gitRemote: 'https://github.com/usestak/stak.git' },
+      ],
+    });
+    const statuses = plan.items.map((item) => item.status).sort();
+    // One writes it, the other finds identical content already there — never a
+    // "conflict" for genuinely identical bytes, and never two separate writes.
+    expect(statuses).toEqual(['identical', 'restored']);
+    expect(
+      await readFile(autoMemoryPath(claudeHome, stakDir, 'MEMORY.md'), 'utf8'),
+    ).toBe('same content either way');
+  });
+
+  it('E: legacy and canonical entries with the SAME relative path but DIFFERENT content fail closed (never silently pick one)', async () => {
+    const registry = reconciledRegistry('C--Users-NT-Desktop-stack', 'github.com/usestak/stak');
+    const stackHome = await seed([
+      {
+        project: gitProject('github.com/usestak/stak'),
+        rel: 'MEMORY.md',
+        body: 'canonical version',
+      },
+      {
+        project: { kind: 'local', vendorKey: 'C--Users-NT-Desktop-stack' },
+        rel: 'MEMORY.md',
+        body: 'DIFFERENT legacy version',
+      },
+    ]);
+    const claudeHome = await tempDir('stack-ch-');
+    const stakDir = await tempDir('stak-checkout-');
+
+    const plan = await runMemoryRestore({
+      stackHome,
+      claudeHome,
+      apply: true,
+      registry,
+      projects: [
+        { dir: stakDir, gitRemote: 'https://github.com/usestak/stak.git' },
+      ],
+    });
+    const statuses = plan.items.map((item) => item.status).sort();
+    expect(statuses).toEqual(['conflict', 'restored']);
+    // Whichever one wrote first stands; the loser is reported, never silently dropped
+    // or overwritten.
+    const written = await readFile(
+      autoMemoryPath(claudeHome, stakDir, 'MEMORY.md'),
+      'utf8',
+    );
+    expect(['canonical version', 'DIFFERENT legacy version']).toContain(written);
+  });
+
+  it('F: a legacy-only relative path (no canonical duplicate) still restores to the reconciled Project target', async () => {
+    const registry = reconciledRegistry('C--Users-NT-Desktop-stack', 'github.com/usestak/stak');
+    const stackHome = await seed([
+      {
+        project: { kind: 'local', vendorKey: 'C--Users-NT-Desktop-stack' },
+        rel: 'legacy-only-file.md',
+        body: 'only ever captured locally',
+      },
+    ]);
+    const claudeHome = await tempDir('stack-ch-');
+    const stakDir = await tempDir('stak-checkout-');
+
+    const plan = await runMemoryRestore({
+      stackHome,
+      claudeHome,
+      apply: true,
+      registry,
+      projects: [
+        { dir: stakDir, gitRemote: 'https://github.com/usestak/stak.git' },
+      ],
+    });
+    expect(plan.items[0]?.status).toBe('restored');
+    expect(
+      await readFile(
+        autoMemoryPath(claudeHome, stakDir, 'legacy-only-file.md'),
+        'utf8',
+      ),
+    ).toBe('only ever captured locally');
+  });
+
+  it('G: with NO reconciliation at all, a legacy locator still never auto-resolves from path/name similarity (unchanged safety)', async () => {
+    const stackHome = await seed([
+      {
+        project: { kind: 'local', vendorKey: 'C--Users-NT-Desktop-stack' },
+        rel: 'note.md',
+        body: 'unreconciled',
+      },
+    ]);
+    const claudeHome = await tempDir('stack-ch-');
+    const stakDir = await tempDir('stak-checkout-');
+    const plan = await runMemoryRestore({
+      stackHome,
+      claudeHome,
+      apply: true,
+      registry: emptyRegistry(), // no reconciliation, no binding
+      projects: [
+        { dir: stakDir, gitRemote: 'https://github.com/usestak/stak.git' },
+      ],
+    });
+    expect(plan.items[0]?.status).toBe('project-not-found');
+  });
+
+  it('H: an UNRELATED local Project is never merged into an available Git Project just because both are "available"', async () => {
+    // Two genuinely distinct logical projects: one reconciled to a live Git checkout,
+    // one local-only and NOT reconciled with it. The second must stay unresolved —
+    // availability of the first must never bleed into the second.
+    const reconciled = reconciledRegistry(
+      'C--Users-NT-Desktop-stack',
+      'github.com/usestak/stak',
+    );
+    const unrelated = resolveOrMintProject(
+      reconciled,
+      { kind: 'local', vendorKey: 'C--Users-NT-Desktop-other-project' },
+      () => 'prj_unrelatedlocal00000000001',
+    ).registry;
+    expect(unrelated.projects).toHaveLength(2);
+
+    const stackHome = await seed([
+      {
+        project: { kind: 'local', vendorKey: 'C--Users-NT-Desktop-stack' },
+        rel: 'reconciled.md',
+        body: 'belongs to stak',
+      },
+      {
+        project: { kind: 'local', vendorKey: 'C--Users-NT-Desktop-other-project' },
+        rel: 'unrelated.md',
+        body: 'does not belong to stak',
+      },
+    ]);
+    const claudeHome = await tempDir('stack-ch-');
+    const stakDir = await tempDir('stak-checkout-');
+    const plan = await runMemoryRestore({
+      stackHome,
+      claudeHome,
+      apply: true,
+      registry: unrelated,
+      projects: [
+        { dir: stakDir, gitRemote: 'https://github.com/usestak/stak.git' },
+      ],
+    });
+    const byRel = Object.fromEntries(
+      plan.items.map((item) => [item.logicalId.split('/').pop(), item.status]),
+    );
+    expect(byRel['reconciled.md']).toBe('restored');
+    // The unrelated local project has no Git claim and no binding — stays unresolved.
+    expect(byRel['unrelated.md']).toBe('project-not-found');
   });
 });

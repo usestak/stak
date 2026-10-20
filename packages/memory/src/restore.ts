@@ -95,11 +95,20 @@ type DirResolution =
  *     logical project → identity-conflict; refuse (never silently merge).
  *  2. A GIT identity may auto-match a live candidate directory by canonical remote —
  *     path-independent, the behavior proven by the Atlas dogfood.
- *  3. Otherwise, only an explicit machine-local BINDING authorizes a destination.
+ *  3. If this identity's claim is reconciled (via the registry) to a stable logical
+ *     Project that is ALSO claimed by a live Git checkout on this machine right now,
+ *     restore follows that Project — e.g. a project first captured under a local path,
+ *     later strengthened to a Git remote (`syncRegistryForBackup`'s identity-
+ *     strengthening, which calls `adoptReconciledProjectId`), still has its historical
+ *     local-locator Memory items. This matches on PROVEN PROJECT IDENTITY (the SAME
+ *     reconciled Project ID), never on path or name similarity — an unrelated local
+ *     Project that merely happens to also be unresolved never qualifies.
+ *  4. Otherwise, only an explicit machine-local BINDING authorizes a destination.
  *
  * A legacy `local:` identity is NEVER matched by re-encoding a directory's path to its
- * vendor key: path reuse must not resurrect unrelated Memory. Legacy identities resolve
- * only through an explicit binding (`stack project map`).
+ * vendor key: path reuse must not resurrect unrelated Memory. An identity that was
+ * never reconciled to an available Git Project resolves only through an explicit
+ * binding (`stack project map`).
  */
 const resolveProjectDir = (
   identity: ProjectIdentity | undefined,
@@ -120,6 +129,16 @@ const resolveProjectDir = (
   }
 
   if (reg.status === 'resolved') {
+    const liveGitMatch = resolved.find((project) => {
+      if (project.identity.kind !== 'git') return false;
+      const candidateReg = resolveProjectForIdentity(registry, project.identity);
+      return (
+        candidateReg.status === 'resolved' &&
+        candidateReg.projectId === reg.projectId
+      );
+    });
+    if (liveGitMatch) return { dir: liveGitMatch.dir };
+
     const binding = bindingFor(registry, reg.projectId);
     if (binding) return { dir: path.resolve(binding.dir) };
   }
@@ -276,12 +295,20 @@ export const runMemoryRestore = async (
       applied.push(result);
       continue;
     }
-    // Re-check at apply time: never clobber a target that appeared meanwhile.
-    if ((await currentHash(result.targetPath)) !== null) {
-      applied.push({ ...result, status: 'conflict' });
+    const item = byId.get(result.logicalId);
+    // Re-check at apply time: a target that appeared meanwhile (including a different
+    // manifest item restored to the SAME target earlier in this very apply — e.g. a
+    // legacy-locator and a canonical-locator item reconciled to the same Project) is
+    // dedupe-safe when its content already matches this item's own expected hash;
+    // otherwise it is a genuine conflict and is never clobbered.
+    const existingHash = await currentHash(result.targetPath);
+    if (existingHash !== null) {
+      applied.push({
+        ...result,
+        status: item && existingHash === item.contentHash ? 'identical' : 'conflict',
+      });
       continue;
     }
-    const item = byId.get(result.logicalId);
     if (!item) {
       applied.push({ ...result, status: 'skipped' });
       continue;

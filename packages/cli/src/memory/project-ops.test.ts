@@ -6,16 +6,21 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ManifestItem, MemoryManifest } from '@stack/memory';
 import {
+  adoptReconciledProjectId,
+  emptyRegistry,
   encodeClaudeProjectKey,
   hashBytes,
   memoryStorePaths,
+  mintProjectId,
   nameHintFor,
   nameHintIsExplicit,
   planMemoryBackupComposition,
   readLocalRegistry,
   readPortableSnapshot,
+  resolveOrMintProject,
   runMemoryRestore,
   syncRegistryForBackup,
+  writeLocalRegistry,
   writeMemoryManifest,
   writeMemoryObject,
 } from '@stack/memory';
@@ -939,5 +944,73 @@ describe('applyRecoveredProjectNames (stak memory recover — Cloud-known names 
 
     const registry = await readLocalRegistry(stackHome);
     expect(nameHintFor(registry, id)).toBe('nexus');
+  });
+});
+
+describe('`stak project` and `stak memory restore` agree on Project ownership (restore identity fix)', () => {
+  it('a reconciled local+Git Project: listProjects counts both locators under one row AND restore recovers both', async () => {
+    const vendorKey = 'C--Users-NT-Desktop-stack';
+    const canonical = 'github.com/usestak/stak';
+    const stackHome = await seedWithObjects([
+      { project: gitProject(canonical), rel: 'MEMORY.md', body: 'canonical memory' },
+      {
+        project: { kind: 'local', vendorKey },
+        rel: 'pnpm-native-binary-fix.md',
+        body: 'legacy-only note',
+      },
+    ]);
+
+    // Build the registry the way the ORIGINAL machine's identity-strengthening
+    // (`syncRegistryForBackup`'s Local -> Git adoption) actually produces: one
+    // reconciled record carrying both claims.
+    const minted = resolveOrMintProject(
+      emptyRegistry(),
+      { kind: 'local', vendorKey },
+      mintProjectId,
+    );
+    const withGit = resolveOrMintProject(
+      minted.registry,
+      gitProject(canonical),
+      mintProjectId,
+    );
+    const reconciled = adoptReconciledProjectId(
+      withGit.registry,
+      minted.projectId,
+      withGit.projectId,
+    );
+    await writeLocalRegistry(stackHome, reconciled);
+
+    const stakDir = await tempDir('stak-checkout-');
+    const claudeHome = await tempDir('claude-');
+
+    const rows = await listProjects({
+      stackHome,
+      projects: [{ dir: stakDir, gitRemote: `https://${canonical}.git` }],
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.files).toBe(2);
+    expect(rows[0]?.availability).toBe('present');
+
+    const registry = await readLocalRegistry(stackHome);
+    const plan = await runMemoryRestore({
+      stackHome,
+      claudeHome,
+      apply: true,
+      registry,
+      projects: [{ dir: stakDir, gitRemote: `https://${canonical}.git` }],
+    });
+    // `stak project` says 2 files, available — restore must actually recover both,
+    // never strand the legacy-locator one as project-not-found.
+    expect(plan.items).toHaveLength(2);
+    expect(plan.items.map((item) => [item.logicalId, item.status])).toEqual([
+      [expect.stringContaining('MEMORY.md'), 'restored'],
+      [expect.stringContaining('pnpm-native-binary-fix.md'), 'restored'],
+    ]);
+    expect(
+      await readFile(
+        autoMemoryPath(claudeHome, stakDir, 'pnpm-native-binary-fix.md'),
+        'utf8',
+      ),
+    ).toBe('legacy-only note');
   });
 });
