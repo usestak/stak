@@ -217,7 +217,7 @@ const COMMAND_DETAILS: Record<string, CommandDetail> = {
       '`scan` is read-only discovery of portable Claude memory on this machine; changes nothing.',
       '`backup` copies allowlisted memory into STAK’s private store (read-only capture; native Claude files are never modified) and, when signed in, also uploads it to STAK Cloud. Commits the manifest last.',
       '`status` shows the last memory backup.',
-      '`recover` downloads the private memory store from STAK Cloud onto this machine (requires sign-in); this is the step that populates a fresh machine before `restore` has anything local to use.',
+      '`recover` downloads the private memory store from STAK Cloud onto this machine (requires sign-in). Use `recover` for explicit or history-based recovery, or when Memory is Protected; a fresh machine normally gets its Memory from `stak pull` instead.',
       '`restore` writes private memory into native agent Memory files. Local only — never talks to Cloud. Only writes absent targets; a differing existing target is reported as a conflict and left untouched (never merged).',
       '`protect` enables client-side encrypted (Protected) Cloud backup, optionally with a passkey or recovery file.',
       '`history` shows your Memory backup history (newest first).',
@@ -252,7 +252,7 @@ const COMMAND_DETAILS: Record<string, CommandDetail> = {
     ],
     examples: ['stak pull', 'stak pull --yes'],
     notes: [
-      'Restores `main`, Skills, and the latest staged private Memory generation. Reference reacquisition plus a private snapshot download, all verified, then an atomic commit. Does not change agent bindings.',
+      'Restores `main`, Skills, and the latest staged private Memory generation. Reference reacquisition plus a private snapshot download, all verified, then an atomic commit. Does not change agent bindings. Memory is restored on a machine with no local Memory yet; if local Memory already exists here, use `stak memory recover` instead.',
     ],
   },
   publish: {

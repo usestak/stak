@@ -76,8 +76,9 @@ Show the last memory backup.
 ### `stak memory recover [--backup <n>] [--passkey] [--recovery-file <path>] [--json]`
 
 Download the private memory store from STAK Cloud onto this machine (requires
-sign-in). This is the step that populates a fresh machine before `restore` has
-anything local to use.
+sign-in). Use `recover` for explicit or history-based recovery, or when Memory
+is Protected; a fresh machine normally gets its Memory from `stak pull`
+instead.
 
 ### `stak memory restore [--dry-run] [--json] [--verbose]`
 

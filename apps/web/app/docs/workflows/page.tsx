@@ -127,7 +127,9 @@ export default function DocsWorkflowsPage() {
         from STAK Cloud; <code>stak memory restore</code> then writes it into
         native agent Memory on this machine. Existing targets are never
         overwritten — a differing existing target is reported as a conflict and
-        left untouched.
+        left untouched. This is explicit, history-based recovery — not part of
+        the normal new-machine flow, which uses <code>stak pull</code> instead
+        (see below).
       </p>
       <pre>
         <code>{`stak memory recover\nstak memory restore`}</code>
