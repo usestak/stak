@@ -95,6 +95,15 @@ export type PendingCliAuthSessionView = {
   expiresAt: string;
 };
 
+export type ProductEvent = {
+  userId: string | null;
+  eventName: string;
+  machineId?: string;
+  success: boolean;
+  errorCode?: string;
+  metadata?: Record<string, unknown>;
+};
+
 export type CloudServiceConfig = {
   repository: CloudRepository & PublicStackRepository & UserStackRepository;
   blobStore: CloudBlobStore;
@@ -111,6 +120,10 @@ export type CloudServiceConfig = {
   memoryBackendFor?: (userId: string) => RemoteMemoryBackend;
   /** P3: injected Standard per-project Memory counts (absent ⇒ unavailable/null). */
   memoryProjectCounts?: MemoryProjectCounts;
+  /** Best-effort product analytics. A thrown/rejected call here must never
+   * affect the operation it's recording — see commitEnvironmentVersion and
+   * getEnvironment, which wrap every call in try/catch. Absent = no-op. */
+  recordEvent?: (event: ProductEvent) => Promise<void> | void;
 };
 
 export type CloudService = ReturnType<typeof createCloudService>;
@@ -126,6 +139,14 @@ export const createCloudService = (config: CloudServiceConfig) => {
   const maxSnapshotBytes =
     config.maxSnapshotBytes ?? DEFAULT_MAX_SNAPSHOT_BYTES;
   const appUrl = config.appUrl.replace(/\/+$/, '');
+
+  const recordEventSafely = async (event: ProductEvent): Promise<void> => {
+    try {
+      await config.recordEvent?.(event);
+    } catch (err) {
+      console.error('[product-events] recordEvent failed', err);
+    }
+  };
 
   /**
    * The one lazy-expiry date comparison, shared by {@link approveCliAuth} and

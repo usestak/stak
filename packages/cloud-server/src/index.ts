@@ -6,6 +6,7 @@ export {
   type CloudService,
   type CloudServiceConfig,
   type PendingCliAuthSessionView,
+  type ProductEvent,
 } from './service.js';
 export {
   createInMemoryRepository,
