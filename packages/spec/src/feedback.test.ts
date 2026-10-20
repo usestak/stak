@@ -55,6 +55,15 @@ describe('feedbackRequestSchema', () => {
     expect(result.success).toBe(false);
   });
 
+  it('rejects an email over 320 characters', () => {
+    const result = feedbackRequestSchema.safeParse({
+      type: 'other',
+      message: 'Something broke.',
+      email: `${'a'.repeat(309)}@example.com`,
+    });
+    expect(result.success).toBe(false);
+  });
+
   it('strips unknown fields rather than accepting arbitrary payload keys', () => {
     const result = feedbackRequestSchema.safeParse({
       type: 'idea',

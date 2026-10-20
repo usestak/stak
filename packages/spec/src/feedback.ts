@@ -10,7 +10,7 @@ export const feedbackRequestSchema = z.object({
   type: z.enum(['bug', 'confusing', 'idea', 'other']),
   message: z.string().min(1).max(4000),
   goal: z.string().max(2000).optional(),
-  email: z.string().email().optional(),
+  email: z.string().email().max(320).optional(),
   pageUrl: z.string().max(2048).optional(),
 });
 
