@@ -528,38 +528,61 @@ export const createCloudService = (config: CloudServiceConfig) => {
       user: AuthenticatedUser,
       name: string,
     ): Promise<GetEnvironmentResponse> => {
-      const environment = await config.repository.getEnvironmentByName(
-        user.userId,
-        name,
-      );
-      if (!environment)
-        throw notFound(
-          'remote-environment-not-found',
-          `No cloud Environment named ${name}.`,
+      try {
+        const environment = await config.repository.getEnvironmentByName(
+          user.userId,
+          name,
         );
-      if (!environment.latestVersionId)
-        return { environmentId: environment.environmentId, name, latest: null };
-      const version = await config.repository.getEnvironmentVersion(
-        environment.latestVersionId,
-      );
-      if (!version || version.userId !== user.userId)
-        throw notFound(
-          'remote-environment-not-found',
-          'Environment version is unavailable.',
+        if (!environment)
+          throw notFound(
+            'remote-environment-not-found',
+            `No cloud Environment named ${name}.`,
+          );
+        if (!environment.latestVersionId) {
+          await recordEventSafely({
+            userId: user.userId,
+            eventName: 'cloud.pull.succeeded',
+            success: true,
+          });
+          return { environmentId: environment.environmentId, name, latest: null };
+        }
+        const version = await config.repository.getEnvironmentVersion(
+          environment.latestVersionId,
         );
-      return {
-        environmentId: environment.environmentId,
-        name,
-        latest: {
-          version: {
-            versionId: version.versionId,
-            versionNumber: version.versionNumber,
-            digest: version.digest,
-            createdAt: version.createdAt,
+        if (!version || version.userId !== user.userId)
+          throw notFound(
+            'remote-environment-not-found',
+            'Environment version is unavailable.',
+          );
+        const response = {
+          environmentId: environment.environmentId,
+          name,
+          latest: {
+            version: {
+              versionId: version.versionId,
+              versionNumber: version.versionNumber,
+              digest: version.digest,
+              createdAt: version.createdAt,
+            },
+            bundle: version.bundle,
           },
-          bundle: version.bundle,
-        },
-      };
+        };
+        await recordEventSafely({
+          userId: user.userId,
+          eventName: 'cloud.pull.succeeded',
+          success: true,
+        });
+        return response;
+      } catch (error) {
+        await recordEventSafely({
+          userId: user.userId,
+          eventName: 'cloud.pull.failed',
+          success: false,
+          errorCode:
+            error instanceof CloudServiceError ? error.code : 'unknown-error',
+        });
+        throw error;
+      }
     },
 
     commitEnvironmentVersion: async (
@@ -572,66 +595,92 @@ export const createCloudService = (config: CloudServiceConfig) => {
         idempotencyKey?: string;
       },
     ): Promise<CommitEnvironmentVersionResponse> => {
-      if (input.bundle.environment.name !== name)
-        throw bundleInvalid(
-          `Bundle Environment name ${input.bundle.environment.name} does not match ${name}.`,
-        );
-      if (input.idempotencyKey) {
-        const existing = await config.repository.findVersionByIdempotencyKey(
-          user.userId,
-          input.idempotencyKey,
-        );
-        if (existing)
-          return {
-            environmentId: existing.environmentId,
-            name,
-            version: {
-              versionId: existing.versionId,
-              versionNumber: existing.versionNumber,
-              digest: existing.digest,
-              createdAt: existing.createdAt,
-            },
-            createdNew: false,
-          };
-      }
-      let outcome;
       try {
-        outcome = await config.repository.commitEnvironmentVersion({
-          userId: user.userId,
+        if (input.bundle.environment.name !== name)
+          throw bundleInvalid(
+            `Bundle Environment name ${input.bundle.environment.name} does not match ${name}.`,
+          );
+        if (input.idempotencyKey) {
+          const existing = await config.repository.findVersionByIdempotencyKey(
+            user.userId,
+            input.idempotencyKey,
+          );
+          if (existing) {
+            await recordEventSafely({
+              userId: user.userId,
+              eventName: 'cloud.push.succeeded',
+              success: true,
+              ...(input.machineId ? { machineId: input.machineId } : {}),
+            });
+            return {
+              environmentId: existing.environmentId,
+              name,
+              version: {
+                versionId: existing.versionId,
+                versionNumber: existing.versionNumber,
+                digest: existing.digest,
+                createdAt: existing.createdAt,
+              },
+              createdNew: false,
+            };
+          }
+        }
+        let outcome;
+        try {
+          outcome = await config.repository.commitEnvironmentVersion({
+            userId: user.userId,
+            name,
+            bundle: input.bundle,
+            digest: input.bundle.digest,
+            expectedLatestVersionId: input.expectedLatestVersionId,
+            ...(input.machineId ? { machineId: input.machineId } : {}),
+            ...(input.idempotencyKey
+              ? { idempotencyKey: input.idempotencyKey }
+              : {}),
+            ids: { environmentId: newId(), versionId: newId() },
+            now: nowIso(),
+          });
+        } catch (error) {
+          if (error instanceof RemoteConflict)
+            throw remoteConflict(error.message);
+          throw error;
+        }
+        if (input.machineId)
+          await config.repository.upsertMachine({
+            userId: user.userId,
+            machineId: input.machineId,
+            firstSeenAt: nowIso(),
+            lastSyncedAt: nowIso(),
+          });
+        const response = {
+          environmentId: outcome.environment.environmentId,
           name,
-          bundle: input.bundle,
-          digest: input.bundle.digest,
-          expectedLatestVersionId: input.expectedLatestVersionId,
+          version: {
+            versionId: outcome.version.versionId,
+            versionNumber: outcome.version.versionNumber,
+            digest: outcome.version.digest,
+            createdAt: outcome.version.createdAt,
+          },
+          createdNew: outcome.createdNew,
+        };
+        await recordEventSafely({
+          userId: user.userId,
+          eventName: 'cloud.push.succeeded',
+          success: true,
           ...(input.machineId ? { machineId: input.machineId } : {}),
-          ...(input.idempotencyKey
-            ? { idempotencyKey: input.idempotencyKey }
-            : {}),
-          ids: { environmentId: newId(), versionId: newId() },
-          now: nowIso(),
         });
+        return response;
       } catch (error) {
-        if (error instanceof RemoteConflict)
-          throw remoteConflict(error.message);
+        await recordEventSafely({
+          userId: user.userId,
+          eventName: 'cloud.push.failed',
+          success: false,
+          errorCode:
+            error instanceof CloudServiceError ? error.code : 'unknown-error',
+          ...(input.machineId ? { machineId: input.machineId } : {}),
+        });
         throw error;
       }
-      if (input.machineId)
-        await config.repository.upsertMachine({
-          userId: user.userId,
-          machineId: input.machineId,
-          firstSeenAt: nowIso(),
-          lastSyncedAt: nowIso(),
-        });
-      return {
-        environmentId: outcome.environment.environmentId,
-        name,
-        version: {
-          versionId: outcome.version.versionId,
-          versionNumber: outcome.version.versionNumber,
-          digest: outcome.version.digest,
-          createdAt: outcome.version.createdAt,
-        },
-        createdNew: outcome.createdNew,
-      };
     },
 
     prepareSnapshot: async (
