@@ -112,6 +112,7 @@ import {
   pushStagedMemory,
   readBackupSupersession,
   readMemoryCloudStatus,
+  resolveMemoryPushState,
   runMemoryCloudBackup,
   runMemoryCloudProtect,
   runMemoryCloudRecover,
@@ -892,10 +893,17 @@ const defaultDependencies: ProgramDependencies = {
         }
       : { blocked: false };
   },
+  // `stak push` means "synchronize MAIN to Cloud" — if staged MAIN already equals the
+  // latest Cloud generation, this must be a no-op: it never creates another immutable
+  // generation containing identical state (unlike the explicit `stak memory backup`,
+  // which intentionally always creates one — see `memoryCloudBackup` below, unchanged).
   applyMemoryPush: async () => {
-    if (!(await readMemoryManifest(stackHome)))
-      return { status: 'nothing-staged' };
-    return pushStagedMemory(await buildMemoryCloudDeps());
+    const deps = await buildMemoryCloudDeps();
+    const state = await resolveMemoryPushState(deps);
+    if (state.status === 'nothing-staged') return { status: 'nothing-staged' };
+    if (state.status === 'already-up-to-date')
+      return { status: 'up-to-date', generation: state.generation };
+    return pushStagedMemory(deps);
   },
   // Unified pull (P3): Memory only auto-recovers on a genuinely fresh machine (no local
   // manifest yet) — an established machine's Memory is never silently overwritten here;

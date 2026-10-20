@@ -64,7 +64,7 @@ describe('renderCombinedPushResult', () => {
     expect(output).not.toContain('Push complete.');
   });
 
-  it('tells the user to `stak add .` when nothing is staged yet, and still calls it complete', () => {
+  it('tells the user to `stak add .` when nothing is staged yet — a total no-op says "Nothing to push.", not "Push complete."', () => {
     const skill: PushSkillOutcome = { status: 'noop' };
     const memory: PushMemoryOutcome = {
       status: 'applied',
@@ -73,7 +73,41 @@ describe('renderCombinedPushResult', () => {
     const output = renderCombinedPushResult(skill, memory);
     expect(output).toContain('nothing staged yet');
     expect(output).toContain('stak add .');
+    expect(output).toContain('Nothing to push.');
+    expect(output).not.toContain('Push complete.');
+  });
+
+  it('reports Memory already up to date without claiming a new generation was created', () => {
+    const skill: PushSkillOutcome = { status: 'noop' };
+    const memory: PushMemoryOutcome = {
+      status: 'applied',
+      outcome: { status: 'up-to-date', generation: 6 },
+    };
+    const output = renderCombinedPushResult(skill, memory);
+    expect(output).toContain('already up to date (generation 6)');
+    expect(output).not.toContain('synced to Cloud (generation 6)');
+    expect(output).toContain('Nothing to push.');
+  });
+
+  it('says "Push complete." (not "Nothing to push.") when Skills actually changed even if Memory was already up to date', () => {
+    const skill: PushSkillOutcome = {
+      status: 'applied',
+      result: {
+        environment: 'main',
+        versionId: '00000000-0000-4000-8000-000000000001',
+        versionNumber: 2,
+        digest: `sha256:${'a'.repeat(64)}`,
+        createdNew: false,
+        uploaded: 1,
+      },
+    };
+    const memory: PushMemoryOutcome = {
+      status: 'applied',
+      outcome: { status: 'up-to-date', generation: 6 },
+    };
+    const output = renderCombinedPushResult(skill, memory);
     expect(output).toContain('Push complete.');
+    expect(output).not.toContain('Nothing to push.');
   });
 });
 

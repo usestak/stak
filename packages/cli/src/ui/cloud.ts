@@ -373,7 +373,12 @@ export type PushSkillOutcome =
 /** What `applyMemoryPush` can return: a real Cloud attempt, or "nothing is staged yet"
  * (no local Memory manifest — `stak add .` has never run) — distinct from `skipped`
  * (not signed in), since the fix is different (`stak add .` vs. `stak login`). */
-export type MemoryPushOutcome = CloudBackupOutcome | { status: 'nothing-staged' };
+export type MemoryPushOutcome =
+  | CloudBackupOutcome
+  | { status: 'nothing-staged' }
+  /** Staged MAIN already equals the latest Cloud generation — no generation was
+   * created. `stak push` is a sync operation, not "always make another backup". */
+  | { status: 'up-to-date'; generation: number };
 
 export type PushMemoryOutcome =
   | { status: 'not-attempted' }
@@ -388,6 +393,20 @@ export const pushFailed = (
   skill.status === 'failed' ||
   memory.status === 'failed' ||
   (memory.status === 'applied' && memory.outcome.status === 'failed');
+
+/** True when NEITHER domain changed anything — no Skill version and no Memory
+ * generation were created. "Push complete." would overclaim; say "Nothing to push." */
+export const pushWasNoop = (
+  skill: PushSkillOutcome,
+  memory: PushMemoryOutcome,
+): boolean =>
+  skill.status === 'noop' &&
+  (memory.status === 'not-attempted' ||
+    (memory.status === 'applied' &&
+      (memory.outcome.status === 'nothing-staged' ||
+        memory.outcome.status === 'up-to-date' ||
+        memory.outcome.status === 'skipped' ||
+        memory.outcome.status === 'protected-locked')));
 
 export const renderCombinedPushResult = (
   skill: PushSkillOutcome,
@@ -411,6 +430,8 @@ export const renderCombinedPushResult = (
     const outcome = memory.outcome;
     if (outcome.status === 'nothing-staged')
       lines.push('  nothing staged yet — run `stak add .` to stage Memory changes.');
+    else if (outcome.status === 'up-to-date')
+      lines.push(`  already up to date (generation ${outcome.generation}).`);
     else if (outcome.status === 'skipped')
       lines.push('  staged locally (sign in to sync Memory to Cloud).');
     else if (outcome.status === 'protected-locked')
@@ -423,7 +444,11 @@ export const renderCombinedPushResult = (
   }
   lines.push(
     '',
-    pushFailed(skill, memory) ? 'Push did not fully succeed.' : 'Push complete.',
+    pushFailed(skill, memory)
+      ? 'Push did not fully succeed.'
+      : pushWasNoop(skill, memory)
+        ? 'Nothing to push.'
+        : 'Push complete.',
   );
   return `${lines.join('\n')}\n`;
 };

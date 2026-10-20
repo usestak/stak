@@ -25,6 +25,16 @@ export const localRecoveryStateSchema = z.object({
   cloudLatestAtRecovery: z.number().int().nonnegative().nullable(),
   recoveredAt: z.iso.datetime({ offset: true }),
   privacyMode: z.enum(['standard', 'protected']),
+  /**
+   * Semantic digest (hash of the canonical, PRE-ENCRYPTION bundle bytes `bundleFromStore`
+   * produces) of the staged Memory state that now corresponds to `recoveredGeneration`.
+   * Lets a later `stak push` detect "staged content is unchanged since the last push" —
+   * essential for Protected mode, where the uploaded ciphertext is randomized per backup
+   * and can never be compared directly. Optional for backward compatibility with state
+   * written before this field existed; its absence just means that optimization can't be
+   * made (callers must not treat it as "unchanged").
+   */
+  semanticDigest: z.string().optional(),
 });
 export type LocalRecoveryState = z.infer<typeof localRecoveryStateSchema>;
 

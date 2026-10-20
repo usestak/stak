@@ -16,13 +16,16 @@
  */
 import { applyRecoveredProjectNames } from './project-ops.js';
 import {
+  BundleError,
   CIPHER_VERSION,
   addRecoveryFileWrapper,
   asBridgeFailure,
+  bundleFromStore,
   cloudRecover,
   createRecoverySession,
   LocalKeyStoreError,
   generateMmk,
+  hashBytes,
   migrateStandardToProtected,
   newKeyring,
   openMmkFromEnvelope,
@@ -128,6 +131,9 @@ const recordRecoveryProvenance = async (
     generation: number;
     privacyMode: 'standard' | 'protected';
     cloudLatest: number | null;
+    /** The staged state's semantic digest at the moment it reached this generation —
+     * lets a later push detect "nothing changed" (see `resolveMemoryPushState`). */
+    semanticDigest?: string;
   },
 ): Promise<void> => {
   await writeLocalRecoveryState(deps.stackHome, {
@@ -136,7 +142,29 @@ const recordRecoveryProvenance = async (
     cloudLatestAtRecovery: recovered.cloudLatest,
     recoveredAt: (deps.now ?? (() => new Date()))().toISOString(),
     privacyMode: recovered.privacyMode,
+    ...(recovered.semanticDigest
+      ? { semanticDigest: recovered.semanticDigest }
+      : {}),
   });
+};
+
+/**
+ * Hash of the canonical, PRE-ENCRYPTION bundle `bundleFromStore` would produce right
+ * now from the staged local manifest/content store/portable registry snapshot —
+ * identical staged state always hashes identically, regardless of Protected mode's
+ * per-upload randomized ciphertext. Null when nothing is staged yet (no local
+ * manifest). Read-only: never mutates the store.
+ */
+const computeSemanticDigest = async (
+  stackHome: string,
+): Promise<string | null> => {
+  try {
+    const { bytes } = await bundleFromStore(stackHome);
+    return hashBytes(bytes);
+  } catch (error) {
+    if (error instanceof BundleError && error.code === 'no-backup') return null;
+    throw error;
+  }
 };
 
 /**
@@ -171,6 +199,7 @@ export const pushStagedMemory = async (
 ): Promise<CloudBackupOutcome> => {
   if (!deps.backend) return { status: 'skipped' };
   try {
+    const semanticDigest = await computeSemanticDigest(deps.stackHome);
     const profile = await deps.backend.getProfile();
     const mode = profile?.privacyMode ?? 'standard';
     if (mode === 'protected') {
@@ -188,6 +217,7 @@ export const pushStagedMemory = async (
         generation: result.generation,
         privacyMode: 'protected',
         cloudLatest: result.generation,
+        ...(semanticDigest ? { semanticDigest } : {}),
       });
       return { status: 'protected', generation: result.generation };
     }
@@ -200,11 +230,57 @@ export const pushStagedMemory = async (
       generation: result.generation,
       privacyMode: 'standard',
       cloudLatest: result.generation,
+      ...(semanticDigest ? { semanticDigest } : {}),
     });
     return { status: 'standard', generation: result.generation };
   } catch (error) {
     return { status: 'failed', message: errorMessage(error) };
   }
+};
+
+export type MemoryPushState =
+  | { status: 'nothing-staged' }
+  | { status: 'no-remote-backup' }
+  | { status: 'already-up-to-date'; generation: number }
+  | { status: 'needs-push' };
+
+/**
+ * Whether the top-level `stak push` actually needs to create a new Memory generation.
+ * `stak push` means "synchronize MAIN to Cloud" — if staged MAIN already equals the
+ * latest Cloud generation, pushing again must be a no-op, never another immutable
+ * generation containing identical state. (`stak memory backup` is a different,
+ * explicit command and keeps its own "always create a generation" behavior — this
+ * function is not used there.)
+ *
+ * Equality is decided from STAGED state only (the local manifest + content store +
+ * portable Project registry snapshot `bundleFromStore` bundles) — native/machine
+ * state the user hasn't `stak add .`-ed is irrelevant, by design.
+ *
+ * - Standard mode: compares the local semantic digest directly against the latest
+ *   generation's own `payloadSha256` (Standard's uploaded payload IS the plaintext
+ *   bundle) — correct even across machines, no local cache needed.
+ * - Protected mode: the uploaded payload is randomized ciphertext, so the ONLY stable
+ *   comparison is against the semantic digest this same machine recorded the last
+ *   time IT pushed (`local-recovery-state.ts`) — valid only when that local record's
+ *   generation still matches Cloud's actual latest (nothing moved underneath it).
+ */
+export const resolveMemoryPushState = async (
+  deps: MemoryCloudDeps,
+): Promise<MemoryPushState> => {
+  const semanticDigest = await computeSemanticDigest(deps.stackHome);
+  if (semanticDigest === null) return { status: 'nothing-staged' };
+  if (!deps.backend) return { status: 'no-remote-backup' };
+  const latest = await deps.backend.getLatest();
+  if (!latest) return { status: 'no-remote-backup' };
+  if (latest.privacyMode === 'standard')
+    return semanticDigest === latest.payloadSha256
+      ? { status: 'already-up-to-date', generation: latest.generation }
+      : { status: 'needs-push' };
+  const local = await readLocalRecoveryState(deps.stackHome);
+  return local?.recoveredGeneration === latest.generation &&
+    local.semanticDigest === semanticDigest
+    ? { status: 'already-up-to-date', generation: latest.generation }
+    : { status: 'needs-push' };
 };
 
 /** backup: local first, then Cloud (never fails the local commit). */

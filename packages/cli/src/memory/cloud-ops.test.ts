@@ -8,16 +8,21 @@ import {
   InMemoryRemoteMemoryStore,
   emptyRegistry,
   fileLocalMemoryKeyStore,
+  generateMmk,
   generateRecoveryKey,
   hashBytes,
   inMemoryRemoteMemoryBackend,
   memoryStorePaths,
+  mintProjectId,
   readMemoryManifest,
   readMemoryObject,
   resolveOrMintProject,
   runMemoryBackup,
+  setBinding,
+  writeLocalRegistry,
   writeMemoryManifest,
   writeMemoryObject,
+  writePortableSnapshot,
   type BackupResult,
   type DiscoveredMemoryItem,
   type ManifestItem,
@@ -28,6 +33,7 @@ import {
   freshRegistryRisksDuplication,
   pushStagedMemory,
   readMemoryCloudStatus,
+  resolveMemoryPushState,
   runMemoryCloudBackup,
   runMemoryCloudProtect,
   runMemoryCloudRecover,
@@ -391,6 +397,271 @@ describe('memory cloud operations', () => {
     expect(await keys.hasKey()).toBe(false);
     // The Standard backup remains usable.
     expect((await backend.getLatest())?.privacyMode).toBe('standard');
+  });
+});
+
+describe('resolveMemoryPushState — top-level push must not create duplicate Memory generations', () => {
+  // Realistic regression coverage for a real production bug: repeatedly running the
+  // top-level `stak push` with nothing staged created a new immutable Cloud generation
+  // every time. Real `runMemoryBackup`/local manifest/content store, a real in-memory
+  // Cloud backend fake — nothing here is a mocked CLI dependency.
+
+  it('A: initial push — no remote backup exists yet', async () => {
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-push-state-keys-'));
+    const state = await resolveMemoryPushState({
+      stackHome: source.stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    });
+    expect(state).toEqual({ status: 'no-remote-backup' });
+  });
+
+  it('B: clean push — MAIN already matches the latest Cloud generation (Standard mode)', async () => {
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-push-state-keys-'));
+    const deps = {
+      stackHome: source.stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    };
+    const first = await pushStagedMemory(deps);
+    expect(first.status).toBe('standard');
+
+    const state = await resolveMemoryPushState(deps);
+    expect(state).toEqual({ status: 'already-up-to-date', generation: 0 });
+
+    // The actual regression: pushing again when already up to date must create NO
+    // generation at all.
+    expect(await backend.getLatest()).toMatchObject({ generation: 0 });
+  });
+
+  it('C: unstaged MACHINE change is irrelevant — MAIN/Cloud equality alone decides', async () => {
+    // This models the exact production sequence: MAIN and Cloud both hold A; a native
+    // machine file changes to B, but nothing re-stages it (no `add .`/runMemoryBackup
+    // call here). resolveMemoryPushState must still say already-up-to-date because it
+    // only ever looks at the STAGED manifest/store, never native/machine state.
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-push-state-keys-'));
+    const deps = {
+      stackHome: source.stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    };
+    await pushStagedMemory(deps);
+
+    const state = await resolveMemoryPushState(deps);
+    expect(state).toEqual({ status: 'already-up-to-date', generation: 0 });
+    expect(await backend.getLatest()).toMatchObject({ generation: 0 });
+  });
+
+  it('D: a genuinely staged change needs a push', async () => {
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-push-state-keys-'));
+    const deps = {
+      stackHome: source.stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    };
+    await pushStagedMemory(deps);
+
+    // Genuinely re-stage different content (a real `add .`/runMemoryBackup call).
+    const newBody = Buffer.from('# a brand new staged file\n', 'utf8');
+    const newHash = hashBytes(newBody);
+    await writeMemoryObject({
+      stackHome: source.stackHome,
+      contentHash: newHash,
+      bytes: newBody,
+    });
+    const manifest = await readMemoryManifest(source.stackHome);
+    if (!manifest) throw new Error('expected a staged manifest');
+    await writeMemoryManifest({
+      stackHome: source.stackHome,
+      manifest: {
+        ...manifest,
+        items: [
+          ...manifest.items,
+          {
+            provider: 'claude',
+            kind: 'auto-memory',
+            scope: 'global',
+            logicalId: 'claude/auto-memory/new-file.md',
+            contentHash: newHash,
+            restoreTarget: { base: 'claude-home', relativePath: 'new-file.md' },
+            capturedAt: '2026-09-25T12:00:00.000Z',
+            sensitivity: 'private',
+          },
+        ],
+      },
+    });
+
+    const state = await resolveMemoryPushState(deps);
+    expect(state).toEqual({ status: 'needs-push' });
+
+    const second = await pushStagedMemory(deps);
+    expect(second).toMatchObject({ status: 'standard', generation: 1 });
+  });
+
+  it('E: second clean push after a real staged change still creates no further generation', async () => {
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-push-state-keys-'));
+    const deps = {
+      stackHome: source.stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    };
+    await pushStagedMemory(deps); // generation 1
+
+    const newBody = Buffer.from('# second file\n', 'utf8');
+    const newHash = hashBytes(newBody);
+    await writeMemoryObject({
+      stackHome: source.stackHome,
+      contentHash: newHash,
+      bytes: newBody,
+    });
+    const manifest = await readMemoryManifest(source.stackHome);
+    if (!manifest) throw new Error('expected a staged manifest');
+    await writeMemoryManifest({
+      stackHome: source.stackHome,
+      manifest: {
+        ...manifest,
+        items: [
+          ...manifest.items,
+          {
+            provider: 'claude',
+            kind: 'auto-memory',
+            scope: 'global',
+            logicalId: 'claude/auto-memory/second-file.md',
+            contentHash: newHash,
+            restoreTarget: { base: 'claude-home', relativePath: 'second-file.md' },
+            capturedAt: '2026-09-25T12:00:00.000Z',
+            sensitivity: 'private',
+          },
+        ],
+      },
+    });
+    await pushStagedMemory(deps); // generation 2
+
+    const state = await resolveMemoryPushState(deps);
+    expect(state).toEqual({ status: 'already-up-to-date', generation: 1 });
+  });
+
+  it('F: a portable Project-only change (Memory files unchanged) still needs a push', async () => {
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-push-state-keys-'));
+    const deps = {
+      stackHome: source.stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    };
+    await pushStagedMemory(deps); // generation 1, no registry snapshot yet
+    expect(await resolveMemoryPushState(deps)).toEqual({
+      status: 'already-up-to-date',
+      generation: 0,
+    });
+
+    // Stage a portable Project change — no Memory file changed at all.
+    await writePortableSnapshot(source.stackHome, {
+      snapshotVersion: 1,
+      projects: [
+        {
+          projectId: mintProjectId(),
+          claims: [{ type: 'legacy-compat' as const, key: 'test-project' }],
+          lifecycle: 'active' as const,
+        },
+      ],
+    });
+
+    expect(await resolveMemoryPushState(deps)).toEqual({ status: 'needs-push' });
+    const second = await pushStagedMemory(deps);
+    expect(second).toMatchObject({ status: 'standard', generation: 1 });
+    expect(await resolveMemoryPushState(deps)).toEqual({
+      status: 'already-up-to-date',
+      generation: 1,
+    });
+  });
+
+  it('G: a machine-binding-only change (portable state unchanged) must stay up to date', async () => {
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-push-state-keys-'));
+    const deps = {
+      stackHome: source.stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    };
+    await pushStagedMemory(deps);
+
+    // A machine-local binding change is never part of the portable bundle at all —
+    // write it via the local (non-portable) registry, never the portable snapshot.
+    const projectId = mintProjectId();
+    const registry = resolveOrMintProject(
+      emptyRegistry(),
+      { kind: 'local', vendorKey: 'C--Users-dev-some-project' },
+      () => projectId,
+    ).registry;
+    await writeLocalRegistry(
+      source.stackHome,
+      setBinding(registry, {
+        projectId,
+        dir: 'C:/Users/dev/some-project',
+        boundAt: '2026-09-25T12:00:00.000Z',
+        provenance: 'user-map',
+      }),
+    );
+
+    expect(await resolveMemoryPushState(deps)).toEqual({
+      status: 'already-up-to-date',
+      generation: 0,
+    });
+  });
+
+  it('H: Protected mode — pushing identical staged state twice is a no-op despite randomized encryption', async () => {
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-push-state-keys-'));
+    // Protected from the start: set the account's privacy mode directly and enroll
+    // this device's MMK, skipping the (unrelated) Standard-to-Protected migration flow.
+    await backend.ensureProfile('v1');
+    await backend.setPrivacyMode('protected');
+    await keys.saveMmk(generateMmk());
+    const deps = {
+      stackHome: source.stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    };
+
+    const first = await pushStagedMemory(deps);
+    expect(first.status).toBe('protected');
+    const firstGeneration = first.status === 'protected' ? first.generation : -1;
+
+    // Pushing the exact same staged state again must be a no-op, even though each
+    // Protected upload is independently encrypted (fresh nonce/DEK every time).
+    const state = await resolveMemoryPushState(deps);
+    expect(state).toEqual({ status: 'already-up-to-date', generation: firstGeneration });
+    expect(await backend.getLatest()).toMatchObject({ generation: firstGeneration });
   });
 });
 

@@ -1645,6 +1645,17 @@ describe('STAK CLI', () => {
     expect(cloudApplyPush).not.toHaveBeenCalled();
   });
 
+  it('a fully clean push (Skills and Memory both already up to date) says "Nothing to push.", never claims a new Memory generation', async () => {
+    const result = await runProgram(['push', '--yes'], {
+      cloudPreparePush: async () => ({ ...basePushPlan, noop: true }),
+      applyMemoryPush: async () => ({ status: 'up-to-date', generation: 7 }),
+    });
+    expect(result.output).toContain('already up to date (generation 7)');
+    expect(result.output).not.toContain('synced to Cloud (generation 7)');
+    expect(result.output).toContain('Nothing to push.');
+    expect(result.output).not.toContain('Push complete.');
+  });
+
   it('push reports a partial failure clearly and never claims success', async () => {
     const chunks: string[] = [];
     await expect(
