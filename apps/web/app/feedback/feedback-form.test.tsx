@@ -49,14 +49,6 @@ describe('FeedbackForm', () => {
     });
   });
 
-  it('shows the privacy note about credentials and secrets', () => {
-    const { container } = render(<FeedbackForm />);
-    const privacyNote = container.querySelector('p:last-of-type');
-    expect(privacyNote?.textContent).toBe(
-      "Please don't include credentials, secrets, or private Memory content.",
-    );
-  });
-
   it('has the correct label for the message field', () => {
     const { container } = render(<FeedbackForm />);
     const label = container.querySelector('label[for="feedback-message"]');

@@ -109,11 +109,6 @@ export function FeedbackForm() {
         />
       </div>
 
-      <p className="stak-feedback-privacy">
-        Please don&apos;t include credentials, secrets, or private Memory
-        content.
-      </p>
-
       <button
         type="submit"
         className="stak-feedback-submit"

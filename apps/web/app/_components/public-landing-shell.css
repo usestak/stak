@@ -1859,18 +1859,13 @@
   outline-offset: 1px;
   border-color: var(--orange);
 }
-.stak-feedback-privacy {
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--faint);
-  margin: 22px 0;
-}
 .stak-feedback-submit {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-height: 46px;
   width: 100%;
+  margin-top: 6px;
   border: 0;
   border-radius: 8px;
   background: var(--ink);
