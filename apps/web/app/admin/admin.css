@@ -1,0 +1,69 @@
+/* apps/web/app/admin/admin.css
+ * Extends the existing .stak dark instrument-panel theme (see
+ * app/overview/shell.css) for the internal admin surface. Reuses the same
+ * token values so the admin dashboard reads as the same product, not a
+ * bolted-on tool.
+ */
+.stak-admin {
+  --bg: #121211;
+  --panel: #0e0e0d;
+  --ink: #edeae3;
+  --muted: #c9c5bc;
+  --line: #232220;
+  --chip: #34332f;
+  --orange: #ee7a3b;
+  --green: #84cb8e;
+  --amber: #e5b85c;
+  --red: #e5776a;
+
+  display: flex;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+}
+
+.stak-admin-sidebar {
+  width: 216px;
+  flex-shrink: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  padding: 24px 16px;
+}
+
+.stak-admin-nav-link {
+  display: block;
+  padding: 8px 12px;
+  margin-bottom: 4px;
+  border-radius: 6px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.stak-admin-nav-link.is-active {
+  background: var(--chip);
+  color: var(--ink);
+}
+
+.stak-admin-nav-link:hover {
+  color: var(--ink);
+}
+
+.stak-admin-main {
+  flex: 1;
+  padding: 32px;
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .stak-admin {
+    flex-direction: column;
+  }
+
+  .stak-admin-sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+}
