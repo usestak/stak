@@ -873,6 +873,125 @@ git commit -m "feat(web): landing page public beta pill and git-like workflow st
 
 ---
 
+## Task 6b: Hero scroll-story data — fix stale workflow narrated in `landing-scroll-story.tsx`
+
+**Discovered during Task 6's implementation (not in the original audit):** `apps/web/app/_components/landing-scroll-story.tsx`'s `STEPS` array drives the hero's pinned Windows → STAK → macOS scroll animation and independently narrates the OLD workflow — `stak scan` as the lead command, `stak push\nstak memory backup` paired as one step, and `stak login\nstak pull\nstak memory recover` as one step. This violates the same locked constraints Task 6 fixed in the static sections below the hero. `public-landing-shell.tsx` (Task 6) does not render this data — it's a separate component — so Task 6's own diff could not have fixed it.
+
+**Files:**
+- Modify: `apps/web/app/_components/landing-scroll-story.tsx` (only the `STEPS` array's `cmd`/`cap`/`sub` string literals — do not touch the scroll-scrubbing/rendering logic around it)
+
+**Interfaces:**
+- No exported signature changes — `STEPS: Step[]` keeps its existing `[machine, cmd, output, cap, sub]` tuple shape and length (7 entries).
+
+- [ ] **Step 1: Replace the `STEPS` array's command/caption text for steps 1, 3, and 5 (indices 0, 2, 4)**
+
+Current (lines ~181-213):
+```tsx
+const STEPS: Step[] = [
+  [
+    'Windows',
+    'stak scan',
+    '',
+    'Your agent setup starts on Windows.',
+    'Skills, Memory and local setup accumulate as you work.',
+  ],
+  ['Windows', 'stak status', '', 'STAK makes the portable parts visible.', ''],
+  [
+    'Windows',
+    'stak push\nstak memory backup',
+    '',
+    'You choose what goes to STAK Cloud, and when.',
+    'Your STAK and Memory move only when you tell STAK to move them.',
+  ],
+  [
+    'Windows',
+    'stak skill check review-pr',
+    '',
+    'Check a Skill locally. Review the update on the web.',
+    '',
+  ],
+  [
+    'macOS',
+    'stak login\nstak pull\nstak memory recover',
+    '',
+    'On macOS, pull your STAK and recover your Memory.',
+    '',
+  ],
+  [
+    'macOS',
+    'stak memory restore',
+    '',
+    'Restore Memory into the agents that use it.',
+    'Recover brings the backup to this machine. Restore puts it back into native agent Memory.',
+  ],
+  // ... step 7 comment + entry unchanged ...
+];
+```
+
+Replace with:
+```tsx
+const STEPS: Step[] = [
+  [
+    'Windows',
+    'stak status',
+    '',
+    'Your agent setup starts on Windows.',
+    'Skills, Memory and local setup accumulate as you work.',
+  ],
+  [
+    'Windows',
+    'stak add .',
+    '',
+    'Choose what belongs in main.',
+    '',
+  ],
+  [
+    'Windows',
+    'stak push',
+    '',
+    'Sync it to STAK Cloud.',
+    'Your STAK and Memory move only when you tell STAK to move them.',
+  ],
+  [
+    'Windows',
+    'stak skill check review-pr',
+    '',
+    'Check a Skill locally. Review the update on the web.',
+    '',
+  ],
+  [
+    'macOS',
+    'stak login\nstak pull',
+    '',
+    'On macOS, pull your STAK — Skills, main, and your latest staged Memory come with it.',
+    '',
+  ],
+  [
+    'macOS',
+    'stak project\nstak memory restore',
+    '',
+    'Restore Memory into the agents that use it.',
+    'Pull already brought Memory down — restore writes it into native agent Memory on this machine.',
+  ],
+  // ... step 7 comment + entry unchanged (stak run claude) ...
+];
+```
+Leave the 7th entry (`stak run claude`) and its preceding comment exactly as-is — only entries 1, 2, 3, and 5, 6 (1-indexed) change. Entry 4 (`stak skill check review-pr`) is unchanged.
+
+- [ ] **Step 2: Run the full landing shell test file** (there is no dedicated test file for this component; `public-landing-shell.test.tsx` renders `<ScrollStory />` as part of the page)
+
+Run: `pnpm --filter @stack/web test -- public-landing-shell`
+Expected: PASS — confirm no existing assertion was asserting the old step text (if one was, update it to the new text, don't weaken it).
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add apps/web/app/_components/landing-scroll-story.tsx
+git commit -m "fix(web): update hero scroll-story steps to the git-like beta workflow"
+```
+
+---
+
 ## Task 7: Docs — getting started, workflows, memory pages
 
 **Files:**
@@ -1205,6 +1324,152 @@ Read it in full first (it already uses the newer workflow per the earlier audit 
 git add README.md packages/cli/README.md
 git commit -m "docs: update README install commands and workflow for public beta"
 ```
+
+---
+
+## Task 10b: Fix stale "not yet published to npm" contradiction in `packages/cli/README.md`
+
+**Discovered during Task 10's review:** `packages/cli/README.md:12-15` still reads:
+```markdown
+> **Status: 0.1.0 release candidate.** This package is not yet published to npm.
+> Until the public 0.1.0 release, install from source — see the repository.
+
+## Install (after 0.1.0 is published)
+```
+directly above a real, working `npm install -g @memstk/cli@beta` command (added by Task 10). This directly contradicts the Public Beta's self-serve goal — a new reader is told in one breath the package isn't published and to install from source, then given a real npm command two lines later.
+
+**Files:**
+- Modify: `packages/cli/README.md` (only these 4 lines: the blockquote and the heading immediately below it)
+
+- [ ] **Step 1: Replace the stale blockquote and heading**
+
+Replace:
+```markdown
+> **Status: 0.1.0 release candidate.** This package is not yet published to npm.
+> Until the public 0.1.0 release, install from source — see the repository.
+
+## Install (after 0.1.0 is published)
+```
+with:
+```markdown
+## Install
+```
+(The `Public Beta · v0.2.0-beta.1.` line Task 10 already added near the top of this file now carries the beta-status signal — the blockquote was saying the same thing with stale, contradictory information, so it is removed rather than reworded.)
+
+- [ ] **Step 2: Re-read the full file to confirm no other stale "not yet published"/"0.1.0 release candidate" claim remains**
+
+Run: `grep -n "not yet published\|release candidate\|after 0.1.0" packages/cli/README.md`
+Expected: no output.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add packages/cli/README.md
+git commit -m "docs(cli): remove stale not-yet-published blockquote now that @beta is live"
+```
+
+---
+
+## Task 11a: Fix bare install command on the landing page (missed by Task 6)
+
+**Discovered during Task 11's repo-wide audit:** `apps/web/app/_components/public-landing-shell.tsx` has TWO `<CopyRow command="npm install -g @memstk/cli" />` occurrences (hero, line ~167, and `CloseSection`, line ~565) that Task 6 did not touch — Task 6's brief only covered the nav pill, hero lead paragraph, `YourStakSection`/`MoveSection`, and footer, not these two `CopyRow` install CTAs. This violates the locked constraint that every install example uses `@beta`.
+
+**Files:**
+- Modify: `apps/web/app/_components/public-landing-shell.tsx` (exactly these two `command="..."` string literals)
+- Modify: `apps/web/app/_components/public-landing-shell.test.tsx` (only if an existing assertion checks this literal string and needs updating)
+
+- [ ] **Step 1: Fix both occurrences**
+
+Change both:
+```tsx
+<CopyRow command="npm install -g @memstk/cli" />
+```
+and
+```tsx
+<CopyRow command="npm install -g @memstk/cli" prefix="1 " />
+```
+to use `npm install -g @memstk/cli@beta` instead.
+
+- [ ] **Step 2: Run the full test file**
+
+Run: `pnpm --filter @stack/web test -- public-landing-shell`
+Expected: PASS. If an existing assertion checks for the old bare string, update it to the `@beta` string.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add apps/web/app/_components/public-landing-shell.tsx
+git commit -m "fix(web): add missing @beta tag to landing page install CTAs"
+```
+(add the test file too, by exact name, only if it was touched)
+
+---
+
+## Task 11b: Fix missing `stak pull` step in the signed-in onboarding page's "existing account, new machine" flow
+
+**Discovered during Task 11's repo-wide audit:** `apps/web/app/onboarding/page.tsx` (the authenticated post-login onboarding screen, not a public marketing/docs page) has a branch for `view.mode !== 'new-account'` (i.e., an existing account signing in on a new machine) that currently reads:
+```tsx
+<p>Your STAK already has Cloud Memory. On the new machine, run:</p>
+<pre className="stak-cmd">
+  <code>{`stak login\nstak memory recover\nstak memory restore`}</code>
+</pre>
+```
+This never tells the user to run `stak pull` — meaning the copy as written would never bring down `main`/Skills, only Memory. This is a real functional-onboarding gap, not just stale wording — fix the copy only, do not touch `onboarding-data.ts` or any conditional logic.
+
+**Files:**
+- Modify: `apps/web/app/onboarding/page.tsx` (only the JSX inside the `view.mode !== 'new-account'` branch shown above)
+- Modify: `apps/web/app/onboarding/onboarding-data.test.ts` or any page-level test, only if an existing assertion checks this exact string
+
+- [ ] **Step 1: Add the missing `stak pull` step**
+
+Replace:
+```tsx
+<p>Your STAK already has Cloud Memory. On the new machine, run:</p>
+<pre className="stak-cmd">
+  <code>{`stak login\nstak memory recover\nstak memory restore`}</code>
+</pre>
+<p>
+  <code style={{ fontFamily: 'var(--mono)' }}>recover</code> brings
+  your Memory down from Cloud to this machine.{' '}
+  <code style={{ fontFamily: 'var(--mono)' }}>restore</code> writes it
+  into your agents&apos; files — it never overwrites anything already
+  there. If your Memory is Protected, recover needs a passkey or your
+  recovery file from this account.
+</p>
+```
+with:
+```tsx
+<p>Your STAK already has Cloud Memory. On the new machine, run:</p>
+<pre className="stak-cmd">
+  <code>{`stak login\nstak pull\nstak memory restore`}</code>
+</pre>
+<p>
+  <code style={{ fontFamily: 'var(--mono)' }}>pull</code> brings down{' '}
+  <code style={{ fontFamily: 'var(--mono)' }}>main</code>, Skills, and
+  your latest staged Memory generation.{' '}
+  <code style={{ fontFamily: 'var(--mono)' }}>restore</code> writes that
+  Memory into your agents&apos; files — it never overwrites anything
+  already there. If you need an older generation or your Memory is
+  Protected, use{' '}
+  <code style={{ fontFamily: 'var(--mono)' }}>stak memory recover</code>{' '}
+  instead — it needs a passkey or your recovery file from this account
+  when Protected.
+</p>
+```
+(This replaces the routine `recover` step with `pull`, matching the locked workflow, while still mentioning `memory recover` as the explicit/Protected-mode alternative rather than deleting it.)
+
+- [ ] **Step 2: Run any existing test covering this page**
+
+Run: `pnpm --filter @stack/web test -- onboarding`
+Expected: PASS. Update any assertion checking the old string, if found.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add apps/web/app/onboarding/page.tsx
+git commit -m "fix(web): teach stak pull (not memory recover) in existing-account onboarding flow"
+```
+(add a test file too, by exact name, only if it was touched)
 
 ---
 
