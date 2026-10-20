@@ -25,7 +25,7 @@ describe('FeedbackForm', () => {
     await userEvent.click(submitButton);
 
     await waitFor(() => {
-      expect(container.querySelector('[role="status"]')).toHaveTextContent('Thanks. This directly helps shape the public beta.');
+      expect(container.querySelector('[role="status"]')?.textContent).toBe('Thanks. This directly helps shape the public beta.');
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -82,7 +82,7 @@ describe('FeedbackForm', () => {
 
     await waitFor(() => {
       const statusElement = container.querySelector('[role="status"]');
-      expect(statusElement).toHaveTextContent('Thanks. This directly helps shape the public beta.');
+      expect(statusElement?.textContent).toBe('Thanks. This directly helps shape the public beta.');
     });
 
     const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body);
