@@ -9,10 +9,7 @@ Claude Code, captures them as a portable environment, restores them on any
 machine, safely composes additional stacks, backs up your private agent Memory,
 and lets you try someone else's stack without disturbing your setup.
 
-> **Status: 0.1.0 release candidate.** This package is not yet published to npm.
-> Until the public 0.1.0 release, install from source — see the repository.
-
-## Install (after 0.1.0 is published)
+## Install
 
 ```bash
 npm install -g @memstk/cli@beta
