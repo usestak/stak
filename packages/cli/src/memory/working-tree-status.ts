@@ -1,7 +1,7 @@
 import { emptyRegistry, readMemoryManifest } from '@stack/memory';
 import type { DiscoveredMemoryItem, LocalRegistry } from '@stack/memory';
 
-import { canonicalMemoryKey, normalizeNativeMemoryItems } from './canonical-identity.js';
+import { canonicalMemoryKey } from './canonical-identity.js';
 
 /**
  * MACHINE (native Memory) vs MAIN (the staged local manifest) — read-only, no Cloud call.
@@ -53,15 +53,12 @@ export const computeMemoryWorkingTreeStatus = async (
     return { state: 'no-manifest', discovered: options.nativeItems.length };
   const registry = options.registry ?? emptyRegistry();
 
-  // Collapse same-Project/same-path/same-content native duplicates (e.g. a relocated
-  // or re-cloned project whose old directory's Claude Memory folder still exists)
-  // into one logical item before comparing.
-  const normalizedNative = normalizeNativeMemoryItems(
-    options.nativeItems,
-    registry,
-  );
+  // Group native items by canonical (Project, kind, relative path) identity — a
+  // relocated or re-cloned project's old-plus-new discoveries land in the SAME
+  // group, and `groupHashesByKey` already collapses identical content into a
+  // single-element hash Set, so no separate native-side dedup pass is needed.
   const nativeByKey = groupHashesByKey(
-    normalizedNative,
+    options.nativeItems,
     (item) => canonicalMemoryKey(item, registry),
     (item) => item.contentHash,
   );

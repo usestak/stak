@@ -69,43 +69,96 @@ export const canonicalMemoryKey = (
     : item.logicalId;
 };
 
+export type MemoryIdentityConflict = {
+  canonicalKey: string;
+  items: DiscoveredMemoryItem[];
+};
+
+export type MemoryStagingPlan = {
+  /**
+   * The exact native item set to feed into `runMemoryBackup`. A canonical identity
+   * already represented UNCHANGED in the existing staged manifest is OMITTED
+   * entirely — it is correctly retained as-is via `runMemoryBackup`'s own
+   * carry-forward, never re-added under a second, differently-encoded locator. A
+   * canonical identity whose content genuinely changed is staged under its EXISTING
+   * logical identity (same `logicalId`/`project`), so the commit updates that entry
+   * in place instead of creating a duplicate. A genuinely new canonical identity
+   * (never staged before) prefers whichever native copy's OWN identity already
+   * carries a registry claim, so a location that is merely BOUND to an existing
+   * Project never causes `syncRegistryForBackup` to mint a new one.
+   */
+  items: DiscoveredMemoryItem[];
+  /**
+   * Canonical-key groups whose native copies disagree on content — NEVER staged
+   * (fail closed: two logical records, or an arbitrary pick, are both unacceptable).
+   * Working-tree status still sees these as a real, surfaced change on its own.
+   */
+  conflicts: MemoryIdentityConflict[];
+};
+
 /**
- * Collapse native Memory discoveries that resolve to the SAME stable Project identity
- * + the same logical relative path + the SAME content into one logical item. This is
- * the real-world "I moved/re-cloned the repo" case: Claude's own per-directory Memory
- * folder for the old location still exists and is still discovered, alongside the new
- * one, with byte-identical content.
- *
- * Never silently resolves a genuine disagreement: when discoveries sharing the same
- * logical identity have DIFFERENT content, every copy is kept distinct so the caller
- * (working-tree comparison, or staging) sees a real, surfaced change rather than an
- * arbitrarily chosen winner.
+ * Reconcile fresh native Memory discoveries against the EXISTING staged MAIN
+ * manifest, through stable Project identity — not raw, possibly stale, encoded
+ * machine locators. This is what makes `stak add .` idempotent after a project
+ * relocation: Claude's own per-directory Memory folder for a project's old directory
+ * commonly still exists (and is still discovered) alongside the new one, with
+ * byte-identical content; without reconciling against what MAIN already has under
+ * the historically-claimed identity, a native-only dedup can still pick a
+ * NEVER-BEFORE-STAGED representative and inadvertently create a second manifest
+ * record (and, via `syncRegistryForBackup`, a second Project).
  */
-export const normalizeNativeMemoryItems = (
-  items: DiscoveredMemoryItem[],
+export const reconcileNativeWithStagedMemory = (
+  nativeItems: DiscoveredMemoryItem[],
+  stagedItems: ManifestItem[],
   registry: LocalRegistry,
-): DiscoveredMemoryItem[] => {
-  const groups = new Map<string, DiscoveredMemoryItem[]>();
-  for (const item of items) {
+): MemoryStagingPlan => {
+  const stagedByKey = new Map<string, ManifestItem>();
+  for (const item of stagedItems)
+    stagedByKey.set(canonicalMemoryKey(item, registry), item);
+
+  const nativeGroups = new Map<string, DiscoveredMemoryItem[]>();
+  for (const item of nativeItems) {
     const key = canonicalMemoryKey(item, registry);
-    const group = groups.get(key);
+    const group = nativeGroups.get(key);
     if (group) group.push(item);
-    else groups.set(key, [item]);
+    else nativeGroups.set(key, [item]);
   }
-  const result: DiscoveredMemoryItem[] = [];
-  for (const group of groups.values()) {
+
+  const items: DiscoveredMemoryItem[] = [];
+  const conflicts: MemoryIdentityConflict[] = [];
+  for (const [key, group] of nativeGroups) {
     const distinctHashes = new Set(group.map((entry) => entry.contentHash));
-    if (distinctHashes.size === 1) {
-      // Identical content everywhere discovered — one logical item. The specific
-      // representative chosen doesn't matter (content is identical); pick
-      // deterministically so results never vary run to run.
-      const [representative] = [...group].sort((a, b) =>
-        a.source.path.localeCompare(b.source.path),
-      );
-      if (representative) result.push(representative);
-    } else {
-      result.push(...group);
+    if (distinctHashes.size > 1) {
+      conflicts.push({ canonicalKey: key, items: group });
+      continue;
     }
+    const hash = group[0]?.contentHash;
+    const existing = stagedByKey.get(key);
+    if (existing && existing.contentHash === hash) continue; // unchanged: no-op
+    const [sourceCopy] = [...group].sort((a, b) =>
+      a.source.path.localeCompare(b.source.path),
+    );
+    if (!sourceCopy) continue;
+    if (existing) {
+      // Content genuinely changed: update the EXISTING logical entry in place.
+      items.push({
+        ...sourceCopy,
+        kind: existing.kind,
+        scope: existing.scope,
+        logicalId: existing.logicalId,
+        restoreTarget: existing.restoreTarget,
+        ...(existing.project ? { project: existing.project } : {}),
+      });
+      continue;
+    }
+    // Genuinely new canonical identity: prefer a copy whose OWN identity already
+    // carries a registry claim over one only reachable via a binding.
+    const claimed = group.find(
+      (entry) =>
+        entry.project &&
+        resolveProjectForIdentity(registry, entry.project).status === 'resolved',
+    );
+    items.push(claimed ?? sourceCopy);
   }
-  return result;
+  return { items, conflicts };
 };
