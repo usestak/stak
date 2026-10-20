@@ -112,7 +112,7 @@ test('This Is Your STAK shows a 4-way tab control and all 4 object cards with th
   // also has a "review-pr" row, so these appear more than once too.
   expect(screen.getAllByText('review-pr').length).toBeGreaterThan(0);
   expect(screen.getAllByText('Update available').length).toBeGreaterThan(0);
-  expect(screen.getAllByText(/stak scan/).length).toBeGreaterThan(0);
+  expect(screen.getAllByText('stak add .').length).toBeGreaterThan(0);
 
   // Switching tabs changes which card is marked active (structural, not
   // just visual - the mobile-only recomposition CSS keys off this).
@@ -127,16 +127,16 @@ test('How it works lists the 5 real steps of the Machine -> Main -> Cloud workfl
   expect(
     screen.getByRole('heading', { name: 'Machine → Main → Cloud.' }),
   ).toBeInTheDocument();
-  // The hero's scroll-story also renders "stak status"/"stak push"/"stak
-  // login"/"stak pull" among its 7 (always-mounted, CSS-driven) steps, so
+  // The hero's scroll-story also renders "stak status"/"stak add ."/"stak push"/"stak
+  // login"/"stak pull"/"stak project" among its 7 (always-mounted, CSS-driven) steps, so
   // these also appear more than once in the document.
   expect(screen.getAllByText(/stak status/).length).toBeGreaterThan(0);
-  expect(screen.getByText('stak add .')).toBeInTheDocument();
+  expect(screen.getAllByText('stak add .').length).toBeGreaterThan(0);
   expect(screen.getAllByText(/stak push/).length).toBeGreaterThan(0);
   expect(
     screen.getAllByText('stak login && stak pull').length,
   ).toBeGreaterThan(0);
-  expect(screen.getByText('stak project')).toBeInTheDocument();
+  expect(screen.getAllByText('stak project').length).toBeGreaterThan(0);
 
   // The design's bare, nonexistent `stak run` is corrected to the real
   // `run <agent>` CLI form (packages/cli/src/commands/run.ts).
