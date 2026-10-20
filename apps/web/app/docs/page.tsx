@@ -58,8 +58,46 @@ export default function DocsGettingStartedPage() {
       <h2>Install STAK</h2>
       <p>Install the CLI globally, then sign in to STAK Cloud:</p>
       <pre>
-        <code>{`npm install -g @memstk/cli\nstak login`}</code>
+        <code>{`npm install -g @memstk/cli@beta\nstak login`}</code>
       </pre>
+
+      <h2>Daily workflow</h2>
+      <p>
+        Once you have Skills and Memory worth keeping, the everyday loop is
+        three commands:
+      </p>
+      <pre>
+        <code>{`stak status\nstak add .\nstak push`}</code>
+      </pre>
+      <p>
+        <code>stak status</code> is read-only and shows what changed.{' '}
+        <code>stak add .</code> stages the Skills and Memory you want in{' '}
+        <code>main</code>. <code>stak push</code> synchronizes staged{' '}
+        <code>main</code> Skills and Memory to STAK Cloud — nothing unstaged
+        is pushed silently.
+      </p>
+
+      <h2>Move to another machine</h2>
+      <p>On a new machine:</p>
+      <pre>
+        <code>{`npm install -g @memstk/cli@beta\nstak login\nstak pull\nstak status`}</code>
+      </pre>
+      <p>
+        <code>stak pull</code> restores <code>main</code>, Skills, and your
+        latest staged private Memory generation. If you use Claude Code,
+        Memory may still need materializing into it:
+      </p>
+      <pre>
+        <code>{`stak project\nstak memory restore --dry-run\nstak memory restore`}</code>
+      </pre>
+      <p>
+        A local-only Project (no Git identity to reconcile automatically) may
+        need an explicit{' '}
+        <code>stak project map &lt;project&gt; &lt;directory&gt;</code>. See{' '}
+        <Link href="/docs/memory">Memory &amp; Projects</Link> for the full
+        explanation, and <Link href="/beta">Public Beta</Link> for current
+        limitations.
+      </p>
 
       <h2>Your first STAK</h2>
       <p>
