@@ -75,10 +75,11 @@ temporary agent config/state directory (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, or
 
 ```bash
 stak login            # browser device authorization
-stak push             # back up main (private) to STAK Cloud
+stak push             # synchronize staged main (Skills + Memory) to STAK Cloud
 # ... on another machine ...
 stak login
 stak pull             # reconstruct main with matching Skill hashes
+stak status           # verify what landed
 stak run codex        # then project it into agents
 ```
 

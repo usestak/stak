@@ -45,6 +45,7 @@ On a new machine:
 ```bash
 stak login
 stak pull                 # restore Skills + Memory + Projects from STAK Cloud
+stak status               # verify what landed
 stak run claude
 ```
 
