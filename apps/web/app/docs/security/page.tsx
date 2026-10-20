@@ -30,10 +30,12 @@ export default function DocsSecurityPage() {
       <p>
         Memory and logical Project identity are private, Cloud-backed state.
         Cloud storage is what lets Memory and Projects follow you across
-        machines — sign in on a new machine, run <code>stak pull</code> for{' '}
-        <code>main</code> and Skills, and separately run{' '}
-        <code>stak memory recover</code> to bring your Memory back down, as
-        described in <Link href="/docs/workflows">Workflows</Link>.
+        machines — sign in on a new machine, run <code>stak pull</code>, which
+        also restores your latest staged private Memory generation;{' '}
+        <code>stak memory recover</code> remains available for
+        explicit/history recovery — see{' '}
+        <Link href="/docs/workflows">Workflows</Link> for the current
+        sequence.
       </p>
 
       <h2>Public STAK contents</h2>
