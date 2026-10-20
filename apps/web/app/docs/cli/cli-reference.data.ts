@@ -21,6 +21,7 @@ export const CLI_REFERENCE_COMMANDS: CliCommandMeta[] = [
   { name: 'whoami', group: 'Authentication' },
   { name: 'init', group: 'Environment' },
   { name: 'status', group: 'Environment' },
+  { name: 'add', group: 'Environment' },
   { name: 'diff', group: 'Environment' },
   { name: 'scan', group: 'Environment' },
   { name: 'open', group: 'Environment' },

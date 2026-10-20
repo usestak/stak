@@ -3,6 +3,32 @@
 All notable changes to STAK are documented here. This project adheres to
 semantic versioning.
 
+## 0.2.0-beta.1 — 2026-10-20
+
+A Git-like mental model for the everyday STAK workflow: `stak status`,
+`stak add <skill>` / `stak add .`, `stak push`, `stak pull` — no separate
+commit step; `push` creates an immutable Cloud checkpoint from whatever was
+staged.
+
+- **Git-like workflow** — `stak status` reports untracked/modified Skills and
+  unstaged Memory; `stak add` stages Skills and Memory onto `main`; `stak push`
+  uploads exactly what's staged (never implicitly re-staging native Memory) and
+  never creates a duplicate Cloud generation when nothing changed.
+- **Unified Skills + Memory Cloud sync** — combined push/pull reporting and
+  Cloud sync status (including an honest "unavailable" state instead of a
+  silent failure).
+- **Stable logical Project identity** — Memory is addressed by a durable
+  Project identity, not a machine-encoded path: local-only Project mapping,
+  Git-backed Project reconciliation, fresh-machine Memory recovery, and
+  relocated/re-cloned Project Memory normalization (idempotent staging and
+  restore, fail-closed on genuine conflicts — never a silent merge or pick).
+- **Legacy environment Cloud bundle compatibility** — older Cloud environment
+  bundles remain readable.
+
+This beta covers Skills for Claude / Cursor / Codex, and Claude-native project
+Memory portability across machines. It does not claim cross-agent Memory
+portability.
+
 ## 0.1.1 — 2026-10-18
 
 - fix(cli): reuse normal Cursor `agent login` sessions in isolated trials
