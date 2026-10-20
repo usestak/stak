@@ -91,3 +91,28 @@
   font-weight: 600;
   margin: 0;
 }
+
+/* Wraps the Users table so a wide table scrolls horizontally inside its own
+ * box instead of overflowing the page at narrow viewports (390px target). */
+.stak-admin-table-wrap {
+  overflow-x: auto;
+}
+
+.stak-admin-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.stak-admin-table-wrap th,
+.stak-admin-table-wrap td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.stak-admin-table-wrap th {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+}
