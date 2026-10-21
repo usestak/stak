@@ -159,7 +159,9 @@ export const loadProjectsList = async (
     },
     statusSentence,
     rows,
-    dockCommand: 'stak memory backup',
+    // Unified model: `stak push` is what actually syncs discovered Projects to STAK Cloud
+    // (staged first via `stak add .`) — not the standalone, Memory-only `stak memory backup`.
+    dockCommand: 'stak push',
     dockHint:
       "Finds Projects in this machine's Memory and syncs them to STAK Cloud.",
   };

@@ -450,6 +450,9 @@ export const loadOverview = async (
     machineCards: cards,
     overflowCount: Math.max(0, active.length - cards.length),
     machineTotal: active.length,
-    dockCommand: 'stak memory backup',
+    // Unified model: `stak push` syncs Skills and Memory to STAK Cloud together (creating a
+    // backup as part of that), so it's the one command to suggest here — not the standalone
+    // `stak memory backup`, which is Memory-only and belongs on the Memory page specifically.
+    dockCommand: 'stak push',
   };
 };
