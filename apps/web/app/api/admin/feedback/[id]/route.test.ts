@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-const { getAdminUserMock, updateMock, eqMock } = vi.hoisted(() => ({
+const { getAdminUserMock, updateMock, eqMock, selectMock } = vi.hoisted(() => ({
   getAdminUserMock: vi.fn(),
-  updateMock: vi.fn().mockResolvedValue({ error: null }),
-  eqMock: vi.fn(() => ({ error: null })),
+  updateMock: vi.fn(),
+  eqMock: vi.fn(),
+  selectMock: vi.fn().mockResolvedValue({ data: [{ id: 'f1' }], error: null }),
 }));
 vi.mock('@/lib/admin', () => ({ getAdminUser: getAdminUserMock }));
 
@@ -12,7 +13,12 @@ vi.mock('@/lib/supabase', () => ({
     from: () => ({
       update: (fields: unknown) => {
         updateMock(fields);
-        return { eq: eqMock };
+        return {
+          eq: (...args: unknown[]) => {
+            eqMock(...args);
+            return { select: selectMock };
+          },
+        };
       },
     }),
   }),
@@ -60,12 +66,36 @@ describe('PATCH /api/admin/feedback/[id]', () => {
     expect(updateMock).not.toHaveBeenCalled();
   });
 
-  it('does not set resolved_at/resolved_by for a non-resolved status change', async () => {
+  it('clears resolved_at/resolved_by (does not stamp them) for a non-resolved status change', async () => {
     getAdminUserMock.mockResolvedValue({ id: 'admin-1', role: 'owner' });
     updateMock.mockClear();
     await PATCH(req({ status: 'reviewing' }), ctx);
     const fields = updateMock.mock.calls[0]![0] as Record<string, unknown>;
-    expect(fields).not.toHaveProperty('resolved_at');
-    expect(fields).not.toHaveProperty('resolved_by');
+    expect(fields.resolved_at).toBeNull();
+    expect(fields.resolved_by).toBeNull();
+  });
+
+  it('rejects an admin note over the length cap without touching the database', async () => {
+    getAdminUserMock.mockResolvedValue({ id: 'admin-1', role: 'owner' });
+    updateMock.mockClear();
+    const res = await PATCH(req({ adminNote: 'x'.repeat(2001) }), ctx);
+    expect(res.status).toBe(400);
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects an update with no recognized fields without touching the database', async () => {
+    getAdminUserMock.mockResolvedValue({ id: 'admin-1', role: 'owner' });
+    updateMock.mockClear();
+    const res = await PATCH(req({}), ctx);
+    expect(res.status).toBe(400);
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the feedback id does not exist (update matched zero rows)', async () => {
+    getAdminUserMock.mockResolvedValue({ id: 'admin-1', role: 'owner' });
+    updateMock.mockClear();
+    selectMock.mockResolvedValueOnce({ data: [], error: null });
+    const res = await PATCH(req({ status: 'resolved' }), ctx);
+    expect(res.status).toBe(404);
   });
 });
