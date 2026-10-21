@@ -31,8 +31,8 @@ describe('loadUsageMetrics', () => {
         error: null,
       },
       machines: { data: [{ user_id: 'u1', machine_id: 'm1' }], error: null },
-      memory_backups: { data: [{ id: 'b1' }], error: null },
-      public_stack_versions: { data: [{ id: 'v1' }], error: null },
+      memory_backups: { data: [], count: 1, error: null },
+      public_stack_versions: { data: [], count: 1, error: null },
     });
 
     const result = await loadUsageMetrics(db, 'all');

@@ -49,22 +49,22 @@ export const loadUsageMetrics = async (
     ((machineRows ?? []) as { machine_id: string }[]).map((m) => m.machine_id),
   ).size;
 
-  const { data: memoryBackupRows, error: backupsError } = await db
+  const { count: memoryBackupsCount, error: backupsError } = await db
     .from('memory_backups')
-    .select('id');
+    .select('id', { count: 'exact', head: true });
   if (backupsError) throw backupsError;
 
-  const { data: publicationRows, error: publicationsError } = await db
+  const { count: publicStakPublications, error: publicationsError } = await db
     .from('public_stack_versions')
-    .select('id');
+    .select('id', { count: 'exact', head: true });
   if (publicationsError) throw publicationsError;
 
   return {
     pushesPerDay: bucketByDay(pushRows),
     pullsPerDay: bucketByDay(pullRows),
     activeMachines,
-    memoryBackupsCount: (memoryBackupRows ?? []).length,
+    memoryBackupsCount: memoryBackupsCount ?? 0,
     memoryRecoveriesCount,
-    publicStakPublications: (publicationRows ?? []).length,
+    publicStakPublications: publicStakPublications ?? 0,
   };
 };
