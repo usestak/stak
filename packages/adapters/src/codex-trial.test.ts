@@ -117,7 +117,13 @@ const storedTrial = async (stackHome: string, names = ['trial-skill']) => {
   return {
     stackName: 'trial',
     stackVersionHash: `sha256:${'a'.repeat(64)}`,
-    environment: { name: 'try:trial', skills, skipped: [], conflicts: [] },
+    environment: {
+      name: 'try:trial',
+      skills,
+      skipped: [],
+      conflicts: [],
+      renamed: [],
+    },
     skippedOptional: 0,
     required: skills.length,
     optionalIncluded: 0,

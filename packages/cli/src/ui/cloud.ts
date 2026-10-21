@@ -13,7 +13,7 @@ import type {
   CloudRecoverOutcome,
 } from '../memory/cloud-ops.js';
 
-import { block, skills } from './format.js';
+import { block, renamedNote, skills } from './format.js';
 
 export type RenderOptions = { verbose?: boolean };
 
@@ -303,10 +303,12 @@ export const renderRemoteStackUse = (
     row('New desired Skills', proposal.summary.newSkills).trimEnd(),
     row('References to restore', proposal.summary.references).trimEnd(),
     row('Hard conflicts', proposal.summary.hardConflicts).trimEnd(),
+    row('Renamed (same name, different content)', proposal.summary.renamed).trimEnd(),
     '',
     'main will become:',
     row('STAK layers', proposal.summary.stackLayers).trimEnd(),
     row('Resolved Skills', proposal.summary.resolvedSkills).trimEnd(),
+    ...renamedNote(proposal.resolved.renamed),
     '',
   ].join('\n');
 
@@ -341,10 +343,12 @@ export const renderOwnedStackUse = (
     row('New desired Skills', proposal.summary.newSkills).trimEnd(),
     row('References to restore', proposal.summary.references).trimEnd(),
     row('Hard conflicts', proposal.summary.hardConflicts).trimEnd(),
+    row('Renamed (same name, different content)', proposal.summary.renamed).trimEnd(),
     '',
     'main will become:',
     row('STAK layers', proposal.summary.stackLayers).trimEnd(),
     row('Resolved Skills', proposal.summary.resolvedSkills).trimEnd(),
+    ...renamedNote(proposal.resolved.renamed),
     '',
   ].join('\n');
 

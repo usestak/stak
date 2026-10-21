@@ -272,6 +272,7 @@ export type StackUseProposal = {
     newSkills: number;
     optionalSkipped: number;
     hardConflicts: number;
+    renamed: number;
     directSkills: number;
     stackLayers: number;
     resolvedSkills: number;
@@ -345,6 +346,7 @@ export const prepareStackUse = async (options: {
       optionalSkipped:
         resolved.skipped.length + loaded.version.skippedOptional.length,
       hardConflicts: resolved.conflicts.length,
+      renamed: resolved.renamed.length,
       directSkills: current.manifest.skills.length,
       stackLayers: manifest.stacks.length,
       resolvedSkills: resolved.skills.length,
@@ -679,6 +681,7 @@ export type StackRemoteUseProposal = {
     newSkills: number;
     optionalSkipped: number;
     hardConflicts: number;
+    renamed: number;
     stackLayers: number;
     resolvedSkills: number;
     references: number;
@@ -770,6 +773,7 @@ export const prepareRemoteStackUse = async (options: {
       ).length,
       optionalSkipped: resolved.skipped.length,
       hardConflicts: resolved.conflicts.length,
+      renamed: resolved.renamed.length,
       stackLayers: manifest.stacks.length,
       resolvedSkills: resolved.skills.length,
       references: options.source.restorations.size,
@@ -882,6 +886,7 @@ export type StackOwnedUseProposal = {
     newSkills: number;
     optionalSkipped: number;
     hardConflicts: number;
+    renamed: number;
     stackLayers: number;
     resolvedSkills: number;
     references: number;
@@ -975,6 +980,7 @@ export const prepareOwnedStackUse = async (options: {
       ).length,
       optionalSkipped: resolved.skipped.length,
       hardConflicts: resolved.conflicts.length,
+      renamed: resolved.renamed.length,
       stackLayers: manifest.stacks.length,
       resolvedSkills: resolved.skills.length,
       references: options.source.references.size,

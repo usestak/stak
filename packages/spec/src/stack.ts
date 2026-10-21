@@ -118,11 +118,23 @@ export const resolutionConflictSchema = z.object({
     )
     .min(2),
 });
+// A required Skill whose name collided with another required Skill already selected (same
+// name, different content) is no longer a hard failure — the newcomer is kept under a
+// disambiguated name (prefixed with its originating Stack) instead of being dropped or
+// blocking resolution. `renamed` reports what happened so callers can tell the user, rather
+// than silently diverging the on-disk name from what the Stack itself calls it.
+export const renamedRequirementSchema = z.object({
+  name: z.string(),
+  renamedTo: z.string(),
+  contentHash: contentHashSchema,
+  origin: requirementOriginSchema,
+});
 export const resolvedEnvironmentSchema = z.object({
   name: z.string(),
   skills: z.array(resolvedEnvironmentSkillSchema),
   skipped: z.array(skippedRequirementSchema),
   conflicts: z.array(resolutionConflictSchema),
+  renamed: z.array(renamedRequirementSchema),
 });
 
 export type StackManifest = z.infer<typeof stackManifestSchema>;
@@ -140,3 +152,4 @@ export type ResolvedEnvironmentSkill = z.infer<
 export type ResolvedEnvironment = z.infer<typeof resolvedEnvironmentSchema>;
 export type ResolutionConflict = z.infer<typeof resolutionConflictSchema>;
 export type SkippedRequirement = z.infer<typeof skippedRequirementSchema>;
+export type RenamedRequirement = z.infer<typeof renamedRequirementSchema>;
