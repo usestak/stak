@@ -157,6 +157,7 @@ export function EditStakForm({
     const result = await publishUserStackAction({
       stackId: detail.stackId,
       slug: publishSlug.trim(),
+      description: description.trim(),
     });
     if (!result.ok) {
       setPublishing(false);
@@ -315,6 +316,8 @@ export function EditStakForm({
           publication={publication}
           publishSlug={publishSlug}
           setPublishSlug={setPublishSlug}
+          description={description}
+          setDescription={setDescription}
           publish={publish}
           publishing={publishing}
           publishError={publishError}
@@ -435,6 +438,8 @@ export function EditStakForm({
         publication={publication}
         publishSlug={publishSlug}
         setPublishSlug={setPublishSlug}
+        description={description}
+        setDescription={setDescription}
         publish={publish}
         publishing={publishing}
         publishError={publishError}
@@ -450,6 +455,8 @@ function PublishSection({
   publication,
   publishSlug,
   setPublishSlug,
+  description,
+  setDescription,
   publish,
   publishing,
   publishError,
@@ -460,6 +467,8 @@ function PublishSection({
   publication: Publication;
   publishSlug: string;
   setPublishSlug: (slug: string) => void;
+  description: string;
+  setDescription: (description: string) => void;
   publish: () => void;
   publishing: boolean;
   publishError: string | null;
@@ -467,6 +476,37 @@ function PublishSection({
   setConfirmingUnpublish: (value: boolean) => void;
   unpublish: () => void;
 }) {
+  const descriptionMissing = description.trim().length === 0;
+  // Shared across first publish and every republish body below — a Stack can reach any of
+  // those states with an empty description (e.g. edited blank after a prior publish), and
+  // the server rejects an empty description at publish time (read-side parity: `stak use`/
+  // `stak try` require a non-empty `stack.description`), so the fix belongs right here
+  // rather than sending the user back to the composition form above to find it.
+  const descriptionField = (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
+        Description{' '}
+        {descriptionMissing ? (
+          <span style={{ color: '#e5776a' }}>(required to publish)</span>
+        ) : null}
+      </span>
+      <input
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder="Add a description before publishing"
+        aria-label="Description to publish"
+        style={{
+          fontSize: 13,
+          padding: '8px 10px',
+          border: '1px solid var(--chip)',
+          borderRadius: 6,
+          background: '#151413',
+          color: 'var(--ink)',
+          maxWidth: 420,
+        }}
+      />
+    </label>
+  );
   const unpublishControl = confirmingUnpublish ? (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>
@@ -504,24 +544,27 @@ function PublishSection({
   );
 
   const publishForm = (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-      <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>you/</span>
-      <input
-        value={publishSlug}
-        onChange={(e) => setPublishSlug(e.target.value)}
-        aria-label="Public slug"
-        style={{ fontFamily: 'var(--mono)', fontSize: 13 }}
-        pattern="[a-z0-9][a-z0-9-_]{0,62}"
-      />
-      <button
-        type="button"
-        className="stak-pill"
-        style={{ cursor: 'pointer' }}
-        onClick={publish}
-        disabled={publishing}
-      >
-        {publishing ? 'Publishing…' : 'Publish'}
-      </button>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {descriptionField}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <span style={{ fontSize: 12.5, color: 'var(--faint)' }}>you/</span>
+        <input
+          value={publishSlug}
+          onChange={(e) => setPublishSlug(e.target.value)}
+          aria-label="Public slug"
+          style={{ fontFamily: 'var(--mono)', fontSize: 13 }}
+          pattern="[a-z0-9][a-z0-9-_]{0,62}"
+        />
+        <button
+          type="button"
+          className="stak-pill"
+          style={{ cursor: 'pointer' }}
+          onClick={publish}
+          disabled={publishing || descriptionMissing}
+        >
+          {publishing ? 'Publishing…' : 'Publish'}
+        </button>
+      </div>
     </div>
   );
 
@@ -577,12 +620,13 @@ function PublishSection({
                 This STAK&apos;s saved composition no longer matches what&apos;s
                 published.
               </span>
+              {descriptionField}
               <button
                 type="button"
                 className="stak-pill"
                 style={{ alignSelf: 'flex-start', cursor: 'pointer' }}
                 onClick={publish}
-                disabled={publishing}
+                disabled={publishing || descriptionMissing}
               >
                 {publishing ? 'Republishing…' : 'Republish'}
               </button>
@@ -620,12 +664,13 @@ function PublishSection({
             This STAK is still published in a legacy format. Republish to
             upgrade it to a portable snapshot.
           </span>
+          {descriptionField}
           <button
             type="button"
             className="stak-pill"
             style={{ alignSelf: 'flex-start', cursor: 'pointer' }}
             onClick={publish}
-            disabled={publishing}
+            disabled={publishing || descriptionMissing}
           >
             {publishing ? 'Republishing…' : 'Republish'}
           </button>

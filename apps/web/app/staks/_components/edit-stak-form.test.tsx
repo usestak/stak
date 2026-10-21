@@ -173,6 +173,53 @@ test('private renders a safe Publish action using the STAK name as the initial s
   ).toBeInTheDocument();
 });
 
+/** Regression: the server rejects publishing a Stack whose description is empty (every
+ *  reader — `stak use`, `stak try`, the web Stack page — requires a non-empty one), so the
+ *  Publish action must guard against it client-side too, right where the user can fix it. */
+test('Publish is disabled with an empty description, and enabled once one is typed', () => {
+  render(
+    <EditStakForm
+      detail={{ ...detail, description: '' }}
+      approvedSkills={approvedSkills}
+      initialPublication={{ status: 'private' }}
+    />,
+  );
+
+  expect(screen.getByText(/required to publish/i)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^publish$/i })).toBeDisabled();
+
+  fireEvent.change(screen.getByLabelText(/description to publish/i), {
+    target: { value: 'A small frontend STAK.' },
+  });
+
+  expect(screen.getByRole('button', { name: /^publish$/i })).toBeEnabled();
+  expect(screen.queryByText(/required to publish/i)).not.toBeInTheDocument();
+});
+
+test('clicking Publish sends the current description from the Publish box', () => {
+  publishUserStackAction.mockResolvedValue({ ok: true, result: {} });
+  getUserStackPublicationStatusAction.mockResolvedValue({
+    ok: true,
+    status: { status: 'private' },
+  });
+  render(
+    <EditStakForm
+      detail={detail}
+      approvedSkills={approvedSkills}
+      initialPublication={{ status: 'private' }}
+    />,
+  );
+
+  fireEvent.change(screen.getByLabelText(/description to publish/i), {
+    target: { value: 'Updated before publishing.' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /^publish$/i }));
+
+  expect(publishUserStackAction).toHaveBeenCalledWith(
+    expect.objectContaining({ description: 'Updated before publishing.' }),
+  );
+});
+
 /** Regression for the Vercel release-blocking type error: `upload-required` intentionally
  *  carries no owner/slug/url/versionNumber, so the UI must never assume them — not even for
  *  the initial slug input's default value. */
