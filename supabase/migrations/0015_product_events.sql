@@ -4,11 +4,11 @@
 -- table, but creating it is schema-only and has no behavioral effect until
 -- something calls recordEvent() against it.
 --
--- RLS enabled with NO policies: writes happen only via a server-side
--- best-effort helper (packages/cloud-server/src/events.ts, Phase 3) using the
--- service-role client; reads happen only via admin pages using the same
--- client. Mirrors the posture of public.feedback (0012) and
--- public.admin_users (0013).
+-- RLS enabled with NO policies: writes happen only via the recordEvent
+-- callback injected into createCloudService() (apps/web/lib/cloud-service.ts),
+-- which inserts via the service-role client; reads happen only via admin
+-- pages using the same client. Mirrors the posture of public.feedback
+-- (0012) and public.admin_users (0013).
 create table if not exists public.product_events (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references auth.users (id) on delete set null,

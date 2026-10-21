@@ -31,6 +31,33 @@ function fakeDb() {
 }
 
 describe('loadUsers', () => {
+  it('quotes a search term containing a comma or parenthesis so it cannot break the .or() filter syntax', async () => {
+    let capturedOrArg = '';
+    const db = {
+      from: () => {
+        const builder: Record<string, unknown> = {};
+        const chain = () => builder;
+        builder.select = chain;
+        builder.order = chain;
+        builder.limit = chain;
+        builder.is = chain;
+        builder.or = (arg: string) => {
+          capturedOrArg = arg;
+          return builder;
+        };
+        builder.then = (resolve: (v: unknown) => void) => resolve({ data: [], error: null });
+        return builder;
+      },
+    } as never;
+
+    await loadUsers(db, 'a,b(c)');
+
+    // The comma/parens from the search term must be inside double quotes,
+    // not sitting at the top level where PostgREST would parse them as
+    // filter-string delimiters.
+    expect(capturedOrArg).toBe('display_name.ilike."%a,b(c)%",github_username.ilike."%a,b(c)%"');
+  });
+
   it('joins push/machine/feedback counts onto each profile', async () => {
     const result = await loadUsers(fakeDb());
     expect(result).toEqual([

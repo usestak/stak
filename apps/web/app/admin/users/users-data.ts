@@ -30,7 +30,10 @@ export const loadUsers = async (db: SupabaseClient, search?: string): Promise<Ad
     .order('created_at', { ascending: false })
     .limit(MAX_ROWS);
   if (search) {
-    const pattern = `%${escapeLikePattern(search)}%`;
+    // Double-quoted so a search term containing a comma or parenthesis
+    // (PostgREST's .or() filter-string delimiters) is treated as a literal
+    // character to match, not parsed as part of the filter syntax itself.
+    const pattern = `"%${escapeLikePattern(search).replace(/"/g, '\\"')}%"`;
     profilesQuery = profilesQuery.or(`display_name.ilike.${pattern},github_username.ilike.${pattern}`);
   }
   const { data: profiles, error: profilesError } = await profilesQuery;
