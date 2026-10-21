@@ -1,4 +1,5 @@
 import type { Command } from 'commander';
+import { StackCompositionError } from '@stack/core';
 import type {
   StackOwnedUseProposal,
   StackRemoteUseProposal,
@@ -123,8 +124,29 @@ export const registerUseCommand = (
               ? renderOwnedStackUse(proposal, options.dryRun)
               : renderStackUse(proposal, options.dryRun),
         );
-        if (proposal.resolved.conflicts.length)
-          throw new Error('STAK has required Skill conflicts.');
+        if (proposal.resolved.conflicts.length) {
+          // `StackCompositionError`, not a plain `Error` — bin.ts's top-level catch only
+          // formats recognized error classes cleanly; a plain `Error` here bypassed that and
+          // crashed with a raw Node stack trace instead of a readable CLI message.
+          const lines = proposal.resolved.conflicts.map((conflict) => {
+            const sources = [
+              ...new Set(
+                conflict.candidates.flatMap((candidate) =>
+                  candidate.origins.map((origin) =>
+                    origin.type === 'direct' ? 'main' : origin.stackName,
+                  ),
+                ),
+              ),
+            ];
+            return `  - ${conflict.name} (required differently by ${sources.join(' and ')})`;
+          });
+          throw new StackCompositionError(
+            'stack-resolution-conflict',
+            `STAK has required Skill conflicts:\n${lines.join('\n')}\n\n` +
+              'Resolve the conflict (e.g. remove or update one of the conflicting ' +
+              'sources) before using this STAK.',
+          );
+        }
         if (options.dryRun) return;
         if (!options.yes && !(await dependencies.confirm('Apply to main?'))) {
           dependencies.writeOut('Cancelled. No changes were made.\n');
