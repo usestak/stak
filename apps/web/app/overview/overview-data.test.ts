@@ -308,10 +308,12 @@ describe('loadOverview — Memory + projects copy (P4 §7/§15)', () => {
       ),
     );
     expect(v.summaries.projects.value).toBe('No projects yet');
-    // Projects are populated by project discovery/sync during check-in (`stak scan`), not by
-    // a Memory backup — the detail copy must not claim otherwise (P5 visual-correction §22A).
+    // Projects are populated by project discovery/sync during check-in (`stak status`, the
+    // canonical check-in command in the current onboarding sequence — `stak scan` also
+    // reports, but it's demoted to diagnostic/advanced), not by a Memory backup — the detail
+    // copy must not claim otherwise (P5 visual-correction §22A).
     expect(v.summaries.projects.detail).toBe(
-      'Projects appear once a machine runs `stak scan` and reports them.',
+      'Projects appear once a machine runs `stak status` and reports them.',
     );
     expect(v.summaries.projects.detail).not.toMatch(
       /back it up|Memory and you/i,

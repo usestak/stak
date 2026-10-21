@@ -139,7 +139,7 @@ export default async function OverviewPage({
         <p>
           Connect this computer to your account first. In your terminal, run{' '}
           <InlineCommand command="stak login" />, then{' '}
-          <InlineCommand command="stak scan" />.
+          <InlineCommand command="stak init" />.
         </p>
       </ShellNotice>
     );
