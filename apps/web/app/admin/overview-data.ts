@@ -15,9 +15,12 @@ export type OverviewMetrics = {
 };
 
 /**
- * Overview metrics computed entirely from existing tables (no product_events
- * yet — that lands in Phase 3). pushPullSuccessRate is explicitly marked
- * unavailable rather than faked from partial data.
+ * Overview metrics computed entirely from tables other than product_events.
+ * pushPullSuccessRate stays a literal 'unavailable' here on purpose, even
+ * though product_events now exists (Phase 3) and /admin/reliability
+ * computes the real number from it — Overview links out to that page
+ * rather than duplicating the computation, to avoid two different success-
+ * rate numbers drifting apart if their definitions ever diverge.
  *
  * activatedUsers/activationRate are deliberately NOT filtered by the
  * selected date range: "activated" means "has ever made a first successful

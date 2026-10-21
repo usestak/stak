@@ -2,14 +2,10 @@ import { notFound } from 'next/navigation';
 
 import { getAdminUser } from '@/lib/admin';
 import { serviceClient } from '@/lib/supabase';
-import type { AdminDateRange } from '@/lib/admin-date-range';
+import { ADMIN_DATE_RANGES, isAdminDateRange, type AdminDateRange } from '@/lib/admin-date-range';
 
 import { AdminSidebar } from '../_components/admin-sidebar';
 import { loadUsageMetrics } from './usage-data';
-
-const RANGES: AdminDateRange[] = ['24h', '7d', '30d', 'all'];
-const isAdminDateRange = (value: string | undefined): value is AdminDateRange =>
-  RANGES.includes(value as AdminDateRange);
 
 export default async function AdminUsagePage({
   searchParams,
@@ -29,7 +25,7 @@ export default async function AdminUsagePage({
       <main className="stak-admin-main">
         <h1>Usage</h1>
         <nav aria-label="Date range" className="stak-admin-range-pills">
-          {RANGES.map((r) => (
+          {ADMIN_DATE_RANGES.map((r) => (
             <a
               key={r}
               href={`/admin/usage?range=${r}`}

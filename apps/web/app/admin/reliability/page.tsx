@@ -2,16 +2,16 @@ import { notFound } from 'next/navigation';
 
 import { getAdminUser } from '@/lib/admin';
 import { serviceClient } from '@/lib/supabase';
-import type { AdminDateRange } from '@/lib/admin-date-range';
+import { ADMIN_DATE_RANGES, isAdminDateRange, type AdminDateRange } from '@/lib/admin-date-range';
 
 import { AdminSidebar } from '../_components/admin-sidebar';
 import { loadReliabilityMetrics } from './reliability-data';
 
-const RANGES: AdminDateRange[] = ['24h', '7d', '30d', 'all'];
-const isAdminDateRange = (value: string | undefined): value is AdminDateRange =>
-  RANGES.includes(value as AdminDateRange);
+// "No data yet" is the shared convention every admin page uses for a
+// metric with no data in the selected range (see Overview's activationRate).
+const NO_DATA_LABEL = 'No data yet';
 
-const pct = (rate: number | null): string => (rate === null ? 'No data yet' : `${(rate * 100).toFixed(1)}%`);
+const pct = (rate: number | null): string => (rate === null ? NO_DATA_LABEL : `${(rate * 100).toFixed(1)}%`);
 
 export default async function AdminReliabilityPage({
   searchParams,
@@ -31,7 +31,7 @@ export default async function AdminReliabilityPage({
       <main className="stak-admin-main">
         <h1>Reliability</h1>
         <nav aria-label="Date range" className="stak-admin-range-pills">
-          {RANGES.map((r) => (
+          {ADMIN_DATE_RANGES.map((r) => (
             <a
               key={r}
               href={`/admin/reliability?range=${r}`}
