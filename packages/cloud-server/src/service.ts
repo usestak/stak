@@ -95,6 +95,15 @@ export type PendingCliAuthSessionView = {
   expiresAt: string;
 };
 
+export type ProductEvent = {
+  userId: string | null;
+  eventName: string;
+  machineId?: string;
+  success: boolean;
+  errorCode?: string;
+  metadata?: Record<string, unknown>;
+};
+
 export type CloudServiceConfig = {
   repository: CloudRepository & PublicStackRepository & UserStackRepository;
   blobStore: CloudBlobStore;
@@ -111,6 +120,10 @@ export type CloudServiceConfig = {
   memoryBackendFor?: (userId: string) => RemoteMemoryBackend;
   /** P3: injected Standard per-project Memory counts (absent ⇒ unavailable/null). */
   memoryProjectCounts?: MemoryProjectCounts;
+  /** Best-effort product analytics. A thrown/rejected call here must never
+   * affect the operation it's recording — see commitEnvironmentVersion and
+   * getEnvironment, which wrap every call in try/catch. Absent = no-op. */
+  recordEvent?: (event: ProductEvent) => Promise<void> | void;
 };
 
 export type CloudService = ReturnType<typeof createCloudService>;
@@ -126,6 +139,23 @@ export const createCloudService = (config: CloudServiceConfig) => {
   const maxSnapshotBytes =
     config.maxSnapshotBytes ?? DEFAULT_MAX_SNAPSHOT_BYTES;
   const appUrl = config.appUrl.replace(/\/+$/, '');
+
+  /**
+   * Best-effort product analytics. Callers invoke this with `void` (fire
+   * and forget), never `await` — a slow or hung config.recordEvent (e.g. a
+   * stalled Supabase insert) must never add latency to a real push/pull
+   * request, not just never fail it. This function's own promise never
+   * rejects either way, so even an awaited call would be safe; the `void`
+   * convention at call sites is the latency guarantee, not a correctness
+   * requirement of this function.
+   */
+  const recordEventSafely = async (event: ProductEvent): Promise<void> => {
+    try {
+      await config.recordEvent?.(event);
+    } catch (err) {
+      console.error('[product-events] recordEvent failed', err);
+    }
+  };
 
   /**
    * The one lazy-expiry date comparison, shared by {@link approveCliAuth} and
@@ -507,38 +537,74 @@ export const createCloudService = (config: CloudServiceConfig) => {
       user: AuthenticatedUser,
       name: string,
     ): Promise<GetEnvironmentResponse> => {
-      const environment = await config.repository.getEnvironmentByName(
-        user.userId,
-        name,
-      );
-      if (!environment)
-        throw notFound(
-          'remote-environment-not-found',
-          `No cloud Environment named ${name}.`,
+      try {
+        const environment = await config.repository.getEnvironmentByName(
+          user.userId,
+          name,
         );
-      if (!environment.latestVersionId)
-        return { environmentId: environment.environmentId, name, latest: null };
-      const version = await config.repository.getEnvironmentVersion(
-        environment.latestVersionId,
-      );
-      if (!version || version.userId !== user.userId)
-        throw notFound(
-          'remote-environment-not-found',
-          'Environment version is unavailable.',
+        if (!environment)
+          throw notFound(
+            'remote-environment-not-found',
+            `No cloud Environment named ${name}.`,
+          );
+        if (!environment.latestVersionId) {
+          void recordEventSafely({
+            userId: user.userId,
+            eventName: 'cloud.pull.succeeded',
+            success: true,
+          });
+          return { environmentId: environment.environmentId, name, latest: null };
+        }
+        const version = await config.repository.getEnvironmentVersion(
+          environment.latestVersionId,
         );
-      return {
-        environmentId: environment.environmentId,
-        name,
-        latest: {
-          version: {
-            versionId: version.versionId,
-            versionNumber: version.versionNumber,
-            digest: version.digest,
-            createdAt: version.createdAt,
+        if (!version || version.userId !== user.userId)
+          throw notFound(
+            'remote-environment-not-found',
+            'Environment version is unavailable.',
+          );
+        const response = {
+          environmentId: environment.environmentId,
+          name,
+          latest: {
+            version: {
+              versionId: version.versionId,
+              versionNumber: version.versionNumber,
+              digest: version.digest,
+              createdAt: version.createdAt,
+            },
+            bundle: version.bundle,
           },
-          bundle: version.bundle,
-        },
-      };
+        };
+        void recordEventSafely({
+          userId: user.userId,
+          eventName: 'cloud.pull.succeeded',
+          success: true,
+        });
+        return response;
+      } catch (error) {
+        // getEnvironment is called by push and status as an internal
+        // precondition check, not only by the user-initiated pull command
+        // (packages/core's cloud-push.ts/cloud-status.ts/cloud-pull.ts all
+        // call client.getEnvironment('main') the same way; the server has
+        // no way to tell them apart). A first-time user's push or status
+        // check against a never-created environment legitimately hits
+        // 'remote-environment-not-found' every time -- that is not a
+        // reliability signal, so it is deliberately excluded here rather
+        // than inflating the Reliability page's pull-failure rate with an
+        // expected, benign outcome. Any other failure is still recorded.
+        const errorCode =
+          error instanceof CloudServiceError ? error.code : 'unknown-error';
+        if (errorCode !== 'remote-environment-not-found') {
+          void recordEventSafely({
+            userId: user.userId,
+            eventName: 'cloud.pull.failed',
+            success: false,
+            errorCode,
+          });
+        }
+        throw error;
+      }
     },
 
     commitEnvironmentVersion: async (
@@ -551,66 +617,93 @@ export const createCloudService = (config: CloudServiceConfig) => {
         idempotencyKey?: string;
       },
     ): Promise<CommitEnvironmentVersionResponse> => {
-      if (input.bundle.environment.name !== name)
-        throw bundleInvalid(
-          `Bundle Environment name ${input.bundle.environment.name} does not match ${name}.`,
-        );
-      if (input.idempotencyKey) {
-        const existing = await config.repository.findVersionByIdempotencyKey(
-          user.userId,
-          input.idempotencyKey,
-        );
-        if (existing)
-          return {
-            environmentId: existing.environmentId,
-            name,
-            version: {
-              versionId: existing.versionId,
-              versionNumber: existing.versionNumber,
-              digest: existing.digest,
-              createdAt: existing.createdAt,
-            },
-            createdNew: false,
-          };
-      }
-      let outcome;
       try {
-        outcome = await config.repository.commitEnvironmentVersion({
-          userId: user.userId,
+        if (input.bundle.environment.name !== name)
+          throw bundleInvalid(
+            `Bundle Environment name ${input.bundle.environment.name} does not match ${name}.`,
+          );
+        if (input.idempotencyKey) {
+          const existing = await config.repository.findVersionByIdempotencyKey(
+            user.userId,
+            input.idempotencyKey,
+          );
+          if (existing) {
+            void recordEventSafely({
+              userId: user.userId,
+              eventName: 'cloud.push.succeeded',
+              success: true,
+              metadata: { replayed: true },
+              ...(input.machineId ? { machineId: input.machineId } : {}),
+            });
+            return {
+              environmentId: existing.environmentId,
+              name,
+              version: {
+                versionId: existing.versionId,
+                versionNumber: existing.versionNumber,
+                digest: existing.digest,
+                createdAt: existing.createdAt,
+              },
+              createdNew: false,
+            };
+          }
+        }
+        let outcome;
+        try {
+          outcome = await config.repository.commitEnvironmentVersion({
+            userId: user.userId,
+            name,
+            bundle: input.bundle,
+            digest: input.bundle.digest,
+            expectedLatestVersionId: input.expectedLatestVersionId,
+            ...(input.machineId ? { machineId: input.machineId } : {}),
+            ...(input.idempotencyKey
+              ? { idempotencyKey: input.idempotencyKey }
+              : {}),
+            ids: { environmentId: newId(), versionId: newId() },
+            now: nowIso(),
+          });
+        } catch (error) {
+          if (error instanceof RemoteConflict)
+            throw remoteConflict(error.message);
+          throw error;
+        }
+        if (input.machineId)
+          await config.repository.upsertMachine({
+            userId: user.userId,
+            machineId: input.machineId,
+            firstSeenAt: nowIso(),
+            lastSyncedAt: nowIso(),
+          });
+        const response = {
+          environmentId: outcome.environment.environmentId,
           name,
-          bundle: input.bundle,
-          digest: input.bundle.digest,
-          expectedLatestVersionId: input.expectedLatestVersionId,
+          version: {
+            versionId: outcome.version.versionId,
+            versionNumber: outcome.version.versionNumber,
+            digest: outcome.version.digest,
+            createdAt: outcome.version.createdAt,
+          },
+          createdNew: outcome.createdNew,
+        };
+        void recordEventSafely({
+          userId: user.userId,
+          eventName: 'cloud.push.succeeded',
+          success: true,
           ...(input.machineId ? { machineId: input.machineId } : {}),
-          ...(input.idempotencyKey
-            ? { idempotencyKey: input.idempotencyKey }
-            : {}),
-          ids: { environmentId: newId(), versionId: newId() },
-          now: nowIso(),
         });
+        return response;
       } catch (error) {
-        if (error instanceof RemoteConflict)
-          throw remoteConflict(error.message);
+        void recordEventSafely({
+          userId: user.userId,
+          eventName: 'cloud.push.failed',
+          success: false,
+          errorCode:
+            error instanceof CloudServiceError ? error.code : 'unknown-error',
+          ...(input.machineId ? { machineId: input.machineId } : {}),
+        });
         throw error;
       }
-      if (input.machineId)
-        await config.repository.upsertMachine({
-          userId: user.userId,
-          machineId: input.machineId,
-          firstSeenAt: nowIso(),
-          lastSyncedAt: nowIso(),
-        });
-      return {
-        environmentId: outcome.environment.environmentId,
-        name,
-        version: {
-          versionId: outcome.version.versionId,
-          versionNumber: outcome.version.versionNumber,
-          digest: outcome.version.digest,
-          createdAt: outcome.version.createdAt,
-        },
-        createdNew: outcome.createdNew,
-      };
     },
 
     prepareSnapshot: async (
