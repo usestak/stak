@@ -184,12 +184,14 @@ describe('deriveOnboardingChecklist', () => {
     expect(steps.find((s) => s.key === 'agents-found')?.done).toBe(false);
   });
 
-  // Launch-polish command-truth pass: verified from actual CLI command
-  // semantics that the correct first-run sequence is login -> scan -> choose
-  // Memory mode -> first backup (`stak scan` is local/read-only and has no
-  // dependency on being signed in first; it's step 2, never replaced by
-  // `stak memory backup`, which was Overview's previous, incorrect claim).
-  it('teaches the verified first-run sequence in order: login, scan, memory mode, backup', () => {
+  // Command-truth pass (post unified add/push redesign): `stak scan` is now
+  // demoted to a diagnostic/advanced command — `stak init` already scans
+  // internally (packages/cli/src/commands/init.ts), so it's the one taught
+  // here. Standalone `stak memory backup` must not appear in onboarding
+  // either: Skills and Memory now back up together via `stak add .` then
+  // `stak push` (push.ts's own description: "Push main (Skills + Memory) to
+  // STAK Cloud"), so that's what the first-backup step teaches instead.
+  it('teaches the verified first-run sequence in order: login, init, memory mode, backup', () => {
     const steps = deriveOnboardingChecklist({
       machines: [],
       memory: memory(),
@@ -202,9 +204,12 @@ describe('deriveOnboardingChecklist', () => {
       'second-machine',
     ]);
     expect(steps[0]!.detail).toContain('stak login');
-    expect(steps[1]!.detail).toContain('stak scan');
+    expect(steps[1]!.detail).toContain('stak init');
+    expect(steps[1]!.detail).not.toContain('stak scan');
     expect(steps[2]!.detail).toContain('stak memory protect');
-    expect(steps[3]!.detail).toContain('stak memory backup');
+    expect(steps[3]!.detail).toContain('stak add .');
+    expect(steps[3]!.detail).toContain('stak push');
+    expect(steps[3]!.detail).not.toContain('stak memory backup');
   });
 
   // The second-machine step must not claim adding a machine removes
