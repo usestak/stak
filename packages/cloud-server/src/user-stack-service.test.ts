@@ -165,6 +165,7 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
     await service.createUserStack(auth, {
       name: 'frontend',
+      description: 'frontend test stack',
       skillIds: [SKILL_ID],
     });
     await expect(
@@ -190,6 +191,7 @@ describe('Named Stacks (P10B §11-15)', () => {
 
     const created = await service.createUserStack(auth, {
       name: 'frontend',
+      description: 'frontend test stack',
       skillIds: [SKILL_ID],
     });
     await service.updateUserStack(auth, {
@@ -225,10 +227,12 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
     const a = await service.createUserStack(auth, {
       name: 'frontend',
+      description: 'frontend test stack',
       skillIds: [SKILL_ID],
     });
     await service.createUserStack(auth, {
       name: 'mobile',
+      description: 'mobile test stack',
       skillIds: [SKILL_ID],
     });
 
@@ -265,6 +269,7 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
     const created = await service.createUserStack(auth, {
       name: 'frontend',
+      description: 'frontend test stack',
       skillIds: [SKILL_ID, SKILL_ID_2],
     });
     await expect(
@@ -296,6 +301,7 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
     const created = await service.createUserStack(auth, {
       name: 'frontend',
+      description: 'frontend test stack',
       skillIds: [SKILL_ID, SKILL_ID_2],
     });
     const error = await service
@@ -323,6 +329,7 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
     const created = await service.createUserStack(auth, {
       name: 'frontend',
+      description: 'frontend test stack',
       skillIds: [SKILL_ID, SKILL_ID_2],
     });
     const error = await service
@@ -354,6 +361,7 @@ describe('Named Stacks (P10B §11-15)', () => {
     await blobStore.put(USER_A, CONTENT_HASH_2, new Uint8Array([4, 5, 6]));
     const created = await service.createUserStack(auth, {
       name: 'frontend',
+      description: 'frontend test stack',
       skillIds: [SKILL_ID, SKILL_ID_2],
     });
     const result = await service.publishUserStack(auth, {
@@ -383,6 +391,7 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
     const created = await service.createUserStack(auth, {
       name: 'frontend',
+      description: 'frontend test stack',
       skillIds: [SKILL_ID, SKILL_ID_2],
     });
     await expect(
@@ -410,6 +419,7 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
     const created = await service.createUserStack(auth, {
       name: 'frontend',
+      description: 'frontend test stack',
       skillIds: [SKILL_ID],
     });
     const result = await service.publishUserStack(auth, {
@@ -440,6 +450,7 @@ describe('Named Stacks (P10B §11-15)', () => {
     await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([9, 8, 7]));
     const created = await service.createUserStack(auth, {
       name: 'notes',
+      description: 'notes test stack',
       skillIds: [SKILL_ID],
     });
     const result = await service.publishUserStack(auth, {
@@ -477,6 +488,7 @@ describe('Named Stacks (P10B §11-15)', () => {
     await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([9, 8, 7]));
     const created = await service.createUserStack(auth, {
       name: 'notes',
+      description: 'notes test stack',
       skillIds: [SKILL_ID],
     });
     const result = await service.publishUserStack(auth, {
@@ -510,6 +522,7 @@ describe('Named Stacks (P10B §11-15)', () => {
     await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([9, 8, 7]));
     const created = await service.createUserStack(auth, {
       name: 'draft-notes',
+      description: 'draft-notes test stack',
       skillIds: [SKILL_ID],
     });
     // Never published — guessing a plausible owner/slug/version/hash combination 404s,
@@ -557,6 +570,7 @@ describe('Named Stacks (P10B §11-15)', () => {
     await blobStore.put(USER_A, CONTENT_HASH, new Uint8Array([9, 8, 7]));
     const created = await service.createUserStack(auth, {
       name: 'notes',
+      description: 'notes test stack',
       skillIds: [SKILL_ID],
     });
     const result = await service.publishUserStack(auth, {
@@ -619,12 +633,14 @@ describe('Named Stacks (P10B §11-15)', () => {
     });
     const a = await service.createUserStack(auth, {
       name: ' Frontend ',
+      description: 'Frontend test stack',
       skillIds: [SKILL_ID],
     });
     expect(a.name).toBe('frontend');
 
     const b = await service.createUserStack(auth, {
       name: 'mobile',
+      description: 'mobile test stack',
       skillIds: [SKILL_ID],
     });
     // "Mobile" canonicalizes to the same identity as the existing "mobile" Stack.
@@ -654,6 +670,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       const result = await service.publishUserStack(auth, {
@@ -684,6 +701,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       const first = await service.publishUserStack(auth, {
@@ -729,6 +747,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       const first = await service.publishUserStack(auth, {
@@ -758,6 +777,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       // Settle handle resolution and v1 sequentially first, so the race below is actually
@@ -809,6 +829,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       const first = await service.publishUserStack(auth, {
@@ -859,6 +880,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
 
@@ -922,6 +944,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       const status = await service.getUserStackPublicationStatus(
@@ -1015,6 +1038,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       await publishLegacyUserStack(
@@ -1073,6 +1097,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       await publishLegacyUserStack(
@@ -1108,6 +1133,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
 
@@ -1172,6 +1198,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       // User B somehow learns user A's version id (e.g. from a log) — direct repository-level
@@ -1203,6 +1230,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       await service.publishUserStack(auth, {
@@ -1244,6 +1272,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       await service.publishUserStack(auth, {
@@ -1271,6 +1300,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       const first = await service.publishUserStack(auth, {
@@ -1308,6 +1338,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       const first = await service.publishUserStack(auth, {
@@ -1351,6 +1382,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const stackA = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       await service.publishUserStack(auth, {
@@ -1361,6 +1393,7 @@ describe('Named Stacks (P10B §11-15)', () => {
 
       const stackB = await service.createUserStack(auth, {
         name: 'web',
+        description: 'web test stack',
         skillIds: [SKILL_ID_2],
       });
       await expect(
@@ -1386,6 +1419,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       await service.publishUserStack(auth, {
@@ -1415,6 +1449,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       await service.publishUserStack(auth, {
@@ -1455,6 +1490,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       const published = await service.publishUserStack(auth, {
@@ -1497,6 +1533,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       await service.publishUserStack(auth, {
@@ -1540,6 +1577,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       });
       const created = await service.createUserStack(auth, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       await service.publishUserStack(auth, {
@@ -1559,6 +1597,7 @@ describe('Named Stacks (P10B §11-15)', () => {
       // guard: B's publish succeeds, and it never touches A's row/version history.
       const bStack = await service.createUserStack(authB, {
         name: 'frontend',
+        description: 'frontend test stack',
         skillIds: [SKILL_ID],
       });
       const bPublished = await service.publishUserStack(authB, {
