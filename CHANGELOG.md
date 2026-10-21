@@ -3,6 +3,27 @@
 All notable changes to STAK are documented here. This project adheres to
 semantic versioning.
 
+## 0.2.0-beta.2 — 2026-10-21
+
+- **Fixed:** `stak use`/`stak try` crashed with a raw, unhandled stack trace
+  instead of a readable error when a required Skill's name collided with
+  something already required — now resolved automatically instead of
+  blocking: the newly-added Skill is kept under a name disambiguated by its
+  originating Stack (e.g. `shared` becomes `second-shared`) rather than
+  forcing you to drop one or the other. Applies to the local, public/remote,
+  and owned `use` paths, and to `try`.
+- **Fixed:** a public Stack published with an empty description could never
+  be read back — `stak use`/`stak try` against it failed with a schema error
+  instead of a usable message. Publishing with an empty description is now
+  rejected up front, with a clear reason, instead of producing an unreadable
+  published Stack.
+- **Performance:** `stak scan`/`stak status`/`stak init` no longer spawn a
+  `git` subprocess for every Skill location that clearly isn't in a Git
+  repository — a cheap in-process check runs first, and `git` is only
+  invoked when it's actually needed. Real-world case (31 unique Skills
+  duplicated across 62 locations, none Git-backed): dropped from ~17s to
+  well under a second.
+
 ## 0.2.0-beta.1 — 2026-10-20
 
 A Git-like mental model for the everyday STAK workflow: `stak status`,

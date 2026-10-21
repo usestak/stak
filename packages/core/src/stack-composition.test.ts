@@ -154,6 +154,7 @@ const version = (
   name: string,
   contentHash: string,
   requirement: 'required' | 'optional',
+  originStackName: string = name,
 ): ImportedStackVersion => ({
   schemaVersion: 1,
   name,
@@ -172,7 +173,7 @@ const version = (
         reason: 'local',
       },
       observedSources: [{ type: 'local' }],
-      originStackName: name,
+      originStackName,
     },
   ],
   inheritedStacks: [],
@@ -284,48 +285,38 @@ describe('Environment resolver', () => {
   });
 
   it('falls back to a numeric suffix when the disambiguated name is itself already taken', () => {
-    const layers = ['first', 'second', 'third'].map((name) => ({
+    const makeLayer = (name: string) => ({
       id: `layer_${name}xx`,
       stackId: `stack_${name}xx`,
       name,
       versionHash: hash(name.charAt(0)),
-    }));
+    });
+    const firstLayer = makeLayer('first');
+    const secondLayer = makeLayer('second');
+    const thirdLayer = makeLayer('third');
     const manifest: EnvironmentManifest = {
       schemaVersion: 1,
       name: 'main',
       skills: [],
-      stacks: layers,
+      stacks: [firstLayer, secondLayer, thirdLayer],
       overrides: {},
     };
     // 'first' is plain 'shared'; 'second' and 'third' both independently resolve to the
     // disambiguated name 'second-shared' — only possible if two different layers both
     // happen to be named 'second' — so simulate that directly via two layers sharing an
-    // originStackName instead of relying on the layer's own `name`.
+    // originStackName, overriding the default (the layer's own `name`).
     const versions = new Map([
-      [importedVersionKey(layers[0]!), version('first', hash('a'), 'required')],
       [
-        importedVersionKey(layers[1]!),
-        {
-          ...version('second', hash('b'), 'required'),
-          requirements: [
-            {
-              ...version('second', hash('b'), 'required').requirements[0]!,
-              originStackName: 'second',
-            },
-          ],
-        },
+        importedVersionKey(firstLayer),
+        version('first', hash('a'), 'required'),
       ],
       [
-        importedVersionKey(layers[2]!),
-        {
-          ...version('third', hash('c'), 'required'),
-          requirements: [
-            {
-              ...version('third', hash('c'), 'required').requirements[0]!,
-              originStackName: 'second',
-            },
-          ],
-        },
+        importedVersionKey(secondLayer),
+        version('second', hash('b'), 'required', 'second'),
+      ],
+      [
+        importedVersionKey(thirdLayer),
+        version('third', hash('c'), 'required', 'second'),
       ],
     ]);
     const result = resolveEnvironment({
