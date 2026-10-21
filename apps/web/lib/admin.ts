@@ -1,4 +1,6 @@
 // apps/web/lib/admin.ts
+import { cache } from 'react';
+
 import { getSessionUser, type WebUser } from './session';
 import { serviceClient } from './supabase';
 
@@ -13,8 +15,12 @@ export type AdminUser = WebUser & { role: AdminRole };
  * admin access" in every case, never distinguish the reasons. A throw here
  * would otherwise surface as a 500 error page instead of the intended 404,
  * which leaks that the route exists.
+ *
+ * `cache()`-wrapped: every admin route calls this independently in BOTH
+ * `admin/layout.tsx` and its own `page.tsx`, each paying for the `admin_users` lookup again —
+ * zero arguments, so a safe, unconditional per-request dedup.
  */
-export const getAdminUser = async (): Promise<AdminUser | null> => {
+export const getAdminUser = cache(async (): Promise<AdminUser | null> => {
   try {
     const user = await getSessionUser();
     if (!user) return null;
@@ -31,4 +37,4 @@ export const getAdminUser = async (): Promise<AdminUser | null> => {
   } catch {
     return null;
   }
-};
+});

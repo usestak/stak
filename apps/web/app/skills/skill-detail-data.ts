@@ -23,6 +23,7 @@ import {
   type MachineReconciliationState,
 } from '../../lib/skill-presentation.js';
 import type { WebUser } from '../../lib/session.js';
+import { webAuth } from '../../lib/web-auth.js';
 
 export type SkillDetailService = Pick<
   CloudService,
@@ -31,8 +32,6 @@ export type SkillDetailService = Pick<
   | 'getSkillDetail'
   | 'getSkillShareStatus'
 >;
-
-const webAuth = (userId: string) => ({ userId, tokenId: 'web-session' });
 const shortHash = (hash: string) => hash.slice(7, 15);
 
 export type HistoryRow = {

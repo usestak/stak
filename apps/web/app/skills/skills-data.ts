@@ -21,6 +21,7 @@ import {
 import type { SidebarCounts } from '../overview/overview-data.js';
 import type { WebUser } from '../../lib/session.js';
 import { loadSidebarSummary } from '../../lib/sidebar-summary.js';
+import { webAuth } from '../../lib/web-auth.js';
 
 export type SkillsService = Pick<
   CloudService,
@@ -29,8 +30,6 @@ export type SkillsService = Pick<
   | 'getOverview'
   | 'listUserStacks'
 >;
-
-const webAuth = (userId: string) => ({ userId, tokenId: 'web-session' });
 const shortHash = (hash: string) => hash.slice(7, 15);
 
 export type SkillRow = {
