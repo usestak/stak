@@ -70,7 +70,7 @@ export const deriveOnboardingChecklist = (input: {
     {
       key: 'agents-found',
       label: 'Find your agents',
-      detail: '`stak scan` looks for Claude Code, Codex, and other agents.',
+      detail: '`stak init` discovers Claude Code, Codex, and other agents automatically.',
       done: agentsFound,
     },
     {
@@ -83,7 +83,8 @@ export const deriveOnboardingChecklist = (input: {
     {
       key: 'first-backup',
       label: 'First backup',
-      detail: 'Run `stak memory backup`. Only what you confirm is backed up.',
+      detail:
+        'Run `stak add .` then `stak push` — Skills and Memory are backed up to STAK Cloud together.',
       done: firstBackup,
     },
     {
