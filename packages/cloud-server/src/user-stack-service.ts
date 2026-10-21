@@ -211,6 +211,19 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
         reason: `"${stack.name}" has no Skills yet — nothing to publish.`,
         uploadRequired: false,
       };
+    // Read-side parity: every public bundle reader (`stak use`, `stak try`, the web Stack
+    // page) parses the response with `publicStackBundleSchema`, which requires a non-empty
+    // `stack.description`. This path is the only one that stores a bundle directly — it never
+    // passes through the HTTP `publishPublicStackVersionRequestSchema` body validation that
+    // the direct bundle-publish endpoint enforces — so it must reject an empty description
+    // itself rather than let an unreadable bundle reach Cloud storage.
+    const description = (descriptionOverride ?? version.bundle.description).trim();
+    if (description.length === 0)
+      return {
+        eligible: false,
+        reason: `"${stack.name}" needs a description before it can be published.`,
+        uploadRequired: false,
+      };
     const ineligible: string[] = [];
     let onlyMissingContent = true;
     for (const skill of version.bundle.skills) {
@@ -243,7 +256,6 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
       };
 
     const displayName = displayNameOverride ?? stack.name;
-    const description = descriptionOverride ?? version.bundle.description;
     const requirements: PublicStackRequirement[] = version.bundle.skills.map(
       (skill) => {
         // Public-publication parity: always snapshot-strategy (see the pre-check above,
