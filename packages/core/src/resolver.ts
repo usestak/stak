@@ -76,6 +76,19 @@ export const resolveEnvironment = (
   >();
   const skipped: ResolvedEnvironment['skipped'] = [];
   const conflicts: ResolvedEnvironment['conflicts'] = [];
+  const renamed: ResolvedEnvironment['renamed'] = [];
+  // Candidates are pushed main's own direct Skills first, then each Stack layer in manifest
+  // order (`[...current.manifest.stacks, layer]` in composition.ts always appends the Stack
+  // being newly added last) — so when two required candidates of the same name collide here,
+  // `current` is always whatever was already selected (main, or an earlier-added layer) and
+  // `candidate` is always the newcomer. Disambiguating the newcomer, never what was already
+  // there, is what keeps this deterministic and least-surprising.
+  const disambiguate = (name: string, stackName: string): string => {
+    let candidateName = `${stackName}-${name}`;
+    let suffix = 2;
+    while (selected.has(candidateName)) candidateName = `${stackName}-${name}-${suffix++}`;
+    return candidateName;
+  };
   for (const candidate of candidates) {
     const current = selected.get(candidate.name);
     if (!current) {
@@ -102,6 +115,28 @@ export const resolveEnvironment = (
       continue;
     }
     if (current.candidate.required && candidate.required) {
+      // Both required, different content, same name: rather than block resolution entirely,
+      // keep both — the newcomer is selected under a name disambiguated by its originating
+      // Stack, so neither the Skill already in place nor the one being pulled in is lost.
+      // Only a Stack-sourced newcomer can be disambiguated this way (its `stackName` is what
+      // makes the new name meaningful and deterministic); a direct Skill colliding with
+      // another direct Skill — which should not happen, since main's own Skill names are
+      // already kept unique — has no such name to borrow, so it still falls back to a
+      // reported conflict rather than inventing one.
+      if (candidate.origin.type === 'stack') {
+        const renamedTo = disambiguate(candidate.name, candidate.origin.stackName);
+        renamed.push({
+          name: candidate.name,
+          renamedTo,
+          contentHash: candidate.contentHash,
+          origin: candidate.origin,
+        });
+        selected.set(renamedTo, {
+          candidate: { ...candidate, name: renamedTo },
+          origins: [candidate.origin],
+        });
+        continue;
+      }
       conflicts.push({
         name: candidate.name,
         candidates: [
@@ -174,7 +209,7 @@ export const resolveEnvironment = (
         a.name.localeCompare(b.name) ||
         a.contentHash.localeCompare(b.contentHash),
     );
-  return { name: options.manifest.name, skills, skipped, conflicts };
+  return { name: options.manifest.name, skills, skipped, conflicts, renamed };
 };
 
 export const importedVersionKey = versionKey;

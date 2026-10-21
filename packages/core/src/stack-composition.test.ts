@@ -209,7 +209,7 @@ describe('Environment resolver', () => {
     expect(result.skills[0]?.origins).toHaveLength(2);
   });
 
-  it('reports required conflicts and deterministically skips optional conflicts', () => {
+  it('disambiguates a required Skill name collision by renaming the newcomer, keeping both, and deterministically skips optional conflicts', () => {
     const layers = ['first', 'second'].map((name) => ({
       id: `layer_${name}xx`,
       stackId: `stack_${name}xx`,
@@ -229,18 +229,39 @@ describe('Environment resolver', () => {
         version(layer.name, hash(index ? 'b' : 'a'), 'required'),
       ]),
     );
+    const requiredResult = resolveEnvironment({
+      manifest,
+      lock: {
+        schemaVersion: 1,
+        resolvedAt: '2026-09-19T00:00:00.000Z',
+        skills: {},
+      },
+      versions: required,
+      idFactory: () => 'generated1',
+    });
+    // Neither required Skill is dropped and resolution never fails: 'first' keeps the plain
+    // name, 'second''s same-named-but-different-content Skill is kept too, renamed with its
+    // own Stack's name so it doesn't collide.
+    expect(requiredResult.conflicts).toHaveLength(0);
+    expect(requiredResult.renamed).toEqual([
+      {
+        name: 'shared',
+        renamedTo: 'second-shared',
+        contentHash: hash('b'),
+        origin: expect.objectContaining({ type: 'stack', stackName: 'second' }),
+      },
+    ]);
+    expect(requiredResult.skills.map((s) => s.name).sort()).toEqual([
+      'second-shared',
+      'shared',
+    ]);
     expect(
-      resolveEnvironment({
-        manifest,
-        lock: {
-          schemaVersion: 1,
-          resolvedAt: '2026-09-19T00:00:00.000Z',
-          skills: {},
-        },
-        versions: required,
-        idFactory: () => 'generated1',
-      }).conflicts,
-    ).toHaveLength(1);
+      requiredResult.skills.find((s) => s.name === 'shared')?.contentHash,
+    ).toBe(hash('a'));
+    expect(
+      requiredResult.skills.find((s) => s.name === 'second-shared')
+        ?.contentHash,
+    ).toBe(hash('b'));
     const optional = new Map(
       layers.map((layer, index) => [
         importedVersionKey(layer),
@@ -260,6 +281,69 @@ describe('Environment resolver', () => {
     expect(result.conflicts).toHaveLength(0);
     expect(result.skills[0]?.contentHash).toBe(hash('a'));
     expect(result.skipped[0]?.reason).toBe('optional-conflict');
+  });
+
+  it('falls back to a numeric suffix when the disambiguated name is itself already taken', () => {
+    const layers = ['first', 'second', 'third'].map((name) => ({
+      id: `layer_${name}xx`,
+      stackId: `stack_${name}xx`,
+      name,
+      versionHash: hash(name.charAt(0)),
+    }));
+    const manifest: EnvironmentManifest = {
+      schemaVersion: 1,
+      name: 'main',
+      skills: [],
+      stacks: layers,
+      overrides: {},
+    };
+    // 'first' is plain 'shared'; 'second' and 'third' both independently resolve to the
+    // disambiguated name 'second-shared' — only possible if two different layers both
+    // happen to be named 'second' — so simulate that directly via two layers sharing an
+    // originStackName instead of relying on the layer's own `name`.
+    const versions = new Map([
+      [importedVersionKey(layers[0]!), version('first', hash('a'), 'required')],
+      [
+        importedVersionKey(layers[1]!),
+        {
+          ...version('second', hash('b'), 'required'),
+          requirements: [
+            {
+              ...version('second', hash('b'), 'required').requirements[0]!,
+              originStackName: 'second',
+            },
+          ],
+        },
+      ],
+      [
+        importedVersionKey(layers[2]!),
+        {
+          ...version('third', hash('c'), 'required'),
+          requirements: [
+            {
+              ...version('third', hash('c'), 'required').requirements[0]!,
+              originStackName: 'second',
+            },
+          ],
+        },
+      ],
+    ]);
+    const result = resolveEnvironment({
+      manifest,
+      lock: {
+        schemaVersion: 1,
+        resolvedAt: '2026-09-19T00:00:00.000Z',
+        skills: {},
+      },
+      versions,
+      idFactory: () => 'generated1',
+    });
+    expect(result.conflicts).toHaveLength(0);
+    expect(result.skills.map((s) => s.name).sort()).toEqual([
+      'second-shared',
+      'second-shared-2',
+      'shared',
+    ]);
   });
 });
 

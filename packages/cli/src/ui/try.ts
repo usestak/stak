@@ -19,7 +19,7 @@ export const renderTryDryRun = (
   trial: TryResolvedEnvironment,
   agent: AgentId,
 ) =>
-  `STAK: ${trial.stackName}\nAgent: ${agentLabel(agent)}\n\nResolved Skills       ${trial.environment.skills.length}\nRequired              ${trial.required}\nOptional included     ${trial.optionalIncluded}\nOptional skipped      ${trial.skippedOptional}\nConflicts             ${trial.environment.conflicts.length}\n\nIsolation\n\nTemporary HOME        yes\nTemporary ${agentHomeLabel(agent)}  yes\nWorkspace Skills      ${trial.environment.skills.length}\n\nmain will not be changed.\nNormal ${agentLabel(agent)} bindings will not be changed.\n\nNo runtime was created.\n`;
+  `STAK: ${trial.stackName}\nAgent: ${agentLabel(agent)}\n\nResolved Skills       ${trial.environment.skills.length}\nRequired              ${trial.required}\nOptional included     ${trial.optionalIncluded}\nOptional skipped      ${trial.skippedOptional}\nRenamed (conflict)    ${trial.environment.renamed.length}\nConflicts             ${trial.environment.conflicts.length}\n\nIsolation\n\nTemporary HOME        yes\nTemporary ${agentHomeLabel(agent)}  yes\nWorkspace Skills      ${trial.environment.skills.length}\n\nmain will not be changed.\nNormal ${agentLabel(agent)} bindings will not be changed.\n\nNo runtime was created.\n`;
 
 const renderTryReadyVerbose = (
   preparation: TryPreparationResult,

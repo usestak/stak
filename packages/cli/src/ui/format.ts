@@ -1,5 +1,20 @@
 /** Human-facing formatting helpers shared across default (non-verbose) output. */
 
+import type { RenamedRequirement } from '@stack/spec';
+
+/** Lines naming each Skill a `stak use`/`stak try` resolution renamed to avoid a name
+ *  collision with something already required — empty when nothing was renamed. Never
+ *  silent: a renamed Skill isn't a failure, but the user still needs to know its new name
+ *  to find/run it. */
+export const renamedNote = (renamed: RenamedRequirement[]): string[] =>
+  renamed.length === 0
+    ? []
+    : [
+        '',
+        'Renamed to avoid a Skill name conflict:',
+        ...renamed.map((item) => `  ${item.name} -> ${item.renamedTo}`),
+      ];
+
 /** "1 skill" / "3 skills". */
 export const skills = (count: number): string =>
   `${count} skill${count === 1 ? '' : 's'}`;
