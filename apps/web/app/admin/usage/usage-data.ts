@@ -1,15 +1,25 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { rangeStart, type AdminDateRange } from '@/lib/admin-date-range';
+import { loadActiveMachinesByUser } from '@/lib/admin-metrics';
 
 export type UsageMetrics = {
   pushesPerDay: { date: string; count: number }[];
   pullsPerDay: { date: string; count: number }[];
   activeMachines: number;
   memoryBackupsCount: number;
-  memoryRecoveriesCount: number;
+  /** No code path emits 'memory.recovered' yet -- always 'not-instrumented'
+   * rather than a real-looking 0, matching the CLI-version-tile convention
+   * (never fake a metric with no real data source). */
+  memoryRecoveriesCount: number | 'not-instrumented';
   publicStakPublications: number;
 };
+
+// A row cap until a proper server-side aggregate (RPC/view) replaces this
+// per-table-fetch approach -- same accepted exception as users-data.ts
+// (Phase 2 final review). Unlike a plain count query, per-day bucketing
+// needs the actual rows, not just a total.
+const MAX_EVENT_ROWS = 20000;
 
 const bucketByDay = (
   rows: { created_at: string }[],
@@ -24,39 +34,58 @@ const bucketByDay = (
     .sort((a, b) => a.date.localeCompare(b.date));
 };
 
+type EventRow = { event_name: string; created_at: string; metadata: { replayed?: boolean } | null };
+
 export const loadUsageMetrics = async (
   db: SupabaseClient,
   range: AdminDateRange,
 ): Promise<UsageMetrics> => {
   const since = rangeStart(range);
 
-  let eventsQuery = db.from('product_events').select('event_name, created_at');
+  // Scoped to exactly the event names this page cares about (not every
+  // product_events row ever written) so the per-page row cap goes further
+  // and so a pathological volume of some unrelated event type can't starve
+  // this query's row budget.
+  let eventsQuery = db
+    .from('product_events')
+    .select('event_name, created_at, metadata')
+    .in('event_name', ['cloud.push.succeeded', 'cloud.pull.succeeded'])
+    .order('created_at', { ascending: false })
+    .limit(MAX_EVENT_ROWS);
   if (since) eventsQuery = eventsQuery.gte('created_at', since.toISOString());
   const { data: events, error: eventsError } = await eventsQuery;
   if (eventsError) throw eventsError;
 
-  const rows = (events ?? []) as { event_name: string; created_at: string }[];
-  const pushRows = rows.filter((r) => r.event_name === 'cloud.push.succeeded');
+  const rows = (events ?? []) as EventRow[];
+  // "cloud.pull.succeeded" also fires for push's and `stak status`'s
+  // internal precondition read (packages/core's cloud-push.ts/
+  // cloud-status.ts both call the same client.getEnvironment('main') the
+  // real pull command uses) -- the server has no signal to tell these
+  // apart. Labelled accordingly in the page rather than presented as a
+  // pure pull count. A retried push (idempotency replay, metadata.replayed)
+  // is excluded from pushesPerDay so a retry isn't double-counted as two
+  // pushes.
+  const pushRows = rows.filter(
+    (r) => r.event_name === 'cloud.push.succeeded' && !r.metadata?.replayed,
+  );
   const pullRows = rows.filter((r) => r.event_name === 'cloud.pull.succeeded');
-  const memoryRecoveriesCount = rows.filter((r) => r.event_name === 'memory.recovered').length;
 
-  const { data: machineRows, error: machineError } = await db
-    .from('machines')
-    .select('user_id, machine_id')
-    .is('revoked_at', null);
-  if (machineError) throw machineError;
+  const machinesByUser = await loadActiveMachinesByUser(db);
   const activeMachines = new Set(
-    ((machineRows ?? []) as { machine_id: string }[]).map((m) => m.machine_id),
+    [...machinesByUser.values()].flatMap((machineIds) => [...machineIds]),
   ).size;
 
+  // 'committed' only: 'pending'/'retired' generations aren't a completed
+  // backup from the user's point of view.
   const { count: memoryBackupsCount, error: backupsError } = await db
     .from('memory_backups')
-    .select('id', { count: 'exact', head: true });
+    .select('backup_id', { count: 'exact', head: true })
+    .eq('state', 'committed');
   if (backupsError) throw backupsError;
 
   const { count: publicStakPublications, error: publicationsError } = await db
     .from('public_stack_versions')
-    .select('id', { count: 'exact', head: true });
+    .select('version_id', { count: 'exact', head: true });
   if (publicationsError) throw publicationsError;
 
   return {
@@ -64,7 +93,7 @@ export const loadUsageMetrics = async (
     pullsPerDay: bucketByDay(pullRows),
     activeMachines,
     memoryBackupsCount: memoryBackupsCount ?? 0,
-    memoryRecoveriesCount,
+    memoryRecoveriesCount: 'not-instrumented',
     publicStakPublications: publicStakPublications ?? 0,
   };
 };

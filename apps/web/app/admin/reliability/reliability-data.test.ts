@@ -2,26 +2,48 @@ import { describe, expect, it } from 'vitest';
 
 import { loadReliabilityMetrics } from './reliability-data';
 
-function fakeDb(rows: { event_name: string; success: boolean; error_code: string | null; user_id: string; created_at: string }[]) {
+type FailureRow = { event_name: string; error_code: string | null; user_id: string; created_at: string };
+
+function fakeDb(config: { counts: Record<string, number>; failureRows: FailureRow[] }) {
   return {
-    from: () => ({
-      select: () => ({
-        gte: () => ({
-          then: (resolve: (v: unknown) => void) => resolve({ data: rows, error: null }),
-        }),
-      }),
-    }),
+    from: () => {
+      const state: { eventName?: string; isFailureQuery?: boolean } = {};
+      const builder: Record<string, unknown> = {};
+      builder.select = () => builder;
+      builder.eq = (col: string, value: unknown) => {
+        if (col === 'event_name') state.eventName = value as string;
+        if (col === 'success' && value === false) state.isFailureQuery = true;
+        return builder;
+      };
+      builder.gte = () => builder;
+      builder.order = () => builder;
+      builder.limit = () => builder;
+      builder.then = (resolve: (v: unknown) => void) => {
+        if (state.isFailureQuery) {
+          resolve({ data: config.failureRows, error: null });
+        } else {
+          resolve({ count: config.counts[state.eventName ?? ''] ?? 0, error: null });
+        }
+      };
+      return builder;
+    },
   } as never;
 }
 
 describe('loadReliabilityMetrics', () => {
-  it('computes push/pull success rates and groups recent failures', async () => {
-    const db = fakeDb([
-      { event_name: 'cloud.push.succeeded', success: true, error_code: null, user_id: 'u1', created_at: '2026-10-19T10:00:00Z' },
-      { event_name: 'cloud.push.failed', success: false, error_code: 'invalid-request', user_id: 'u1', created_at: '2026-10-19T11:00:00Z' },
-      { event_name: 'cloud.push.failed', success: false, error_code: 'invalid-request', user_id: 'u2', created_at: '2026-10-19T12:00:00Z' },
-      { event_name: 'cloud.pull.succeeded', success: true, error_code: null, user_id: 'u1', created_at: '2026-10-19T13:00:00Z' },
-    ]);
+  it('computes push/pull success rates (via head:true counts) and groups recent failures', async () => {
+    const db = fakeDb({
+      counts: {
+        'cloud.push.succeeded': 1,
+        'cloud.push.failed': 2,
+        'cloud.pull.succeeded': 1,
+        'cloud.pull.failed': 0,
+      },
+      failureRows: [
+        { event_name: 'cloud.push.failed', error_code: 'invalid-request', user_id: 'u1', created_at: '2026-10-19T11:00:00Z' },
+        { event_name: 'cloud.push.failed', error_code: 'invalid-request', user_id: 'u2', created_at: '2026-10-19T12:00:00Z' },
+      ],
+    });
 
     const result = await loadReliabilityMetrics(db, 'all');
 
@@ -40,7 +62,7 @@ describe('loadReliabilityMetrics', () => {
   });
 
   it('returns null success rates (not NaN) when there are zero attempts of that type', async () => {
-    const db = fakeDb([]);
+    const db = fakeDb({ counts: {}, failureRows: [] });
     const result = await loadReliabilityMetrics(db, 'all');
     expect(result.pushSuccessRate).toBeNull();
     expect(result.pullSuccessRate).toBeNull();

@@ -46,7 +46,7 @@ export default async function AdminUsagePage({
           </div>
           <div>
             <dt>Memory recoveries</dt>
-            <dd>{metrics.memoryRecoveriesCount}</dd>
+            <dd>{metrics.memoryRecoveriesCount === 'not-instrumented' ? 'Not instrumented yet' : metrics.memoryRecoveriesCount}</dd>
           </div>
           <div>
             <dt>Public STAK publications</dt>
@@ -65,9 +65,14 @@ export default async function AdminUsagePage({
             ))}
           </ul>
         )}
-        <h2>Pulls per day</h2>
+        <h2>Environment reads per day</h2>
+        <p style={{ color: 'var(--muted)', fontSize: '13px' }}>
+          Includes pull, push, and <code>stak status</code> checks — the server
+          can&apos;t yet tell these apart (no CLI signal distinguishes them). Not a
+          pure pull count.
+        </p>
         {metrics.pullsPerDay.length === 0 ? (
-          <p>No pulls in this period.</p>
+          <p>No environment reads in this period.</p>
         ) : (
           <ul>
             {metrics.pullsPerDay.map((d) => (
