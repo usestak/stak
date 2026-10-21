@@ -15,11 +15,17 @@ export type UsageMetrics = {
   publicStakPublications: number;
 };
 
-// A row cap until a proper server-side aggregate (RPC/view) replaces this
-// per-table-fetch approach -- same accepted exception as users-data.ts
-// (Phase 2 final review). Unlike a plain count query, per-day bucketing
-// needs the actual rows, not just a total.
-const MAX_EVENT_ROWS = 20000;
+// Hosted Supabase/PostgREST caps any single response at 1000 rows by
+// default (no max_rows override exists in this repo's supabase/ config) --
+// a limit() higher than that does NOT raise the real ceiling, it just
+// documents the intent. Once events-in-range exceed 1000, the oldest days
+// in the bucketed output silently drop (ordered newest-first). Accepted
+// limitation until a proper server-side aggregate (RPC/view) replaces this
+// per-table-fetch approach -- same category of exception as users-data.ts's
+// row cap (Phase 2 final review), carried forward rather than silently
+// re-introduced. Unlike a plain count query, per-day bucketing needs the
+// actual rows, not just a total, so a head:true count can't replace this.
+const MAX_EVENT_ROWS = 1000;
 
 const bucketByDay = (
   rows: { created_at: string }[],

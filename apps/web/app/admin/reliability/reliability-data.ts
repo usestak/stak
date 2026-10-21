@@ -22,12 +22,18 @@ type FailureRow = {
   created_at: string;
 };
 
-// A row cap until a proper server-side aggregate (RPC/view) replaces this
-// per-table-fetch approach -- same accepted exception as usage-data.ts/
-// users-data.ts (Phase 2/3 final reviews). Success rates don't need this
-// (they're computed via head:true counts below); only the per-failure
-// grouping genuinely needs row-level data.
-const MAX_FAILURE_ROWS = 2000;
+// Hosted Supabase/PostgREST caps any single response at 1000 rows by
+// default (no max_rows override exists in this repo's supabase/ config) --
+// a limit() higher than that does NOT raise the real ceiling. Once
+// failures-in-range exceed 1000, the oldest ones silently drop from
+// recentFailures' counts/firstSeen (ordered newest-first) -- the admin has
+// no on-page indication this happened. Accepted limitation until a proper
+// server-side aggregate (RPC/view) replaces this per-table-fetch approach,
+// same category of exception as usage-data.ts/users-data.ts's row caps
+// (Phase 2/3 final reviews). Success rates don't need this (they're
+// computed via head:true counts below, with no row cap); only the
+// per-failure grouping genuinely needs row-level data.
+const MAX_FAILURE_ROWS = 1000;
 
 const countFor = async (
   db: SupabaseClient,
