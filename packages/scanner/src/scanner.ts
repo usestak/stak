@@ -42,6 +42,7 @@ type ContentInspection = {
 const inspectContent = (
   contentPath: string,
   cache: Map<string, Promise<ContentInspection>>,
+  provenanceCache: Map<string, boolean>,
 ): Promise<ContentInspection> => {
   const cached = cache.get(contentPath);
   if (cached) return cached;
@@ -50,7 +51,7 @@ const inspectContent = (
       await readFile(path.join(contentPath, 'SKILL.md'), 'utf8'),
     );
     const hashed = await hashSkillDirectory(contentPath);
-    const source = await detectProvenance(contentPath);
+    const source = await detectProvenance(contentPath, provenanceCache);
     return { parsed, hashed, source };
   })();
   cache.set(contentPath, computed);
@@ -141,12 +142,14 @@ const inspectOccurrence = async (
   visiblePath: string,
   resolvedPath: string | undefined,
   contentCache: Map<string, Promise<ContentInspection>>,
+  provenanceCache: Map<string, boolean>,
 ) => {
   const contentPath = resolvedPath ?? visiblePath;
   const diagnostics: ScanDiagnostic[] = [];
   const { parsed, hashed, source } = await inspectContent(
     contentPath,
     contentCache,
+    provenanceCache,
   );
   const location: SkillLocation = {
     path: visiblePath,
@@ -228,6 +231,10 @@ export const scanSkills = async ({
   const diagnostics: ScanDiagnostic[] = [];
   const byHash = new Map<string, DiscoveredSkill>();
   const contentCache = new Map<string, Promise<ContentInspection>>();
+  // Shared across the whole scan, not per content path: Skill locations commonly share long
+  // ancestor chains (a global root, home, …), so this avoids re-`stat`-ing the same directory
+  // for `.git` once per distinct physical Skill location that happens to live under it.
+  const provenanceCache = new Map<string, boolean>();
   const pending: Array<{
     root: SkillRoot;
     path: string;
@@ -276,6 +283,7 @@ export const scanSkills = async ({
             skillPath.path,
             skillPath.realPath,
             contentCache,
+            provenanceCache,
           ),
         };
       } catch (error) {

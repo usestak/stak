@@ -128,4 +128,37 @@ describe('detectProvenance', () => {
 
     expect(await detectProvenance(directory)).toEqual({ type: 'local' });
   });
+
+  // The fast path short-circuits the `git` subprocess entirely for a confirmed-local
+  // directory by walking ancestors in pure JS, caching per-directory across calls — this
+  // proves that sharing one cache across sibling calls never conflates "no .git up to here"
+  // for one directory with a DIFFERENT sibling directory that genuinely has its own .git.
+  it('correctly distinguishes Git from local siblings sharing a cache, even sharing a non-Git parent', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'stack-mixed-'));
+    directories.push(root);
+    const { mkdir } = await import('node:fs/promises');
+    const gitSkill = path.join(root, 'skills', 'one');
+    const localSkill = path.join(root, 'skills', 'two');
+    await mkdir(gitSkill, { recursive: true });
+    await mkdir(localSkill, { recursive: true });
+    await writeFile(path.join(gitSkill, 'SKILL.md'), 'demo');
+    await writeFile(path.join(localSkill, 'SKILL.md'), 'demo');
+    execFileSync('git', ['init', '-q'], { cwd: gitSkill });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], {
+      cwd: gitSkill,
+    });
+    execFileSync('git', ['config', 'user.name', 'Stack Test'], {
+      cwd: gitSkill,
+    });
+    execFileSync('git', ['add', '.'], { cwd: gitSkill });
+    execFileSync('git', ['commit', '-qm', 'fixture'], { cwd: gitSkill });
+
+    const cache = new Map<string, boolean>();
+    const [gitSource, localSource] = await Promise.all([
+      detectProvenance(gitSkill, cache),
+      detectProvenance(localSkill, cache),
+    ]);
+    expect(gitSource.type).toBe('git');
+    expect(localSource).toEqual({ type: 'local' });
+  }, 15_000);
 });
