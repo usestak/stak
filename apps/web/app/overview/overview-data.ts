@@ -22,6 +22,7 @@ import {
   type MachineOption,
 } from '../../lib/machine-context.js';
 import { projectDisplayName } from '../../lib/project-presentation.js';
+import { webAuth } from '../../lib/web-auth.js';
 
 /** The P3 read methods the Overview consumes; injectable so the view model is unit-testable. */
 export type OverviewService = Pick<
@@ -31,9 +32,6 @@ export type OverviewService = Pick<
   | 'getProjectsReadModel'
   | 'listUserStacks'
 >;
-
-/** The web calls the P3 service as the signed-in session user (identity never from input). */
-const webAuth = (userId: string) => ({ userId, tokenId: 'web-session' });
 
 const MAX_CARDS = 4;
 const MAX_ACTIVITY = 4;

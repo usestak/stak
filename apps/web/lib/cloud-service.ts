@@ -1,5 +1,6 @@
 import { createCloudService, type CloudService, type ProductEvent } from '@stack/cloud-server';
 import { after } from 'next/server';
+import { cache } from 'react';
 
 import { supabaseBlobStore } from './blob';
 import { cloudEnv } from './env';
@@ -28,7 +29,7 @@ export const productEventToRow = (event: ProductEvent) => ({
 export const getCloudService = (): CloudService => {
   if (!cached) {
     const env = cloudEnv();
-    cached = createCloudService({
+    const service = createCloudService({
       repository: supabaseRepository(),
       blobStore: supabaseBlobStore(),
       appUrl: env.appUrl,
@@ -52,6 +53,22 @@ export const getCloudService = (): CloudService => {
         });
       },
     });
+    cached = {
+      ...service,
+      // `cache()`-wrapped: these three reads are each independently called by multiple
+      // loaders within the SAME request (every page's own data loader, plus
+      // `loadSidebarSummary` for the sidebar badges on every route) — without this, each
+      // request paid for the identical Cloud/Supabase read twice. `cache()` is request-scoped
+      // (via the App Router's render context) even though it's set up once here on a
+      // process-lifetime singleton — defining it once at this call site, not per-request, is
+      // the correct and intended way to use it. Relies on `webAuth(userId)` itself being
+      // `cache()`-wrapped (see lib/web-auth.ts) so the `auth` argument is the same object
+      // reference across callers within one request — React's `cache()` keys non-primitive
+      // arguments by reference, not deep equality.
+      getOverview: cache(service.getOverview),
+      listUserStacks: cache(service.listUserStacks),
+      getMachinesReadModel: cache(service.getMachinesReadModel),
+    };
   }
   return cached;
 };
