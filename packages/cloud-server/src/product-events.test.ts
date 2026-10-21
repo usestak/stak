@@ -95,6 +95,40 @@ describe('push/pull event recording', () => {
       expectedLatestVersionId: null,
     });
     expect(result.createdNew).toBe(true); // the push itself must not fail
+    // Not vacuous: recordEvent genuinely ran and rejected (not simply absent).
+    expect(recordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ eventName: 'cloud.push.succeeded' }),
+    );
+  });
+
+  it('commitEnvironmentVersion does not wait for a slow recordEvent before resolving', async () => {
+    let releaseRecordEvent: () => void = () => {};
+    const recordEvent = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseRecordEvent = resolve;
+        }),
+    );
+    const service = createCloudService({
+      repository: createInMemoryRepository(),
+      blobStore: createInMemoryBlobStore(),
+      appUrl: 'http://localhost:3000',
+      ticketSecret: 'test-secret',
+      recordEvent,
+    });
+    const user = { userId: 'user-1', tokenId: 'token-1' };
+
+    const result = await service.commitEnvironmentVersion(user, 'main', {
+      bundle: makeEnvironmentBundle('main'),
+      expectedLatestVersionId: null,
+    });
+
+    // The push already resolved above, even though recordEvent's own promise
+    // is still pending (releaseRecordEvent has not been called yet) -- proof
+    // that the call site doesn't await it (I1 from the Phase 3 final review).
+    expect(result.createdNew).toBe(true);
+    expect(recordEvent).toHaveBeenCalled();
+    releaseRecordEvent(); // avoid leaving a dangling unresolved promise
   });
 
   it('records cloud.pull.succeeded on a successful getEnvironment', async () => {
@@ -118,7 +152,13 @@ describe('push/pull event recording', () => {
     );
   });
 
-  it('records cloud.pull.failed when getEnvironment throws not-found, and still throws', async () => {
+  it('does NOT record cloud.pull.failed for "remote-environment-not-found" (still throws)', async () => {
+    // packages/core's cloud-push.ts and cloud-status.ts call the same
+    // client.getEnvironment('main') as the real pull command -- a
+    // first-time user's push/status against a never-created environment
+    // legitimately hits this error every time. Recording it as a pull
+    // failure would inflate Reliability's failure rate with an expected,
+    // benign outcome rather than a real reliability signal.
     const recordEvent = vi.fn();
     const service = createCloudService({
       repository: createInMemoryRepository(),
@@ -129,8 +169,31 @@ describe('push/pull event recording', () => {
     });
     const user = { userId: 'user-1', tokenId: 'token-1' };
     await expect(service.getEnvironment(user, 'does-not-exist')).rejects.toThrow();
+    expect(recordEvent).not.toHaveBeenCalled();
+  });
+
+  it('DOES record cloud.pull.failed for a non-"not-found" error, and still throws', async () => {
+    const recordEvent = vi.fn();
+    const repository = createInMemoryRepository();
+    repository.getEnvironmentByName = async () => {
+      throw new Error('simulated repository failure');
+    };
+    const service = createCloudService({
+      repository,
+      blobStore: createInMemoryBlobStore(),
+      appUrl: 'http://localhost:3000',
+      ticketSecret: 'test-secret',
+      recordEvent,
+    });
+    const user = { userId: 'user-1', tokenId: 'token-1' };
+    await expect(service.getEnvironment(user, 'main')).rejects.toThrow('simulated repository failure');
     expect(recordEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-1', eventName: 'cloud.pull.failed', success: false }),
+      expect.objectContaining({
+        userId: 'user-1',
+        eventName: 'cloud.pull.failed',
+        success: false,
+        errorCode: 'unknown-error',
+      }),
     );
   });
 });

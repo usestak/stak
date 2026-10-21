@@ -140,6 +140,15 @@ export const createCloudService = (config: CloudServiceConfig) => {
     config.maxSnapshotBytes ?? DEFAULT_MAX_SNAPSHOT_BYTES;
   const appUrl = config.appUrl.replace(/\/+$/, '');
 
+  /**
+   * Best-effort product analytics. Callers invoke this with `void` (fire
+   * and forget), never `await` — a slow or hung config.recordEvent (e.g. a
+   * stalled Supabase insert) must never add latency to a real push/pull
+   * request, not just never fail it. This function's own promise never
+   * rejects either way, so even an awaited call would be safe; the `void`
+   * convention at call sites is the latency guarantee, not a correctness
+   * requirement of this function.
+   */
   const recordEventSafely = async (event: ProductEvent): Promise<void> => {
     try {
       await config.recordEvent?.(event);
@@ -539,7 +548,7 @@ export const createCloudService = (config: CloudServiceConfig) => {
             `No cloud Environment named ${name}.`,
           );
         if (!environment.latestVersionId) {
-          await recordEventSafely({
+          void recordEventSafely({
             userId: user.userId,
             eventName: 'cloud.pull.succeeded',
             success: true,
@@ -567,20 +576,33 @@ export const createCloudService = (config: CloudServiceConfig) => {
             bundle: version.bundle,
           },
         };
-        await recordEventSafely({
+        void recordEventSafely({
           userId: user.userId,
           eventName: 'cloud.pull.succeeded',
           success: true,
         });
         return response;
       } catch (error) {
-        await recordEventSafely({
-          userId: user.userId,
-          eventName: 'cloud.pull.failed',
-          success: false,
-          errorCode:
-            error instanceof CloudServiceError ? error.code : 'unknown-error',
-        });
+        // getEnvironment is called by push and status as an internal
+        // precondition check, not only by the user-initiated pull command
+        // (packages/core's cloud-push.ts/cloud-status.ts/cloud-pull.ts all
+        // call client.getEnvironment('main') the same way; the server has
+        // no way to tell them apart). A first-time user's push or status
+        // check against a never-created environment legitimately hits
+        // 'remote-environment-not-found' every time -- that is not a
+        // reliability signal, so it is deliberately excluded here rather
+        // than inflating the Reliability page's pull-failure rate with an
+        // expected, benign outcome. Any other failure is still recorded.
+        const errorCode =
+          error instanceof CloudServiceError ? error.code : 'unknown-error';
+        if (errorCode !== 'remote-environment-not-found') {
+          void recordEventSafely({
+            userId: user.userId,
+            eventName: 'cloud.pull.failed',
+            success: false,
+            errorCode,
+          });
+        }
         throw error;
       }
     },
@@ -606,10 +628,11 @@ export const createCloudService = (config: CloudServiceConfig) => {
             input.idempotencyKey,
           );
           if (existing) {
-            await recordEventSafely({
+            void recordEventSafely({
               userId: user.userId,
               eventName: 'cloud.push.succeeded',
               success: true,
+              metadata: { replayed: true },
               ...(input.machineId ? { machineId: input.machineId } : {}),
             });
             return {
@@ -663,7 +686,7 @@ export const createCloudService = (config: CloudServiceConfig) => {
           },
           createdNew: outcome.createdNew,
         };
-        await recordEventSafely({
+        void recordEventSafely({
           userId: user.userId,
           eventName: 'cloud.push.succeeded',
           success: true,
@@ -671,7 +694,7 @@ export const createCloudService = (config: CloudServiceConfig) => {
         });
         return response;
       } catch (error) {
-        await recordEventSafely({
+        void recordEventSafely({
           userId: user.userId,
           eventName: 'cloud.push.failed',
           success: false,
