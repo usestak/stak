@@ -154,10 +154,28 @@ export function EditStakForm({
     if (publishing) return;
     setPublishing(true);
     setPublishError(null);
+    // Persist an edited description to the draft BEFORE publishing, rather than passing it
+    // as a one-off override to `publishUserStackAction` — an override made the published
+    // bundle's description diverge from the saved draft's, and `getUserStackPublicationStatus`
+    // rebuilds its comparison hash from the saved draft alone, so that divergence made the
+    // status permanently (and misleadingly) read "Unpublished changes" right after a
+    // successful publish. Saving first keeps the draft and the published version the same
+    // source of truth, exactly like every other field already works.
+    if (description.trim() !== detail.description) {
+      const saveResult = await updateUserStackAction({
+        stackId: detail.stackId,
+        expectedLatestVersionId: detail.version?.versionId ?? null,
+        description: description.trim(),
+      });
+      if (!saveResult.ok) {
+        setPublishing(false);
+        setPublishError(saveResult.error);
+        return;
+      }
+    }
     const result = await publishUserStackAction({
       stackId: detail.stackId,
       slug: publishSlug.trim(),
-      description: description.trim(),
     });
     if (!result.ok) {
       setPublishing(false);
