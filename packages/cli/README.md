@@ -1,6 +1,6 @@
 # @memstk/cli
 
-Public Beta · v0.2.0-beta.1.
+Public Beta · v0.2.0-beta.2.
 
 **STAK — the control plane for portable AI agent environments.**
 
