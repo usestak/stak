@@ -13,6 +13,18 @@
         "STACK_MAX_SNAPSHOT_BYTES"
       ]
     },
+    "@stack/web#build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**"],
+      "env": [
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "STAK_APP_URL",
+        "STACK_APP_URL",
+        "STACK_TICKET_SECRET",
+        "STACK_SNAPSHOT_BUCKET",
+        "STACK_MAX_SNAPSHOT_BYTES"
+      ]
+    },
     "lint": {
       "dependsOn": ["^lint"],
       "outputs": []
