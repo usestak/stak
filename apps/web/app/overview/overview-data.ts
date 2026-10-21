@@ -414,8 +414,13 @@ export const loadOverview = async (
           ? {
               label: 'PROJECTS',
               value: 'No projects yet',
+              // `stak scan` technically also reports (any CHECKIN_COMMANDS member's
+              // check-in bundles project presence, not just what it's named for — see
+              // packages/cli/src/cloud/checkin.ts), but it's the demoted/diagnostic
+              // command. `stak status` is the canonical one in the current onboarding
+              // sequence (`stak init` itself isn't a check-in command at all).
               detail:
-                'Projects appear once a machine runs `stak scan` and reports them.',
+                'Projects appear once a machine runs `stak status` and reports them.',
             }
           : isCheckedIn
             ? {
