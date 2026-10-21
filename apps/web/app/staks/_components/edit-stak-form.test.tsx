@@ -1,5 +1,11 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
@@ -196,7 +202,13 @@ test('Publish is disabled with an empty description, and enabled once one is typ
   expect(screen.queryByText(/required to publish/i)).not.toBeInTheDocument();
 });
 
-test('clicking Publish sends the current description from the Publish box', () => {
+/** Regression: an edited description must be SAVED to the draft before publishing, not sent
+ *  as a one-off override to `publishUserStackAction` — an override made the published
+ *  bundle's description diverge from the saved draft, which permanently broke the
+ *  "Unpublished changes" status check (it rebuilds its comparison hash from the saved draft
+ *  alone) even right after a successful publish. */
+test('clicking Publish with an edited description saves it to the draft first, then publishes without an override', async () => {
+  updateUserStackAction.mockResolvedValue({ ok: true, versionNumber: 2 });
   publishUserStackAction.mockResolvedValue({ ok: true, result: {} });
   getUserStackPublicationStatusAction.mockResolvedValue({
     ok: true,
@@ -215,8 +227,16 @@ test('clicking Publish sends the current description from the Publish box', () =
   });
   fireEvent.click(screen.getByRole('button', { name: /^publish$/i }));
 
+  await waitFor(() => expect(publishUserStackAction).toHaveBeenCalled());
+
+  expect(updateUserStackAction).toHaveBeenCalledWith(
+    expect.objectContaining({
+      stackId: 'stack-1',
+      description: 'Updated before publishing.',
+    }),
+  );
   expect(publishUserStackAction).toHaveBeenCalledWith(
-    expect.objectContaining({ description: 'Updated before publishing.' }),
+    expect.not.objectContaining({ description: expect.anything() }),
   );
 });
 
