@@ -1,5 +1,6 @@
 import { parseBundle } from './bundle-codec.js';
 import { memoryManifestSchema } from '../domain.js';
+import { canonicalMainManifestSchema } from '../canonical/domain.js';
 import {
   claimKey,
   identityClaim,
@@ -21,6 +22,20 @@ export const standardProjectCountsFromBundle = (
 ): ProjectFileCount[] | null => {
   try {
     const bundle = parseBundle(bytes);
+    // v2: the canonical Project Memory manifest already groups documents by stable Project ID.
+    if (bundle.canonicalB64) {
+      const main = canonicalMainManifestSchema.parse(
+        JSON.parse(Buffer.from(bundle.canonicalB64, 'base64').toString('utf8')),
+      );
+      return main.projects
+        .map((project) => ({
+          projectId: project.projectId,
+          fileCount: project.documents.filter((doc) => doc.state === 'present')
+            .length,
+        }))
+        .filter((entry) => entry.fileCount > 0)
+        .sort((a, b) => (a.projectId < b.projectId ? -1 : 1));
+    }
     // Without the registry snapshot we cannot map item identities to stable Project IDs.
     if (!bundle.registryB64) return null;
     const snapshot = portableRegistrySnapshotSchema.parse(

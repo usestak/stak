@@ -17,6 +17,7 @@ import { createHash, randomUUID } from 'node:crypto';
 
 import { z } from 'zod';
 
+import { BUNDLE_FORMAT, BUNDLE_FORMAT_V2 } from './bundle-codec.js';
 import type { WrappedDek } from './mmk.js';
 
 /** Explicit size bounds — reject pathological payloads. */
@@ -91,7 +92,8 @@ export class RemoteMemoryError extends Error {
       | 'mmk-required'
       | 'session-consumed'
       | 'session-expired'
-      | 'no-envelope',
+      | 'no-envelope'
+      | 'incompatible-format',
     message: string,
   ) {
     super(message);
@@ -126,7 +128,15 @@ export type CreateRecoverySessionInput = {
   expiresAt: string;
 };
 
-/** Per-user remote Memory backend. Identity is bound at construction, never passed. */
+/**
+ * Per-user remote Memory backend. Identity is bound at construction, never passed.
+ *
+ * Phase: STAK-native Project Memory. `createGeneration` must reject a
+ * `stack-mem-bundle-v1` payload once this account's latest committed generation
+ * is `stack-mem-bundle-v2` (RemoteMemoryError 'incompatible-format') — every
+ * implementation of this interface (in-memory, and any future production
+ * backend) must enforce this, not just the one below.
+ */
 export interface RemoteMemoryBackend {
   getProfile(): Promise<MemoryProfile | null>;
   ensureProfile(formatVersion: string): Promise<MemoryProfile>;
@@ -289,6 +299,16 @@ class InMemoryRemoteMemoryBackend implements RemoteMemoryBackend {
         `Cloud latest generation is ${String(currentParent)}, not ${String(
           input.expectedParent,
         )}. Refresh and retry.`,
+      );
+    if (
+      latest &&
+      latest.bundleFormatVersion !== input.bundleFormatVersion &&
+      latest.bundleFormatVersion === BUNDLE_FORMAT_V2 &&
+      input.bundleFormatVersion === BUNDLE_FORMAT
+    )
+      throw new RemoteMemoryError(
+        'incompatible-format',
+        'This account’s Memory was upgraded by a newer STAK CLI. Update with `npm i -g @memstk/cli@beta`.',
       );
     if (
       this.myGenerations().some((record) => record.backupId === input.backupId)
