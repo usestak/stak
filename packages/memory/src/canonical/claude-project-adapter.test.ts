@@ -4,6 +4,8 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { PathFenceError } from '@stack/shared';
+
 import { encodeClaudeProjectKey } from '../project-identity.js';
 import {
   claudeCanonicalPathOf,
@@ -140,6 +142,11 @@ describe('writeClaudeProject', () => {
       [
         { kind: 'write', canonicalPath: 'instructions/private.md', bytes: Buffer.from('p') },
         { kind: 'write', canonicalPath: 'notes/a.md', bytes: Buffer.from('n') },
+        {
+          kind: 'write',
+          canonicalPath: 'agents/reviewer/notes.md',
+          bytes: Buffer.from('agent notes'),
+        },
       ],
       claudeHome,
     );
@@ -157,6 +164,14 @@ describe('writeClaudeProject', () => {
         'utf8',
       ),
     ).toBe('n');
+    // Exercises the narrowed `agents/` owned root on a normal, successful write
+    // (not only in the symlink-rejection tests below).
+    expect(
+      await readFile(
+        path.join(projectDir, '.claude', 'agent-memory', 'reviewer', 'notes.md'),
+        'utf8',
+      ),
+    ).toBe('agent notes');
 
     await writeClaudeProject(
       { projectId: 'prj_x', dir: projectDir },
@@ -193,10 +208,43 @@ describe('writeClaudeProject', () => {
       writeClaudeProject({ projectId: 'prj_x', dir: projectDir }, [
         { kind: 'write', canonicalPath: 'agents/reviewer/notes.md', bytes: Buffer.from('pwned') },
       ]),
-    ).rejects.toThrow();
+    ).rejects.toBeInstanceOf(PathFenceError);
 
     await expect(
       readFile(path.join(escapeTarget, 'notes.md'), 'utf8'),
+    ).rejects.toThrow();
+  });
+
+  it('refuses to write when .claude/agent-memory itself is a symlink', async (context) => {
+    const { readFile } = await import('node:fs/promises');
+    const root = await temp();
+    const projectDir = path.join(root, 'proj');
+    // A sibling directory still inside the sandboxed project.dir tree, but OUTSIDE
+    // `.claude/` entirely — simulates an attacker-controlled repo checkout that
+    // plants `.claude/agent-memory` ITSELF as a symlink (rather than just the
+    // `<agent>` segment underneath it). `assertPathWithin` realpath-canonicalizes
+    // the OWNED ROOT as well as the proposed target, so without
+    // `assertRootHasNoSymlinkSegments` the narrowed root would silently
+    // canonicalize to wherever this symlink points, and a write to
+    // `agents/reviewer/notes.md` would be allowed "within" that redirected root.
+    const escapeTarget = path.join(projectDir, 'escape-target');
+    await mkdir(escapeTarget, { recursive: true });
+    await mkdir(path.join(projectDir, '.claude'), { recursive: true });
+    try {
+      await symlink(escapeTarget, path.join(projectDir, '.claude', 'agent-memory'));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EPERM') return context.skip();
+      throw error;
+    }
+
+    await expect(
+      writeClaudeProject({ projectId: 'prj_x', dir: projectDir }, [
+        { kind: 'write', canonicalPath: 'agents/reviewer/notes.md', bytes: Buffer.from('pwned') },
+      ]),
+    ).rejects.toBeInstanceOf(PathFenceError);
+
+    await expect(
+      readFile(path.join(escapeTarget, 'reviewer', 'notes.md'), 'utf8'),
     ).rejects.toThrow();
   });
 });

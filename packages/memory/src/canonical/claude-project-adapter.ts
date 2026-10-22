@@ -1,8 +1,8 @@
-import { readFile, rm } from 'node:fs/promises';
+import { lstat, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { assertPathWithin } from '@stack/shared';
+import { assertPathWithin, PathFenceError } from '@stack/shared';
 
 import {
   discoverClaudeMemory,
@@ -24,6 +24,31 @@ export type MaterializeOp =
   | { kind: 'write'; canonicalPath: string; bytes: Uint8Array }
   | { kind: 'delete'; canonicalPath: string };
 export type WriteResult = { written: string[]; deleted: string[] };
+
+/**
+ * Refuse a narrowed owned root whose path, from `anchor` down to `root`, passes
+ * through a symlinked directory segment. `assertPathWithin` itself realpath-
+ * canonicalizes `root`, so a symlinked root (or an ancestor of it) would silently
+ * redirect the fence to wherever that symlink points — this check closes that gap.
+ * A segment that does not exist yet (nothing created there so far) is not a
+ * symlink and is safe to pass through.
+ */
+const assertRootHasNoSymlinkSegments = async (anchor: string, root: string): Promise<void> => {
+  const relative = path.relative(anchor, root);
+  const segments = relative.split(path.sep).filter((segment) => segment.length > 0);
+  let current = anchor;
+  for (const segment of segments) {
+    current = path.join(current, segment);
+    let stats;
+    try {
+      stats = await lstat(current);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    if (stats.isSymbolicLink()) throw new PathFenceError(); // same error type assertPathWithin itself throws
+  }
+};
 
 /** Maps one discovered Claude item to its canonical path, or null if out of scope
  * (global items — `user-instructions` and global `agent-memory` — stay in the v1
@@ -143,6 +168,8 @@ export const writeClaudeProject = async (
         : namespace === 'agents'
           ? path.join(project.dir, '.claude', 'agent-memory')
           : project.dir;
+    if (namespace === 'notes') await assertRootHasNoSymlinkSegments(claudeHome, ownedRoot);
+    else if (namespace === 'agents') await assertRootHasNoSymlinkSegments(project.dir, ownedRoot);
     await assertPathWithin({ ownedRoot, proposedPath: target, allowRoot: true });
     if (op.kind === 'write') {
       await atomicWriteFile(target, op.bytes);
