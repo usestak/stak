@@ -23,13 +23,19 @@ describe('pullCanonicalMemory', () => {
     expect(outcome).toEqual({ status: 'up-to-date', generation: null });
   });
 
-  it('is up-to-date when local already equals remote exactly', async () => {
+  it('is up-to-date when local already equals remote exactly, and repairs a missing base', async () => {
     const main = manifest([present('notes/a.md', 1)]);
-    const outcome = await pullCanonicalMemory(baseDeps({
+    const deps = baseDeps({
       getLocalMain: vi.fn(async () => main),
       fetchRemote: vi.fn(async () => ({ generation: 4, main })),
-    }));
+      // base is null (the default) — e.g. a fresh machine whose local Memory
+      // already happens to match Cloud, or a crash right after an earlier
+      // sync's local writes. Must be repaired so a LATER pull/push doesn't
+      // merge against a base that doesn't reflect reality.
+    });
+    const outcome = await pullCanonicalMemory(deps);
     expect(outcome).toEqual({ status: 'up-to-date', generation: 4 });
+    expect(deps.setBase).toHaveBeenCalledWith({ generation: 4, main });
   });
 
   it('is up-to-date when Cloud has not moved since base (local differences are purely unpushed, not pulled)', async () => {
@@ -56,9 +62,9 @@ describe('pullCanonicalMemory', () => {
     expect(deps.setBase).toHaveBeenCalledWith({ generation: 0, main: remote });
   });
 
-  it('merges a remote change on top of local-only edits with no conflict', async () => {
+  it('merges a remote change on top of local-only edits with no conflict, basing on what Cloud ACTUALLY holds, not the merge result', async () => {
     const base = manifest([present('notes/a.md', 1)]);
-    const local = manifest([present('notes/a.md', 1), present('notes/local-only.md', 9)]);
+    const local = manifest([present('notes/a.md', 1), present('notes/local-only.md', 9)]); // unpushed local-only doc
     const remote = manifest([present('notes/a.md', 2)]);
     const deps = baseDeps({
       getLocalMain: vi.fn(async () => local),
@@ -68,11 +74,48 @@ describe('pullCanonicalMemory', () => {
     const outcome = await pullCanonicalMemory(deps);
     expect(outcome.status).toBe('merged-local');
     if (outcome.status === 'merged-local') {
+      // Local storage DOES get the merge (including the still-unpushed local-only doc).
       const paths = outcome.main.projects[0]!.documents.map((d) => d.path);
       expect(paths).toContain('notes/a.md');
       expect(paths).toContain('notes/local-only.md');
     }
-    expect(deps.setBase).toHaveBeenCalledWith({ generation: 4, main: outcome.status === 'merged-local' ? outcome.main : undefined });
+    // The BASE must record what Cloud generation 4 actually holds (just `remote`,
+    // no local-only.md) — never the merge result. If the base recorded the merge
+    // result instead, a later pull against a newer remote that also lacks
+    // local-only.md would read it as "Cloud deleted my unpushed document" and
+    // silently drop it from local storage, even though it was never pushed and
+    // nothing ever deleted it.
+    expect(deps.setBase).toHaveBeenCalledWith({ generation: 4, main: remote });
+  });
+
+  it('a later pull against a newer remote never loses a still-unpushed local-only document (regression for the base-content bug above)', async () => {
+    const base1 = manifest([present('notes/a.md', 1)]);
+    const localWithUnpushedDoc = manifest([present('notes/a.md', 1), present('notes/local-only.md', 9)]);
+    const remote1 = manifest([present('notes/a.md', 2)]);
+    let storedLocal = localWithUnpushedDoc;
+    let storedBase: { generation: number; main: CanonicalMainManifest } | null = { generation: 3, main: base1 };
+    const deps: PullDeps = {
+      getLocalMain: vi.fn(async () => storedLocal),
+      getBase: vi.fn(async () => storedBase),
+      setLocalMain: vi.fn(async (main) => { storedLocal = main; }),
+      setBase: vi.fn(async (base) => { storedBase = base; }),
+      fetchRemote: vi.fn(async () => ({ generation: 4, main: remote1 })),
+      savePendingMerge: vi.fn(async () => undefined),
+      clearPendingMerge: vi.fn(async () => undefined),
+    };
+    await pullCanonicalMemory(deps); // first pull: merges, base correctly becomes {4, remote1}
+
+    // A second machine now publishes generation 5 — still without local-only.md,
+    // since that document was never pushed by anyone.
+    const remote2 = manifest([present('notes/a.md', 2), present('notes/other.md', 5)]);
+    deps.fetchRemote = vi.fn(async () => ({ generation: 5, main: remote2 }));
+    const second = await pullCanonicalMemory(deps);
+    expect(second.status).toBe('merged-local');
+    if (second.status === 'merged-local') {
+      const paths = second.main.projects[0]!.documents.map((d) => d.path);
+      expect(paths).toContain('notes/local-only.md'); // still there — never pushed, never deleted
+      expect(paths).toContain('notes/other.md');
+    }
   });
 
   it('stops with status conflict and saves a pending merge, without touching local main or base', async () => {
