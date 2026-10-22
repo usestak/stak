@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { link, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { memoryManifestSchema, type ManifestItem } from '../domain.js';
@@ -70,14 +70,27 @@ const ensureBackup = async (stackHome: string) => {
   }
   const current = await readMemoryManifest(stackHome);
   const manifest = current ?? { schemaVersion: 1 as const, provider: 'claude' as const, createdAt: new Date().toISOString(), items: [] };
-  // Atomic: write to a temp file in the same directory, then rename into place.
-  // A crash mid-write leaves only an orphaned temp file, never a truncated
-  // backup that would otherwise permanently block every future migration
-  // attempt with a JSON/schema parse error.
+  // Write to a temp file, then publish with `link` (not `rename`): `link` fails
+  // with EEXIST if `file` already exists instead of silently overwriting it, so
+  // two concurrent first-ever migration attempts (e.g. two terminal windows)
+  // can never both "win" and clobber each other's backup — the loser's EEXIST
+  // falls back to reading the winner's already-published backup, same as the
+  // ordinary "already exists" path above. (A full cross-process store lock is
+  // a larger fix deferred to a later task; this is the narrow, cheap piece of
+  // it specific to this one file.)
   const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(temp, `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
-  const { rename } = await import('node:fs/promises');
-  await rename(temp, file);
+  await writeFile(temp, `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+  try {
+    await link(temp, file);
+  } catch (error) {
+    await unlink(temp).catch(() => undefined);
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      const raw = await readFile(file, 'utf8');
+      return { manifest: memoryManifestSchema.parse(JSON.parse(raw)), alreadyMigrated: true };
+    }
+    throw error;
+  }
+  await unlink(temp).catch(() => undefined); // link() leaves the temp name too; drop it
   return { manifest, alreadyMigrated: false };
 };
 
@@ -130,10 +143,15 @@ const buildCanonicalMain = async (
       // Deduplicate identical copies by hash FIRST: several manifest entries can
       // carry the exact same bytes (e.g. carried-forward duplicates from the
       // 2026-10-20-era bugs), and those must collapse into ONE kept-both entry,
-      // never one conflict file per duplicate copy.
+      // never one conflict file per duplicate copy. Keep the MOST RECENTLY
+      // captured copy of each hash (not the first-seen one) so the metadata
+      // used downstream (`importedAt`) doesn't depend on manifest array order —
+      // the same determinism rule the primary/rest tie-break below enforces.
       const distinctByHash = new Map<string, ManifestItem>();
-      for (const entry of bucket)
-        if (!distinctByHash.has(entry.contentHash)) distinctByHash.set(entry.contentHash, entry);
+      for (const entry of bucket) {
+        const prev = distinctByHash.get(entry.contentHash);
+        if (!prev || entry.capturedAt > prev.capturedAt) distinctByHash.set(entry.contentHash, entry);
+      }
       const distinct = [...distinctByHash.values()];
       if (distinct.length === 1) {
         const winner = distinct[0]!;
@@ -248,7 +266,7 @@ export const migrateLocalStore = async (stackHome: string): Promise<MigrationSum
   if (needsBuild) await writeCanonicalMain(stackHome, main);
   await seedClaudeProjection(stackHome, main);
   await slimToGlobal(stackHome, manifest.items);
-  await writeFile(markerFile, new Date().toISOString());
+  await writeFile(markerFile, new Date().toISOString(), { mode: 0o600 });
 
   const migratedDocuments = main.projects.reduce((n, p) => n + p.documents.length, 0);
   return { migratedDocuments, keptBothDuplicates, alreadyMigrated };

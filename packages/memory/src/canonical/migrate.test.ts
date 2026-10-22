@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { memoryManifestSchema, toManifestItem } from '../domain.js';
+import { memoryManifestSchema } from '../domain.js';
 import { writeMemoryManifest, writeMemoryObject, hashBytes } from '../store.js';
 import { readCanonicalMain } from './store.js';
 import { migrateLocalStore } from './migrate.js';
@@ -236,6 +236,86 @@ describe('migrateLocalStore', () => {
     const paths = main.projects[0]!.documents.map((d) => d.path);
     expect(paths).toContain('notes/a.md'); // latest capturedAt keeps the original path
     expect(paths.some((p) => p.startsWith('notes/a.conflict-'))).toBe(true);
+  });
+
+  it('keeps the MOST RECENTLY captured copy when collapsing identical-hash duplicates, regardless of manifest array order', async () => {
+    // Three manifest entries at one canonical path, all under the SAME proven
+    // (git) identity: an OLDER copy and a NEWER copy that are byte-identical
+    // (same hash, captured at two different times), plus a third entry with
+    // genuinely DIFFERENT content captured in between. The older same-hash copy
+    // is placed FIRST in the array and the newer one LAST, specifically so a
+    // "first manifest entry with this hash wins" bug (instead of "the one with
+    // the greatest capturedAt wins") would pick the wrong entry: under that bug,
+    // the stale `capturedAt: 2026-10-18` copy would survive the hash-collapse,
+    // and since it is now compared to the differing entry's `2026-10-20`, the
+    // (wrong) DIFFERING entry would end up winning the "primary, unsuffixed
+    // path" slot instead of the shared-hash content — the opposite of what the
+    // spec requires ("the most recently captured one keeps the original name").
+    const hashShared = await putObject(Buffer.from('shared content'));
+    const hashDiff = await putObject(Buffer.from('different content'));
+    const identity = {
+      kind: 'git' as const,
+      canonical: 'github.com/acme/widgets',
+      host: 'github.com',
+      owner: 'acme',
+      repo: 'widgets',
+    };
+    await writeMemoryManifest({
+      stackHome,
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-22T00:00:00.000Z',
+        items: [
+          {
+            provider: 'claude',
+            kind: 'auto-memory',
+            scope: 'project',
+            logicalId: 'claude/auto-memory/github.com/acme/widgets/a.md#shared-old',
+            project: identity,
+            contentHash: hashShared,
+            restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
+            capturedAt: '2026-10-18T00:00:00.000Z', // oldest of the shared-hash pair
+            sensitivity: 'private',
+          },
+          {
+            provider: 'claude',
+            kind: 'auto-memory',
+            scope: 'project',
+            logicalId: 'claude/auto-memory/github.com/acme/widgets/a.md#diff',
+            project: identity,
+            contentHash: hashDiff,
+            restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
+            capturedAt: '2026-10-20T00:00:00.000Z', // strictly between the shared-hash pair
+            sensitivity: 'private',
+          },
+          {
+            provider: 'claude',
+            kind: 'auto-memory',
+            scope: 'project',
+            logicalId: 'claude/auto-memory/github.com/acme/widgets/a.md#shared-new',
+            project: identity,
+            contentHash: hashShared,
+            restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
+            capturedAt: '2026-10-22T00:00:00.000Z', // newest of the shared-hash pair, LAST in array
+            sensitivity: 'private',
+          },
+        ],
+      },
+    });
+    const summary = await migrateLocalStore(stackHome);
+    // Three entries, two distinct hashes after collapsing the identical pair.
+    expect(summary.keptBothDuplicates).toBe(1);
+    const main = await readCanonicalMain(stackHome);
+    expect(main.projects).toHaveLength(1);
+    const docs = main.projects[0]!.documents;
+    const primary = docs.find((d) => d.path === 'notes/a.md');
+    expect(primary).toMatchObject({
+      contentHash: hashShared,
+      importedAt: '2026-10-22T00:00:00.000Z', // the NEWEST shared-hash copy, not the first-seen one
+    });
+    const conflict = docs.find((d) => d.path !== 'notes/a.md');
+    expect(conflict).toMatchObject({ contentHash: hashDiff, importedAt: '2026-10-20T00:00:00.000Z' });
   });
 
   it('does NOT merge two UNRELATED local (non-Git) projects that happen to share a relative path', async () => {
