@@ -1129,7 +1129,7 @@ git commit -m "feat(memory): add the N/P/C Memory sync decision engine"
 
 **Interfaces:**
 - Consumes: `CanonicalDoc`, `CanonicalMainManifest`, `CanonicalProjectMemory`, `projectMemoryOf`, `documentOf` from `./domain.js` (Task 1).
-- Produces: `type MergeConflict = { projectId: string; path: string; reason: 'edit-edit' | 'edit-delete' }`, `mergeConflictSchema` (zod, for persisting inside `PendingMerge`), `type MergeOutcome = { merged: CanonicalMainManifest; conflicts: MergeConflict[] }`, `mergeCanonical(base: CanonicalMainManifest, local: CanonicalMainManifest, remote: CanonicalMainManifest): MergeOutcome`, `keepBothPath(originalPath: string, localContentHash: string, isTaken: (candidate: string) => boolean): string`.
+- Produces: `type MergeConflict = { projectId: string; path: string; reason: 'edit-edit' | 'edit-delete' | 'delete-delete' }` (`'delete-delete'` covers both sides having no live content — deleted, or an absent entry with no tombstone at all — with differing history; `'edit-edit'` requires BOTH sides to actually be `present`), `mergeConflictSchema` (zod, for persisting inside `PendingMerge`), `type MergeOutcome = { merged: CanonicalMainManifest; conflicts: MergeConflict[] }`, `mergeCanonical(base: CanonicalMainManifest, local: CanonicalMainManifest, remote: CanonicalMainManifest): MergeOutcome`, `keepBothPath(originalPath: string, localContentHash: string, isTaken: (candidate: string) => boolean): string`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1214,6 +1214,24 @@ describe('mergeCanonical', () => {
     expect(merged.projects[0]!.documents).toEqual([]);
   });
 
+  it('delete vs delete with different history conflicts as delete-delete, not edit-delete', () => {
+    const base = manifest([present('notes/a.md', 1)]);
+    const local = manifest([deleted('notes/a.md', 1)]);
+    const remote = manifest([deleted('notes/a.md', 2)]); // remote edited to v2, then deleted
+    const { merged, conflicts } = mergeCanonical(base, local, remote);
+    expect(conflicts).toEqual([{ projectId: 'prj_x', path: 'notes/a.md', reason: 'delete-delete' }]);
+    expect(merged.projects[0]!.documents).toEqual([]);
+  });
+
+  it('an entry absent on one side (no tombstone at all) vs present on the other conflicts as edit-delete', () => {
+    const base = manifest([present('notes/a.md', 1)]);
+    const local: CanonicalMainManifest = { schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION, projects: [{ projectId: 'prj_x', documents: [] }] };
+    const remote = manifest([present('notes/a.md', 2)]);
+    const { merged, conflicts } = mergeCanonical(base, local, remote);
+    expect(conflicts).toEqual([{ projectId: 'prj_x', path: 'notes/a.md', reason: 'edit-delete' }]);
+    expect(merged.projects[0]!.documents).toEqual([]);
+  });
+
   it('a brand-new document added only on one side is carried over with no conflict', () => {
     const base = manifest([]);
     const local = manifest([present('notes/new.md', 1)]);
@@ -1290,13 +1308,13 @@ import {
 export type MergeConflict = {
   projectId: string;
   path: string;
-  reason: 'edit-edit' | 'edit-delete';
+  reason: 'edit-edit' | 'edit-delete' | 'delete-delete';
 };
 
 export const mergeConflictSchema = z.object({
   projectId: z.string(),
   path: z.string(),
-  reason: z.enum(['edit-edit', 'edit-delete']),
+  reason: z.enum(['edit-edit', 'edit-delete', 'delete-delete']),
 });
 
 export type MergeOutcome = {
@@ -1363,8 +1381,17 @@ const mergeProject = (
       if (L) documents.push(L);
       continue;
     }
-    const reason: MergeConflict['reason'] =
-      L?.state === 'deleted' || R?.state === 'deleted' ? 'edit-delete' : 'edit-edit';
+    // "Gone" covers both an explicit tombstone and an entry that is simply absent
+    // (no `CanonicalDoc` at all for this path on that side) — both mean "no live
+    // content here," and `'edit-edit'` must require BOTH sides to be genuinely
+    // `present`, not just "not provably deleted."
+    const isGone = (doc: CanonicalDoc | undefined): boolean =>
+      doc === undefined || doc.state === 'deleted';
+    const reason: MergeConflict['reason'] = isGone(L) && isGone(R)
+      ? 'delete-delete'
+      : isGone(L) || isGone(R)
+        ? 'edit-delete'
+        : 'edit-edit';
     conflicts.push({ projectId, path, reason });
     // Conflicted documents are omitted from `merged` entirely until resolved.
   }
