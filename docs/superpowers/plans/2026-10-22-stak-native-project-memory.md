@@ -1651,11 +1651,11 @@ Expected: FAIL with a module-not-found error for `./claude-project-adapter.js`
 Create `packages/memory/src/canonical/claude-project-adapter.ts`:
 
 ```ts
-import { readFile, rm } from 'node:fs/promises';
+import { lstat, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { assertPathWithin } from '@stack/shared';
+import { assertPathWithin, PathFenceError } from '@stack/shared';
 
 import {
   discoverClaudeMemory,
@@ -1759,9 +1759,49 @@ export const scanClaudeProject = async (
   return { docs, sourceConflicts: sourceConflicts.sort((a, b) => (a.canonicalPath < b.canonicalPath ? -1 : 1)) };
 };
 
+/**
+ * Refuse a narrowed owned root whose path, from `anchor` down to `root`, passes
+ * through a symlinked directory segment. `assertPathWithin` itself realpath-
+ * canonicalizes `root`, so a symlinked root (or an ancestor of it) would silently
+ * redirect the fence to wherever that symlink points — this check closes that gap.
+ * A segment that does not exist yet (nothing created there so far) is not a
+ * symlink and is safe to pass through. `anchor` (`project.dir`/`claudeHome`) is
+ * trusted as given — it is a user-confirmed `stak project map` binding or the
+ * user's own home directory, never something a cloned repo's content controls.
+ */
+const assertRootHasNoSymlinkSegments = async (anchor: string, root: string): Promise<void> => {
+  const relative = path.relative(anchor, root);
+  const segments = relative.split(path.sep).filter((segment) => segment.length > 0);
+  let current = anchor;
+  for (const segment of segments) {
+    current = path.join(current, segment);
+    let stats;
+    try {
+      stats = await lstat(current);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    if (stats.isSymbolicLink()) throw new PathFenceError(); // same error type assertPathWithin itself throws
+  }
+};
+
 /** Write/delete native Claude files for the CURRENT bound location only — never
  * to any historical/leftover folder. Caller (the pull/materialize orchestrator,
- * Task 10) is responsible for only passing ops the sync engine already approved. */
+ * Task 10) is responsible for only passing ops the sync engine already approved.
+ * The owned root for `notes/`/`agents/` is narrowed to the SPECIFIC memory
+ * subdirectory (not the whole `project.dir`/project-key directory) so a symlink
+ * at the first attacker-influenced segment underneath it (e.g.
+ * `.claude/agent-memory/<agent>` pointing at `../../.git/hooks`) cannot
+ * realpath-escape into a location that still reads as "within project.dir". The
+ * narrowed root itself is then checked by `assertRootHasNoSymlinkSegments`, since
+ * `assertPathWithin` canonicalizes the ROOT too — without that second check, a
+ * symlink planted AT `.claude` or `.claude/agent-memory` itself would redirect the
+ * fence to wherever it points, which is worse than not narrowing the root at all.
+ * `instructions/`'s root stays `project.dir` (no nested, attacker-influenced
+ * segment exists there — the target is always exactly `project.dir/CLAUDE.local.md`,
+ * and a symlinked `CLAUDE.local.md` itself is replaced, not written through, by
+ * `atomicWriteFile`'s rename and by `rm`'s unlink). */
 export const writeClaudeProject = async (
   project: BoundProject,
   ops: MaterializeOp[],
@@ -1774,8 +1814,12 @@ export const writeClaudeProject = async (
     const namespace = namespaceOf(op.canonicalPath);
     const ownedRoot =
       namespace === 'notes'
-        ? path.join(claudeHome, 'projects', encodeClaudeProjectKey(path.resolve(project.dir)))
-        : project.dir;
+        ? path.join(claudeHome, 'projects', encodeClaudeProjectKey(path.resolve(project.dir)), 'memory')
+        : namespace === 'agents'
+          ? path.join(project.dir, '.claude', 'agent-memory')
+          : project.dir;
+    if (namespace === 'notes') await assertRootHasNoSymlinkSegments(claudeHome, ownedRoot);
+    else if (namespace === 'agents') await assertRootHasNoSymlinkSegments(project.dir, ownedRoot);
     await assertPathWithin({ ownedRoot, proposedPath: target, allowRoot: true });
     if (op.kind === 'write') {
       await atomicWriteFile(target, op.bytes);
