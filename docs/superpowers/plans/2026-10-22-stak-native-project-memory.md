@@ -2063,9 +2063,21 @@ describe('migrateLocalStore', () => {
     expect(main.projects).toHaveLength(1);
   });
 
-  it('keeps differing migration duplicates under both paths deterministically', async () => {
+  it('keeps differing migration duplicates under both paths deterministically — the SAME identity captured twice with different content', async () => {
+    // The only SAFE "old duplicate" case: both items carry the SAME git identity
+    // (same canonical remote), so they are PROVEN to be the same real project —
+    // never guessed from a coincidentally-matching path. A duplicate can arise
+    // here because the same project was captured at two different times, under
+    // two different (now-irrelevant) vendor keys, before the content stabilized.
     const hashOld = await putObject(Buffer.from('old content'));
     const hashNew = await putObject(Buffer.from('new content'));
+    const identity = {
+      kind: 'git' as const,
+      canonical: 'github.com/acme/widgets',
+      host: 'github.com',
+      owner: 'acme',
+      repo: 'widgets',
+    };
     await writeMemoryManifest({
       stackHome,
       manifest: {
@@ -2077,8 +2089,8 @@ describe('migrateLocalStore', () => {
             provider: 'claude',
             kind: 'auto-memory',
             scope: 'project',
-            logicalId: 'claude/auto-memory/local:key-old/a.md',
-            project: { kind: 'local', vendorKey: 'key-old' },
+            logicalId: 'claude/auto-memory/github.com/acme/widgets/a.md#old',
+            project: identity,
             contentHash: hashOld,
             restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
             capturedAt: '2026-10-19T00:00:00.000Z',
@@ -2088,8 +2100,8 @@ describe('migrateLocalStore', () => {
             provider: 'claude',
             kind: 'auto-memory',
             scope: 'project',
-            logicalId: 'claude/auto-memory/local:key-new/a.md',
-            project: { kind: 'local', vendorKey: 'key-new' },
+            logicalId: 'claude/auto-memory/github.com/acme/widgets/a.md#new',
+            project: identity,
             contentHash: hashNew,
             restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
             capturedAt: '2026-10-21T00:00:00.000Z',
@@ -2101,9 +2113,162 @@ describe('migrateLocalStore', () => {
     const summary = await migrateLocalStore(stackHome);
     expect(summary.keptBothDuplicates).toBe(1);
     const main = await readCanonicalMain(stackHome);
-    const paths = main.projects.flatMap((p) => p.documents.map((d) => d.path));
+    expect(main.projects).toHaveLength(1); // one real project, not two
+    const paths = main.projects[0]!.documents.map((d) => d.path);
     expect(paths).toContain('notes/a.md'); // latest capturedAt keeps the original path
     expect(paths.some((p) => p.startsWith('notes/a.conflict-'))).toBe(true);
+  });
+
+  it('does NOT merge two UNRELATED local (non-Git) projects that happen to share a relative path', async () => {
+    // This is the regression this fixture exists to prevent: two different real
+    // local projects both having, say, `MEMORY.md` must NEVER be coalesced just
+    // because the path matches. Path is never a strong identity signal (same
+    // rule as everywhere else in this system) — only a PROVEN shared identity
+    // (same git canonical, or the SAME already-resolved Project ID) may coalesce
+    // duplicates. Two different `local` vendor keys prove nothing about being
+    // the same project, so migration must mint two SEPARATE projects here, with
+    // NO keep-both naming and NO cross-project data loss.
+    const hashA = await putObject(Buffer.from('project A content'));
+    const hashB = await putObject(Buffer.from('project B content'));
+    await writeMemoryManifest({
+      stackHome,
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-20T00:00:00.000Z',
+        items: [
+          {
+            provider: 'claude',
+            kind: 'auto-memory',
+            scope: 'project',
+            logicalId: 'claude/auto-memory/local:key-foo/MEMORY.md',
+            project: { kind: 'local', vendorKey: 'key-foo' },
+            contentHash: hashA,
+            restoreTarget: { base: 'claude-project-memory', relativePath: 'MEMORY.md' },
+            capturedAt: '2026-10-19T00:00:00.000Z',
+            sensitivity: 'private',
+          },
+          {
+            provider: 'claude',
+            kind: 'auto-memory',
+            scope: 'project',
+            logicalId: 'claude/auto-memory/local:key-bar/MEMORY.md',
+            project: { kind: 'local', vendorKey: 'key-bar' },
+            contentHash: hashB,
+            restoreTarget: { base: 'claude-project-memory', relativePath: 'MEMORY.md' },
+            capturedAt: '2026-10-21T00:00:00.000Z',
+            sensitivity: 'private',
+          },
+        ],
+      },
+    });
+    const summary = await migrateLocalStore(stackHome);
+    expect(summary.keptBothDuplicates).toBe(0);
+    const main = await readCanonicalMain(stackHome);
+    expect(main.projects).toHaveLength(2); // two separate projects, never merged
+    for (const project of main.projects) {
+      expect(project.documents).toHaveLength(1);
+      expect(project.documents[0]!.path).toBe('notes/MEMORY.md'); // each keeps its own, unsuffixed
+    }
+    const hashes = main.projects.map((p) => (p.documents[0] as { contentHash: string }).contentHash).sort();
+    expect(hashes).toEqual([hashA, hashB].sort());
+  });
+
+  it('throws migration-invalid for a genuinely broken entry (content missing from the store)', async () => {
+    const missingHash = `sha256:${'9'.repeat(64)}`; // never written via putObject
+    await writeMemoryManifest({
+      stackHome,
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-20T00:00:00.000Z',
+        items: [
+          {
+            provider: 'claude',
+            kind: 'auto-memory',
+            scope: 'project',
+            logicalId: 'claude/auto-memory/github.com/acme/widgets/broken.md',
+            project: { kind: 'git', canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' },
+            contentHash: missingHash,
+            restoreTarget: { base: 'claude-project-memory', relativePath: 'broken.md' },
+            capturedAt: '2026-10-20T00:00:00.000Z',
+            sensitivity: 'private',
+          },
+        ],
+      },
+    });
+    await expect(migrateLocalStore(stackHome)).rejects.toMatchObject({ code: 'migration-invalid' });
+    // Fails BEFORE any mutation: no backup side effect beyond the (harmless,
+    // always-written) pre-migration backup file itself, and no canonical main.
+    const main = await readCanonicalMain(stackHome);
+    expect(main.projects).toEqual([]);
+  });
+
+  it('works on a genuinely fresh $STAK_HOME with no manifests directory at all yet', async () => {
+    // No writeMemoryManifest call at all — `stackHome` here has never had ANY
+    // memory command touch it, so `memory/manifests/` does not exist yet. This
+    // is the real first-run path for every brand-new account.
+    const summary = await migrateLocalStore(stackHome);
+    expect(summary.migratedDocuments).toBe(0);
+    expect(summary.alreadyMigrated).toBe(false);
+    // Calling it again must still be a safe no-op.
+    const second = await migrateLocalStore(stackHome);
+    expect(second.alreadyMigrated).toBe(true);
+  });
+
+  it('is a true no-op after completion: does not revert global items backed up since, and does not reset the projection', async () => {
+    const hash = await putObject(Buffer.from('global instructions v1'));
+    await writeMemoryManifest({
+      stackHome,
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-20T00:00:00.000Z',
+        items: [
+          {
+            provider: 'claude',
+            kind: 'user-instructions',
+            scope: 'global',
+            logicalId: 'claude/user-instructions/global/CLAUDE.md',
+            contentHash: hash,
+            restoreTarget: { base: 'claude-home', relativePath: 'CLAUDE.md' },
+            capturedAt: '2026-10-20T00:00:00.000Z',
+            sensitivity: 'private',
+          },
+        ],
+      },
+    });
+    await migrateLocalStore(stackHome); // first run completes migration (no project items here)
+
+    // Simulate a later, independent global backup that updates current.json.
+    const newHash = await putObject(Buffer.from('global instructions v2'));
+    await writeMemoryManifest({
+      stackHome,
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-22T00:00:00.000Z',
+        items: [
+          {
+            provider: 'claude',
+            kind: 'user-instructions',
+            scope: 'global',
+            logicalId: 'claude/user-instructions/global/CLAUDE.md',
+            contentHash: newHash,
+            restoreTarget: { base: 'claude-home', relativePath: 'CLAUDE.md' },
+            capturedAt: '2026-10-22T00:00:00.000Z',
+            sensitivity: 'private',
+          },
+        ],
+      },
+    });
+
+    await migrateLocalStore(stackHome); // must NOT revert the above
+
+    const current = memoryManifestSchema.parse(
+      JSON.parse(await readFile(path.join(stackHome, 'memory', 'manifests', 'current.json'), 'utf8')),
+    );
+    expect(current.items[0]?.contentHash).toBe(newHash); // not reverted to the old hash
   });
 });
 ```
@@ -2118,14 +2283,13 @@ Expected: FAIL with a module-not-found error for `./migrate.js`
 Create `packages/memory/src/canonical/migrate.ts`:
 
 ```ts
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { ManifestItem } from '../domain.js';
+import { memoryManifestSchema, type ManifestItem } from '../domain.js';
 import { memoryStorePaths, readMemoryManifest, readMemoryObject, writeMemoryManifest } from '../store.js';
 import { readLocalRegistry, writeLocalRegistry } from '../project/registry-store.js';
 import { resolveOrMintProject } from '../project/registry.js';
-import { projectIdentityKey } from '../project-identity.js';
 import { claudeCanonicalPathOf } from './claude-project-adapter.js';
 import { keepBothPath } from './merge.js';
 import {
@@ -2133,7 +2297,7 @@ import {
   type CanonicalDoc,
   type CanonicalMainManifest,
 } from './domain.js';
-import { readCanonicalMain, writeCanonicalMain, readProjection, writeProjection } from './store.js';
+import { readCanonicalMain, writeCanonicalMain, writeProjection } from './store.js';
 
 export class MigrationError extends Error {
   constructor(public readonly code: 'migration-invalid', message: string, options?: ErrorOptions) {
@@ -2151,25 +2315,72 @@ export type MigrationSummary = {
 const premigrationBackupPath = (stackHome: string) =>
   path.join(memoryStorePaths(stackHome).manifests, 'current.v1-premigration.json');
 
+// A dedicated completion marker — NOT just "the backup exists" and NOT just
+// "main.json has projects". Both of those are ambiguous: the backup is written
+// BEFORE the build step, and an account with zero project memory ever (global
+// items only, or genuinely nothing) never populates `main.json` either way, yet
+// steps C/D still must run exactly once. Only this marker, written at the very
+// end after every step has actually succeeded, can tell "never finished" apart
+// from "finished, nothing to migrate" apart from "finished, with real content" —
+// and only it is safe to gate re-running steps C/D on without either re-running
+// them forever (reverting newer global backups, resetting the projection) or
+// skipping a genuine crash-resume.
+const migrationCompleteMarkerPath = (stackHome: string) =>
+  path.join(memoryStorePaths(stackHome).manifests, '.v1-migration-complete');
+
+const markerExists = async (file: string): Promise<boolean> => {
+  try {
+    await readFile(file, 'utf8');
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+};
+
 /** Step A: write the pre-migration backup exactly once. A pre-existing backup is
  * read back unchanged (never overwritten), which is what makes later steps safe
- * to resume from after any crash. */
+ * to resume from after any crash. Schema-validated on read-back so a truncated
+ * write (crash mid-write) is caught explicitly rather than surfacing as an
+ * opaque `JSON.parse` failure on every future run. */
 const ensureBackup = async (stackHome: string) => {
+  const dir = memoryStorePaths(stackHome).manifests;
   const file = premigrationBackupPath(stackHome);
+  await mkdir(dir, { recursive: true }); // a genuinely fresh $STAK_HOME has no manifests/ yet
   try {
     const raw = await readFile(file, 'utf8');
-    return { manifest: JSON.parse(raw) as { items: ManifestItem[] }, alreadyMigrated: true };
+    return { manifest: memoryManifestSchema.parse(JSON.parse(raw)), alreadyMigrated: true };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
   const current = await readMemoryManifest(stackHome);
   const manifest = current ?? { schemaVersion: 1 as const, provider: 'claude' as const, createdAt: new Date().toISOString(), items: [] };
-  await writeFile(file, `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
+  // Atomic: write to a temp file in the same directory, then rename into place.
+  // A crash mid-write leaves only an orphaned temp file, never a truncated
+  // backup that would otherwise permanently block every future migration
+  // attempt with a JSON/schema parse error.
+  const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(temp, `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
+  const { rename } = await import('node:fs/promises');
+  await rename(temp, file);
   return { manifest, alreadyMigrated: false };
 };
 
 /** Step B: build canonical documents from the backed-up v1 items, resolving/minting
- * Project IDs through the existing registry and persisting any newly minted ones. */
+ * Project IDs through the existing registry and persisting any newly minted ones.
+ * Grouped by ALREADY-RESOLVED Project ID first, THEN by canonical path — never
+ * the reverse. Path alone is never a strong identity signal anywhere else in this
+ * system, and it must not become one here: two different local (non-Git)
+ * projects can easily share a relative path (every Claude auto-memory project has
+ * a `MEMORY.md`), and grouping by path first would silently fold one project's
+ * memory into another's as a "duplicate". Grouping by resolved identity first
+ * means a duplicate can only ever arise from the SAME proven identity (most
+ * commonly: the same Git remote) having been captured more than once with
+ * different content — the one case migration can safely and automatically
+ * resolve with keep-both naming. A purely local project whose vendor key changed
+ * over time (no Git remote ever) is NOT automatically reconciled by migration —
+ * it becomes two separate logical projects, which is the safe, conservative
+ * outcome; `stak project map` remains available to merge them manually later. */
 const buildCanonicalMain = async (
   stackHome: string,
   items: ManifestItem[],
@@ -2201,9 +2412,16 @@ const buildCanonicalMain = async (
     const documents: CanonicalDoc[] = [];
     const takenPaths = new Set<string>(byPath.keys());
     for (const [canonicalPath, bucket] of byPath) {
-      const distinctHashes = new Set(bucket.map((entry) => entry.contentHash));
-      if (distinctHashes.size === 1) {
-        const winner = bucket[0]!;
+      // Deduplicate identical copies by hash FIRST: several manifest entries can
+      // carry the exact same bytes (e.g. carried-forward duplicates from the
+      // 2026-10-20-era bugs), and those must collapse into ONE kept-both entry,
+      // never one conflict file per duplicate copy.
+      const distinctByHash = new Map<string, ManifestItem>();
+      for (const entry of bucket)
+        if (!distinctByHash.has(entry.contentHash)) distinctByHash.set(entry.contentHash, entry);
+      const distinct = [...distinctByHash.values()];
+      if (distinct.length === 1) {
+        const winner = distinct[0]!;
         documents.push({
           path: canonicalPath,
           state: 'present',
@@ -2213,7 +2431,16 @@ const buildCanonicalMain = async (
         });
         continue;
       }
-      const sorted = [...bucket].sort((a, b) => a.capturedAt < b.capturedAt ? 1 : -1);
+      // Deterministic tie-break: `capturedAt` descending, then `contentHash`
+      // ascending — two items captured in the SAME backup run share a
+      // `capturedAt`, and without a tie-break the "primary" (original-path)
+      // winner would depend on manifest array order, which is not deterministic
+      // across machines converting the same history.
+      const sorted = [...distinct].sort((a, b) =>
+        a.capturedAt !== b.capturedAt
+          ? a.capturedAt < b.capturedAt ? 1 : -1
+          : a.contentHash < b.contentHash ? -1 : 1,
+      );
       const [primary, ...rest] = sorted;
       documents.push({
         path: canonicalPath,
@@ -2242,8 +2469,7 @@ const buildCanonicalMain = async (
 
 /** Step C: seed the claude projection so every migrated document reads as
  * already synced (P = C), turning later native edits into ordinary edits rather
- * than a wall of first-sighting conflicts. Always recomputed from `main` and
- * rewritten, which makes it safe to resume after a crash at any point. */
+ * than a wall of first-sighting conflicts. */
 const seedClaudeProjection = async (stackHome: string, main: CanonicalMainManifest) => {
   const projects: Record<string, Record<string, string>> = {};
   for (const project of main.projects) {
@@ -2255,7 +2481,7 @@ const seedClaudeProjection = async (stackHome: string, main: CanonicalMainManife
   await writeProjection(stackHome, 'claude', { schemaVersion: 1, projects });
 };
 
-/** Step D: slim the v1 manifest down to global-only items. Safe to re-run. */
+/** Step D: slim the v1 manifest down to global-only items. */
 const slimToGlobal = async (stackHome: string, items: ManifestItem[]) => {
   const globalItems = items.filter((item) => item.scope === 'global');
   await writeMemoryManifest({
@@ -2265,12 +2491,28 @@ const slimToGlobal = async (stackHome: string, items: ManifestItem[]) => {
 };
 
 /**
- * Migrate the local v1 Memory store into the v2 canonical store. Each step is
- * written to be a safe no-op when it already ran, so calling this again after a
- * crash at ANY point (including mid-step) always converges on the same result —
- * there is no separate "resume" algorithm, only idempotent steps run in order.
+ * Migrate the local v1 Memory store into the v2 canonical store. Steps A/B are
+ * each independently safe to re-run (the backup is write-once; the build is
+ * gated on canonical main still being empty), which is what makes a crash
+ * BEFORE migration finishes resumable with no separate "resume" algorithm.
+ * Steps C/D are different: once migration has genuinely finished, they must
+ * NEVER run again — re-seeding the projection would erase progress any later
+ * sync made, and re-slimming `current.json` would revert any global backup made
+ * since. The completion marker (written only at the very end, after everything
+ * else has already succeeded) is what tells "still resuming" apart from "already
+ * done, nothing more to do here, ever again".
  */
 export const migrateLocalStore = async (stackHome: string): Promise<MigrationSummary> => {
+  const markerFile = migrationCompleteMarkerPath(stackHome);
+  if (await markerExists(markerFile)) {
+    const main = await readCanonicalMain(stackHome);
+    return {
+      migratedDocuments: main.projects.reduce((n, p) => n + p.documents.length, 0),
+      keptBothDuplicates: 0,
+      alreadyMigrated: true,
+    };
+  }
+
   const { manifest, alreadyMigrated } = await ensureBackup(stackHome);
   for (const item of manifest.items) {
     try {
@@ -2291,10 +2533,14 @@ export const migrateLocalStore = async (stackHome: string): Promise<MigrationSum
   if (needsBuild) await writeCanonicalMain(stackHome, main);
   await seedClaudeProjection(stackHome, main);
   await slimToGlobal(stackHome, manifest.items);
+  await writeFile(markerFile, new Date().toISOString());
+
   const migratedDocuments = main.projects.reduce((n, p) => n + p.documents.length, 0);
   return { migratedDocuments, keptBothDuplicates, alreadyMigrated };
 };
 ```
+
+Note: `markerExists`/`migrationCompleteMarkerPath` and `premigrationBackupPath`'s directory both live under `memory/manifests/`, which Task 2's exclusion-list work does NOT need to touch — a `.v1-migration-complete` marker and the pre-migration backup are both machine-local artifacts of a ONE-TIME conversion, not portable state, but they are also not referenced by `bundleFromStore`/`restoreBundleToStore` (Task 7) at all, so they simply never travel in a bundle regardless; no new entry in `packages/core/src/state.ts`'s `STATE_EXCLUDE_PATHS` is needed for them specifically (the whole `memory/manifests/` directory is already exercised by existing state-file handling for `current.json`, which legitimately IS portable — these two new files sit alongside it on disk but are simply never read by anything bundle-related).
 
 - [ ] **Step 5: Run tests to verify they pass**
 
