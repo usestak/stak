@@ -2283,7 +2283,7 @@ Expected: FAIL with a module-not-found error for `./migrate.js`
 Create `packages/memory/src/canonical/migrate.ts`:
 
 ```ts
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { link, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { memoryManifestSchema, type ManifestItem } from '../domain.js';
@@ -2342,7 +2342,15 @@ const markerExists = async (file: string): Promise<boolean> => {
  * read back unchanged (never overwritten), which is what makes later steps safe
  * to resume from after any crash. Schema-validated on read-back so a truncated
  * write (crash mid-write) is caught explicitly rather than surfacing as an
- * opaque `JSON.parse` failure on every future run. */
+ * opaque `JSON.parse` failure on every future run. Published via `link` (not
+ * `rename`), which fails with `EEXIST` instead of silently clobbering an
+ * already-published backup — the narrow defense against two processes racing
+ * to migrate the same fresh `$STAK_HOME` at once; a losing process simply reads
+ * back the winner's backup, same as the ordinary already-exists path. (The
+ * remaining lock-free gaps elsewhere in this migration — e.g. two concurrent
+ * runs each minting their own Project ID for the same identity — are a known,
+ * pre-existing limitation of this feature's lock-free design, not something
+ * this task closes; a cross-process store lock is deferred to a later task.) */
 const ensureBackup = async (stackHome: string) => {
   const dir = memoryStorePaths(stackHome).manifests;
   const file = premigrationBackupPath(stackHome);
@@ -2355,14 +2363,19 @@ const ensureBackup = async (stackHome: string) => {
   }
   const current = await readMemoryManifest(stackHome);
   const manifest = current ?? { schemaVersion: 1 as const, provider: 'claude' as const, createdAt: new Date().toISOString(), items: [] };
-  // Atomic: write to a temp file in the same directory, then rename into place.
-  // A crash mid-write leaves only an orphaned temp file, never a truncated
-  // backup that would otherwise permanently block every future migration
-  // attempt with a JSON/schema parse error.
   const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(temp, `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
-  const { rename } = await import('node:fs/promises');
-  await rename(temp, file);
+  await writeFile(temp, `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+  try {
+    await link(temp, file);
+  } catch (error) {
+    await unlink(temp).catch(() => undefined);
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      const raw = await readFile(file, 'utf8');
+      return { manifest: memoryManifestSchema.parse(JSON.parse(raw)), alreadyMigrated: true };
+    }
+    throw error;
+  }
+  await unlink(temp).catch(() => undefined); // drop the now-redundant temp hardlink name
   return { manifest, alreadyMigrated: false };
 };
 
@@ -2415,10 +2428,15 @@ const buildCanonicalMain = async (
       // Deduplicate identical copies by hash FIRST: several manifest entries can
       // carry the exact same bytes (e.g. carried-forward duplicates from the
       // 2026-10-20-era bugs), and those must collapse into ONE kept-both entry,
-      // never one conflict file per duplicate copy.
+      // never one conflict file per duplicate copy. Keep the MOST RECENTLY
+      // captured copy per hash (not first-seen) — otherwise which copy's
+      // metadata survives depends on manifest array order, the same
+      // non-determinism the tie-break below exists to avoid.
       const distinctByHash = new Map<string, ManifestItem>();
-      for (const entry of bucket)
-        if (!distinctByHash.has(entry.contentHash)) distinctByHash.set(entry.contentHash, entry);
+      for (const entry of bucket) {
+        const prev = distinctByHash.get(entry.contentHash);
+        if (!prev || entry.capturedAt > prev.capturedAt) distinctByHash.set(entry.contentHash, entry);
+      }
       const distinct = [...distinctByHash.values()];
       if (distinct.length === 1) {
         const winner = distinct[0]!;
@@ -2533,7 +2551,7 @@ export const migrateLocalStore = async (stackHome: string): Promise<MigrationSum
   if (needsBuild) await writeCanonicalMain(stackHome, main);
   await seedClaudeProjection(stackHome, main);
   await slimToGlobal(stackHome, manifest.items);
-  await writeFile(markerFile, new Date().toISOString());
+  await writeFile(markerFile, new Date().toISOString(), { mode: 0o600 });
 
   const migratedDocuments = main.projects.reduce((n, p) => n + p.documents.length, 0);
   return { migratedDocuments, keptBothDuplicates, alreadyMigrated };
