@@ -1,7 +1,6 @@
 import {
   discoverClaudeMemory,
   planMemoryBackupComposition,
-  projectIdentityKey,
   readLocalRegistry,
   readMemoryManifest,
   runMemoryBackup,
@@ -43,15 +42,12 @@ export const stageMemoryWithProjectDedup = async (
       },
     })
   ).filter((item) => item.scope === 'global'); // project-scope Memory now goes through canonical staging (stageCanonicalMemory), not this v1 path.
-  // Same Bug-B zombie-retirement bookkeeping `adapter.ts`'s backup() does, computed
-  // from the RAW (pre-reconcile) discovery so Local -> Git identity-strengthening is
-  // unaffected by this staging-only reconciliation.
+  // `syncRegistryForBackup` requires a `vendorKeys` map (Bug-B zombie-retirement
+  // bookkeeping, keyed by project-scope identity) — but `nativeItems` is global-only
+  // now, so it can never contain a project-scope item and this is always empty.
+  // Left in place only because the parameter is required; the loop that used to
+  // populate it from project-scope items is gone.
   const vendorKeys = new Map<string, string>();
-  for (const item of nativeItems) {
-    if (item.scope !== 'project' || !item.project || !item.source.vendorKey)
-      continue;
-    vendorKeys.set(projectIdentityKey(item.project), item.source.vendorKey);
-  }
 
   const registry = await readLocalRegistry(options.stackHome);
   const stagedManifest = await readMemoryManifest(options.stackHome);

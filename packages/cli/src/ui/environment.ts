@@ -20,6 +20,9 @@ import type {
  * object `stak status` already threads through as `memory`. */
 export type MemoryStatusDisplay = MemoryWorkingTreeStatus & {
   canonicalProjects?: CanonicalMemoryProjectStatus[];
+  /** Locatable project-scope identities discovered on this machine with no
+   * registered Project ID yet — `stak add .` would mint and import them. */
+  newProjects?: number;
 };
 
 import { agentLabel, block, changes, skills } from './format.js';
@@ -130,6 +133,10 @@ const renderMemorySection = (memory?: MemoryStatusDisplay): string[] => {
   const lines = [`  ${memoryLine(memory)}`];
   if (memory.canonicalProjects?.length)
     lines.push(...canonicalMemoryLines(memory.canonicalProjects));
+  if (memory.newProjects)
+    lines.push(
+      `  ${memory.newProjects} new project${memory.newProjects === 1 ? '' : 's'} not added yet — run \`stak add .\``,
+    );
   return ['', 'Memory', ...lines];
 };
 

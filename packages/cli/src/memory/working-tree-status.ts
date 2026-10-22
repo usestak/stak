@@ -24,9 +24,12 @@ export type MemoryWorkingTreeStatus =
 export type { CanonicalProjectSummary as CanonicalMemoryProjectStatus } from './canonical-ops.js';
 
 /** Canonical (Project Memory) status, additive to `MemoryWorkingTreeStatus` above —
- * consumed by `ui/environment.ts`'s `renderStatus`. */
+ * consumed by `ui/environment.ts`'s `renderStatus`. `newProjects` counts locatable
+ * project-scope identities discovered on this machine with no registered Project ID
+ * yet (see `canonical-ops.ts`'s `CanonicalMemoryStatusResult`). */
 export type CanonicalMemoryWorkingTreeStatus = {
   projects: CanonicalProjectSummary[];
+  newProjects: number;
 };
 
 export type ComputeMemoryWorkingTreeStatusOptions = {

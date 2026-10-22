@@ -707,18 +707,30 @@ const defaultDependencies: ProgramDependencies = {
   // comparison `runMemoryBackup` itself would make; never duplicates scanning/manifest
   // construction.
   checkMemory: async (): Promise<
-    MemoryWorkingTreeStatus & { canonicalProjects: CanonicalProjectSummary[] }
+    MemoryWorkingTreeStatus & { canonicalProjects: CanonicalProjectSummary[]; newProjects: number }
   > => {
-    const nativeItems = await (await memoryAdapter()).discover();
+    // Project-scope Memory is canonical Memory's job now (Step 1 of this feature) —
+    // the v1 manifest only ever contains global items post-migration, so this
+    // MACHINE-vs-MAIN comparison must only ever compare global items too. Comparing
+    // unfiltered native items here would show every project-scope item as a
+    // permanent, un-clearable "change not added".
+    const nativeItems = (await (await memoryAdapter()).discover()).filter(
+      (item) => item.scope === 'global',
+    );
     const registry = await readLocalRegistry(stackHome);
     const status = await computeMemoryWorkingTreeStatus({ stackHome, nativeItems, registry });
     // Canonical (Project) Memory status, additive to the MACHINE-vs-MAIN check above.
     // Never let a canonical status failure break `stak status` — same defensive
     // wrapping convention as `checkCloud`/`checkMemoryCloud` just above.
-    const canonicalProjects = await canonicalMemoryStatus(stackHome, { claudeHome }).catch(
-      () => [] as CanonicalProjectSummary[],
-    );
-    return { ...status, canonicalProjects };
+    const canonicalStatus = await canonicalMemoryStatus(
+      stackHome,
+      await memoryDiscoveryOptions(),
+    ).catch(() => ({ projects: [] as CanonicalProjectSummary[], newProjects: 0 }));
+    return {
+      ...status,
+      canonicalProjects: canonicalStatus.projects,
+      newProjects: canonicalStatus.newProjects,
+    };
   },
   // Deliberately narrow (see MemoryCloudDisplayState): only "does a Cloud backup exist
   // at all", reusing the existing readMemoryCloudStatus check — never a new subsystem,
@@ -748,8 +760,9 @@ const defaultDependencies: ProgramDependencies = {
   // first, so a relocated/re-cloned project's stale-but-still-discovered old directory
   // never creates a second manifest record for Memory that already has one.
   stageMemory: async () => {
-    const legacy = await stageMemoryWithProjectDedup(await memoryDiscoveryOptions());
-    const canonical = await stageCanonicalMemory(stackHome, { claudeHome });
+    const discovery = await memoryDiscoveryOptions();
+    const legacy = await stageMemoryWithProjectDedup(discovery);
+    const canonical = await stageCanonicalMemory(stackHome, discovery);
     return {
       files: legacy.files,
       projects: legacy.projects,
@@ -1216,7 +1229,12 @@ const defaultDependencies: ProgramDependencies = {
       // TRUE only when every current native Memory item is byte-identical in the latest
       // backup manifest (never just "a manifest exists"); conservative false otherwise.
       memoryBackedUp: async () => {
-        const nativeItems = await (await memoryAdapter()).discover();
+        // The v1 manifest only ever holds global items post-migration (project-scope
+        // Memory is canonical Memory's job now) — compare only global native items
+        // against it, or every project item would permanently read as "not backed up".
+        const nativeItems = (await (await memoryAdapter()).discover()).filter(
+          (item) => item.scope === 'global',
+        );
         const manifest = await readMemoryManifest(stackHome);
         return nativeMemoryBackedUp(
           nativeItems.map((i) => ({

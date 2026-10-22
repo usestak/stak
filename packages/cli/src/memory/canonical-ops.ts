@@ -1,18 +1,29 @@
+import path from 'node:path';
+
 import {
   applyImportActions,
+  bindingFor,
+  discoverClaudeMemory,
+  encodeClaudeProjectKey,
   migrateLocalStore,
+  normalizeVendorKey,
   planProjectSync,
   readLocalRegistry,
+  reconstructProjectDir,
+  resolveOrMintProject,
+  resolveProjectForIdentity,
   scanClaudeProject,
+  writeLocalRegistry,
+  projectIdentityKey,
+  type ClaudeProjectInput,
   type DiscoveredMemoryItem,
   type LocalRegistry,
   type ManifestItem,
+  type ProjectIdentity,
   type ScanResult,
 } from '@stack/memory';
 
 import { resolveCanonicalProjectId } from './canonical-identity.js';
-
-export type BoundProjectRecord = { projectId: string; dir: string };
 
 export type CanonicalProjectSummary = {
   projectId: string;
@@ -22,17 +33,243 @@ export type CanonicalProjectSummary = {
   guardedPaths: string[];
 };
 
-const planAllBoundProjects = async (
+/**
+ * Discovery options for canonical Memory sync — the SAME native-discovery inputs v1
+ * staging already uses (`program.ts`'s `memoryDiscoveryOptions()`), so canonical
+ * Memory recognizes exactly the projects v1 would have: the current project is "on
+ * this machine" per spec §4.5 the moment STAK can find its folder, with no separate
+ * mapping step required for the normal case.
+ */
+export type CanonicalDiscoveryOptions = {
+  claudeHome?: string;
+  /** Candidate local project directories (cwd + siblings, each with any resolvable
+   * Git origin) — `resolveMemoryProjects`'s output. Used both to re-derive a strong
+   * Git identity for an unmatched vendor key (passed straight through to discovery)
+   * and, here, to locate a project's CURRENT directory by matching its vendor key. */
+  projects?: ClaudeProjectInput[];
+  gitRemoteOf?: (dir: string) => Promise<string | undefined>;
+  isDirectory?: (candidate: string) => Promise<boolean>;
+  platform?: NodeJS.Platform;
+};
+
+type ProjectGroup = {
+  identity: ProjectIdentity;
+  identityKey: string;
+  /** Every distinct Claude vendor key discovered under this one logical identity —
+   * more than one exactly when a relocated/re-cloned project's stale old folder is
+   * still discovered alongside the current one. */
+  vendorKeys: Set<string>;
+};
+
+/** Group every discovered project-scope item by its logical (Project) identity,
+ * collecting all the distinct Claude vendor keys discovered under it. */
+const groupProjectItems = (items: DiscoveredMemoryItem[]): ProjectGroup[] => {
+  const groups = new Map<string, ProjectGroup>();
+  for (const item of items) {
+    if (item.scope !== 'project' || !item.project) continue;
+    const identityKey = projectIdentityKey(item.project);
+    let group = groups.get(identityKey);
+    if (!group) {
+      group = { identity: item.project, identityKey, vendorKeys: new Set() };
+      groups.set(identityKey, group);
+    }
+    if (item.source.vendorKey) group.vendorKeys.add(item.source.vendorKey);
+  }
+  return [...groups.values()];
+};
+
+const findCandidateDir = (
+  vendorKeys: Set<string>,
+  candidates: ClaudeProjectInput[],
+  platform: NodeJS.Platform,
+): ClaudeProjectInput | undefined => {
+  const targets = new Set([...vendorKeys].map((key) => normalizeVendorKey(key, platform)));
+  for (const candidate of candidates) {
+    const candidateKey = normalizeVendorKey(
+      encodeClaudeProjectKey(path.resolve(candidate.dir)),
+      platform,
+    );
+    if (targets.has(candidateKey)) return candidate;
+  }
+  return undefined;
+};
+
+const findReconstructedDir = async (
+  vendorKeys: Set<string>,
+  isDirectory: ((candidate: string) => Promise<boolean>) | undefined,
+  platform: NodeJS.Platform,
+): Promise<string | undefined> => {
+  if (!isDirectory) return undefined;
+  for (const vendorKey of vendorKeys) {
+    const dir = await reconstructProjectDir({ vendorKey, isDirectory, platform });
+    if (dir) return dir;
+  }
+  return undefined;
+};
+
+/**
+ * Determine a project's CURRENT directory (the write target), in priority order:
+ *  (a) an explicit machine binding for this Project ID (`stak project map`'s escape
+ *      hatch for a project STAK can't otherwise locate);
+ *  (b) a candidate directory (cwd/siblings) whose encoded vendor key matches;
+ *  (c) an unambiguous reconstruction of the vendor key back to a real directory.
+ * Returns `undefined` (never available on this machine) when none apply — the
+ * project's canonical Memory is left untouched, per spec §4.5.
+ */
+const resolveProjectDir = async (
+  group: ProjectGroup,
+  projectId: string | undefined,
+  registry: LocalRegistry,
+  candidates: ClaudeProjectInput[],
+  options: {
+    gitRemoteOf?: (dir: string) => Promise<string | undefined>;
+    isDirectory?: (candidate: string) => Promise<boolean>;
+    platform: NodeJS.Platform;
+  },
+): Promise<{ dir: string; gitRemote?: string } | undefined> => {
+  if (projectId) {
+    const binding = bindingFor(registry, projectId);
+    if (binding) return { dir: binding.dir };
+  }
+  const candidate = findCandidateDir(group.vendorKeys, candidates, options.platform);
+  if (candidate)
+    return {
+      dir: path.resolve(candidate.dir),
+      ...(candidate.gitRemote ? { gitRemote: candidate.gitRemote } : {}),
+    };
+  const reconstructed = await findReconstructedDir(group.vendorKeys, options.isDirectory, options.platform);
+  if (reconstructed) return { dir: reconstructed };
+  return undefined;
+};
+
+/**
+ * Resolve a group's Project ID in the SAME order `resolveCanonicalProjectId` already
+ * uses for staged/native items: a registry CLAIM first, then — for a `local`
+ * identity only — an explicit machine BINDING whose directory encodes to the SAME
+ * vendor key. Minting (`mode: 'stage'` only) is the last resort, and only reached
+ * when NEITHER already resolves it.
+ *
+ * This matters because a bound project's directory is itself fed into discovery as
+ * a candidate (see `enumerateSyncableProjects`), which mints its OWN local identity
+ * keyed by ITS OWN vendor key — a DIFFERENT identity key than whatever vendor key the
+ * project's auto-memory was originally captured/claimed under. Without checking the
+ * binding fallback first, staging would mint a second, phantom Project ID for that
+ * directory and misattribute its project-local items (`CLAUDE.local.md`,
+ * `.claude/agent-memory/`) to the phantom instead of the real, already-claimed one.
+ */
+const resolveGroupProjectId = (
+  group: ProjectGroup,
+  registry: LocalRegistry,
+  mode: 'status' | 'stage',
+): { projectId: string | undefined; registry: LocalRegistry } => {
+  const claimed = resolveProjectForIdentity(registry, group.identity);
+  if (claimed.status === 'resolved') return { projectId: claimed.projectId, registry };
+  if (claimed.status === 'conflict') return { projectId: undefined, registry };
+  const identity = group.identity;
+  if (identity.kind === 'local') {
+    const binding = registry.bindings.find(
+      (candidate) => encodeClaudeProjectKey(path.resolve(candidate.dir)) === identity.vendorKey,
+    );
+    if (binding) return { projectId: binding.projectId, registry };
+  }
+  if (mode === 'status') return { projectId: undefined, registry };
+  const minted = resolveOrMintProject(registry, group.identity);
+  return { projectId: minted.projectId, registry: minted.registry };
+};
+
+type ResolvedProject = { projectId: string; dir: string; gitRemote?: string };
+
+/**
+ * Enumerate every syncable project from LIVE native discovery (not just machine
+ * bindings — see the Task 12 review: a never-mapped, ordinary project must still
+ * sync, since `stak project map` is only the fallback for a project STAK can't
+ * locate on its own).
+ *
+ * `mode: 'stage'` resolves identity by MINTING (via `resolveOrMintProject`) and
+ * persists the registry once at the end. `mode: 'status'` resolves identity
+ * read-only (`resolveProjectForIdentity`) and never mints or writes anything; a
+ * locatable project whose identity isn't yet registered is counted in
+ * `newProjectCount` instead of being added to `resolved`.
+ */
+const enumerateSyncableProjects = async (
   stackHome: string,
-  options: { claudeHome?: string } = {},
-): Promise<Array<{ projectId: string; dir: string; plan: Awaited<ReturnType<typeof planProjectSync>>; scanResult: ScanResult }>> => {
-  const bound = await listBoundProjects(stackHome);
-  const registry = await readLocalRegistry(stackHome);
-  const out = [];
-  for (const { projectId, dir } of bound) {
+  options: CanonicalDiscoveryOptions,
+  mode: 'status' | 'stage',
+): Promise<{ resolved: ResolvedProject[]; registry: LocalRegistry; newProjectCount: number }> => {
+  const platform = options.platform ?? process.platform;
+  let registry = await readLocalRegistry(stackHome);
+  // A project's own native memory may be ENTIRELY project-local (`CLAUDE.local.md`,
+  // `.claude/agent-memory/`) with no `claudeHome/projects/<vendorKey>/memory/`
+  // auto-memory folder at all — `discoverClaudeMemory` only scans a project-local
+  // location when that directory is in its `projects` candidate list. Every
+  // currently-bound directory MUST be a candidate here too, or a bound project with
+  // no auto-memory folder would never be (re)discovered by this enumeration pass at
+  // all, even though its binding (priority (a)) already tells us exactly where it is.
+  const candidates = [
+    ...(options.projects ?? []),
+    ...registry.bindings.map((binding) => ({ dir: binding.dir })),
+  ];
+  const discovered = await discoverClaudeMemory({
+    ...(options.claudeHome ? { claudeHome: options.claudeHome } : {}),
+    projects: candidates,
+    platform,
+    ...(options.gitRemoteOf ? { gitRemoteOf: options.gitRemoteOf } : {}),
+    ...(options.isDirectory ? { isDirectory: options.isDirectory } : {}),
+  });
+  const groups = groupProjectItems(discovered);
+
+  const resolved: ResolvedProject[] = [];
+  const seen = new Set<string>();
+  let newProjectCount = 0;
+
+  for (const group of groups) {
+    const resolution = resolveGroupProjectId(group, registry, mode);
+    registry = resolution.registry;
+    const projectId = resolution.projectId;
+
+    const location = await resolveProjectDir(group, projectId, registry, candidates, {
+      ...(options.gitRemoteOf ? { gitRemoteOf: options.gitRemoteOf } : {}),
+      ...(options.isDirectory ? { isDirectory: options.isDirectory } : {}),
+      platform,
+    });
+    if (!location) continue; // not locatable on this machine — skip entirely (spec §4.5)
+
+    if (!projectId) {
+      // Read-only status only: a genuinely new, locatable project not yet added.
+      newProjectCount += 1;
+      continue;
+    }
+    if (seen.has(projectId)) continue; // dedup: first-resolved group for this Project ID wins
+    seen.add(projectId);
+    resolved.push({ projectId, dir: location.dir, ...(location.gitRemote ? { gitRemote: location.gitRemote } : {}) });
+  }
+
+  if (mode === 'stage') await writeLocalRegistry(stackHome, registry);
+  return { resolved, registry, newProjectCount };
+};
+
+type PlannedEntry = {
+  projectId: string;
+  dir: string;
+  plan: Awaited<ReturnType<typeof planProjectSync>>;
+  scanResult: ScanResult;
+};
+
+const planResolvedProjects = async (
+  stackHome: string,
+  resolvedProjects: ResolvedProject[],
+  registry: LocalRegistry,
+  options: CanonicalDiscoveryOptions,
+): Promise<PlannedEntry[]> => {
+  const platform = options.platform ?? process.platform;
+  const out: PlannedEntry[] = [];
+  for (const { projectId, dir, gitRemote } of resolvedProjects) {
     const scanOptions = {
       ...(options.claudeHome ? { claudeHome: options.claudeHome } : {}),
-      projects: [{ dir }],
+      projects: [{ dir, ...(gitRemote ? { gitRemote } : {}) }],
+      platform,
+      ...(options.gitRemoteOf ? { gitRemoteOf: options.gitRemoteOf } : {}),
+      ...(options.isDirectory ? { isDirectory: options.isDirectory } : {}),
       resolveProjectId: (item: DiscoveredMemoryItem) => resolveProjectIdForClaudeItem(item, registry),
     };
     const plan = await planProjectSync({ projectId, dir }, stackHome, scanOptions);
@@ -42,7 +279,7 @@ const planAllBoundProjects = async (
   return out;
 };
 
-const toSummary = (entry: Awaited<ReturnType<typeof planAllBoundProjects>>[number], imported: string[]): CanonicalProjectSummary => ({
+const toSummary = (entry: PlannedEntry, imported: string[]): CanonicalProjectSummary => ({
   projectId: entry.projectId,
   imported,
   conflicts: entry.plan.actions
@@ -52,37 +289,41 @@ const toSummary = (entry: Awaited<ReturnType<typeof planAllBoundProjects>>[numbe
   guardedPaths: entry.plan.guardedPaths,
 });
 
-/** Read-only: plans every bound project's sync but never imports. */
-export const canonicalMemoryStatus = async (
-  stackHome: string,
-  options: { claudeHome?: string } = {},
-): Promise<CanonicalProjectSummary[]> => {
-  const entries = await planAllBoundProjects(stackHome, options);
-  return entries.map((entry) => toSummary(entry, []));
+export type CanonicalMemoryStatusResult = {
+  projects: CanonicalProjectSummary[];
+  /** Locatable project-scope identities discovered on this machine that have no
+   * registered Project ID yet — `stak add .` would mint and import them. Read-only:
+   * this count never mints anything itself. */
+  newProjects: number;
 };
 
-/** `stak add .`'s canonical-Memory half: migrate once, then import every bound
- * project's native edits into canonical Memory. */
+/** Read-only: plans every syncable project's sync but never imports, mints, or
+ * writes anything (not the registry, not canonical Memory, not the projection). */
+export const canonicalMemoryStatus = async (
+  stackHome: string,
+  options: CanonicalDiscoveryOptions = {},
+): Promise<CanonicalMemoryStatusResult> => {
+  const { resolved, registry, newProjectCount } = await enumerateSyncableProjects(stackHome, options, 'status');
+  const entries = await planResolvedProjects(stackHome, resolved, registry, options);
+  return { projects: entries.map((entry) => toSummary(entry, [])), newProjects: newProjectCount };
+};
+
+/** `stak add .`'s canonical-Memory half: migrate once, then mint/resolve a Project ID
+ * for and import every LOCATABLE project's native edits into canonical Memory — not
+ * only machine-bound ones (see `enumerateSyncableProjects`). */
 export const stageCanonicalMemory = async (
   stackHome: string,
-  options: { claudeHome?: string } = {},
+  options: CanonicalDiscoveryOptions = {},
 ): Promise<CanonicalProjectSummary[]> => {
   await migrateLocalStore(stackHome);
-  const entries = await planAllBoundProjects(stackHome, options);
+  const { resolved, registry } = await enumerateSyncableProjects(stackHome, options, 'stage');
+  const entries = await planResolvedProjects(stackHome, resolved, registry, options);
   const summaries: CanonicalProjectSummary[] = [];
   for (const entry of entries) {
     const { imported } = await applyImportActions({ projectId: entry.projectId, dir: entry.dir }, stackHome, entry.scanResult, entry.plan.actions);
     summaries.push(toSummary(entry, imported));
   }
   return summaries;
-};
-
-/** Every machine-local binding this registry knows, regardless of lifecycle —
- * archived projects still sync their Memory (spec: "preserved regardless of
- * lifecycle"). */
-export const listBoundProjects = async (stackHome: string): Promise<BoundProjectRecord[]> => {
-  const registry = await readLocalRegistry(stackHome);
-  return registry.bindings.map((binding) => ({ projectId: binding.projectId, dir: binding.dir }));
 };
 
 /** The `resolveProjectId` callback the canonical scan/migration functions expect,
