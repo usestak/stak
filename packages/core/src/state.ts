@@ -60,6 +60,18 @@ const STATE_MARKERS: readonly string[] = [
 ];
 
 /**
+ * Paths to exclude from Cloud bundle and state uploads. These are machine-local
+ * files that should never be synced across machines. Kept in sync with bundling
+ * code that filters state before upload.
+ */
+export const STATE_EXCLUDE_PATHS: readonly string[] = [
+  path.join('memory', 'recovery-state.json'), // recovery provenance
+  path.join('memory', 'canonical', 'base.json'), // machine-local merge base
+  path.join('memory', 'canonical', 'merge.json'), // machine-local pending merge
+  path.join('memory', 'projections'), // machine-local native/canonical sync state (directory)
+];
+
+/**
  * Whether `home` holds recognizable STAK state (any one marker). Read-only; never
  * creates anything. Used to adopt a legacy `~/.stack` in place without moving data.
  */
