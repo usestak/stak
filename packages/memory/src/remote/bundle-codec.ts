@@ -20,9 +20,11 @@ import {
   readMemoryObject,
   writeMemoryObject,
 } from '../store.js';
+import { canonicalStorePaths } from '../canonical/store.js';
 import { atomicWriteFile } from './secure-file.js';
 
 export const BUNDLE_FORMAT = 'stack-mem-bundle-v1' as const;
+export const BUNDLE_FORMAT_V2 = 'stack-mem-bundle-v2' as const;
 
 export class BundleError extends Error {
   constructor(
@@ -46,7 +48,7 @@ const bundleObjectSchema = z.object({
 });
 
 const bundleSchema = z.object({
-  bundleFormat: z.literal(BUNDLE_FORMAT),
+  bundleFormat: z.union([z.literal(BUNDLE_FORMAT), z.literal(BUNDLE_FORMAT_V2)]),
   provider: z.literal('claude'),
   manifestSha256: z.string().regex(/^sha256:[a-f0-9]{64}$/),
   manifestB64: z.string(),
@@ -61,6 +63,12 @@ const bundleSchema = z.object({
     .regex(/^sha256:[a-f0-9]{64}$/)
     .optional(),
   registryB64: z.string().optional(),
+  // v2 only: the canonical Project Memory manifest, byte-exact.
+  canonicalSha256: z
+    .string()
+    .regex(/^sha256:[a-f0-9]{64}$/)
+    .optional(),
+  canonicalB64: z.string().optional(),
 });
 
 export type MemoryBackupBundle = z.infer<typeof bundleSchema>;
@@ -83,6 +91,12 @@ const serialize = (bundle: MemoryBackupBundle): Buffer => {
       ? {
           registrySha256: bundle.registrySha256,
           registryB64: bundle.registryB64,
+        }
+      : {}),
+    ...(bundle.canonicalSha256 && bundle.canonicalB64
+      ? {
+          canonicalSha256: bundle.canonicalSha256,
+          canonicalB64: bundle.canonicalB64,
         }
       : {}),
   };
@@ -118,8 +132,18 @@ export const bundleFromStore = async (
     if (error.code === 'ENOENT') return undefined;
     throw error;
   });
+  // Read `canonical/main.json` directly (not through `readCanonicalMain`'s
+  // empty-default fallback) so a never-migrated store still produces a
+  // byte-identical v1 bundle — only a store that genuinely HAS a canonical
+  // manifest on disk upgrades to v2.
+  const canonicalBytes = await readFile(canonicalStorePaths(stackHome).main).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined;
+      throw error;
+    },
+  );
   const bundle: MemoryBackupBundle = {
-    bundleFormat: BUNDLE_FORMAT,
+    bundleFormat: canonicalBytes ? BUNDLE_FORMAT_V2 : BUNDLE_FORMAT,
     provider: 'claude',
     manifestSha256: hashBytes(manifestBytes),
     manifestB64: manifestBytes.toString('base64'),
@@ -128,6 +152,12 @@ export const bundleFromStore = async (
       ? {
           registrySha256: hashBytes(registryBytes),
           registryB64: registryBytes.toString('base64'),
+        }
+      : {}),
+    ...(canonicalBytes
+      ? {
+          canonicalSha256: hashBytes(canonicalBytes),
+          canonicalB64: canonicalBytes.toString('base64'),
         }
       : {}),
   };
@@ -201,6 +231,16 @@ export const restoreBundleToStore = async (options: {
       memoryStorePaths(options.stackHome).projectRegistrySnapshot,
       registryBytes,
     );
+  }
+  // Rebuild the canonical Memory manifest when the bundle carried one (v2).
+  if (bundle.canonicalB64 && bundle.canonicalSha256) {
+    const canonicalBytes = Buffer.from(bundle.canonicalB64, 'base64');
+    if (hashBytes(canonicalBytes) !== bundle.canonicalSha256)
+      throw new BundleError(
+        'manifest-hash-mismatch',
+        'The bundled canonical Memory manifest does not match its hash.',
+      );
+    await atomicWriteFile(canonicalStorePaths(options.stackHome).main, canonicalBytes);
   }
   return {
     objects: bundle.objects.length,
