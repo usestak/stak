@@ -707,7 +707,11 @@ const defaultDependencies: ProgramDependencies = {
   // comparison `runMemoryBackup` itself would make; never duplicates scanning/manifest
   // construction.
   checkMemory: async (): Promise<
-    MemoryWorkingTreeStatus & { canonicalProjects: CanonicalProjectSummary[]; newProjects: number }
+    MemoryWorkingTreeStatus & {
+      canonicalProjects: CanonicalProjectSummary[];
+      newProjects: number;
+      conflictedProjects: number;
+    }
   > => {
     // Project-scope Memory is canonical Memory's job now (Step 1 of this feature) —
     // the v1 manifest only ever contains global items post-migration, so this
@@ -725,11 +729,16 @@ const defaultDependencies: ProgramDependencies = {
     const canonicalStatus = await canonicalMemoryStatus(
       stackHome,
       await memoryDiscoveryOptions(),
-    ).catch(() => ({ projects: [] as CanonicalProjectSummary[], newProjects: 0 }));
+    ).catch(() => ({
+      projects: [] as CanonicalProjectSummary[],
+      newProjects: 0,
+      conflictedProjects: 0,
+    }));
     return {
       ...status,
       canonicalProjects: canonicalStatus.projects,
       newProjects: canonicalStatus.newProjects,
+      conflictedProjects: canonicalStatus.conflictedProjects,
     };
   },
   // Deliberately narrow (see MemoryCloudDisplayState): only "does a Cloud backup exist
@@ -766,12 +775,13 @@ const defaultDependencies: ProgramDependencies = {
     return {
       files: legacy.files,
       projects: legacy.projects,
-      canonical: canonical.map((p) => ({
+      canonical: canonical.projects.map((p) => ({
         projectId: p.projectId,
         imported: p.imported.length,
         conflicts: p.conflicts.length + p.sourceConflicts.length,
         guarded: p.guardedPaths.length,
       })),
+      conflictedProjects: canonical.conflictedProjects,
     };
   },
   prepareUse: async (input, options) => {

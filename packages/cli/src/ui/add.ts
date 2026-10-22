@@ -23,6 +23,10 @@ export type StagedMemorySummary = {
   files: number;
   projects: number;
   canonical?: Array<{ projectId: string; imported: number; conflicts: number; guarded: number }>;
+  /** Project identities with genuinely ambiguous resolution (more than one existing
+   * Project ID claims or is bound to the same identity) — never staged; the user
+   * must run `stak project` to resolve them. */
+  conflictedProjects?: number;
 };
 
 export const renderSkillAdd = (
@@ -60,6 +64,10 @@ export const renderSkillAdd = (
         if (project.guarded > 0) lines.push(`  Memory: ${project.guarded} path(s) will be regenerated for ${project.projectId} — run \`stak memory materialize\``);
       }
     }
+    if (options.memory.conflictedProjects)
+      lines.push(
+        `  Memory: ${options.memory.conflictedProjects} project(s) have conflicting identities — run \`stak project\` to inspect`,
+      );
   }
   if (proposal.targets.length > 0 || options.memory)
     lines.push('', 'Run `stak push` to sync main to STAK Cloud.');

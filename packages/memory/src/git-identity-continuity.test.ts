@@ -55,6 +55,20 @@ describe('reconstructProjectDir', () => {
     expect(path.resolve(resolved as string)).toBe(path.resolve(projectDir));
   });
 
+  it('decodes a dotted-name vendor key back to the dotted directory, and only it', async () => {
+    const base = await tempDir('recon-dot-');
+    const dottedDir = path.join(base, '.claude-mem');
+    await mkdir(dottedDir, { recursive: true });
+    const vendorKey = encodeClaudeProjectKey(dottedDir);
+    const resolved = await reconstructProjectDir({
+      vendorKey,
+      isDirectory,
+      platform: process.platform,
+    });
+    expect(resolved).not.toBeNull();
+    expect(path.resolve(resolved as string)).toBe(path.resolve(dottedDir));
+  });
+
   it('returns null when the path cannot be reconstructed', async () => {
     const resolved = await reconstructProjectDir({
       vendorKey:

@@ -59,13 +59,16 @@ export const canonicalGitIdentity = (
 
 /**
  * Encode an absolute project path the way Claude Code keys its per-project
- * directory under `~/.claude/projects/` (drive/path separators become `-`).
- * Deterministic forward-only; used to match a known local project to its
- * auto-memory directory. The result is a machine-local vendor key, never a
- * portable identity.
+ * directory under `~/.claude/projects/`: every character that is not
+ * `[a-zA-Z0-9]` becomes `-` — not just the drive/path separators (`:`, `\`, `/`),
+ * but also `.`, `_`, spaces, and any other punctuation in a path segment's name
+ * (observed on a real machine: `C:\Users\NT\.claude-mem` encodes to
+ * `C--Users-NT--claude-mem`). Deterministic forward-only; used to match a known
+ * local project to its auto-memory directory. The result is a machine-local
+ * vendor key, never a portable identity.
  */
 export const encodeClaudeProjectKey = (absolutePath: string): string =>
-  absolutePath.replace(/[:\\/]/g, '-');
+  absolutePath.replace(/[^a-zA-Z0-9]/g, '-');
 
 /**
  * Normalize a Claude vendor key for MATCHING against a known local project.
@@ -87,13 +90,61 @@ export const projectIdentityKey = (identity: ProjectIdentity): string =>
     : `local:${identity.vendorKey ?? 'unresolved'}`;
 
 /**
+ * Every character `encodeClaudeProjectKey` can collapse to `-`, other than a path
+ * separator (which `reconstructProjectDirs` handles separately by ending a span and
+ * recursing into a new directory level). A `-` WITHIN a span — i.e. between two
+ * tokens that remain in the SAME path segment — could originally have been any one
+ * of these.
+ */
+const SEGMENT_SEPARATOR_CHARS = ['-', '.', '_', ' '] as const;
+
+/** A span wider than this never gets full separator-variant expansion (only the
+ * plain literal-`-` join, below) — `4^(width-1)` variants per span width makes an
+ * UNBOUNDED width catastrophically expensive long before it is ever realistic:
+ * trying every width up to "the rest of the path as one segment" at every walk
+ * level is the dominant cost, and real directory names with a non-hyphen separator
+ * (a dot, underscore, or space) are essentially never more than a handful of words.
+ * Capped at a width whose full expansion (`4^(CAP-1)` = 64 variants) is cheap even
+ * multiplied across many walk levels, while an arbitrarily long HYPHEN-only name
+ * (the pre-existing, common case) is untouched below — it still costs exactly one
+ * probe per width, identical to before this generalization. */
+const MAX_VARIANT_SPAN_WIDTH = 4;
+
+/** Every way to join `tokens[index..end]` (inclusive) into one candidate path-segment
+ * name. Spans up to `MAX_VARIANT_SPAN_WIDTH` try every `SEGMENT_SEPARATOR_CHARS`
+ * choice at every internal gap — all of which collapse to the exact same encoded
+ * key, so all are valid candidate undoings of that span. Wider spans (and any
+ * single-token span, which has no gap to choose) get only the plain literal `-`
+ * join, matching this function's pre-generalization behavior exactly. */
+const joinSegmentVariants = (
+  tokens: string[],
+  index: number,
+  end: number,
+): string[] => {
+  if (end === index) return [tokens[index] ?? ''];
+  if (end - index + 1 > MAX_VARIANT_SPAN_WIDTH)
+    return [tokens.slice(index, end + 1).join('-')];
+  let variants = [tokens[index] ?? ''];
+  for (let i = index + 1; i <= end; i += 1) {
+    const next: string[] = [];
+    for (const variant of variants)
+      for (const sep of SEGMENT_SEPARATOR_CHARS)
+        next.push(`${variant}${sep}${tokens[i] ?? ''}`);
+    variants = next;
+  }
+  return variants;
+};
+
+/**
  * Enumerate EVERY existing absolute directory that a Claude auto-memory vendor key
- * could decode to. `encodeClaudeProjectKey` is lossy (`:`, `\`, `/` all become `-`),
- * so a key such as `...-foo-bar-baz` may correspond to `foo-bar\baz`, `foo\bar-baz`,
- * etc. This walks the real filesystem and returns all distinct paths that fully
- * decode to existing directory chains — the raw material for a SAFE, unique-only
- * resolution (see `reconstructProjectDir`). On probe-limit overflow it returns `[]`
- * (fail closed) rather than a partial/biased set.
+ * could decode to. `encodeClaudeProjectKey` is lossy — every non-alphanumeric
+ * character (path separators, but also `.`, `_`, spaces, and other punctuation
+ * WITHIN a segment's own name) all collapse to the same `-` — so a key such as
+ * `...-foo-bar-baz` may correspond to `foo-bar\baz`, `foo\bar-baz`, `foo.bar\baz`,
+ * `foo\bar_baz`, etc. This walks the real filesystem and returns all distinct paths
+ * that fully decode to existing directory chains — the raw material for a SAFE,
+ * unique-only resolution (see `reconstructProjectDir`). On probe-limit overflow it
+ * returns `[]` (fail closed) rather than a partial/biased set.
  */
 export const reconstructProjectDirs = async (options: {
   vendorKey: string;
@@ -124,22 +175,24 @@ export const reconstructProjectDirs = async (options: {
   let overflow = false;
   const limit = options.maxProbes ?? 4000;
   // Enumerate ALL complete decodings (no ordering preference — order must never
-  // decide identity). Every split point is explored so ambiguity is detectable.
+  // decide identity). Every split point AND every within-span separator choice is
+  // explored so ambiguity is detectable.
   const walk = async (base: string, index: number): Promise<void> => {
     if (overflow) return;
     if (index >= tokens.length) {
       results.add(base);
       return;
     }
-    for (let end = index; end < tokens.length; end += 1) {
-      if (probes >= limit) {
-        overflow = true;
-        return;
+    for (let end = index; end < tokens.length && !overflow; end += 1) {
+      for (const name of joinSegmentVariants(tokens, index, end)) {
+        if (probes >= limit) {
+          overflow = true;
+          return;
+        }
+        probes += 1;
+        const candidate = p.join(base, name);
+        if (await options.isDirectory(candidate)) await walk(candidate, end + 1);
       }
-      probes += 1;
-      const name = tokens.slice(index, end + 1).join('-');
-      const candidate = p.join(base, name);
-      if (await options.isDirectory(candidate)) await walk(candidate, end + 1);
     }
   };
   await walk(root, 0);

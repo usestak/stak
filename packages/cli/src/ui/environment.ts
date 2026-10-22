@@ -23,6 +23,10 @@ export type MemoryStatusDisplay = MemoryWorkingTreeStatus & {
   /** Locatable project-scope identities discovered on this machine with no
    * registered Project ID yet — `stak add .` would mint and import them. */
   newProjects?: number;
+  /** Project identities with genuinely ambiguous resolution (more than one existing
+   * Project ID claims or is bound to the same identity) — never counted in
+   * `newProjects`; the user must run `stak project` to resolve them. */
+  conflictedProjects?: number;
 };
 
 import { agentLabel, block, changes, skills } from './format.js';
@@ -108,14 +112,23 @@ const memoryLine = (memory: MemoryWorkingTreeStatus): string => {
   }
 };
 /** Canonical (Project) Memory status — one line per bound project that has any
- * conflicts, source conflicts, or guarded (to-be-regenerated) paths. A clean
- * project stays silent, matching this file's existing `'clean'` convention for
- * `MemoryWorkingTreeStatus` itself. */
+ * pending (not-yet-added) changes, conflicts, source conflicts, or guarded
+ * (to-be-regenerated) paths. A clean project stays silent, matching this file's
+ * existing `'clean'` convention for `MemoryWorkingTreeStatus` itself. */
 const canonicalMemoryLines = (projects: CanonicalMemoryProjectStatus[]): string[] => {
   const lines: string[] = [];
   for (const project of projects) {
     const totalConflicts = project.conflicts.length + project.sourceConflicts.length;
-    if (totalConflicts === 0 && project.guardedPaths.length === 0) continue;
+    if (
+      project.pending === 0 &&
+      totalConflicts === 0 &&
+      project.guardedPaths.length === 0
+    )
+      continue;
+    if (project.pending > 0)
+      lines.push(
+        `  ${project.projectId}: ${project.pending} change${project.pending === 1 ? '' : 's'} not added — run \`stak add .\``,
+      );
     if (totalConflicts > 0)
       lines.push(
         `  ${project.projectId}: ${totalConflicts} conflict${totalConflicts === 1 ? '' : 's'} — resolve with \`stak memory resolve\``,
@@ -136,6 +149,10 @@ const renderMemorySection = (memory?: MemoryStatusDisplay): string[] => {
   if (memory.newProjects)
     lines.push(
       `  ${memory.newProjects} new project${memory.newProjects === 1 ? '' : 's'} not added yet — run \`stak add .\``,
+    );
+  if (memory.conflictedProjects)
+    lines.push(
+      `  ${memory.conflictedProjects} project${memory.conflictedProjects === 1 ? '' : 's'} have conflicting identities — run \`stak project\` to inspect`,
     );
   return ['', 'Memory', ...lines];
 };

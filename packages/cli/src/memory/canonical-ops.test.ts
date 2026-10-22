@@ -5,7 +5,10 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  emptyRegistry,
   encodeClaudeProjectKey,
+  legacyCompatKey,
+  mintProjectId,
   readLocalRegistry,
   resolveOrMintProject,
   setBinding,
@@ -64,14 +67,24 @@ const projectionPath = () => path.join(stackHome, 'memory', 'projections', 'clau
 const migrationMarkerPath = () => path.join(stackHome, 'memory', 'manifests', '.v1-migration-complete');
 const registryPath = () => path.join(stackHome, 'memory', 'projects-local.json');
 
+/** Flip the case of a vendor key's first character (the drive letter on win32) —
+ * used to simulate Claude producing a differently-cased vendor key for the SAME
+ * real, case-insensitive folder than `encodeClaudeProjectKey` independently
+ * computes (the Critical identity bug this file's win32 test exercises). */
+const flipFirstCharCase = (key: string): string => {
+  const first = key[0] as string;
+  const flipped = first === first.toLowerCase() ? first.toUpperCase() : first.toLowerCase();
+  return flipped + key.slice(1);
+};
+
 describe('stageCanonicalMemory', () => {
   it('imports a native edit for a bound project and reports it', async () => {
     const projectId = await bindProject(projectDir);
     await mkdir(path.dirname(path.join(projectDir, 'CLAUDE.local.md')), { recursive: true });
     await writeFile(path.join(projectDir, 'CLAUDE.local.md'), 'private memory');
 
-    const summaries = await stageCanonicalMemory(stackHome, { claudeHome });
-    const mine = summaries.find((s) => s.projectId === projectId);
+    const result = await stageCanonicalMemory(stackHome, { claudeHome });
+    const mine = result.projects.find((s) => s.projectId === projectId);
     expect(mine?.imported).toContain('instructions/private.md');
   });
 
@@ -84,18 +97,35 @@ describe('stageCanonicalMemory', () => {
     const registryBefore = await readLocalRegistry(stackHome);
     expect(registryBefore.projects).toHaveLength(0);
 
-    const summaries = await stageCanonicalMemory(stackHome, {
+    const result = await stageCanonicalMemory(stackHome, {
       claudeHome,
       projects: [{ dir: unmappedDir }],
     });
 
-    expect(summaries).toHaveLength(1);
-    expect(summaries[0]?.imported).toContain('notes/MEMORY.md');
+    expect(result.projects).toHaveLength(1);
+    expect(result.projects[0]?.imported).toContain('notes/MEMORY.md');
 
     const registryAfter = await readLocalRegistry(stackHome);
     expect(registryAfter.projects).toHaveLength(1);
     // Minted, but never explicitly bound — located purely via the candidate match.
     expect(registryAfter.bindings).toHaveLength(0);
+  });
+
+  it('a dotted-path project (`.claude-mem`-style directory name) located via a `projects` candidate match: staged', async () => {
+    const dottedDir = path.join(root, '.claude-mem');
+    await mkdir(dottedDir, { recursive: true });
+    const vendorKey = encodeClaudeProjectKey(path.resolve(dottedDir));
+    await writeAutoMemory(vendorKey, 'MEMORY.md', 'dotted project notes');
+
+    const result = await stageCanonicalMemory(stackHome, {
+      claudeHome,
+      projects: [{ dir: dottedDir }],
+    });
+
+    expect(result.projects).toHaveLength(1);
+    expect(result.projects[0]?.imported).toContain('notes/MEMORY.md');
+    const registryAfter = await readLocalRegistry(stackHome);
+    expect(registryAfter.projects).toHaveLength(1);
   });
 
   it('a brand-new project with native Memory and no registry record: located via reconstruction alone (no `projects` candidate), minted, imported', async () => {
@@ -104,13 +134,13 @@ describe('stageCanonicalMemory', () => {
     const vendorKey = encodeClaudeProjectKey(path.resolve(freshDir));
     await writeAutoMemory(vendorKey, 'MEMORY.md', 'fresh notes');
 
-    const summaries = await stageCanonicalMemory(stackHome, {
+    const result = await stageCanonicalMemory(stackHome, {
       claudeHome,
       isDirectory: isDirectoryStat,
     });
 
-    expect(summaries).toHaveLength(1);
-    expect(summaries[0]?.imported).toContain('notes/MEMORY.md');
+    expect(result.projects).toHaveLength(1);
+    expect(result.projects[0]?.imported).toContain('notes/MEMORY.md');
     const registryAfter = await readLocalRegistry(stackHome);
     expect(registryAfter.projects).toHaveLength(1);
   });
@@ -139,28 +169,95 @@ describe('stageCanonicalMemory', () => {
 
     await writeFile(path.join(newDir, 'CLAUDE.local.md'), 'private memory at new location');
 
-    const summaries = await stageCanonicalMemory(stackHome, { claudeHome });
-    const mine = summaries.find((s) => s.projectId === minted.projectId);
+    const result = await stageCanonicalMemory(stackHome, { claudeHome });
+    const mine = result.projects.find((s) => s.projectId === minted.projectId);
     expect(mine?.imported).toEqual(
       expect.arrayContaining(['notes/MEMORY.md', 'instructions/private.md']),
     );
   });
 
-  it('a project whose folder cannot be located: no actions, no error, canonical Memory untouched', async () => {
+  it('a bound dir whose auto-memory resolves to a Git identity with NO existing Git claim: everything lands on the bound Project, no second (phantom) Project is minted', async () => {
+    const dir = path.join(root, 'checkout');
+    await mkdir(dir, { recursive: true });
+    const vendorKey = encodeClaudeProjectKey(path.resolve(dir));
+    await writeAutoMemory(vendorKey, 'MEMORY.md', 'checkout notes');
+
+    // Explicitly bind this directory to an existing Project — no Git claim exists
+    // for it anywhere in the registry.
+    let registry = await readLocalRegistry(stackHome);
+    const minted = resolveOrMintProject(registry, { kind: 'local', vendorKey: `v-${path.basename(dir)}` });
+    registry = setBinding(minted.registry, {
+      projectId: minted.projectId,
+      dir: path.resolve(dir),
+      boundAt: '2026-10-22T00:00:00.000Z',
+      provenance: 'user-map',
+    });
+    await writeLocalRegistry(stackHome, registry);
+
+    // Discovery resolves this vendor key to a STRONG Git identity (via
+    // reconstruction + gitRemoteOf) — a different identity KIND than the binding's
+    // own local claim, but the binding is proof of ownership regardless of kind.
+    const result = await stageCanonicalMemory(stackHome, {
+      claudeHome,
+      isDirectory: isDirectoryStat,
+      gitRemoteOf: async (candidate) =>
+        path.resolve(candidate) === path.resolve(dir)
+          ? 'https://github.com/example/checkout.git'
+          : undefined,
+    });
+
+    expect(result.projects).toHaveLength(1);
+    const mine = result.projects.find((s) => s.projectId === minted.projectId);
+    expect(mine?.imported).toContain('notes/MEMORY.md');
+
+    const registryAfter = await readLocalRegistry(stackHome);
+    expect(registryAfter.projects).toHaveLength(1); // no second, phantom Project
+  });
+
+  it('win32: a local project whose notes-folder vendor key uses a differently-cased drive letter than its CLAUDE.local.md key resolves to ONE Project ID, both documents under it', async () => {
+    const dir = path.join(root, 'case-project');
+    await mkdir(dir, { recursive: true });
+    const naturalKey = encodeClaudeProjectKey(path.resolve(dir));
+    const differentlyCasedKey = flipFirstCharCase(naturalKey);
+    expect(differentlyCasedKey).not.toBe(naturalKey); // sanity: the two variants actually differ
+
+    // Claude's own auto-memory folder uses the differently-cased vendor key; the
+    // project's own `CLAUDE.local.md` resolves via `encodeClaudeProjectKey` to the
+    // NATURAL-cased key (via the `projects` candidate below) — same real folder on
+    // a case-insensitive (win32) filesystem, two different raw vendor-key strings.
+    await writeAutoMemory(differentlyCasedKey, 'MEMORY.md', 'case notes');
+    await writeFile(path.join(dir, 'CLAUDE.local.md'), 'private memory');
+
+    const result = await stageCanonicalMemory(stackHome, {
+      claudeHome,
+      projects: [{ dir }],
+      platform: 'win32',
+    });
+
+    expect(result.projects).toHaveLength(1);
+    expect(result.projects[0]?.imported).toEqual(
+      expect.arrayContaining(['notes/MEMORY.md', 'instructions/private.md']),
+    );
+    const registryAfter = await readLocalRegistry(stackHome);
+    expect(registryAfter.projects).toHaveLength(1); // ONE Project, not two
+  });
+
+  it('a project whose folder cannot be located: no actions, no error, canonical Memory untouched, and NO Project ID is minted for it', async () => {
     const goneDir = path.join(root, 'gone-project'); // never created on disk
     const vendorKey = encodeClaudeProjectKey(path.resolve(goneDir));
     await writeAutoMemory(vendorKey, 'MEMORY.md', 'orphaned notes');
 
-    const summaries = await stageCanonicalMemory(stackHome, {
+    const result = await stageCanonicalMemory(stackHome, {
       claudeHome,
       isDirectory: async () => false, // nothing is locatable
     });
-    expect(summaries).toHaveLength(0);
+    expect(result.projects).toHaveLength(0);
     expect(await exists(canonicalMainPath())).toBe(false);
 
-    // The identity is minted (discovery proved it exists), but nothing was synced.
+    // Important: minting only happens AFTER a write-target directory is located —
+    // an unlocatable identity must never create a registry record at all.
     const registryAfter = await readLocalRegistry(stackHome);
-    expect(registryAfter.projects).toHaveLength(1);
+    expect(registryAfter.projects).toHaveLength(0);
     expect(registryAfter.bindings).toHaveLength(0);
 
     // Idempotent: running again is still a safe no-op, no error.
@@ -168,8 +265,41 @@ describe('stageCanonicalMemory', () => {
       claudeHome,
       isDirectory: async () => false,
     });
-    expect(second).toHaveLength(0);
+    expect(second.projects).toHaveLength(0);
     expect(await exists(canonicalMainPath())).toBe(false);
+  });
+
+  it('two Project IDs with a conflicting claim on the same identity: never staged, never a third phantom Project, reported as conflicted', async () => {
+    const conflictDir = path.join(root, 'conflict-project');
+    await mkdir(conflictDir, { recursive: true });
+    const vendorKey = encodeClaudeProjectKey(path.resolve(conflictDir));
+    await writeAutoMemory(vendorKey, 'MEMORY.md', 'conflicted notes');
+
+    // Manufacture a genuine registry conflict: two DISTINCT Project IDs both
+    // carrying a claim for the SAME identity (the normal mint/resolve path never
+    // produces this on its own — this simulates e.g. a cross-machine merge gone
+    // wrong, which `resolveProjectForIdentity` must still fail closed on).
+    const idA = mintProjectId();
+    const idB = mintProjectId();
+    const claim = { type: 'legacy-compat' as const, key: legacyCompatKey(`local:${vendorKey}`) };
+    const registry = {
+      ...emptyRegistry(),
+      projects: [
+        { projectId: idA, claims: [claim], lifecycle: 'active' as const },
+        { projectId: idB, claims: [claim], lifecycle: 'active' as const },
+      ],
+    };
+    await writeLocalRegistry(stackHome, registry);
+
+    const result = await stageCanonicalMemory(stackHome, {
+      claudeHome,
+      projects: [{ dir: conflictDir }],
+    });
+    expect(result.projects).toHaveLength(0);
+    expect(result.conflictedProjects).toBe(1);
+
+    const registryAfter = await readLocalRegistry(stackHome);
+    expect(registryAfter.projects).toHaveLength(2); // still exactly idA, idB — no third minted
   });
 });
 
@@ -211,5 +341,48 @@ describe('canonicalMemoryStatus', () => {
 
     // Still read-only: no registry file was ever created, nothing minted.
     expect(await exists(registryPath())).toBe(false);
+  });
+
+  it('reports a planned (not-yet-applied) edit to a REGISTERED project as pending, then 0 after staging', async () => {
+    const projectId = await bindProject(projectDir);
+    await writeFile(path.join(projectDir, 'CLAUDE.local.md'), 'private memory v1');
+
+    const before = await canonicalMemoryStatus(stackHome, { claudeHome });
+    const mineBefore = before.projects.find((s) => s.projectId === projectId);
+    expect(mineBefore?.pending).toBe(1);
+    expect(mineBefore?.imported).toEqual([]); // status never applies anything
+
+    await stageCanonicalMemory(stackHome, { claudeHome });
+
+    const after = await canonicalMemoryStatus(stackHome, { claudeHome });
+    const mineAfter = after.projects.find((s) => s.projectId === projectId);
+    expect(mineAfter?.pending).toBe(0);
+  });
+
+  it('two Project IDs with a conflicting claim on the same identity: excluded from newProjects, reported as conflicted', async () => {
+    const conflictDir = path.join(root, 'conflict-project');
+    await mkdir(conflictDir, { recursive: true });
+    const vendorKey = encodeClaudeProjectKey(path.resolve(conflictDir));
+    await writeAutoMemory(vendorKey, 'MEMORY.md', 'conflicted notes');
+
+    const idA = mintProjectId();
+    const idB = mintProjectId();
+    const claim = { type: 'legacy-compat' as const, key: legacyCompatKey(`local:${vendorKey}`) };
+    const registry = {
+      ...emptyRegistry(),
+      projects: [
+        { projectId: idA, claims: [claim], lifecycle: 'active' as const },
+        { projectId: idB, claims: [claim], lifecycle: 'active' as const },
+      ],
+    };
+    await writeLocalRegistry(stackHome, registry);
+
+    const result = await canonicalMemoryStatus(stackHome, {
+      claudeHome,
+      projects: [{ dir: conflictDir }],
+    });
+    expect(result.newProjects).toBe(0);
+    expect(result.conflictedProjects).toBe(1);
+    expect(result.projects).toHaveLength(0);
   });
 });
