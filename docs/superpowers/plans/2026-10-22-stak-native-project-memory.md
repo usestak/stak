@@ -2695,9 +2695,17 @@ export const groupLegacyItems = (
     const documents: CanonicalDoc[] = [];
     const takenPaths = new Set<string>(byPath.keys());
     for (const [canonicalPath, bucket] of [...byPath].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
-      const distinctHashes = new Set(bucket.map((entry) => entry.contentHash));
-      if (distinctHashes.size === 1) {
-        const winner = bucket[0]!;
+      // Deduplicate identical copies by hash FIRST, keeping the MOST RECENTLY
+      // captured copy per hash — never first-seen, which would make the result
+      // depend on array order (the exact bug fixed in migrate.ts, Task 6).
+      const distinctByHash = new Map<string, ManifestItem & { __projectId: string }>();
+      for (const entry of bucket) {
+        const prev = distinctByHash.get(entry.contentHash);
+        if (!prev || entry.capturedAt > prev.capturedAt) distinctByHash.set(entry.contentHash, entry);
+      }
+      const distinct = [...distinctByHash.values()];
+      if (distinct.length === 1) {
+        const winner = distinct[0]!;
         documents.push({
           path: canonicalPath,
           state: 'present',
@@ -2707,7 +2715,14 @@ export const groupLegacyItems = (
         });
         continue;
       }
-      const sorted = [...bucket].sort((a, b) => (a.capturedAt < b.capturedAt ? 1 : -1));
+      // Deterministic tie-break: `capturedAt` descending, then `contentHash`
+      // ascending, so two items captured in the same backup run (same
+      // `capturedAt`) still resolve the same way on every machine.
+      const sorted = [...distinct].sort((a, b) =>
+        a.capturedAt !== b.capturedAt
+          ? a.capturedAt < b.capturedAt ? 1 : -1
+          : a.contentHash < b.contentHash ? -1 : 1,
+      );
       const [primary, ...rest] = sorted;
       documents.push({
         path: canonicalPath,
