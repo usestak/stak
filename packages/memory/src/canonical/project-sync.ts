@@ -44,7 +44,19 @@ export const planProjectSync = async (
       : Object.fromEntries(Object.entries(projection).filter(([p]) => !guardedPaths.includes(p)));
 
   const native: NativeEntry[] = scanResult.docs.map((d) => ({ path: d.canonicalPath, contentHash: d.contentHash }));
-  const actions = planSync({ native, projection: effectiveProjection, canonical: canonicalDocs });
+  const planned = planSync({ native, projection: effectiveProjection, canonical: canonicalDocs });
+  // A source-conflicted path is deliberately ABSENT from `scanResult.docs` — Claude
+  // folders disagree on its content and `scanClaudeProject` refuses to pick one
+  // (fail closed). To `planSync` that absence looks identical to "the native file
+  // was deleted", which — when a projection entry already exists for that path —
+  // produces `import-delete`: a conflict the user hasn't even seen yet would get
+  // silently tombstoned, pushed to Cloud, and deleted on every other machine. A
+  // source conflict must never produce ANY action until the user resolves it (by
+  // reconciling the disagreeing Claude folders themselves); it is reported via
+  // `sourceConflicts`, exactly as `reconcileNativeWithStagedMemory`'s existing
+  // fail-closed behavior already does for the same situation.
+  const conflictedPaths = new Set(scanResult.sourceConflicts.map((c) => c.canonicalPath));
+  const actions = planned.filter((action) => !('path' in action && conflictedPaths.has(action.path)));
   return { actions, sourceConflicts: scanResult.sourceConflicts, guardedPaths };
 };
 

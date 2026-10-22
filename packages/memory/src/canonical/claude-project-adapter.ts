@@ -26,18 +26,51 @@ const isDir = async (candidate: string): Promise<boolean> => {
   }
 };
 
+/** Whether `candidate` is a directory, WITHOUT following a symlink AT `candidate`
+ * itself (an lstat, not a stat) — matching `discoverClaudeMemory`'s own
+ * `listDirNames` (`readdir(withFileTypes)` + `entry.isDirectory()`, which reports
+ * `false` for a symlinked entry regardless of what it points to). */
+const isDirNoSymlink = async (candidate: string): Promise<boolean> => {
+  try {
+    return (await lstat(candidate)).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
 /** Whether this project's native roots exist on THIS machine — the mass-delete
  * guard's existence check (spec section 6): a missing root means "not
- * materialized here", never "everything in it was deleted". */
+ * materialized here", never "everything in it was deleted".
+ *
+ * `notesRootExists` checks the `projects/<key>` SEGMENT ITSELF with
+ * `isDirNoSymlink` first — this is exactly the entry `listDirNames` enumerates
+ * when scanning, and a plain `lstat` on the full `.../memory` path would still
+ * silently traverse THROUGH a symlinked `<key>` segment to reach it (lstat only
+ * refuses to follow the FINAL path component, not intermediate ones). If this
+ * check and the scan's own enumeration disagreed about whether a symlinked key
+ * folder "exists", every note under it would be planned as deleted instead of
+ * "not materialized here" the moment the key folder happened to be a symlink.
+ * Once the key folder itself is confirmed to be a real (non-symlink) directory,
+ * the `memory` subdirectory below it is checked with the ordinary `isDir`
+ * (following any symlinks deeper is fine — `listDirNames` never looks past the
+ * `<key>` entry itself). `project.dir` keeps the ordinary `isDir` check — a
+ * user's own project checkout may legitimately be a symlink by the user's own
+ * deliberate setup, and nothing in discovery treats THAT specially. */
 export const nativeRootsExist = async (
   project: BoundProject,
   claudeHome: string = path.join(os.homedir(), '.claude'),
-): Promise<NativeRoots> => ({
-  projectDirExists: await isDir(project.dir),
-  notesRootExists: await isDir(
-    path.join(claudeHome, 'projects', encodeClaudeProjectKey(path.resolve(project.dir)), 'memory'),
-  ),
-});
+): Promise<NativeRoots> => {
+  const keyDir = path.join(
+    claudeHome,
+    'projects',
+    encodeClaudeProjectKey(path.resolve(project.dir)),
+  );
+  const keyFolderIsRealDir = await isDirNoSymlink(keyDir);
+  return {
+    projectDirExists: await isDir(project.dir),
+    notesRootExists: keyFolderIsRealDir && (await isDir(path.join(keyDir, 'memory'))),
+  };
+};
 
 export type NativeDoc = { canonicalPath: string; contentHash: string; bytes: Uint8Array };
 export type SourceConflict = { canonicalPath: string };

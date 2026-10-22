@@ -72,6 +72,64 @@ describe('planProjectSync', () => {
     expect(plan.actions).toContainEqual({ kind: 'materialize-write', path: 'notes/MEMORY.md', contentHash });
     expect(plan.actions.some((a) => a.kind === 'import-delete')).toBe(false);
   });
+
+  it('the guard does NOT protect a notes root that genuinely exists but is now empty — that is a real deletion', async () => {
+    const bytes = Buffer.from('MEMORY content');
+    const contentHash = hashBytes(bytes);
+    await writeMemoryObject({ stackHome, contentHash, bytes });
+    await writeCanonicalMain(stackHome, {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [{ projectId: 'prj_aaaaaaaaaaaaaaaaaaaaaaaaaa', documents: [{ path: 'notes/MEMORY.md', state: 'present', contentHash, importedFrom: 'claude', importedAt: '2026-10-22T00:00:00.000Z' }] }],
+    });
+    await writeProjection(stackHome, 'claude', { schemaVersion: 1, projects: { prj_aaaaaaaaaaaaaaaaaaaaaaaaaa: { 'notes/MEMORY.md': contentHash } } });
+    // The notes root DOES exist this time — just empty (the user deleted the file,
+    // the directory itself is untouched). A regression that guards on "no files
+    // found" instead of "root missing" would wrongly protect this too.
+    const { encodeClaudeProjectKey } = await import('../project-identity.js');
+    const encodedKey = encodeClaudeProjectKey(path.resolve(projectDir));
+    await mkdir(path.join(claudeHome, 'projects', encodedKey, 'memory'), { recursive: true });
+
+    const plan = await planProjectSync(project, stackHome, {
+      claudeHome,
+      projects: [{ dir: projectDir }],
+      resolveProjectId: () => 'prj_aaaaaaaaaaaaaaaaaaaaaaaaaa',
+    });
+    expect(plan.guardedPaths).toEqual([]);
+    expect(plan.actions).toContainEqual({ kind: 'import-delete', path: 'notes/MEMORY.md' });
+  });
+
+  it("a symlinked Claude project-key folder is treated the same as a missing one, matching discovery's own symlink-skipping rule", async () => {
+    const bytes = Buffer.from('MEMORY content');
+    const contentHash = hashBytes(bytes);
+    await writeMemoryObject({ stackHome, contentHash, bytes });
+    await writeCanonicalMain(stackHome, {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [{ projectId: 'prj_aaaaaaaaaaaaaaaaaaaaaaaaaa', documents: [{ path: 'notes/MEMORY.md', state: 'present', contentHash, importedFrom: 'claude', importedAt: '2026-10-22T00:00:00.000Z' }] }],
+    });
+    await writeProjection(stackHome, 'claude', { schemaVersion: 1, projects: { prj_aaaaaaaaaaaaaaaaaaaaaaaaaa: { 'notes/MEMORY.md': contentHash } } });
+    const encodedKey = (await import('../project-identity.js')).encodeClaudeProjectKey(path.resolve(projectDir));
+    const realTarget = path.join(root, 'symlink-target-with-memory');
+    await mkdir(path.join(realTarget, 'memory'), { recursive: true });
+    await mkdir(path.join(claudeHome, 'projects'), { recursive: true });
+    try {
+      await (await import('node:fs/promises')).symlink(realTarget, path.join(claudeHome, 'projects', encodedKey), 'junction');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EPERM') return; // no symlink privilege on this machine; skip
+      throw error;
+    }
+
+    const plan = await planProjectSync(project, stackHome, {
+      claudeHome,
+      projects: [{ dir: projectDir }],
+      resolveProjectId: () => 'prj_aaaaaaaaaaaaaaaaaaaaaaaaaa',
+    });
+    // discoverClaudeMemory's own listDirNames would skip this symlinked key folder
+    // entirely, so the guard MUST agree it does not "exist" either — otherwise the
+    // scan finds nothing while the guard thinks the root is fine, and the real
+    // (but invisible-to-the-scan) notes/MEMORY.md gets planned as deleted.
+    expect(plan.guardedPaths).toEqual(['notes/MEMORY.md']);
+    expect(plan.actions.some((a) => a.kind === 'import-delete')).toBe(false);
+  });
 });
 
 describe('applyImportActions and applyMaterializeActions', () => {
