@@ -122,10 +122,27 @@ export const writeClaudeProject = async (
   for (const op of ops) {
     const target = claudeNativeTargetOf(project, op.canonicalPath, claudeHome);
     const namespace = namespaceOf(op.canonicalPath);
+    // The owned root is narrowed to the SPECIFIC memory subdirectory per namespace
+    // (not the whole project.dir / project key dir) so that assertPathWithin's
+    // realpath-based containment check also catches a symlink planted at the first
+    // path segment under that subdirectory (e.g. `.claude/agent-memory/<agent>`
+    // pointing at `../../.git/hooks`) — such a symlink target would still resolve
+    // "within project.dir" but does NOT resolve within this narrower root.
+    // `instructions/` has no such nested, attacker-influenced segment (the target is
+    // always exactly `project.dir/CLAUDE.local.md`), so it keeps `project.dir` as the
+    // owned root; assertPathWithin already catches CLAUDE.local.md itself being a
+    // symlink that escapes project.dir.
     const ownedRoot =
       namespace === 'notes'
-        ? path.join(claudeHome, 'projects', encodeClaudeProjectKey(path.resolve(project.dir)))
-        : project.dir;
+        ? path.join(
+            claudeHome,
+            'projects',
+            encodeClaudeProjectKey(path.resolve(project.dir)),
+            'memory',
+          )
+        : namespace === 'agents'
+          ? path.join(project.dir, '.claude', 'agent-memory')
+          : project.dir;
     await assertPathWithin({ ownedRoot, proposedPath: target, allowRoot: true });
     if (op.kind === 'write') {
       await atomicWriteFile(target, op.bytes);

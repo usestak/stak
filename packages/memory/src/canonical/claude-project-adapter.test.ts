@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -77,13 +77,18 @@ describe('scanClaudeProject', () => {
     const root = await temp();
     const claudeHome = path.join(root, '.claude');
     const projectDir = path.join(root, 'proj');
-    // Two auto-memory folders both matched (same gitRemote) with different content
-    // at the same relative file — simulate via gitRemoteOf resolving both to the
-    // same identity while `projects` only lists the current one; the second is a
-    // leftover folder discovered independently by discoverClaudeMemory's own
-    // reconstruction path. For this unit test we instead directly construct the
-    // ambiguity by giving two DIFFERENT vendor keys both an identical gitRemote so
-    // discoverClaudeMemory resolves them to the SAME git identity.
+    // Two auto-memory folders (vendor keys `key-old` and `key-new`) with different
+    // content at the same relative file `a.md`. Neither key actually resolves to a
+    // shared Git identity here (`key-old`/`key-new` don't match the drive-letter
+    // vendor-key shape `reconstructProjectDir` expects, so both fall back to
+    // unresolved local identities) — the `gitRemoteOf`/`isDirectory` options below
+    // are unused in practice for this fixture. What actually makes both items
+    // "matched" is the `resolveProjectId: () => 'prj_x'` stub below: it ignores its
+    // `item` argument entirely and returns `'prj_x'` unconditionally, so
+    // `scanClaudeProject`'s matched-filter accepts every discovered item regardless
+    // of identity. Both land on canonical path `notes/a.md` with different content
+    // hashes, which is what exercises `scanClaudeProject`'s dedup-by-hash conflict
+    // detection.
     await write(path.join(claudeHome, 'projects', 'key-old', 'memory', 'a.md'), 'old');
     await write(path.join(claudeHome, 'projects', 'key-new', 'memory', 'a.md'), 'new');
 
@@ -159,5 +164,39 @@ describe('writeClaudeProject', () => {
       claudeHome,
     );
     await expect(readFile(path.join(projectDir, 'CLAUDE.local.md'), 'utf8')).rejects.toThrow();
+  });
+
+  it('refuses to write through a symlink planted at the agent directory', async (context) => {
+    const { readFile } = await import('node:fs/promises');
+    const root = await temp();
+    const projectDir = path.join(root, 'proj');
+    // A sibling directory still inside the sandboxed project.dir tree, but OUTSIDE
+    // `.claude/agent-memory/` — simulates an attacker-controlled repo checkout that
+    // plants `.claude/agent-memory/<agent>` as a symlink pointing elsewhere inside
+    // project.dir (e.g. `.git/hooks`). Before narrowing ownedRoot to
+    // `.claude/agent-memory`, assertPathWithin's realpath-based containment check
+    // would still see this as "within project.dir" and allow the write.
+    const escapeTarget = path.join(projectDir, 'escape-target');
+    await mkdir(escapeTarget, { recursive: true });
+    await mkdir(path.join(projectDir, '.claude', 'agent-memory'), { recursive: true });
+    try {
+      await symlink(
+        escapeTarget,
+        path.join(projectDir, '.claude', 'agent-memory', 'reviewer'),
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EPERM') return context.skip();
+      throw error;
+    }
+
+    await expect(
+      writeClaudeProject({ projectId: 'prj_x', dir: projectDir }, [
+        { kind: 'write', canonicalPath: 'agents/reviewer/notes.md', bytes: Buffer.from('pwned') },
+      ]),
+    ).rejects.toThrow();
+
+    await expect(
+      readFile(path.join(escapeTarget, 'notes.md'), 'utf8'),
+    ).rejects.toThrow();
   });
 });
