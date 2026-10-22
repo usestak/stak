@@ -5,6 +5,7 @@ import { memoryManifestSchema, type ManifestItem } from '../domain.js';
 import { memoryStorePaths, readMemoryManifest, readMemoryObject, writeMemoryManifest } from '../store.js';
 import { readLocalRegistry, writeLocalRegistry } from '../project/registry-store.js';
 import { resolveOrMintProject } from '../project/registry.js';
+import { claudeCanonicalPathOf } from './claude-project-adapter.js';
 import { groupLegacyItems } from './group-legacy-items.js';
 import type { CanonicalMainManifest } from './domain.js';
 import { readCanonicalMain, writeCanonicalMain, writeProjection } from './store.js';
@@ -112,6 +113,13 @@ const buildCanonicalMain = async (
   const tagged: Array<ManifestItem & { __projectId: string }> = [];
   for (const item of items) {
     if (item.scope !== 'project' || !item.project) continue;
+    // Skip items with no mappable canonical path BEFORE minting/resolving a
+    // Project ID — never mint a registry entry for an item that will never
+    // produce a document. Order matters: a malformed/edge-case v1 item
+    // (`scope: 'project'` paired with a `kind` that maps to no canonical path,
+    // e.g. `user-instructions`) must never leave a phantom, document-less
+    // project behind in the registry or in `main.json`.
+    if (!claudeCanonicalPathOf(item)) continue;
     const { registry: next, projectId } = resolveOrMintProject(registry, item.project);
     registry = next;
     tagged.push({ ...item, __projectId: projectId });

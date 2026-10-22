@@ -11,9 +11,16 @@ import { emptyCanonicalMain, type CanonicalMainManifest } from './domain.js';
  * ONLY for identities the bundle's own registry snapshot does not cover (a
  * bundle without any snapshot at all, or — in principle — a gap in one). Two
  * machines converting the SAME bundle with the SAME snapshot get the SAME
- * result regardless of their differing local registries; without a snapshot,
- * the result instead depends on whichever `localRegistry` is passed (spec section
- * 9.2's documented limitation for bundles predating the registry snapshot).
+ * result regardless of their differing local registries — PROVIDED the local
+ * registry does not itself claim the SAME identity under a DIFFERENT Project
+ * ID than the bundle's snapshot does. In that conflicting case,
+ * `resolveProjectForIdentity` returns `'conflict'` (per `registry.ts`) and the
+ * affected item is silently DROPPED (fail-closed, never guessed) — so the
+ * result CAN still depend on the caller's `localRegistry` even when the bundle
+ * carries its own snapshot, specifically for identities the two registries
+ * disagree about. Without a snapshot at all, the result depends on whichever
+ * `localRegistry` is passed (spec section 9.2's documented limitation for
+ * bundles predating the registry snapshot).
  */
 export const convertV1Bundle = (
   bundle: MemoryBackupBundle,

@@ -116,4 +116,47 @@ describe('convertV1Bundle', () => {
     const result = convertV1Bundle(bundle, { localRegistry: emptyRegistry() });
     expect(result.projects).toEqual([]);
   });
+
+  it('drops (never guesses) an item whose identity the bundle snapshot and the local registry claim under DIFFERENT Project IDs', () => {
+    // The bundle's own snapshot claims `identity` under Project ID A. The caller's
+    // local registry (e.g. this machine's own registry, independently) claims the
+    // SAME identity under a DIFFERENT Project ID B. After merging the snapshot
+    // into the local registry, both A and B records carry the same claim key, so
+    // `resolveProjectForIdentity` reports a 'conflict' rather than resolving to
+    // either one — the item must be dropped, never silently assigned to A, B, or
+    // any guessed winner.
+    const identity = {
+      kind: 'git' as const,
+      canonical: 'github.com/acme/contested',
+      host: 'github.com',
+      owner: 'acme',
+      repo: 'contested',
+    };
+    const bundleSideRegistry = resolveOrMintProject(emptyRegistry(), identity);
+    const snapshot = toPortableSnapshot(bundleSideRegistry.registry);
+    const localSideRegistry = resolveOrMintProject(emptyRegistry(), identity);
+    expect(localSideRegistry.projectId).not.toBe(bundleSideRegistry.projectId);
+
+    const manifest: MemoryManifest = {
+      schemaVersion: 1,
+      provider: 'claude',
+      createdAt: '2026-10-22T00:00:00.000Z',
+      items: [
+        {
+          provider: 'claude',
+          kind: 'auto-memory',
+          scope: 'project',
+          logicalId: 'claude/auto-memory/github.com/acme/contested/a.md',
+          project: identity,
+          contentHash: h(1),
+          restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
+          capturedAt: '2026-10-22T00:00:00.000Z',
+          sensitivity: 'private',
+        },
+      ],
+    };
+    const bundle = makeBundle(manifest, snapshot);
+    const result = convertV1Bundle(bundle, { localRegistry: localSideRegistry.registry });
+    expect(result.projects).toEqual([]); // dropped, not assigned to either A or B
+  });
 });

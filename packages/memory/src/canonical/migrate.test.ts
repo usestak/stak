@@ -373,6 +373,52 @@ describe('migrateLocalStore', () => {
     expect(hashes).toEqual([hashA, hashB].sort());
   });
 
+  it('never mints a registry entry or a phantom project for a project-scope item with no mappable canonical path', async () => {
+    // `scope: 'project'` paired with a `kind` that `claudeCanonicalPathOf` maps to
+    // `null` (e.g. `user-instructions`, which real Claude discovery only ever
+    // produces as `scope: 'global'`) is an edge case the schema technically
+    // allows. Minting a Project ID for such an item — even though it can never
+    // produce a document — would leave a phantom, document-less project behind
+    // in both the registry and `main.json`. The pre-mint filter must skip it
+    // BEFORE any registry mutation happens.
+    const hash = await putObject(Buffer.from('edge case content'));
+    const identity = {
+      kind: 'git' as const,
+      canonical: 'github.com/acme/orphan',
+      host: 'github.com',
+      owner: 'acme',
+      repo: 'orphan',
+    };
+    await writeMemoryManifest({
+      stackHome,
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-22T00:00:00.000Z',
+        items: [
+          {
+            provider: 'claude',
+            kind: 'user-instructions',
+            scope: 'project',
+            logicalId: 'claude/user-instructions/github.com/acme/orphan/CLAUDE.md',
+            project: identity,
+            contentHash: hash,
+            restoreTarget: { base: 'claude-home', relativePath: 'CLAUDE.md' },
+            capturedAt: '2026-10-22T00:00:00.000Z',
+            sensitivity: 'private',
+          },
+        ],
+      },
+    });
+    const summary = await migrateLocalStore(stackHome);
+    expect(summary.migratedDocuments).toBe(0);
+    const main = await readCanonicalMain(stackHome);
+    expect(main.projects).toEqual([]); // no phantom project
+    const { readLocalRegistry } = await import('../project/registry-store.js');
+    const registry = await readLocalRegistry(stackHome);
+    expect(registry.projects).toEqual([]); // no registry entry minted for it
+  });
+
   it('throws migration-invalid for a genuinely broken entry (content missing from the store)', async () => {
     const missingHash = `sha256:${'9'.repeat(64)}`; // never written via putObject
     await writeMemoryManifest({
