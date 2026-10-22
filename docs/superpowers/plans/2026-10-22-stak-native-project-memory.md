@@ -2761,6 +2761,7 @@ In `packages/memory/src/canonical/migrate.ts`, replace the body of `buildCanonic
 
 ```ts
 import { groupLegacyItems } from './group-legacy-items.js';
+import { claudeCanonicalPathOf } from './claude-project-adapter.js';
 
 const buildCanonicalMain = async (
   stackHome: string,
@@ -2770,6 +2771,13 @@ const buildCanonicalMain = async (
   const tagged: Array<ManifestItem & { __projectId: string }> = [];
   for (const item of items) {
     if (item.scope !== 'project' || !item.project) continue;
+    // Skip BEFORE minting: an item with no mappable canonical path must never
+    // mint a registry entry or leave a phantom empty project in main.json —
+    // the exact behavior the pre-this-task inline version already had.
+    // `groupLegacyItems` also filters internally (it has no other way to know
+    // which items a DIFFERENT caller, like `convert-v1.ts`, already excluded),
+    // but by the time an item reaches it here, this loop has already decided.
+    if (!claudeCanonicalPathOf(item)) continue;
     const { registry: next, projectId } = resolveOrMintProject(registry, item.project);
     registry = next;
     tagged.push({ ...item, __projectId: projectId });
@@ -2780,7 +2788,7 @@ const buildCanonicalMain = async (
 };
 ```
 
-Remove the now-unused `keepBothPath` and `claudeCanonicalPathOf` imports from `migrate.ts` if no longer referenced elsewhere in that file (keep `claudeCanonicalPathOf`'s import only if `seedClaudeProjection` or another function in the file still uses it directly — it does not, so remove it; `keepBothPath` is also unused now).
+`keepBothPath`'s import can still be removed from `migrate.ts` if no longer referenced elsewhere in that file (it is not); `claudeCanonicalPathOf`'s import must stay, now used by the pre-mint filter above.
 
 - [ ] **Step 6: Run migration tests to confirm the refactor did not change behavior**
 
@@ -2931,14 +2939,19 @@ import { groupLegacyItems } from './group-legacy-items.js';
 import { emptyCanonicalMain, type CanonicalMainManifest } from './domain.js';
 
 /**
- * Deterministically convert a historical v1 bundle into canonical Memory. Pure:
- * depends only on the bundle's own contents, plus `localRegistry` as a fallback
- * ONLY for identities the bundle's own registry snapshot does not cover (a
- * bundle without any snapshot at all, or — in principle — a gap in one). Two
- * machines converting the SAME bundle with the SAME snapshot get the SAME
- * result regardless of their differing local registries; without a snapshot,
- * the result instead depends on whichever `localRegistry` is passed (spec section
- * 9.2's documented limitation for bundles predating the registry snapshot).
+ * Deterministically convert a historical v1 bundle into canonical Memory. Pure
+ * (no I/O, no mutation of its inputs): depends only on the bundle's own
+ * contents and `localRegistry`. `localRegistry` is merged with the bundle's own
+ * registry snapshot (when present) BEFORE resolving any item, so it still has
+ * an effect even with a snapshot present: if `localRegistry` claims the SAME
+ * identity under a DIFFERENT Project ID than the snapshot does, that is a
+ * genuine conflict (`resolveProjectForIdentity` returns `'conflict'`), and the
+ * affected item is DROPPED, never guessed — this is the one way the result can
+ * still depend on `localRegistry` even with a snapshot present. Two machines
+ * passing the SAME bundle and registries that AGREE (or that never overlap for
+ * an identity) get the SAME result. Without any snapshot at all, the result
+ * depends entirely on whichever `localRegistry` is passed (spec section 9.2's
+ * documented limitation for bundles predating the registry snapshot).
  */
 export const convertV1Bundle = (
   bundle: MemoryBackupBundle,
