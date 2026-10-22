@@ -8,7 +8,7 @@ import {
   discoverClaudeMemory,
   type ClaudeMemoryDiscoveryOptions,
 } from '../claude-adapter.js';
-import type { DiscoveredMemoryItem } from '../domain.js';
+import type { DiscoveredMemoryItem, ManifestItem } from '../domain.js';
 import { hashBytes } from '../store.js';
 import { atomicWriteFile } from '../remote/secure-file.js';
 import { encodeClaudeProjectKey } from '../project-identity.js';
@@ -53,7 +53,9 @@ const assertRootHasNoSymlinkSegments = async (anchor: string, root: string): Pro
 /** Maps one discovered Claude item to its canonical path, or null if out of scope
  * (global items — `user-instructions` and global `agent-memory` — stay in the v1
  * store per spec section 3). */
-export const claudeCanonicalPathOf = (item: DiscoveredMemoryItem): string | null => {
+export const claudeCanonicalPathOf = (
+  item: Pick<DiscoveredMemoryItem | ManifestItem, 'scope' | 'kind' | 'restoreTarget'>,
+): string | null => {
   if (item.scope !== 'project') return null;
   switch (item.kind) {
     case 'auto-memory':
