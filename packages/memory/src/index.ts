@@ -10,3 +10,6 @@ export * from './backup.js';
 export * from './restore.js';
 export * from './adapter.js';
 export * from './remote/index.js';
+export * from './canonical/migrate.js';
+export * from './canonical/project-sync.js';
+export * from './canonical/claude-project-adapter.js';

@@ -8,7 +8,19 @@ import type {
   EnvironmentStatus,
   SkillStatus,
 } from '@stack/spec';
-import type { MemoryWorkingTreeStatus } from '../memory/working-tree-status.js';
+import type {
+  CanonicalMemoryProjectStatus,
+  MemoryWorkingTreeStatus,
+} from '../memory/working-tree-status.js';
+
+/** `stak status`'s Memory section, widened (additively) to also carry canonical
+ * (Project) Memory summaries — set by `program.ts`'s `checkMemory` dependency,
+ * read by `renderCanonicalMemorySection` below. The existing `MemoryWorkingTreeStatus`
+ * union itself is untouched; this is purely a display-layer extension of the single
+ * object `stak status` already threads through as `memory`. */
+export type MemoryStatusDisplay = MemoryWorkingTreeStatus & {
+  canonicalProjects?: CanonicalMemoryProjectStatus[];
+};
 
 import { agentLabel, block, changes, skills } from './format.js';
 
@@ -92,8 +104,34 @@ const memoryLine = (memory: MemoryWorkingTreeStatus): string => {
       return `${memory.changed} change${memory.changed === 1 ? '' : 's'} not added`;
   }
 };
-const renderMemorySection = (memory?: MemoryWorkingTreeStatus): string[] =>
-  memory ? ['', 'Memory', `  ${memoryLine(memory)}`] : [];
+/** Canonical (Project) Memory status — one line per bound project that has any
+ * conflicts, source conflicts, or guarded (to-be-regenerated) paths. A clean
+ * project stays silent, matching this file's existing `'clean'` convention for
+ * `MemoryWorkingTreeStatus` itself. */
+const canonicalMemoryLines = (projects: CanonicalMemoryProjectStatus[]): string[] => {
+  const lines: string[] = [];
+  for (const project of projects) {
+    const totalConflicts = project.conflicts.length + project.sourceConflicts.length;
+    if (totalConflicts === 0 && project.guardedPaths.length === 0) continue;
+    if (totalConflicts > 0)
+      lines.push(
+        `  ${project.projectId}: ${totalConflicts} conflict${totalConflicts === 1 ? '' : 's'} — resolve with \`stak memory resolve\``,
+      );
+    if (project.guardedPaths.length > 0)
+      lines.push(
+        `  ${project.projectId}: ${project.guardedPaths.length} path${project.guardedPaths.length === 1 ? '' : 's'} will be regenerated — run \`stak memory materialize\``,
+      );
+  }
+  return lines;
+};
+
+const renderMemorySection = (memory?: MemoryStatusDisplay): string[] => {
+  if (!memory) return [];
+  const lines = [`  ${memoryLine(memory)}`];
+  if (memory.canonicalProjects?.length)
+    lines.push(...canonicalMemoryLines(memory.canonicalProjects));
+  return ['', 'Memory', ...lines];
+};
 
 // ---------------------------------------------------------------------------
 // init
@@ -225,7 +263,7 @@ export const renderStatus = (
   options: RenderOptions & {
     agents?: AgentReadiness[];
     cloud?: CloudSyncDisplayState;
-    memory?: MemoryWorkingTreeStatus;
+    memory?: MemoryStatusDisplay;
     memoryCloud?: MemoryCloudDisplayState;
   } = {},
 ): string => {

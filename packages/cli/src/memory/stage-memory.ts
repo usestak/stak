@@ -34,13 +34,15 @@ export const stageMemoryWithProjectDedup = async (
   options: StageMemoryOptions,
 ): Promise<BackupResult> => {
   const nameHints = new Map<string, string>();
-  const nativeItems = await discoverClaudeMemory({
-    ...options,
-    onLocalProjectResolved: (vendorKey, dir) => {
-      const base = safeDirectoryBasename(dir);
-      if (base) nameHints.set(vendorKey, base);
-    },
-  });
+  const nativeItems = (
+    await discoverClaudeMemory({
+      ...options,
+      onLocalProjectResolved: (vendorKey, dir) => {
+        const base = safeDirectoryBasename(dir);
+        if (base) nameHints.set(vendorKey, base);
+      },
+    })
+  ).filter((item) => item.scope === 'global'); // project-scope Memory now goes through canonical staging (stageCanonicalMemory), not this v1 path.
   // Same Bug-B zombie-retirement bookkeeping `adapter.ts`'s backup() does, computed
   // from the RAW (pre-reconcile) discovery so Local -> Git identity-strengthening is
   // unaffected by this staging-only reconciliation.

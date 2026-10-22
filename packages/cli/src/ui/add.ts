@@ -19,7 +19,11 @@ const issueLine = (issue: SkillAddIssue): string => {
   }
 };
 
-export type StagedMemorySummary = { files: number; projects: number };
+export type StagedMemorySummary = {
+  files: number;
+  projects: number;
+  canonical?: Array<{ projectId: string; imported: number; conflicts: number; guarded: number }>;
+};
 
 export const renderSkillAdd = (
   proposal: SkillAddProposal,
@@ -49,6 +53,13 @@ export const renderSkillAdd = (
       `  staged ${options.memory.files} file${options.memory.files === 1 ? '' : 's'}` +
         ` across ${options.memory.projects} project${options.memory.projects === 1 ? '' : 's'}`,
     );
+    if (options.memory.canonical?.length) {
+      for (const project of options.memory.canonical) {
+        if (project.imported > 0) lines.push(`  Memory: imported ${project.imported} change(s) for ${project.projectId}`);
+        if (project.conflicts > 0) lines.push(`  Memory: ${project.conflicts} conflict(s) in ${project.projectId} — resolve with \`stak memory resolve\``);
+        if (project.guarded > 0) lines.push(`  Memory: ${project.guarded} path(s) will be regenerated for ${project.projectId} — run \`stak memory materialize\``);
+      }
+    }
   }
   if (proposal.targets.length > 0 || options.memory)
     lines.push('', 'Run `stak push` to sync main to STAK Cloud.');

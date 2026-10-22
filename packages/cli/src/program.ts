@@ -107,6 +107,11 @@ import {
 } from './cloud/config.js';
 import { registerOpenCommand } from './commands/open.js';
 import { stackCloudRemoteMemoryBackend } from './memory/cloud-backend.js';
+import {
+  canonicalMemoryStatus,
+  stageCanonicalMemory,
+  type CanonicalProjectSummary,
+} from './memory/canonical-ops.js';
 import { stageMemoryWithProjectDedup } from './memory/stage-memory.js';
 import {
   freshRegistryRisksDuplication,
@@ -701,10 +706,19 @@ const defaultDependencies: ProgramDependencies = {
   // call, never mutates. Reuses the same scan `stak memory scan` uses and the same
   // comparison `runMemoryBackup` itself would make; never duplicates scanning/manifest
   // construction.
-  checkMemory: async (): Promise<MemoryWorkingTreeStatus> => {
+  checkMemory: async (): Promise<
+    MemoryWorkingTreeStatus & { canonicalProjects: CanonicalProjectSummary[] }
+  > => {
     const nativeItems = await (await memoryAdapter()).discover();
     const registry = await readLocalRegistry(stackHome);
-    return computeMemoryWorkingTreeStatus({ stackHome, nativeItems, registry });
+    const status = await computeMemoryWorkingTreeStatus({ stackHome, nativeItems, registry });
+    // Canonical (Project) Memory status, additive to the MACHINE-vs-MAIN check above.
+    // Never let a canonical status failure break `stak status` — same defensive
+    // wrapping convention as `checkCloud`/`checkMemoryCloud` just above.
+    const canonicalProjects = await canonicalMemoryStatus(stackHome, { claudeHome }).catch(
+      () => [] as CanonicalProjectSummary[],
+    );
+    return { ...status, canonicalProjects };
   },
   // Deliberately narrow (see MemoryCloudDisplayState): only "does a Cloud backup exist
   // at all", reusing the existing readMemoryCloudStatus check — never a new subsystem,
@@ -734,8 +748,18 @@ const defaultDependencies: ProgramDependencies = {
   // first, so a relocated/re-cloned project's stale-but-still-discovered old directory
   // never creates a second manifest record for Memory that already has one.
   stageMemory: async () => {
-    const result = await stageMemoryWithProjectDedup(await memoryDiscoveryOptions());
-    return { files: result.files, projects: result.projects };
+    const legacy = await stageMemoryWithProjectDedup(await memoryDiscoveryOptions());
+    const canonical = await stageCanonicalMemory(stackHome, { claudeHome });
+    return {
+      files: legacy.files,
+      projects: legacy.projects,
+      canonical: canonical.map((p) => ({
+        projectId: p.projectId,
+        imported: p.imported.length,
+        conflicts: p.conflicts.length + p.sourceConflicts.length,
+        guarded: p.guardedPaths.length,
+      })),
+    };
   },
   prepareUse: async (input, options) => {
     const bootstrap = await bootstrapEmptyMainIfSkillFree({

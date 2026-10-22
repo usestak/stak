@@ -2,6 +2,7 @@ import { emptyRegistry, readMemoryManifest } from '@stack/memory';
 import type { DiscoveredMemoryItem, LocalRegistry } from '@stack/memory';
 
 import { canonicalMemoryKey } from './canonical-identity.js';
+import type { CanonicalProjectSummary } from './canonical-ops.js';
 
 /**
  * MACHINE (native Memory) vs MAIN (the staged local manifest) — read-only, no Cloud call.
@@ -19,6 +20,14 @@ export type MemoryWorkingTreeStatus =
   | { state: 'no-manifest'; discovered: number }
   | { state: 'clean' }
   | { state: 'changes-not-added'; changed: number };
+
+export type { CanonicalProjectSummary as CanonicalMemoryProjectStatus } from './canonical-ops.js';
+
+/** Canonical (Project Memory) status, additive to `MemoryWorkingTreeStatus` above —
+ * consumed by `ui/environment.ts`'s `renderStatus`. */
+export type CanonicalMemoryWorkingTreeStatus = {
+  projects: CanonicalProjectSummary[];
+};
 
 export type ComputeMemoryWorkingTreeStatusOptions = {
   stackHome: string;
