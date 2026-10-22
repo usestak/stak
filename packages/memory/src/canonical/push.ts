@@ -10,6 +10,12 @@ export type PublishConflictError = { code: 'conflict' };
 export type PushDeps = {
   getLocalMain(): Promise<CanonicalMainManifest>;
   getBase(): Promise<{ generation: number; main: CanonicalMainManifest } | null>;
+  /** Called whenever a clean merge's result differs from what `getLocalMain`
+   * returned — regardless of whether that result also gets published. A merge
+   * can incorporate remote-only documents local never had; if that result is
+   * never written to local storage, the NEXT push would re-upload the stale,
+   * pre-merge local state and silently delete those documents from Cloud. */
+  setLocalMain(main: CanonicalMainManifest): Promise<void>;
   setBase(base: { generation: number; main: CanonicalMainManifest }): Promise<void>;
   fetchRemote(): Promise<RemoteCanonical | null>;
   publish(main: CanonicalMainManifest, expectedParent: number | null): Promise<{ generation: number }>;
@@ -30,7 +36,6 @@ export type PushOutcome =
 
 export class PushError extends Error {
   readonly code = 'retry-exhausted' as const;
-
   constructor(message = 'push retry attempts exhausted') {
     super(message);
     this.name = 'PushError';
@@ -45,15 +50,16 @@ const isConflictError = (error: unknown): boolean =>
  * machine's base, three-way merge when it did, and an all-or-nothing stop on any
  * real conflict. See spec section 8.2 and Appendix A.4.
  *
- * The "is Cloud already exactly what I have" check only applies OFF the
- * fast-forward path (i.e. only when base and remote generations disagree, or one
- * of base/remote is null while the other isn't). That's deliberate: it is what
- * makes a crash between a successful `publish` and the local `setBase` self-heal
- * on the next push (Cloud has moved past our stale base to exactly `local`), while
- * a genuine fast-forward attempt — base and remote generations agreeing, even if
- * local happens to already match remote's content (nothing changed locally
- * either) — still goes through `publish` rather than being short-circuited, so a
- * concurrent-write race on that publish is still detected and retried.
+ * Whether to publish depends ONLY on content — never on whether generation
+ * numbers happen to agree. The very first thing every attempt checks is "is
+ * Cloud's current latest already semantically identical to local", completely
+ * unconditionally. This single check covers BOTH the ordinary "nothing changed
+ * since my last push" case (the single most common push of all — it must never
+ * create a duplicate generation) AND the crash-recovery case (a stale/disagreeing
+ * base, but Cloud already has exactly `local` because an earlier publish
+ * actually succeeded and only local bookkeeping didn't catch up). Generation
+ * agreement decides HOW to publish if something does need publishing
+ * (fast-forward vs. merge) — it never decides WHETHER to.
  */
 export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> => {
   const maxAttempts = deps.maxAttempts ?? 3;
@@ -63,19 +69,14 @@ export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> 
     const remote = await deps.fetchRemote();
     const base = await deps.getBase();
 
-    const isFastForward =
-      (base === null && remote === null) ||
-      (base !== null && remote !== null && base.generation === remote.generation);
-
-    if (!isFastForward && remote && canonicalDigest(remote.main) === canonicalDigest(local)) {
-      // Cloud's latest already matches local exactly, even though our known base
-      // disagrees with it (or we have no base at all) — a previous publish must
-      // have succeeded on Cloud without our local bookkeeping catching up. Repair
-      // the base and stop; publishing again would create a pointless duplicate
-      // generation.
+    if (remote && canonicalDigest(remote.main) === canonicalDigest(local)) {
       await deps.setBase({ generation: remote.generation, main: local });
       return { status: 'up-to-date', generation: remote.generation };
     }
+
+    const isFastForward =
+      (base === null && remote === null) ||
+      (base !== null && remote !== null && base.generation === remote.generation);
 
     if (isFastForward) {
       const expectedParent = remote?.generation ?? null;
@@ -98,13 +99,25 @@ export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> 
       await deps.savePendingMerge({ basedOnGeneration: remoteGeneration, merged, conflicts });
       return { status: 'conflict', conflicts };
     }
+    // Adopt the merge result locally FIRST, unconditionally — whether or not it
+    // also needs to be published. Only after that do we decide whether there is
+    // anything new to upload at all.
+    await deps.setLocalMain(merged);
+    if (canonicalDigest(merged) === canonicalDigest(remote!.main)) {
+      // The merge only ever picked up content remote already has; there is
+      // nothing of ours to contribute. Publishing `merged` now would create a
+      // generation identical to `remoteGeneration` — forbidden. Advance the
+      // base to match what was just adopted and stop.
+      await deps.setBase({ generation: remoteGeneration, main: merged });
+      return { status: 'up-to-date', generation: remoteGeneration };
+    }
     try {
       const result = await deps.publish(merged, remoteGeneration);
       await deps.setBase({ generation: result.generation, main: merged });
       await deps.clearPendingMerge();
       return { status: 'pushed', generation: result.generation, main: merged };
     } catch (error) {
-      if (!isConflictError(error)) throw error; // not a race we can retry: propagate immediately
+      if (!isConflictError(error)) throw error;
       if (attempt === maxAttempts) break;
       continue;
     }
