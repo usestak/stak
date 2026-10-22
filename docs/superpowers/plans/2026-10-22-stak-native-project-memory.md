@@ -3417,10 +3417,14 @@ git commit -m "feat(memory): reject v1-after-v2 pushes and read v2 project count
 - Produces:
   - `type RemoteCanonical = { generation: number; main: CanonicalMainManifest }`
   - `type PublishConflictError = { code: 'conflict' }` (the shape `publish` rejects with — matches `RemoteMemoryError`'s `code: 'conflict'`, checked with `instanceof`-free duck typing so this module never imports `RemoteMemoryError` directly)
-  - `type PushDeps = { getLocalMain(): Promise<CanonicalMainManifest>; getBase(): Promise<{ generation: number; main: CanonicalMainManifest } | null>; setBase(base: { generation: number; main: CanonicalMainManifest }): Promise<void>; fetchRemote(): Promise<RemoteCanonical | null>; publish(main: CanonicalMainManifest, expectedParent: number | null): Promise<{ generation: number }>; savePendingMerge(pending: { basedOnGeneration: number; merged: CanonicalMainManifest; conflicts: MergeConflict[] }): Promise<void>; clearPendingMerge(): Promise<void>; maxAttempts?: number; }` — this module is PUSH-only; `stak pull` (Task 13) never calls it, since pull's "merge locally, upload nothing" semantics (spec section 8.4) are genuinely different from push's "always resolves by either publishing or stopping on conflict" and get their own small function in Task 13 instead of a flag bent onto this one.
+  - `type PushDeps = { getLocalMain(): Promise<CanonicalMainManifest>; getBase(): Promise<{ generation: number; main: CanonicalMainManifest } | null>; setLocalMain(main: CanonicalMainManifest): Promise<void>; setBase(base: { generation: number; main: CanonicalMainManifest }): Promise<void>; fetchRemote(): Promise<RemoteCanonical | null>; publish(main: CanonicalMainManifest, expectedParent: number | null): Promise<{ generation: number }>; savePendingMerge(pending: { basedOnGeneration: number; merged: CanonicalMainManifest; conflicts: MergeConflict[] }): Promise<void>; clearPendingMerge(): Promise<void>; maxAttempts?: number; }` — `setLocalMain` exists because a clean merge can produce a result that DIFFERS from local (it incorporated remote-only documents) even when nothing from local itself needs to go to Cloud; that merged result must be written to local storage regardless of whether a new generation gets published, or the next push would silently re-upload a stale local state that is missing whatever came from remote, deleting those documents from Cloud. This module is PUSH-only; `stak pull` (Task 13) never calls it, since pull's "merge locally, upload nothing" semantics (spec section 8.4) are genuinely different from push's "always resolves by either publishing or stopping on conflict" and get their own small function in Task 13 instead of a flag bent onto this one.
   - `type PushOutcome = | { status: 'up-to-date'; generation: number } | { status: 'pushed'; generation: number; main: CanonicalMainManifest } | { status: 'conflict'; conflicts: MergeConflict[] } | { status: 'retry-exhausted' }`
   - `class PushError extends Error { code: 'retry-exhausted' }`
   - `pushCanonicalMemory(deps: PushDeps): Promise<PushOutcome>`
+
+**Two correctness properties this algorithm must hold, independent of each other — do not conflate them:**
+1. **Never create a Cloud generation whose content is identical to Cloud's current latest.** This depends ONLY on content (a digest comparison), never on whether generation numbers happen to agree. A plain "nothing changed since my last push" call is the single most common push of all, and it must never create a duplicate generation.
+2. **Never leave local canonical storage holding less than what a clean merge just proved should exist.** A clean merge's result must always be written to local storage, whether or not that merge result also gets published to Cloud.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3447,6 +3451,7 @@ const manifest = (docs: CanonicalDoc[]): CanonicalMainManifest => ({
 const baseDeps = (overrides: Partial<PushDeps> = {}): PushDeps => ({
   getLocalMain: vi.fn(async () => manifest([present('notes/a.md', 1)])),
   getBase: vi.fn(async () => null),
+  setLocalMain: vi.fn(async () => undefined),
   setBase: vi.fn(async () => undefined),
   fetchRemote: vi.fn(async () => null),
   publish: vi.fn(async () => ({ generation: 0 })),
@@ -3493,12 +3498,30 @@ describe('pushCanonicalMemory', () => {
     expect(deps.setBase).toHaveBeenCalledWith({ generation: 4, main: local });
   });
 
-  it('merges a one-sided remote change with no conflict, then publishes the merge', async () => {
-    const local = manifest([present('notes/a.md', 1)]); // unchanged locally since base
-    const remote = manifest([present('notes/a.md', 1), present('notes/b.md', 9)]);
+  it('is a true no-op when base and remote generations already agree and local already matches remote (the most common push of all)', async () => {
+    const same = manifest([present('notes/a.md', 1)]);
+    const deps = baseDeps({
+      getLocalMain: vi.fn(async () => same),
+      getBase: vi.fn(async () => ({ generation: 3, main: same })),
+      fetchRemote: vi.fn(async () => ({ generation: 3, main: same })), // same generation AND same content
+      publish: vi.fn(),
+    });
+    const outcome = await pushCanonicalMemory(deps);
+    expect(outcome).toEqual({ status: 'up-to-date', generation: 3 });
+    expect(deps.publish).not.toHaveBeenCalled(); // must NEVER create a duplicate generation
+  });
+
+  it('merges changes from BOTH sides with no conflict, then publishes the merge, and adopts it locally', async () => {
+    // Local and remote each added a DIFFERENT document since base, so the merge
+    // result genuinely differs from remote's own content — unlike a one-sided
+    // remote-only change (covered by the next test), this one really does have
+    // something new to upload.
+    const base = manifest([present('notes/a.md', 1)]);
+    const local = manifest([present('notes/a.md', 1), present('notes/c.md', 7)]); // local added c.md
+    const remote = manifest([present('notes/a.md', 1), present('notes/b.md', 9)]); // remote added b.md
     const deps = baseDeps({
       getLocalMain: vi.fn(async () => local),
-      getBase: vi.fn(async () => ({ generation: 3, main: manifest([present('notes/a.md', 1)]) })),
+      getBase: vi.fn(async () => ({ generation: 3, main: base })),
       fetchRemote: vi.fn(async () => ({ generation: 4, main: remote })),
       publish: vi.fn(async (_main, expectedParent) => {
         expect(expectedParent).toBe(4);
@@ -3507,8 +3530,34 @@ describe('pushCanonicalMemory', () => {
     });
     const outcome = await pushCanonicalMemory(deps);
     expect(outcome.status).toBe('pushed');
-    if (outcome.status === 'pushed')
-      expect(outcome.main.projects[0]!.documents).toEqual(remote.projects[0]!.documents);
+    const merged = manifest([present('notes/a.md', 1), present('notes/c.md', 7), present('notes/b.md', 9)]);
+    if (outcome.status === 'pushed') expect(outcome.main.projects[0]!.documents.length).toBe(3);
+    expect(deps.setLocalMain).toHaveBeenCalledWith(expect.objectContaining({
+      projects: [expect.objectContaining({ documents: expect.arrayContaining(merged.projects[0]!.documents) })],
+    }));
+  });
+
+  it('a clean merge that turns out identical to remote is adopted locally but never republished', async () => {
+    // Local never actually changed anything new relative to base; the merge's
+    // only job here is to pick up remote's own one-sided change — the SAME
+    // content Cloud's latest already holds. Publishing it again would create a
+    // duplicate generation; this must be treated as up-to-date instead, while
+    // still writing the merge result into local storage (local was missing
+    // remote's change until now).
+    const base = manifest([present('notes/a.md', 1)]);
+    const local = manifest([present('notes/a.md', 1)]); // unchanged since base
+    const remote = manifest([present('notes/a.md', 1), present('notes/b.md', 9)]);
+    const deps = baseDeps({
+      getLocalMain: vi.fn(async () => local),
+      getBase: vi.fn(async () => ({ generation: 3, main: base })),
+      fetchRemote: vi.fn(async () => ({ generation: 4, main: remote })),
+      publish: vi.fn(),
+    });
+    const outcome = await pushCanonicalMemory(deps);
+    expect(outcome).toEqual({ status: 'up-to-date', generation: 4 });
+    expect(deps.publish).not.toHaveBeenCalled();
+    expect(deps.setLocalMain).toHaveBeenCalledWith(remote);
+    expect(deps.setBase).toHaveBeenCalledWith({ generation: 4, main: remote });
   });
 
   it('stops with status conflict and saves a pending merge, without publishing', async () => {
@@ -3534,16 +3583,19 @@ describe('pushCanonicalMemory', () => {
   });
 
   it('retries when publish reports a concurrent conflict, then succeeds against the new remote', async () => {
-    const local = manifest([present('notes/a.md', 1)]);
+    // local genuinely differs from base/remote — a REAL pending change, not a
+    // no-op — so the retry mechanism is exercised honestly, without also
+    // triggering the unrelated "nothing to push" short-circuit.
+    const local = manifest([present('notes/a.md', 2)]);
     let fetchCount = 0;
     const deps = baseDeps({
       getLocalMain: vi.fn(async () => local),
       getBase: vi.fn(async () => ({ generation: 3, main: manifest([present('notes/a.md', 1)]) })),
       fetchRemote: vi.fn(async () => {
         fetchCount += 1;
-        // First call: still generation 3 (no new remote state) so push attempts to
-        // fast-forward and publish, which fails once with a conflict; second call
-        // (after the retry) reflects the generation that publish's failure implies.
+        // Cloud stays at generation 3 with the old content on both calls — the
+        // conflict is purely a simulated concurrent-write race on `publish`
+        // itself, not a real move of Cloud's latest.
         return { generation: 3, main: manifest([present('notes/a.md', 1)]) };
       }),
       publish: vi.fn()
@@ -3557,7 +3609,7 @@ describe('pushCanonicalMemory', () => {
   });
 
   it('gives up after maxAttempts concurrent conflicts', async () => {
-    const local = manifest([present('notes/a.md', 1)]);
+    const local = manifest([present('notes/a.md', 2)]); // genuinely differs; see note above
     const deps = baseDeps({
       getLocalMain: vi.fn(async () => local),
       getBase: vi.fn(async () => ({ generation: 3, main: manifest([present('notes/a.md', 1)]) })),
@@ -3570,6 +3622,21 @@ describe('pushCanonicalMemory', () => {
     const outcome = await pushCanonicalMemory(deps);
     expect(outcome).toEqual({ status: 'retry-exhausted' });
     expect(deps.publish).toHaveBeenCalledTimes(3);
+  });
+
+  it('propagates a non-conflict publish error immediately, without retrying', async () => {
+    const local = manifest([present('notes/a.md', 2)]);
+    const boom = new Error('network unreachable');
+    const deps = baseDeps({
+      getLocalMain: vi.fn(async () => local),
+      getBase: vi.fn(async () => ({ generation: 3, main: manifest([present('notes/a.md', 1)]) })),
+      fetchRemote: vi.fn(async () => ({ generation: 3, main: manifest([present('notes/a.md', 1)]) })),
+      publish: vi.fn(async () => {
+        throw boom;
+      }),
+    });
+    await expect(pushCanonicalMemory(deps)).rejects.toBe(boom);
+    expect(deps.publish).toHaveBeenCalledTimes(1); // never retried — this isn't a race, retrying would misreport the real failure
   });
 });
 ```
@@ -3592,6 +3659,12 @@ export type RemoteCanonical = { generation: number; main: CanonicalMainManifest 
 export type PushDeps = {
   getLocalMain(): Promise<CanonicalMainManifest>;
   getBase(): Promise<{ generation: number; main: CanonicalMainManifest } | null>;
+  /** Called whenever a clean merge's result differs from what `getLocalMain`
+   * returned — regardless of whether that result also gets published. A merge
+   * can incorporate remote-only documents local never had; if that result is
+   * never written to local storage, the NEXT push would re-upload the stale,
+   * pre-merge local state and silently delete those documents from Cloud. */
+  setLocalMain(main: CanonicalMainManifest): Promise<void>;
   setBase(base: { generation: number; main: CanonicalMainManifest }): Promise<void>;
   fetchRemote(): Promise<RemoteCanonical | null>;
   publish(main: CanonicalMainManifest, expectedParent: number | null): Promise<{ generation: number }>;
@@ -3610,17 +3683,32 @@ export type PushOutcome =
   | { status: 'conflict'; conflicts: MergeConflict[] }
   | { status: 'retry-exhausted' };
 
+export class PushError extends Error {
+  readonly code = 'retry-exhausted' as const;
+  constructor(message = 'push retry attempts exhausted') {
+    super(message);
+    this.name = 'PushError';
+  }
+}
+
 const isConflictError = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'conflict';
 
 /**
  * Push canonical Memory: fast-forward when nothing else changed Cloud since this
  * machine's base, three-way merge when it did, and an all-or-nothing stop on any
- * real conflict. See spec section 8.2 and Appendix A.4. One check runs before
- * anything else: if Cloud's current latest is already semantically identical to
- * local, repair the base and stop — this is what makes a crash between a
- * successful `publish` and the local `setBase` self-heal on the next push, instead
- * of creating a duplicate generation.
+ * real conflict. See spec section 8.2 and Appendix A.4.
+ *
+ * Whether to publish depends ONLY on content — never on whether generation
+ * numbers happen to agree. The very first thing every attempt checks is "is
+ * Cloud's current latest already semantically identical to local", completely
+ * unconditionally. This single check covers BOTH the ordinary "nothing changed
+ * since my last push" case (the single most common push of all — it must never
+ * create a duplicate generation) AND the crash-recovery case (a stale/disagreeing
+ * base, but Cloud already has exactly `local` because an earlier publish
+ * actually succeeded and only local bookkeeping didn't catch up). Generation
+ * agreement decides HOW to publish if something does need publishing
+ * (fast-forward vs. merge) — it never decides WHETHER to.
  */
 export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> => {
   const maxAttempts = deps.maxAttempts ?? 3;
@@ -3646,7 +3734,8 @@ export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> 
         await deps.setBase({ generation: result.generation, main: local });
         return { status: 'pushed', generation: result.generation, main: local };
       } catch (error) {
-        if (!isConflictError(error) || attempt === maxAttempts) break;
+        if (!isConflictError(error)) throw error; // not a race we can retry: propagate immediately
+        if (attempt === maxAttempts) break;
         continue; // Cloud moved again mid-push; retry against the new latest.
       }
     }
@@ -3659,13 +3748,26 @@ export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> 
       await deps.savePendingMerge({ basedOnGeneration: remoteGeneration, merged, conflicts });
       return { status: 'conflict', conflicts };
     }
+    // Adopt the merge result locally FIRST, unconditionally — whether or not it
+    // also needs to be published. Only after that do we decide whether there is
+    // anything new to upload at all.
+    await deps.setLocalMain(merged);
+    if (canonicalDigest(merged) === canonicalDigest(remote!.main)) {
+      // The merge only ever picked up content remote already has; there is
+      // nothing of ours to contribute. Publishing `merged` now would create a
+      // generation identical to `remoteGeneration` — forbidden. Advance the
+      // base to match what was just adopted and stop.
+      await deps.setBase({ generation: remoteGeneration, main: merged });
+      return { status: 'up-to-date', generation: remoteGeneration };
+    }
     try {
       const result = await deps.publish(merged, remoteGeneration);
       await deps.setBase({ generation: result.generation, main: merged });
       await deps.clearPendingMerge();
       return { status: 'pushed', generation: result.generation, main: merged };
     } catch (error) {
-      if (!isConflictError(error) || attempt === maxAttempts) break;
+      if (!isConflictError(error)) throw error;
+      if (attempt === maxAttempts) break;
       continue;
     }
   }
