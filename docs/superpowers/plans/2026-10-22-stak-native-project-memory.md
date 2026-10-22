@@ -1030,19 +1030,31 @@ export const planSync = (input: {
     const tombstone = canonicalTombstoneHash(canonicalDoc);
 
     // Tombstone-resurrection guard: a native file whose content exactly matches
-    // what was deleted is never treated as a new import, regardless of P.
-    if (tombstone !== undefined && N !== undefined && N === tombstone && C === undefined) {
-      if (P === undefined || P === tombstone) {
-        actions.push({ kind: 'none' });
-        continue;
-      }
+    // what was deleted is never treated as a new import. Scoped to P === undefined
+    // (first sighting) ONLY — a P-defined path with a tombstone always falls to the
+    // P-defined branch below, where `cMatchesP` (plain `C === P`) is false (C is
+    // undefined, P is a real hash), correctly producing materialize-delete /
+    // conflict rather than resurrecting anything; the resurrection case that
+    // actually needs blocking is the no-history one below.
+    if (
+      P === undefined &&
+      tombstone !== undefined &&
+      N !== undefined &&
+      N === tombstone &&
+      C === undefined
+    ) {
+      actions.push({ kind: 'none' });
+      continue;
     }
 
     if (P === undefined) {
       // First sighting: nothing synced yet for this path.
       if (N === undefined && C === undefined) {
         actions.push({ kind: 'none' });
-      } else if (N !== undefined && C === undefined && tombstone === undefined) {
+      } else if (N !== undefined && C === undefined) {
+        // The resurrection guard above already excluded N === tombstone; any other
+        // native-only content here is genuinely new and must import, EVEN when a
+        // tombstone exists for this path at a different hash.
         actions.push({ kind: 'import-edit', path, contentHash: N });
       } else if (N === undefined && C !== undefined) {
         actions.push({ kind: 'materialize-write', path, contentHash: C });
@@ -1056,7 +1068,14 @@ export const planSync = (input: {
     }
 
     const nMatchesP = N === P;
-    const cMatchesP = C === P || (C === undefined && tombstone !== undefined && tombstone === P);
+    // Plain equality — NOT `C === P || (C === undefined && tombstone === P)`. That
+    // extra clause looks plausible (P === tombstone happens right after a canonical
+    // delete arrives, before this machine's own delete is synced) but is wrong: it
+    // treats "canonical was just deleted" as "canonical hasn't changed," which
+    // either silently loses the delete (native unchanged -> 'none' instead of
+    // materialize-delete) or lets a native edit silently override a canonical
+    // delete (both changed -> import-edit instead of conflict edit-delete).
+    const cMatchesP = C === P;
 
     if (nMatchesP && cMatchesP) {
       actions.push({ kind: 'none' });
