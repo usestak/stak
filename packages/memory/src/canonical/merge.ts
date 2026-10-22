@@ -10,13 +10,13 @@ import {
 export type MergeConflict = {
   projectId: string;
   path: string;
-  reason: 'edit-edit' | 'edit-delete';
+  reason: 'edit-edit' | 'edit-delete' | 'delete-delete';
 };
 
 export const mergeConflictSchema = z.object({
   projectId: z.string(),
   path: z.string(),
-  reason: z.enum(['edit-edit', 'edit-delete']),
+  reason: z.enum(['edit-edit', 'edit-delete', 'delete-delete']),
 });
 
 export type MergeOutcome = {
@@ -37,6 +37,9 @@ const sameDoc = (a: CanonicalDoc | undefined, b: CanonicalDoc | undefined): bool
       ? a.lastContentHash === b.lastContentHash
       : false;
 };
+
+const isGone = (doc: CanonicalDoc | undefined): boolean =>
+  doc === undefined || doc.state === 'deleted';
 
 /**
  * Three-way merge of one project's documents. `base` is what this machine last
@@ -83,8 +86,11 @@ const mergeProject = (
       if (L) documents.push(L);
       continue;
     }
-    const reason: MergeConflict['reason'] =
-      L?.state === 'deleted' || R?.state === 'deleted' ? 'edit-delete' : 'edit-edit';
+    const reason: MergeConflict['reason'] = isGone(L) && isGone(R)
+      ? 'delete-delete'
+      : isGone(L) || isGone(R)
+        ? 'edit-delete'
+        : 'edit-edit';
     conflicts.push({ projectId, path, reason });
     // Conflicted documents are omitted from `merged` entirely until resolved.
   }

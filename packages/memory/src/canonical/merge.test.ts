@@ -95,6 +95,24 @@ describe('mergeCanonical', () => {
       present('notes/a.md', 1),
     ]);
   });
+
+  it('delete-vs-delete with different lastContentHash conflicts as delete-delete', () => {
+    const base = manifest([present('notes/a.md', 1)]);
+    const local = manifest([deleted('notes/a.md', 1)]);
+    const remote = manifest([deleted('notes/a.md', 2)]);
+    const { merged, conflicts } = mergeCanonical(base, local, remote);
+    expect(conflicts).toEqual([{ projectId: 'prj_x', path: 'notes/a.md', reason: 'delete-delete' }]);
+    expect(merged.projects[0]!.documents).toEqual([]);
+  });
+
+  it('one side absent (no entry), other side present conflicts as edit-delete', () => {
+    const base = manifest([present('notes/a.md', 1)]);
+    const local: CanonicalMainManifest = { schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION, projects: [{ projectId: 'prj_x', documents: [] }] };
+    const remote = manifest([present('notes/a.md', 2)]);
+    const { merged, conflicts } = mergeCanonical(base, local, remote);
+    expect(conflicts).toEqual([{ projectId: 'prj_x', path: 'notes/a.md', reason: 'edit-delete' }]);
+    expect(merged.projects[0]!.documents).toEqual([]);
+  });
 });
 
 describe('keepBothPath', () => {
