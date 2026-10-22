@@ -130,6 +130,56 @@ describe('planProjectSync', () => {
     expect(plan.guardedPaths).toEqual(['notes/MEMORY.md']);
     expect(plan.actions.some((a) => a.kind === 'import-delete')).toBe(false);
   });
+
+  it('a source conflict at notes/MEMORY.md produces NO action (not import-delete), while an unrelated edit still plans normally', async () => {
+    // Two Claude memory folders for the SAME resolved project (matched purely via
+    // the `resolveProjectId` stub below, which ignores its `item` argument — see
+    // claude-project-adapter.test.ts's own source-conflict test for the identical
+    // pattern) disagree on content at `notes/MEMORY.md`. This is a genuine source
+    // conflict: `scanClaudeProject` refuses to pick a winner and omits the path
+    // from `scanResult.docs` entirely.
+    await write(path.join(claudeHome, 'projects', 'key-old', 'memory', 'MEMORY.md'), 'old');
+    await write(path.join(claudeHome, 'projects', 'key-new', 'memory', 'MEMORY.md'), 'new');
+
+    // The mass-delete guard keys off THIS project's own encoded key folder, which
+    // is neither `key-old` nor `key-new` above — create it (empty) so the guard
+    // sees a genuine, existing notes root and stays out of the way. Without this,
+    // `notesRootExists` would be false and the guard itself would strip the
+    // projection entry below, masking what this test is actually pinning (the
+    // conflict filter, not the mass-delete guard).
+    const { encodeClaudeProjectKey } = await import('../project-identity.js');
+    const ownEncodedKey = encodeClaudeProjectKey(path.resolve(projectDir));
+    await mkdir(path.join(claudeHome, 'projects', ownEncodedKey, 'memory'), { recursive: true });
+
+    // An existing projection entry for the conflicted path: this is what the
+    // Critical bug needed to reproduce — without it, `planSync` would see
+    // "first sighting, native absent" (`materialize-write`, not `import-delete`),
+    // not the "native changed since last sync" branch the bug actually hit.
+    const syncedHash = hashBytes(Buffer.from('old'));
+    await writeCanonicalMain(stackHome, {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [{ projectId: 'prj_aaaaaaaaaaaaaaaaaaaaaaaaaa', documents: [{ path: 'notes/MEMORY.md', state: 'present', contentHash: syncedHash, importedFrom: 'claude', importedAt: '2026-10-22T00:00:00.000Z' }] }],
+    });
+    await writeProjection(stackHome, 'claude', { schemaVersion: 1, projects: { prj_aaaaaaaaaaaaaaaaaaaaaaaaaa: { 'notes/MEMORY.md': syncedHash } } });
+
+    // A second, unrelated, non-conflicted native edit in the same project, to
+    // confirm the conflict filter doesn't over-exclude.
+    await write(path.join(projectDir, 'CLAUDE.local.md'), 'private v1');
+
+    const plan = await planProjectSync(project, stackHome, {
+      claudeHome,
+      projects: [{ dir: projectDir }],
+      resolveProjectId: () => 'prj_aaaaaaaaaaaaaaaaaaaaaaaaaa',
+    });
+
+    expect(plan.actions.find((a) => 'path' in a && a.path === 'notes/MEMORY.md')).toBeUndefined();
+    expect(plan.sourceConflicts).toContainEqual({ canonicalPath: 'notes/MEMORY.md' });
+    expect(plan.actions).toContainEqual({
+      kind: 'import-edit',
+      path: 'instructions/private.md',
+      contentHash: hashBytes(Buffer.from('private v1')),
+    });
+  });
 });
 
 describe('applyImportActions and applyMaterializeActions', () => {
