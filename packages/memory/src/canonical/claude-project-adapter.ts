@@ -1,4 +1,4 @@
-import { lstat, readFile, rm } from 'node:fs/promises';
+import { lstat, readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -15,6 +15,29 @@ import { encodeClaudeProjectKey } from '../project-identity.js';
 import { namespaceOf, validateCanonicalPath } from './paths.js';
 
 export type BoundProject = { projectId: string; dir: string; gitRemote?: string };
+
+export type NativeRoots = { projectDirExists: boolean; notesRootExists: boolean };
+
+const isDir = async (candidate: string): Promise<boolean> => {
+  try {
+    return (await stat(candidate)).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+/** Whether this project's native roots exist on THIS machine — the mass-delete
+ * guard's existence check (spec section 6): a missing root means "not
+ * materialized here", never "everything in it was deleted". */
+export const nativeRootsExist = async (
+  project: BoundProject,
+  claudeHome: string = path.join(os.homedir(), '.claude'),
+): Promise<NativeRoots> => ({
+  projectDirExists: await isDir(project.dir),
+  notesRootExists: await isDir(
+    path.join(claudeHome, 'projects', encodeClaudeProjectKey(path.resolve(project.dir)), 'memory'),
+  ),
+});
 
 export type NativeDoc = { canonicalPath: string; contentHash: string; bytes: Uint8Array };
 export type SourceConflict = { canonicalPath: string };
