@@ -42,7 +42,7 @@ describe('v2 canonical bundling', () => {
       manifest: { schemaVersion: 1, provider: 'claude', createdAt: '2026-10-22T00:00:00.000Z', items: [] },
     });
     const canonical = {
-      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION as const,
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
       projects: [{ projectId: 'prj_aaaaaaaaaaaaaaaaaaaaaaaaaa', documents: [] }],
     };
     await writeCanonicalMain(source, canonical);
