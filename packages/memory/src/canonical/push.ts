@@ -99,20 +99,28 @@ export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> 
       await deps.savePendingMerge({ basedOnGeneration: remoteGeneration, merged, conflicts });
       return { status: 'conflict', conflicts };
     }
-    // Adopt the merge result locally FIRST, unconditionally — whether or not it
-    // also needs to be published. Only after that do we decide whether there is
-    // anything new to upload at all.
-    await deps.setLocalMain(merged);
     if (canonicalDigest(merged) === canonicalDigest(remote!.main)) {
       // The merge only ever picked up content remote already has; there is
       // nothing of ours to contribute. Publishing `merged` now would create a
-      // generation identical to `remoteGeneration` — forbidden. Advance the
-      // base to match what was just adopted and stop.
+      // generation identical to `remoteGeneration` — forbidden. This IS already
+      // Cloud's committed state, so it is safe to adopt immediately: advance
+      // local storage and the base together and stop.
+      await deps.setLocalMain(merged);
       await deps.setBase({ generation: remoteGeneration, main: merged });
       return { status: 'up-to-date', generation: remoteGeneration };
     }
+    // Do NOT adopt `merged` into local storage yet — it is not yet Cloud's
+    // committed state. Adopting it before `publish` succeeds would let local
+    // storage run ahead of `base` across a retry or a crash: if this exact
+    // `publish` call fails or the process dies here, local storage would hold
+    // `merged` while `base` still points at the OLD generation, so the next
+    // merge would compare a NEW remote against a base that no longer matches
+    // what is actually on disk — able to resurrect content a later remote
+    // change removed, or raise a conflict that is not real. `setLocalMain` and
+    // `setBase` move together, immediately after `publish` actually succeeds.
     try {
       const result = await deps.publish(merged, remoteGeneration);
+      await deps.setLocalMain(merged);
       await deps.setBase({ generation: result.generation, main: merged });
       await deps.clearPendingMerge();
       return { status: 'pushed', generation: result.generation, main: merged };
