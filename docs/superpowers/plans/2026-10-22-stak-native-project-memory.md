@@ -4079,7 +4079,7 @@ Ties `sync.ts`'s pure N/P/C plan to real I/O: the Claude adapter's `scan`/`write
 In `packages/memory/src/canonical/claude-project-adapter.ts`, add:
 
 ```ts
-import { stat } from 'node:fs/promises';
+import { lstat, stat } from 'node:fs/promises';
 
 export type NativeRoots = { projectDirExists: boolean; notesRootExists: boolean };
 
@@ -4091,18 +4091,51 @@ const isDir = async (candidate: string): Promise<boolean> => {
   }
 };
 
+/** Whether `candidate` is a directory, WITHOUT following a symlink AT `candidate`
+ * itself (an lstat, not a stat) — matching `discoverClaudeMemory`'s own
+ * `listDirNames` (`readdir(withFileTypes)` + `entry.isDirectory()`, which reports
+ * `false` for a symlinked entry regardless of what it points to). */
+const isDirNoSymlink = async (candidate: string): Promise<boolean> => {
+  try {
+    return (await lstat(candidate)).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
 /** Whether this project's native roots exist on THIS machine — the mass-delete
  * guard's existence check (spec section 6): a missing root means "not
- * materialized here", never "everything in it was deleted". */
+ * materialized here", never "everything in it was deleted".
+ *
+ * `notesRootExists` checks the `projects/<key>` SEGMENT ITSELF with
+ * `isDirNoSymlink` first — this is exactly the entry `listDirNames` enumerates
+ * when scanning, and a plain `lstat` on the full `.../memory` path would still
+ * silently traverse THROUGH a symlinked `<key>` segment to reach it (lstat only
+ * refuses to follow the FINAL path component, not intermediate ones). If this
+ * check and the scan's own enumeration disagreed about whether a symlinked key
+ * folder "exists", every note under it would be planned as deleted instead of
+ * "not materialized here" the moment the key folder happened to be a symlink.
+ * Once the key folder itself is confirmed to be a real (non-symlink) directory,
+ * the `memory` subdirectory below it is checked with the ordinary `isDir`
+ * (following any symlinks deeper is fine — `listDirNames` never looks past the
+ * `<key>` entry itself). `project.dir` keeps the ordinary `isDir` check — a
+ * user's own project checkout may legitimately be a symlink by the user's own
+ * deliberate setup, and nothing in discovery treats THAT specially. */
 export const nativeRootsExist = async (
   project: BoundProject,
   claudeHome: string = path.join(os.homedir(), '.claude'),
-): Promise<NativeRoots> => ({
-  projectDirExists: await isDir(project.dir),
-  notesRootExists: await isDir(
-    path.join(claudeHome, 'projects', encodeClaudeProjectKey(path.resolve(project.dir)), 'memory'),
-  ),
-});
+): Promise<NativeRoots> => {
+  const keyDir = path.join(
+    claudeHome,
+    'projects',
+    encodeClaudeProjectKey(path.resolve(project.dir)),
+  );
+  const keyFolderIsRealDir = await isDirNoSymlink(keyDir);
+  return {
+    projectDirExists: await isDir(project.dir),
+    notesRootExists: keyFolderIsRealDir && (await isDir(path.join(keyDir, 'memory'))),
+  };
+};
 ```
 
 - [ ] **Step 2: Write the failing tests**
@@ -4182,6 +4215,63 @@ describe('planProjectSync', () => {
     });
     expect(plan.guardedPaths).toEqual(['notes/MEMORY.md']);
     expect(plan.actions).toContainEqual({ kind: 'materialize-write', path: 'notes/MEMORY.md', contentHash });
+    expect(plan.actions.some((a) => a.kind === 'import-delete')).toBe(false);
+  });
+
+  it('the guard does NOT protect a notes root that genuinely exists but is now empty — that is a real deletion', async () => {
+    const bytes = Buffer.from('MEMORY content');
+    const contentHash = hashBytes(bytes);
+    await writeMemoryObject({ stackHome, contentHash, bytes });
+    await writeCanonicalMain(stackHome, {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [{ projectId: 'prj_x', documents: [{ path: 'notes/MEMORY.md', state: 'present', contentHash, importedFrom: 'claude', importedAt: '2026-10-22T00:00:00.000Z' }] }],
+    });
+    await writeProjection(stackHome, 'claude', { schemaVersion: 1, projects: { prj_x: { 'notes/MEMORY.md': contentHash } } });
+    // The notes root DOES exist this time — just empty (the user deleted the file,
+    // the directory itself is untouched). A regression that guards on "no files
+    // found" instead of "root missing" would wrongly protect this too.
+    const { encodeClaudeProjectKey } = await import('../project-identity.js');
+    const encodedKey = encodeClaudeProjectKey(path.resolve(projectDir));
+    await mkdir(path.join(claudeHome, 'projects', encodedKey, 'memory'), { recursive: true });
+
+    const plan = await planProjectSync(project, stackHome, {
+      claudeHome,
+      projects: [{ dir: projectDir }],
+      resolveProjectId: () => 'prj_x',
+    });
+    expect(plan.guardedPaths).toEqual([]);
+    expect(plan.actions).toContainEqual({ kind: 'import-delete', path: 'notes/MEMORY.md' });
+  });
+
+  it('a symlinked Claude project-key folder is treated the same as a missing one, matching discovery\'s own symlink-skipping rule', async () => {
+    const bytes = Buffer.from('MEMORY content');
+    const contentHash = hashBytes(bytes);
+    await writeMemoryObject({ stackHome, contentHash, bytes });
+    await writeCanonicalMain(stackHome, {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [{ projectId: 'prj_x', documents: [{ path: 'notes/MEMORY.md', state: 'present', contentHash, importedFrom: 'claude', importedAt: '2026-10-22T00:00:00.000Z' }] }],
+    });
+    await writeProjection(stackHome, 'claude', { schemaVersion: 1, projects: { prj_x: { 'notes/MEMORY.md': contentHash } } });
+    const encodedKey = (await import('../project-identity.js')).encodeClaudeProjectKey(path.resolve(projectDir));
+    const realTarget = path.join(root, 'symlink-target-with-memory');
+    await mkdir(path.join(realTarget, 'memory'), { recursive: true });
+    try {
+      await (await import('node:fs/promises')).symlink(realTarget, path.join(claudeHome, 'projects', encodedKey), 'junction');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EPERM') return; // no symlink privilege on this machine; skip
+      throw error;
+    }
+
+    const plan = await planProjectSync(project, stackHome, {
+      claudeHome,
+      projects: [{ dir: projectDir }],
+      resolveProjectId: () => 'prj_x',
+    });
+    // discoverClaudeMemory's own listDirNames would skip this symlinked key folder
+    // entirely, so the guard MUST agree it does not "exist" either — otherwise the
+    // scan finds nothing while the guard thinks the root is fine, and the real
+    // (but invisible-to-the-scan) notes/MEMORY.md gets planned as deleted.
+    expect(plan.guardedPaths).toEqual(['notes/MEMORY.md']);
     expect(plan.actions.some((a) => a.kind === 'import-delete')).toBe(false);
   });
 });
@@ -4288,7 +4378,19 @@ export const planProjectSync = async (
     : Object.fromEntries(Object.entries(projection).filter(([p]) => !guardedPaths.includes(p)));
 
   const native: NativeEntry[] = scanResult.docs.map((d) => ({ path: d.canonicalPath, contentHash: d.contentHash }));
-  const actions = planSync({ native, projection: effectiveProjection, canonical: canonicalDocs });
+  const planned = planSync({ native, projection: effectiveProjection, canonical: canonicalDocs });
+  // A source-conflicted path is deliberately ABSENT from `scanResult.docs` — Claude
+  // folders disagree on its content and `scanClaudeProject` refuses to pick one
+  // (fail closed). To `planSync` that absence looks identical to "the native file
+  // was deleted", which — when a projection entry already exists for that path —
+  // produces `import-delete`: a conflict the user hasn't even seen yet would get
+  // silently tombstoned, pushed to Cloud, and deleted on every other machine. A
+  // source conflict must never produce ANY action until the user resolves it (by
+  // reconciling the disagreeing Claude folders themselves); it is reported via
+  // `sourceConflicts`, exactly as `reconcileNativeWithStagedMemory`'s existing
+  // fail-closed behavior already does for the same situation.
+  const conflictedPaths = new Set(scanResult.sourceConflicts.map((c) => c.canonicalPath));
+  const actions = planned.filter((action) => !('path' in action && conflictedPaths.has(action.path)));
   return { actions, sourceConflicts: scanResult.sourceConflicts, guardedPaths };
 };
 
