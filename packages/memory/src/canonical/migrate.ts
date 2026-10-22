@@ -5,13 +5,8 @@ import { memoryManifestSchema, type ManifestItem } from '../domain.js';
 import { memoryStorePaths, readMemoryManifest, readMemoryObject, writeMemoryManifest } from '../store.js';
 import { readLocalRegistry, writeLocalRegistry } from '../project/registry-store.js';
 import { resolveOrMintProject } from '../project/registry.js';
-import { claudeCanonicalPathOf } from './claude-project-adapter.js';
-import { keepBothPath } from './merge.js';
-import {
-  CANONICAL_MAIN_SCHEMA_VERSION,
-  type CanonicalDoc,
-  type CanonicalMainManifest,
-} from './domain.js';
+import { groupLegacyItems } from './group-legacy-items.js';
+import type { CanonicalMainManifest } from './domain.js';
 import { readCanonicalMain, writeCanonicalMain, writeProjection } from './store.js';
 
 export class MigrationError extends Error {
@@ -114,89 +109,15 @@ const buildCanonicalMain = async (
   items: ManifestItem[],
 ): Promise<{ main: CanonicalMainManifest; keptBothDuplicates: number }> => {
   let registry = await readLocalRegistry(stackHome);
-  const byProject = new Map<string, ManifestItem[]>();
+  const tagged: Array<ManifestItem & { __projectId: string }> = [];
   for (const item of items) {
-    if (item.scope !== 'project' || !item.project) continue; // global stays in v1
-    const canonicalPath = claudeCanonicalPathOf(item);
-    if (!canonicalPath) continue;
+    if (item.scope !== 'project' || !item.project) continue;
     const { registry: next, projectId } = resolveOrMintProject(registry, item.project);
     registry = next;
-    const group = byProject.get(projectId) ?? [];
-    group.push(item);
-    byProject.set(projectId, group);
+    tagged.push({ ...item, __projectId: projectId });
   }
   await writeLocalRegistry(stackHome, registry);
-
-  let keptBothDuplicates = 0;
-  const main: CanonicalMainManifest = { schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION, projects: [] };
-  for (const [projectId, group] of byProject) {
-    const byPath = new Map<string, ManifestItem[]>();
-    for (const item of group) {
-      const canonicalPath = claudeCanonicalPathOf(item)!;
-      const bucket = byPath.get(canonicalPath) ?? [];
-      bucket.push(item);
-      byPath.set(canonicalPath, bucket);
-    }
-    const documents: CanonicalDoc[] = [];
-    const takenPaths = new Set<string>(byPath.keys());
-    for (const [canonicalPath, bucket] of byPath) {
-      // Deduplicate identical copies by hash FIRST: several manifest entries can
-      // carry the exact same bytes (e.g. carried-forward duplicates from the
-      // 2026-10-20-era bugs), and those must collapse into ONE kept-both entry,
-      // never one conflict file per duplicate copy. Keep the MOST RECENTLY
-      // captured copy of each hash (not the first-seen one) so the metadata
-      // used downstream (`importedAt`) doesn't depend on manifest array order —
-      // the same determinism rule the primary/rest tie-break below enforces.
-      const distinctByHash = new Map<string, ManifestItem>();
-      for (const entry of bucket) {
-        const prev = distinctByHash.get(entry.contentHash);
-        if (!prev || entry.capturedAt > prev.capturedAt) distinctByHash.set(entry.contentHash, entry);
-      }
-      const distinct = [...distinctByHash.values()];
-      if (distinct.length === 1) {
-        const winner = distinct[0]!;
-        documents.push({
-          path: canonicalPath,
-          state: 'present',
-          contentHash: winner.contentHash,
-          importedFrom: 'claude',
-          importedAt: winner.capturedAt,
-        });
-        continue;
-      }
-      // Deterministic tie-break: `capturedAt` descending, then `contentHash`
-      // ascending — two items captured in the SAME backup run share a
-      // `capturedAt`, and without a tie-break the "primary" (original-path)
-      // winner would depend on manifest array order, which is not deterministic
-      // across machines converting the same history.
-      const sorted = [...distinct].sort((a, b) =>
-        a.capturedAt !== b.capturedAt
-          ? a.capturedAt < b.capturedAt ? 1 : -1
-          : a.contentHash < b.contentHash ? -1 : 1,
-      );
-      const [primary, ...rest] = sorted;
-      documents.push({
-        path: canonicalPath,
-        state: 'present',
-        contentHash: primary!.contentHash,
-        importedFrom: 'claude',
-        importedAt: primary!.capturedAt,
-      });
-      for (const extra of rest) {
-        const altPath = keepBothPath(canonicalPath, extra.contentHash, (candidate) => takenPaths.has(candidate));
-        takenPaths.add(altPath);
-        documents.push({
-          path: altPath,
-          state: 'present',
-          contentHash: extra.contentHash,
-          importedFrom: 'claude',
-          importedAt: extra.capturedAt,
-        });
-        keptBothDuplicates += 1;
-      }
-    }
-    main.projects.push({ projectId, documents });
-  }
+  const { main, keptBothDuplicates } = groupLegacyItems(tagged);
   return { main, keptBothDuplicates };
 };
 
