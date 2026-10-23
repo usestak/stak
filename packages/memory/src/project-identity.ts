@@ -1,3 +1,4 @@
+import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { GitProjectIdentity, ProjectIdentity } from './domain.js';
@@ -89,71 +90,68 @@ export const projectIdentityKey = (identity: ProjectIdentity): string =>
     ? identity.canonical
     : `local:${identity.vendorKey ?? 'unresolved'}`;
 
-/**
- * Every character `encodeClaudeProjectKey` can collapse to `-`, other than a path
- * separator (which `reconstructProjectDirs` handles separately by ending a span and
- * recursing into a new directory level). A `-` WITHIN a span — i.e. between two
- * tokens that remain in the SAME path segment — could originally have been any one
- * of these.
- */
-const SEGMENT_SEPARATOR_CHARS = ['-', '.', '_', ' '] as const;
-
-/** A span wider than this never gets full separator-variant expansion (only the
- * plain literal-`-` join, below) — `4^(width-1)` variants per span width makes an
- * UNBOUNDED width catastrophically expensive long before it is ever realistic:
- * trying every width up to "the rest of the path as one segment" at every walk
- * level is the dominant cost, and real directory names with a non-hyphen separator
- * (a dot, underscore, or space) are essentially never more than a handful of words.
- * Capped at a width whose full expansion (`4^(CAP-1)` = 64 variants) is cheap even
- * multiplied across many walk levels, while an arbitrarily long HYPHEN-only name
- * (the pre-existing, common case) is untouched below — it still costs exactly one
- * probe per width, identical to before this generalization. */
-const MAX_VARIANT_SPAN_WIDTH = 4;
-
-/** Every way to join `tokens[index..end]` (inclusive) into one candidate path-segment
- * name. Spans up to `MAX_VARIANT_SPAN_WIDTH` try every `SEGMENT_SEPARATOR_CHARS`
- * choice at every internal gap — all of which collapse to the exact same encoded
- * key, so all are valid candidate undoings of that span. Wider spans (and any
- * single-token span, which has no gap to choose) get only the plain literal `-`
- * join, matching this function's pre-generalization behavior exactly. */
-const joinSegmentVariants = (
-  tokens: string[],
-  index: number,
-  end: number,
-): string[] => {
-  if (end === index) return [tokens[index] ?? ''];
-  if (end - index + 1 > MAX_VARIANT_SPAN_WIDTH)
-    return [tokens.slice(index, end + 1).join('-')];
-  let variants = [tokens[index] ?? ''];
-  for (let i = index + 1; i <= end; i += 1) {
-    const next: string[] = [];
-    for (const variant of variants)
-      for (const sep of SEGMENT_SEPARATOR_CHARS)
-        next.push(`${variant}${sep}${tokens[i] ?? ''}`);
-    variants = next;
+/** List the real (non-symlink) child directory NAMES of `dir`, or `[]` on any
+ * error (including "doesn't exist") — fail closed, never throw. Uses `readdir`'s
+ * own `Dirent.isDirectory()`, which reports a symlink entry's OWN type (never what
+ * it points to), consistent with how discovery itself treats symlinked entries
+ * (see `claude-project-adapter.ts`'s `isDirNoSymlink`/`listDirNames` convention). */
+const defaultListChildDirNames = async (dir: string): Promise<string[]> => {
+  try {
+    const entries = await readdir(dir, { withFileTypes: true });
+    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  } catch {
+    return [];
   }
-  return variants;
+};
+
+/** Real `stat`-based directory check — used ONLY for `reconstructProjectDirs`'s
+ * degenerate zero-token case (the vendor key IS the root itself, e.g. `C--`), where
+ * there is no recursive readdir step to drive at all. */
+const defaultIsDirectory = async (candidate: string): Promise<boolean> => {
+  try {
+    return (await stat(candidate)).isDirectory();
+  } catch {
+    return false;
+  }
 };
 
 /**
  * Enumerate EVERY existing absolute directory that a Claude auto-memory vendor key
- * could decode to. `encodeClaudeProjectKey` is lossy — every non-alphanumeric
- * character (path separators, but also `.`, `_`, spaces, and other punctuation
- * WITHIN a segment's own name) all collapse to the same `-` — so a key such as
- * `...-foo-bar-baz` may correspond to `foo-bar\baz`, `foo\bar-baz`, `foo.bar\baz`,
- * `foo\bar_baz`, etc. This walks the real filesystem and returns all distinct paths
- * that fully decode to existing directory chains — the raw material for a SAFE,
- * unique-only resolution (see `reconstructProjectDir`). On probe-limit overflow it
- * returns `[]` (fail closed) rather than a partial/biased set.
+ * could decode to, by walking the REAL directory tree level by level rather than
+ * guessing separator characters: at each level, list the current directory's real
+ * children, and for each child whose OWN `encodeClaudeProjectKey`-encoded name is a
+ * prefix of the remaining key (followed by `-`, or exactly the remainder at the very
+ * end), recurse into it with whatever key remains. Because this compares against
+ * each child's ACTUAL encoded name rather than enumerating candidate separator
+ * choices, it handles ANY punctuation or Unicode in a real directory name (a dot, an
+ * underscore, a space, parentheses, accented characters, ...) with no combinatorial
+ * cost and no cap — `encodeClaudeProjectKey` is still lossy (multiple real
+ * directories can decode to the same key), so this returns every distinct match;
+ * the raw material for a SAFE, unique-only resolution (see `reconstructProjectDir`).
+ * On readdir-budget overflow it returns `[]` (fail closed) rather than a
+ * partial/biased set.
  */
 export const reconstructProjectDirs = async (options: {
   vendorKey: string;
-  isDirectory: (candidate: string) => Promise<boolean>;
+  /** Real `stat`-based existence check, used ONLY for the degenerate zero-token
+   * (vendor key IS the root) case. Defaults to a real filesystem check; inject for
+   * deterministic tests of that one edge case. */
+  isDirectory?: (candidate: string) => Promise<boolean>;
+  /** List a directory's real (non-symlink) child directory NAMES — the walk's one
+   * dependency. Defaults to a real `readdir`; inject a synthetic one for
+   * deterministic tests of a fake directory tree. */
+  listDirs?: (dir: string) => Promise<string[]>;
   platform?: NodeJS.Platform;
+  /** Max number of `listDirs` (readdir) CALLS across the whole walk — not a
+   * per-candidate-string probe count like before: this algorithm never enumerates
+   * candidate strings, so even a long, ambiguous real tree costs at most one call
+   * per directory level actually visited. Exists purely as a defensive guard
+   * against a pathological tree, essentially never reached by a realistic path. */
   maxProbes?: number;
 }): Promise<string[]> => {
   const platform = options.platform ?? process.platform;
   const p = platform === 'win32' ? path.win32 : path.posix;
+  const listDirs = options.listDirs ?? defaultListChildDirNames;
   let root: string;
   let rest: string;
   if (platform === 'win32') {
@@ -166,36 +164,42 @@ export const reconstructProjectDirs = async (options: {
     root = '/';
     rest = options.vendorKey.slice(1);
   }
-  const tokens = rest.length > 0 ? rest.split('-') : [];
-  if (tokens.length === 0)
-    return (await options.isDirectory(root)) ? [root] : [];
+  if (rest.length === 0) {
+    const isDirectory = options.isDirectory ?? defaultIsDirectory;
+    return (await isDirectory(root)) ? [root] : [];
+  }
 
   const results = new Set<string>();
   let probes = 0;
   let overflow = false;
   const limit = options.maxProbes ?? 4000;
   // Enumerate ALL complete decodings (no ordering preference — order must never
-  // decide identity). Every split point AND every within-span separator choice is
-  // explored so ambiguity is detectable.
-  const walk = async (base: string, index: number): Promise<void> => {
+  // decide identity). Every real child whose encoded name matches the current
+  // remaining key prefix is explored, so ambiguity (more than one real directory
+  // decoding to the same key) is still fully detectable.
+  const walk = async (base: string, remaining: string): Promise<void> => {
     if (overflow) return;
-    if (index >= tokens.length) {
+    if (remaining.length === 0) {
       results.add(base);
       return;
     }
-    for (let end = index; end < tokens.length && !overflow; end += 1) {
-      for (const name of joinSegmentVariants(tokens, index, end)) {
-        if (probes >= limit) {
-          overflow = true;
-          return;
-        }
-        probes += 1;
-        const candidate = p.join(base, name);
-        if (await options.isDirectory(candidate)) await walk(candidate, end + 1);
+    if (probes >= limit) {
+      overflow = true;
+      return;
+    }
+    probes += 1;
+    const children = await listDirs(base);
+    for (const childName of children) {
+      if (overflow) return;
+      const encodedChild = encodeClaudeProjectKey(childName);
+      if (remaining === encodedChild) {
+        await walk(p.join(base, childName), '');
+      } else if (remaining.startsWith(`${encodedChild}-`)) {
+        await walk(p.join(base, childName), remaining.slice(encodedChild.length + 1));
       }
     }
   };
-  await walk(root, 0);
+  await walk(root, rest);
   return overflow ? [] : [...results];
 };
 
@@ -212,7 +216,8 @@ export const reconstructProjectDirs = async (options: {
  */
 export const reconstructProjectDir = async (options: {
   vendorKey: string;
-  isDirectory: (candidate: string) => Promise<boolean>;
+  isDirectory?: (candidate: string) => Promise<boolean>;
+  listDirs?: (dir: string) => Promise<string[]>;
   platform?: NodeJS.Platform;
   maxProbes?: number;
 }): Promise<string | null> => {

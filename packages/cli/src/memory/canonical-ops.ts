@@ -5,10 +5,12 @@ import {
   bindingFor,
   discoverClaudeMemory,
   encodeClaudeProjectKey,
+  isLocalStoreMigrated,
   migrateLocalStore,
   normalizeVendorKey,
   planProjectSync,
   readLocalRegistry,
+  readMemoryManifest,
   reconstructProjectDir,
   resolveOrMintProject,
   resolveProjectForIdentity,
@@ -189,15 +191,53 @@ const resolveProjectDir = async (
 type IdentityResolution = { projectId: string | undefined; conflict: boolean };
 
 /**
+ * The OLD (pre-fix) `encodeClaudeProjectKey` rule — replaced only `:`, `\`, `/`.
+ * A project-local v1 item captured before the encoder fix (Task 12's Critical-2
+ * review finding) was claimed under `legacyCompatKey('local:' + oldEncode(dir))`;
+ * after the fix, the SAME directory now encodes to a DIFFERENT key, which would
+ * either orphan that existing Project (never resolving to it again) or mint a
+ * duplicate. `resolveKnownProjectId` re-derives this old key for a group's matched
+ * directory and checks its claim too, purely as a one-time migration-compat alias.
+ * NEVER reused anywhere else — this is not a second, ongoing encoding rule.
+ */
+const oldEncodeClaudeProjectKey = (absolutePath: string): string =>
+  absolutePath.replace(/[:\\/]/g, '-');
+
+/** Every directory this group is currently associated with — via a candidate match
+ * or an existing binding on its (new-encoding) vendor keys — re-encoded under the
+ * OLD (pre-fix) rule, as candidate legacy claims to check (see
+ * `oldEncodeClaudeProjectKey`). Local identities only; a Git identity's claim was
+ * never derived from an encoded path at all. */
+const legacyVendorKeysForGroup = (
+  group: ProjectGroup,
+  registry: LocalRegistry,
+  candidates: ClaudeProjectInput[],
+  platform: NodeJS.Platform,
+): string[] => {
+  const dirs = new Set<string>();
+  const candidateMatch = findCandidateDir(group.vendorKeys, candidates, platform);
+  if (candidateMatch) dirs.add(path.resolve(candidateMatch.dir));
+  const targets = new Set([...group.vendorKeys].map((key) => normalizeVendorKey(key, platform)));
+  for (const binding of registry.bindings) {
+    const bindingKey = normalizeVendorKey(encodeClaudeProjectKey(path.resolve(binding.dir)), platform);
+    if (targets.has(bindingKey)) dirs.add(path.resolve(binding.dir));
+  }
+  return [...dirs].map((dir) => oldEncodeClaudeProjectKey(dir));
+};
+
+/**
  * Resolve a group's EXISTING Project ID, READ-ONLY (never mints — see
  * `enumerateSyncableProjects`, which mints only AFTER a write-target directory is
  * actually located):
  *
- *  1. A registry CLAIM — checked against EVERY raw vendor-key variant this group
- *     collected (Critical identity bug: a win32 case-differing vendor key for the
- *     SAME real folder must not be treated as a second identity). Exactly one
- *     distinct claimed Project ID resolves it; more than one is a genuine conflict
- *     (fail closed — never silently pick one); none falls through to (2).
+ *  1. A registry CLAIM — checked against EVERY raw (new-encoding) vendor-key
+ *     variant this group collected (Critical identity bug: a win32 case-differing
+ *     vendor key for the SAME real folder must not be treated as a second
+ *     identity), PLUS the OLD-encoding alias of any directory this group matches
+ *     via a candidate or binding (legacy migration-compat — see
+ *     `legacyVendorKeysForGroup`). Exactly one distinct claimed Project ID across
+ *     ALL of these resolves it; more than one is a genuine conflict (fail closed —
+ *     never silently pick one); none falls through to (2).
  *  2. An explicit machine BINDING (`stak project map`) is user-proof that its
  *     directory belongs to a Project REGARDLESS of identity kind (Critical identity
  *     bug: a mapped Git checkout whose auto-memory resolves to a strong Git identity
@@ -209,6 +249,7 @@ type IdentityResolution = { projectId: string | undefined; conflict: boolean };
 const resolveKnownProjectId = (
   group: ProjectGroup,
   registry: LocalRegistry,
+  candidates: ClaudeProjectInput[],
   platform: NodeJS.Platform,
 ): IdentityResolution => {
   const claimedIds = new Set<string>();
@@ -218,7 +259,11 @@ const resolveKnownProjectId = (
     if (resolution.status === 'resolved') claimedIds.add(resolution.projectId);
     if (resolution.status === 'conflict') conflict = true;
   } else {
-    for (const vendorKey of group.vendorKeys) {
+    const vendorKeysToCheck = [
+      ...group.vendorKeys,
+      ...legacyVendorKeysForGroup(group, registry, candidates, platform),
+    ];
+    for (const vendorKey of vendorKeysToCheck) {
       const resolution = resolveProjectForIdentity(registry, { kind: 'local', vendorKey });
       if (resolution.status === 'resolved') claimedIds.add(resolution.projectId);
       if (resolution.status === 'conflict') conflict = true;
@@ -252,6 +297,12 @@ type EnumerationResult = {
    * staged, regardless of mode; reported separately so they are never confused with
    * a genuinely new, unclaimed project. */
   conflictedCount: number;
+  /** Non-conflicted groups whose directory could not be located on this machine at
+   * all (no binding, no candidate match, no unambiguous reconstruction) — their
+   * canonical Memory is left untouched (spec §4.5), but — since v1 staging is now
+   * global-only — that means NOWHERE backs up their project Memory right now.
+   * Reported so this is never a silent gap. */
+  unlocatableCount: number;
   /** Every discovered item's group, mapped to the FINAL Project ID enumeration
    * decided for it (only for groups that got one — conflicted/pending groups are
    * absent) — fed into each project's own `scanClaudeProject`/`planProjectSync` call
@@ -306,10 +357,11 @@ const enumerateSyncableProjects = async (
   const groupProjectIds = new Map<string, string>();
   let newProjectCount = 0;
   let conflictedCount = 0;
+  let unlocatableCount = 0;
   let mintedAny = false;
 
   for (const group of groups) {
-    const known = resolveKnownProjectId(group, registry, platform);
+    const known = resolveKnownProjectId(group, registry, candidates, platform);
     if (known.conflict) {
       conflictedCount += 1;
       continue;
@@ -320,7 +372,12 @@ const enumerateSyncableProjects = async (
       ...(options.isDirectory ? { isDirectory: options.isDirectory } : {}),
       platform,
     });
-    if (!location) continue; // not locatable on this machine — skip entirely, never mint (spec §4.5)
+    if (!location) {
+      // Not locatable on this machine — skip entirely, never mint (spec §4.5), but
+      // still worth telling the user about (see `unlocatableCount`'s doc comment).
+      unlocatableCount += 1;
+      continue;
+    }
 
     let projectId = known.projectId;
     if (!projectId) {
@@ -341,7 +398,7 @@ const enumerateSyncableProjects = async (
   }
 
   if (mode === 'stage' && mintedAny) await writeLocalRegistry(stackHome, registry);
-  return { resolved, registry, newProjectCount, conflictedCount, groupProjectIds };
+  return { resolved, registry, newProjectCount, conflictedCount, unlocatableCount, groupProjectIds };
 };
 
 type PlannedEntry = {
@@ -401,7 +458,30 @@ export type CanonicalMemoryStatusResult = {
    * Project ID claims or is bound to the same identity) — never counted as
    * `newProjects`, never staged; the user must run `stak project` to resolve them. */
   conflictedProjects: number;
+  /** Non-conflicted project identities discovered on this machine whose directory
+   * could not be located at all (no binding, no candidate match, no unambiguous
+   * reconstruction) — never staged. Since v1 staging is global-only, this means
+   * their project Memory is backed up NOWHERE right now; never a silent gap. */
+  unlocatableProjects: number;
+  /** `true` when the v1 -> canonical migration hasn't run yet AND the v1 manifest
+   * actually has project-scope items to migrate. In that state every claimed
+   * project's documents would otherwise show as "pending" (planned against an
+   * empty, un-migrated canonical store) even though `stak add .` — which migrates
+   * first — would import NONE of the already-captured, unchanged ones. When this
+   * is `true`, `projects`/`newProjects`/`conflictedProjects`/`unlocatableProjects`
+   * are all deliberately empty/zero: nothing is planned until migration has run,
+   * since planning against the pre-migration state would be meaningless. Status
+   * stays strictly read-only either way — this check never migrates anything. */
+  upgradePending: boolean;
 };
+
+const emptyStatusResult = (upgradePending: boolean): CanonicalMemoryStatusResult => ({
+  projects: [],
+  newProjects: 0,
+  conflictedProjects: 0,
+  unlocatableProjects: 0,
+  upgradePending,
+});
 
 /** Read-only: plans every syncable project's sync but never imports, mints, or
  * writes anything (not the registry, not canonical Memory, not the projection). */
@@ -409,16 +489,26 @@ export const canonicalMemoryStatus = async (
   stackHome: string,
   options: CanonicalDiscoveryOptions = {},
 ): Promise<CanonicalMemoryStatusResult> => {
-  const { resolved, newProjectCount, conflictedCount, groupProjectIds } = await enumerateSyncableProjects(
-    stackHome,
-    options,
-    'status',
-  );
+  // Planning against the canonical store before migration has ever run would plan
+  // against an empty store — every claimed project's documents would show as
+  // "pending" when `stak add .` (which migrates first) would actually import none
+  // of the unchanged ones. Detect that state read-only and report it distinctly
+  // instead of a misleading per-project pending count.
+  if (!(await isLocalStoreMigrated(stackHome))) {
+    const manifest = await readMemoryManifest(stackHome);
+    const hasProjectItems = manifest?.items.some((item) => item.scope === 'project') ?? false;
+    if (hasProjectItems) return emptyStatusResult(true);
+  }
+
+  const { resolved, newProjectCount, conflictedCount, unlocatableCount, groupProjectIds } =
+    await enumerateSyncableProjects(stackHome, options, 'status');
   const entries = await planResolvedProjects(stackHome, resolved, groupProjectIds, options);
   return {
     projects: entries.map((entry) => toSummary(entry, [], pendingCountOf(entry.plan))),
+    upgradePending: false,
     newProjects: newProjectCount,
     conflictedProjects: conflictedCount,
+    unlocatableProjects: unlocatableCount,
   };
 };
 
@@ -427,6 +517,8 @@ export type CanonicalMemoryStageResult = {
   /** Same meaning as `CanonicalMemoryStatusResult.conflictedProjects` — reported here
    * too so `stak add .` never silently drops an ambiguous identity without saying so. */
   conflictedProjects: number;
+  /** Same meaning as `CanonicalMemoryStatusResult.unlocatableProjects`. */
+  unlocatableProjects: number;
 };
 
 /** `stak add .`'s canonical-Memory half: migrate once, then mint/resolve a Project ID
@@ -437,14 +529,18 @@ export const stageCanonicalMemory = async (
   options: CanonicalDiscoveryOptions = {},
 ): Promise<CanonicalMemoryStageResult> => {
   await migrateLocalStore(stackHome);
-  const { resolved, conflictedCount, groupProjectIds } = await enumerateSyncableProjects(stackHome, options, 'stage');
+  const { resolved, conflictedCount, unlocatableCount, groupProjectIds } = await enumerateSyncableProjects(
+    stackHome,
+    options,
+    'stage',
+  );
   const entries = await planResolvedProjects(stackHome, resolved, groupProjectIds, options);
   const summaries: CanonicalProjectSummary[] = [];
   for (const entry of entries) {
     const { imported } = await applyImportActions({ projectId: entry.projectId, dir: entry.dir }, stackHome, entry.scanResult, entry.plan.actions);
     summaries.push(toSummary(entry, imported, 0));
   }
-  return { projects: summaries, conflictedProjects: conflictedCount };
+  return { projects: summaries, conflictedProjects: conflictedCount, unlocatableProjects: unlocatableCount };
 };
 
 /** The `resolveProjectId` callback the canonical scan/migration functions expect,

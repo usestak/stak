@@ -85,33 +85,57 @@ describe('reconstructProjectDir', () => {
 describe('reconstructProjectDir ambiguity (15B.4 closure)', () => {
   // Deterministic, cross-platform: a synthetic win32 filesystem given as an exact set
   // of existing directories, so ordering/host FS never influences the result.
+  // `fakeListDirs` derives a parent -> child-NAME map from that flat set (the exact
+  // readdir-based walk's one dependency) rather than answering "does this exact
+  // candidate path exist" — it drives the new algorithm the same way a real
+  // `readdir` would.
   const win = path.win32;
-  const fakeDirs = (existing: string[]) => {
-    const set = new Set(existing);
-    return async (candidate: string) => set.has(candidate);
+  const fakeListDirs = (existing: string[]) => {
+    // Every ANCESTOR of each given path is implicitly real too (as it would be on
+    // a real filesystem) — a caller only needs to list the leaf(ves) it cares
+    // about, not every intermediate level by hand.
+    const allDirs = new Set<string>();
+    for (const leaf of existing.map((p) => win.resolve(p))) {
+      let current = leaf;
+      for (;;) {
+        allDirs.add(current);
+        const parent = win.dirname(current);
+        if (parent === current) break; // reached the root
+        current = parent;
+      }
+    }
+    return async (dir: string): Promise<string[]> => {
+      const parent = win.resolve(dir);
+      const names = new Set<string>();
+      for (const candidate of allDirs) {
+        if (candidate === parent) continue;
+        if (win.dirname(candidate) === parent) names.add(win.basename(candidate));
+      }
+      return [...names];
+    };
   };
 
   it('1. resolves one unambiguous hyphenated project path', async () => {
-    const isDir = fakeDirs([
+    const listDirs = fakeListDirs([
       win.join('C:\\', 'repos'),
       win.join('C:\\', 'repos', 'atlas-access-flow'),
     ]);
     const resolved = await reconstructProjectDir({
       vendorKey: 'C--repos-atlas-access-flow',
-      isDirectory: isDir,
+      listDirs,
       platform: 'win32',
     });
     expect(resolved).toBe(win.join('C:\\', 'repos', 'atlas-access-flow'));
   });
 
   it('2. resolves nested hyphenated directories unambiguously', async () => {
-    const isDir = fakeDirs([
+    const listDirs = fakeListDirs([
       win.join('C:\\', 'my-repos'),
       win.join('C:\\', 'my-repos', 'atlas-access-flow'),
     ]);
     const resolved = await reconstructProjectDir({
       vendorKey: 'C--my-repos-atlas-access-flow',
-      isDirectory: isDir,
+      listDirs,
       platform: 'win32',
     });
     expect(resolved).toBe(win.join('C:\\', 'my-repos', 'atlas-access-flow'));
@@ -119,7 +143,7 @@ describe('reconstructProjectDir ambiguity (15B.4 closure)', () => {
 
   it('3. picks no arbitrary winner when two reconstructions both exist', async () => {
     // Key "C--a-b-c" decodes to BOTH C:\a-b\c and C:\a\b-c.
-    const isDir = fakeDirs([
+    const listDirs = fakeListDirs([
       win.join('C:\\', 'a-b'),
       win.join('C:\\', 'a-b', 'c'),
       win.join('C:\\', 'a'),
@@ -127,7 +151,7 @@ describe('reconstructProjectDir ambiguity (15B.4 closure)', () => {
     ]);
     const all = await reconstructProjectDirs({
       vendorKey: 'C--a-b-c',
-      isDirectory: isDir,
+      listDirs,
       platform: 'win32',
     });
     expect(all.sort()).toEqual(
@@ -137,10 +161,41 @@ describe('reconstructProjectDir ambiguity (15B.4 closure)', () => {
     expect(
       await reconstructProjectDir({
         vendorKey: 'C--a-b-c',
-        isDirectory: isDir,
+        listDirs,
         platform: 'win32',
       }),
     ).toBeNull();
+  });
+
+  it('9. decodes real-world punctuation/Unicode directory names exactly, with no guessing', async () => {
+    const realWorldNames = [
+      'OneDrive - Acme Corp',
+      'my_cool_side_project_v2',
+      'New folder (2)',
+      'Résumé site',
+    ];
+    for (const name of realWorldNames) {
+      const listDirs = fakeListDirs([win.join('C:\\', 'Users', 'NT', name)]);
+      const vendorKey = encodeClaudeProjectKey(win.join('C:\\', 'Users', 'NT', name));
+      const resolved = await reconstructProjectDir({ vendorKey, listDirs, platform: 'win32' });
+      expect(resolved).toBe(win.join('C:\\', 'Users', 'NT', name));
+    }
+  });
+
+  it('10. two children with identically-encoding names are ambiguous, not an arbitrary pick', async () => {
+    // "a.b" and "a_b" both encode to "a-b" — two real children of the SAME parent
+    // that collide. Neither is a parent/child nesting (unlike test 3) — a true
+    // sibling collision.
+    const listDirs = fakeListDirs([
+      win.join('C:\\', 'proj', 'a.b'),
+      win.join('C:\\', 'proj', 'a_b'),
+    ]);
+    const vendorKey = 'C--proj-a-b';
+    const all = await reconstructProjectDirs({ vendorKey, listDirs, platform: 'win32' });
+    expect(all.sort()).toEqual(
+      [win.join('C:\\', 'proj', 'a.b'), win.join('C:\\', 'proj', 'a_b')].sort(),
+    );
+    expect(await reconstructProjectDir({ vendorKey, listDirs, platform: 'win32' })).toBeNull();
   });
 
   it('4/5. ambiguous decodings never authorize a Git identity (probe is not consulted)', async () => {
@@ -176,18 +231,18 @@ describe('reconstructProjectDir ambiguity (15B.4 closure)', () => {
   });
 
   it('6. non-existent path yields no reconstruction', async () => {
-    const none = fakeDirs([]);
+    const listDirs = fakeListDirs([]);
     expect(
       await reconstructProjectDirs({
         vendorKey: 'C--no-such-place',
-        isDirectory: none,
+        listDirs,
         platform: 'win32',
       }),
     ).toEqual([]);
   });
 
   it('7. resolves an ordinary Windows drive path', async () => {
-    const isDir = fakeDirs([
+    const listDirs = fakeListDirs([
       win.join('C:\\', 'Users'),
       win.join('C:\\', 'Users', 'NT'),
       win.join('C:\\', 'Users', 'NT', 'project'),
@@ -195,24 +250,27 @@ describe('reconstructProjectDir ambiguity (15B.4 closure)', () => {
     expect(
       await reconstructProjectDir({
         vendorKey: 'C--Users-NT-project',
-        isDirectory: isDir,
+        listDirs,
         platform: 'win32',
       }),
     ).toBe(win.join('C:\\', 'Users', 'NT', 'project'));
   });
 
-  it('8. matching is delegated to isDirectory (no case folding of its own)', async () => {
+  it('8. matching is delegated to listDirs (no case folding of its own)', async () => {
     // The reconstructor never case-folds; case behavior is whatever the injected
-    // predicate (the real filesystem) does. A case-sensitive predicate that only
-    // knows the lowercase path does not match a differently-cased key.
-    const isDir = fakeDirs([
+    // child-name lister's own real names are (the real filesystem is
+    // case-insensitive on win32 for OPENING a path, but each child's own `name` as
+    // readdir reports it is still an exact string compared verbatim here). A
+    // directory tree that only knows the lowercase names does not match a
+    // differently-cased key.
+    const listDirs = fakeListDirs([
       win.join('C:\\', 'repos'),
       win.join('C:\\', 'repos', 'atlas'),
     ]);
     expect(
       await reconstructProjectDir({
         vendorKey: 'C--Repos-Atlas',
-        isDirectory: isDir,
+        listDirs,
         platform: 'win32',
       }),
     ).toBeNull();

@@ -25,8 +25,15 @@ export type MemoryStatusDisplay = MemoryWorkingTreeStatus & {
   newProjects?: number;
   /** Project identities with genuinely ambiguous resolution (more than one existing
    * Project ID claims or is bound to the same identity) — never counted in
-   * `newProjects`; the user must run `stak project` to resolve them. */
+   * `newProjects`. No existing `stak project` subcommand can merge/remove a claim,
+   * so this is a standing conflict STAK won't guess at, not something to "resolve". */
   conflictedProjects?: number;
+  /** Project identities discovered on this machine whose directory could not be
+   * located at all — `stak project map <project> <dir>` is the escape hatch. */
+  unlocatableProjects?: number;
+  /** The v1 -> canonical migration hasn't run yet, so no per-project pending count
+   * is meaningful — see `canonicalMemoryStatus`'s `upgradePending` doc comment. */
+  upgradePending?: boolean;
 };
 
 import { agentLabel, block, changes, skills } from './format.js';
@@ -144,6 +151,13 @@ const canonicalMemoryLines = (projects: CanonicalMemoryProjectStatus[]): string[
 const renderMemorySection = (memory?: MemoryStatusDisplay): string[] => {
   if (!memory) return [];
   const lines = [`  ${memoryLine(memory)}`];
+  if (memory.upgradePending) {
+    // Planning against the canonical store before migration has ever run would be
+    // meaningless (every claimed project would show as "pending" against an empty
+    // store) — a single, distinct line instead of a misleading per-project count.
+    lines.push('  upgrade pending — run `stak add .` to move project Memory into STAK');
+    return ['', 'Memory', ...lines];
+  }
   if (memory.canonicalProjects?.length)
     lines.push(...canonicalMemoryLines(memory.canonicalProjects));
   if (memory.newProjects)
@@ -152,7 +166,11 @@ const renderMemorySection = (memory?: MemoryStatusDisplay): string[] => {
     );
   if (memory.conflictedProjects)
     lines.push(
-      `  ${memory.conflictedProjects} project${memory.conflictedProjects === 1 ? '' : 's'} have conflicting identities — run \`stak project\` to inspect`,
+      `  ${memory.conflictedProjects} project${memory.conflictedProjects === 1 ? '' : 's'} have conflicting identities — STAK won't guess which is correct; left unchanged`,
+    );
+  if (memory.unlocatableProjects)
+    lines.push(
+      `  ${memory.unlocatableProjects} project${memory.unlocatableProjects === 1 ? '' : 's'} couldn't be located on this machine — run \`stak project map <project> <dir>\``,
     );
   return ['', 'Memory', ...lines];
 };

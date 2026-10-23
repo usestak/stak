@@ -7,12 +7,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   emptyRegistry,
   encodeClaudeProjectKey,
+  hashBytes,
   legacyCompatKey,
   mintProjectId,
   readLocalRegistry,
   resolveOrMintProject,
   setBinding,
   writeLocalRegistry,
+  writeMemoryManifest,
 } from '@stack/memory';
 
 import { canonicalMemoryStatus, stageCanonicalMemory } from './canonical-ops.js';
@@ -252,6 +254,7 @@ describe('stageCanonicalMemory', () => {
       isDirectory: async () => false, // nothing is locatable
     });
     expect(result.projects).toHaveLength(0);
+    expect(result.unlocatableProjects).toBe(1); // reported, not a silent gap
     expect(await exists(canonicalMainPath())).toBe(false);
 
     // Important: minting only happens AFTER a write-target directory is located —
@@ -266,7 +269,39 @@ describe('stageCanonicalMemory', () => {
       isDirectory: async () => false,
     });
     expect(second.projects).toHaveLength(0);
+    expect(second.unlocatableProjects).toBe(1);
     expect(await exists(canonicalMainPath())).toBe(false);
+  });
+
+  it('a project-local v1 claim under the OLD (pre-fix) encoding resolves to that same Project after the encoder fix, with no new Project minted', async () => {
+    const dottedDir = path.join(root, '.legacy-claude-mem');
+    await mkdir(dottedDir, { recursive: true });
+
+    // Pre-existing claim under the OLD encoding rule (only `:\/` replaced) — this
+    // is what a project-local v1 item captured BEFORE the encoder fix would have
+    // been claimed under.
+    const oldKey = path.resolve(dottedDir).replace(/[:\\/]/g, '-');
+    const newKey = encodeClaudeProjectKey(path.resolve(dottedDir));
+    expect(oldKey).not.toBe(newKey); // sanity: the fix actually changes this key
+
+    let registry = await readLocalRegistry(stackHome);
+    const minted = resolveOrMintProject(registry, { kind: 'local', vendorKey: oldKey });
+    registry = minted.registry;
+    await writeLocalRegistry(stackHome, registry);
+
+    await writeFile(path.join(dottedDir, 'CLAUDE.local.md'), 'private memory');
+
+    const result = await stageCanonicalMemory(stackHome, {
+      claudeHome,
+      projects: [{ dir: dottedDir }],
+    });
+
+    expect(result.projects).toHaveLength(1);
+    const mine = result.projects.find((s) => s.projectId === minted.projectId);
+    expect(mine?.imported).toContain('instructions/private.md');
+
+    const registryAfter = await readLocalRegistry(stackHome);
+    expect(registryAfter.projects).toHaveLength(1); // the SAME Project — no duplicate minted
   });
 
   it('two Project IDs with a conflicting claim on the same identity: never staged, never a third phantom Project, reported as conflicted', async () => {
@@ -384,5 +419,55 @@ describe('canonicalMemoryStatus', () => {
     expect(result.newProjects).toBe(0);
     expect(result.conflictedProjects).toBe(1);
     expect(result.projects).toHaveLength(0);
+  });
+
+  it('reports an unlocatable project identity as a separate count, excluded from newProjects', async () => {
+    const goneDir = path.join(root, 'gone-project'); // never created on disk
+    const vendorKey = encodeClaudeProjectKey(path.resolve(goneDir));
+    await writeAutoMemory(vendorKey, 'MEMORY.md', 'orphaned notes');
+
+    const result = await canonicalMemoryStatus(stackHome, {
+      claudeHome,
+      isDirectory: async () => false,
+    });
+    expect(result.unlocatableProjects).toBe(1);
+    expect(result.newProjects).toBe(0);
+    expect(result.projects).toHaveLength(0);
+    expect(await exists(registryPath())).toBe(false); // still read-only, nothing written
+  });
+
+  it("does NOT report per-project pending before migration has run when the v1 manifest has project items — reports upgradePending instead, stays read-only", async () => {
+    const bytes = Buffer.from('legacy content', 'utf8');
+    const manifest = {
+      schemaVersion: 1 as const,
+      provider: 'claude' as const,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      items: [
+        {
+          provider: 'claude' as const,
+          kind: 'auto-memory' as const,
+          scope: 'project' as const,
+          logicalId: 'claude/auto-memory/local:some-key/m.md',
+          project: { kind: 'local' as const, vendorKey: 'some-key' },
+          contentHash: hashBytes(bytes),
+          restoreTarget: { base: 'claude-project-memory' as const, relativePath: 'm.md' },
+          capturedAt: '2026-01-01T00:00:00.000Z',
+          sensitivity: 'private' as const,
+        },
+      ],
+    };
+    await writeMemoryManifest({ stackHome, manifest });
+    expect(await exists(migrationMarkerPath())).toBe(false);
+
+    const result = await canonicalMemoryStatus(stackHome, { claudeHome });
+    expect(result.upgradePending).toBe(true);
+    expect(result.projects).toEqual([]);
+    expect(result.newProjects).toBe(0);
+    expect(result.conflictedProjects).toBe(0);
+    expect(result.unlocatableProjects).toBe(0);
+
+    // Strictly read-only: migration never actually ran because of this check.
+    expect(await exists(migrationMarkerPath())).toBe(false);
+    expect(await exists(canonicalMainPath())).toBe(false);
   });
 });

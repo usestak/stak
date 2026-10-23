@@ -711,6 +711,8 @@ const defaultDependencies: ProgramDependencies = {
       canonicalProjects: CanonicalProjectSummary[];
       newProjects: number;
       conflictedProjects: number;
+      unlocatableProjects: number;
+      upgradePending: boolean;
     }
   > => {
     // Project-scope Memory is canonical Memory's job now (Step 1 of this feature) —
@@ -733,12 +735,16 @@ const defaultDependencies: ProgramDependencies = {
       projects: [] as CanonicalProjectSummary[],
       newProjects: 0,
       conflictedProjects: 0,
+      unlocatableProjects: 0,
+      upgradePending: false,
     }));
     return {
       ...status,
       canonicalProjects: canonicalStatus.projects,
       newProjects: canonicalStatus.newProjects,
       conflictedProjects: canonicalStatus.conflictedProjects,
+      unlocatableProjects: canonicalStatus.unlocatableProjects,
+      upgradePending: canonicalStatus.upgradePending,
     };
   },
   // Deliberately narrow (see MemoryCloudDisplayState): only "does a Cloud backup exist
@@ -782,6 +788,7 @@ const defaultDependencies: ProgramDependencies = {
         guarded: p.guardedPaths.length,
       })),
       conflictedProjects: canonical.conflictedProjects,
+      unlocatableProjects: canonical.unlocatableProjects,
     };
   },
   prepareUse: async (input, options) => {

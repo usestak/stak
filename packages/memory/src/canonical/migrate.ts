@@ -49,6 +49,13 @@ const markerExists = async (file: string): Promise<boolean> => {
   }
 };
 
+/** Read-only: has `migrateLocalStore` ever completed for this store? Callers that
+ * must behave differently before vs. after migration (e.g. a status check that
+ * would otherwise plan against a canonical store that migration hasn't populated
+ * yet) use this to detect "upgrade pending" WITHOUT triggering it themselves. */
+export const isLocalStoreMigrated = async (stackHome: string): Promise<boolean> =>
+  markerExists(migrationCompleteMarkerPath(stackHome));
+
 /** Step A: write the pre-migration backup exactly once. A pre-existing backup is
  * read back unchanged (never overwritten), which is what makes later steps safe
  * to resume from after any crash. Schema-validated on read-back so a truncated

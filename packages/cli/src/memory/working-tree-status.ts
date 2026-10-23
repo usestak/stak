@@ -26,12 +26,17 @@ export type { CanonicalProjectSummary as CanonicalMemoryProjectStatus } from './
 /** Canonical (Project Memory) status, additive to `MemoryWorkingTreeStatus` above —
  * consumed by `ui/environment.ts`'s `renderStatus`. `newProjects` counts locatable
  * project-scope identities discovered on this machine with no registered Project ID
- * yet; `conflictedProjects` counts identities with genuinely ambiguous resolution
- * (see `canonical-ops.ts`'s `CanonicalMemoryStatusResult`, which this mirrors). */
+ * yet; `conflictedProjects` counts identities with genuinely ambiguous resolution;
+ * `unlocatableProjects` counts non-conflicted identities whose directory couldn't be
+ * located at all; `upgradePending` is `true` when the v1 -> canonical migration
+ * hasn't run yet (see `canonical-ops.ts`'s `CanonicalMemoryStatusResult`, which this
+ * mirrors). */
 export type CanonicalMemoryWorkingTreeStatus = {
   projects: CanonicalProjectSummary[];
   newProjects: number;
   conflictedProjects: number;
+  unlocatableProjects: number;
+  upgradePending: boolean;
 };
 
 export type ComputeMemoryWorkingTreeStatusOptions = {

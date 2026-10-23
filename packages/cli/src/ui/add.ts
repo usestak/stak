@@ -24,9 +24,14 @@ export type StagedMemorySummary = {
   projects: number;
   canonical?: Array<{ projectId: string; imported: number; conflicts: number; guarded: number }>;
   /** Project identities with genuinely ambiguous resolution (more than one existing
-   * Project ID claims or is bound to the same identity) — never staged; the user
-   * must run `stak project` to resolve them. */
+   * Project ID claims or is bound to the same identity) — never staged. No existing
+   * `stak project` subcommand can merge/remove a claim, so this is reported as a
+   * standing conflict, never as something the user can resolve today. */
   conflictedProjects?: number;
+  /** Project identities discovered on this machine whose directory could not be
+   * located at all — never staged. `stak project map <project> <dir>` is the
+   * escape hatch. */
+  unlocatableProjects?: number;
 };
 
 export const renderSkillAdd = (
@@ -66,7 +71,11 @@ export const renderSkillAdd = (
     }
     if (options.memory.conflictedProjects)
       lines.push(
-        `  Memory: ${options.memory.conflictedProjects} project(s) have conflicting identities — run \`stak project\` to inspect`,
+        `  Memory: ${options.memory.conflictedProjects} project(s) have conflicting identities — STAK won't guess which is correct; left unchanged`,
+      );
+    if (options.memory.unlocatableProjects)
+      lines.push(
+        `  Memory: ${options.memory.unlocatableProjects} project(s) couldn't be located on this machine — run \`stak project map <project> <dir>\``,
       );
   }
   if (proposal.targets.length > 0 || options.memory)
