@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -17,6 +18,7 @@ import {
 import { generateMmk } from './mmk.js';
 import {
   cloudRecover,
+  isProtectInProgress,
   migrateStandardToProtected,
   protectedCloudBackup,
   standardCloudBackup,
@@ -376,5 +378,159 @@ describe('Standard → Protected migration', () => {
     const v1Copy = protectedOnly.find((g) => g.bundleFormatVersion === 'stack-mem-bundle-v1');
     expect(v2Copy?.generation).toBeGreaterThan(v1Copy?.generation ?? -1);
     expect(latest?.generation).toBe(v2Copy?.generation);
+  });
+});
+
+describe('protect replicas and the sticky v1-after-v2 gate (Task 13 fix round 3, A)', () => {
+  const V1 = 'stack-mem-bundle-v1';
+  const V2 = 'stack-mem-bundle-v2';
+
+  /** g0: v1 Standard, g1: v2 Standard (a real mixed-history account). */
+  const mixedHistory = async () => {
+    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 1 });
+    roots.push(source.stackHome);
+    const { store, backend } = backendFor('user-a');
+    const v1 = await standardCloudBackup({ stackHome: source.stackHome, backend });
+    await writeCanonicalMain(source.stackHome, { schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION, projects: [] });
+    const v2 = await standardCloudBackup({ stackHome: source.stackHome, backend });
+    const original = (await backend.getGenerationById(v1.backupId))!;
+    return { source, store, backend, v1, v2, original };
+  };
+
+  const parentOf = async (backend: RemoteMemoryBackend) => (await backend.getLatest())?.generation ?? null;
+
+  const create = async (
+    backend: RemoteMemoryBackend,
+    input: { bundleFormatVersion: string; privacyMode: 'standard' | 'protected'; bytes: number; replicaOf?: string },
+  ) =>
+    backend.createGeneration({
+      backupId: randomUUID(),
+      expectedParent: await parentOf(backend),
+      privacyMode: input.privacyMode,
+      payload: Buffer.alloc(input.bytes, 7),
+      bundleFormatVersion: input.bundleFormatVersion,
+      ...(input.replicaOf !== undefined ? { replicaOf: input.replicaOf } : {}),
+    });
+
+  it('refuses an old-CLI v1 Standard push once ANY v2 was ever committed — even when latest is a v1 replica', async () => {
+    const { backend, original } = await mixedHistory();
+    // A legitimate v1 replica of g0 becomes latest.
+    const replica = await create(backend, {
+      bundleFormatVersion: V1,
+      privacyMode: 'protected',
+      bytes: original.payloadBytes + 28,
+      replicaOf: original.backupId,
+    });
+    expect((await backend.getLatest())?.backupId).toBe(replica.backupId);
+    expect((await backend.getLatest())?.bundleFormatVersion).toBe(V1);
+    // An old CLI's v1 Standard push is still refused, with the exact message.
+    await expect(create(backend, { bundleFormatVersion: V1, privacyMode: 'standard', bytes: 10 })).rejects.toMatchObject({
+      code: 'incompatible-format',
+      message: "This account's Memory was upgraded by a newer STAK CLI. Update with `npm i -g @memstk/cli@beta`.",
+    });
+    expect((await backend.getLatest())?.backupId).toBe(replica.backupId);
+  });
+
+  it('refuses forged replicas: unknown original, wrong format, wrong length, Standard replica, second replica, after finalize', async () => {
+    const { backend, original, v2 } = await mixedHistory();
+    const ok = { bundleFormatVersion: V1, privacyMode: 'protected' as const, bytes: original.payloadBytes + 28 };
+    await expect(create(backend, { ...ok, replicaOf: randomUUID() })).rejects.toMatchObject({ code: 'invalid-replica' });
+    await expect(create(backend, { ...ok, bundleFormatVersion: V2, replicaOf: original.backupId })).rejects.toMatchObject({
+      code: 'invalid-replica',
+    });
+    await expect(create(backend, { ...ok, bytes: original.payloadBytes + 27, replicaOf: original.backupId })).rejects.toMatchObject({
+      code: 'invalid-replica',
+    });
+    await expect(create(backend, { ...ok, privacyMode: 'standard', replicaOf: original.backupId })).rejects.toMatchObject({
+      code: 'invalid-replica',
+    });
+    // A replica can't name another replica (originals must be Standard).
+    const first = await create(backend, { ...ok, replicaOf: original.backupId });
+    await expect(create(backend, { ...ok, replicaOf: original.backupId })).rejects.toMatchObject({ code: 'invalid-replica' });
+    await expect(
+      create(backend, { ...ok, bytes: first.payloadBytes + 28, replicaOf: first.backupId }),
+    ).rejects.toMatchObject({ code: 'invalid-replica' });
+    // Once the account is Protected, no replica exemption exists any more.
+    const v2Meta = (await backend.getGenerationById(v2.backupId))!;
+    await backend.setPrivacyMode('protected');
+    await expect(
+      create(backend, { bundleFormatVersion: V2, privacyMode: 'protected', bytes: v2Meta.payloadBytes + 28, replicaOf: v2.backupId }),
+    ).rejects.toMatchObject({ code: 'invalid-replica' });
+    // Nothing forged was committed.
+    expect((await backend.listGenerations()).filter((g) => g.replicaOf)).toHaveLength(1);
+  });
+
+  it('protects a v1 -> v2 mixed-history account: every replica names its original, latest is the v2 replica', async () => {
+    const { source, backend, v1, v2 } = await mixedHistory();
+    const mmk = generateMmk();
+    const result = await migrateStandardToProtected({ backend, mmk });
+    expect(result).toMatchObject({ finalized: true, migrated: 2, resumed: 0, retiredStandard: 2 });
+    const latest = (await backend.getLatest())!;
+    expect(latest.privacyMode).toBe('protected');
+    expect(latest.bundleFormatVersion).toBe(V2);
+    expect(latest.replicaOf).toBe(v2.backupId);
+    const replicas = await backend.listGenerations();
+    expect(replicas.map((g) => g.replicaOf).sort()).toEqual([v1.backupId, v2.backupId].sort());
+    const dest = await freshStore();
+    await cloudRecover({ stackHome: dest, backend, mmk });
+    await assertByteExact(source.stackHome, dest, source.hashes);
+  });
+
+  it('an interrupted protect leaves the account Standard and in progress; re-running with the same key resumes and finalizes', async () => {
+    const { backend, v1, v2 } = await mixedHistory();
+    const mmk = generateMmk();
+    // Interrupt after the first replica (the v1 original's) is created.
+    let creates = 0;
+    const flaky: RemoteMemoryBackend = Object.create(backend);
+    flaky.createGeneration = async (input) => {
+      creates += 1;
+      if (creates === 2) throw new Error('network dropped');
+      return backend.createGeneration(input);
+    };
+    await expect(migrateStandardToProtected({ backend: flaky, mmk })).rejects.toThrow('network dropped');
+    expect((await backend.getProfile())?.privacyMode).toBe('standard');
+    expect(await isProtectInProgress(backend)).toBe(true);
+    expect((await backend.getLatest())?.replicaOf).toBe(v1.backupId);
+
+    // A different key can't finalize over the existing replica.
+    await expect(migrateStandardToProtected({ backend, mmk: generateMmk() })).rejects.toMatchObject({ code: 'integrity' });
+    expect((await backend.getProfile())?.privacyMode).toBe('standard');
+
+    const resumed = await migrateStandardToProtected({ backend, mmk });
+    expect(resumed).toMatchObject({ finalized: true, migrated: 1, resumed: 1, retiredStandard: 2 });
+    expect(await isProtectInProgress(backend)).toBe(false);
+    expect((await backend.getLatest())?.replicaOf).toBe(v2.backupId);
+    expect((await backend.listGenerations()).filter((g) => g.replicaOf === v1.backupId)).toHaveLength(1);
+  });
+
+  it('a concurrent push during protect aborts the migration (chained expectedParent) instead of stranding it as Standard', async () => {
+    const { source, backend } = await mixedHistory();
+    const mmk = generateMmk();
+    let creates = 0;
+    let concurrentBackupId: string | undefined;
+    const racing: RemoteMemoryBackend = Object.create(backend);
+    racing.createGeneration = async (input) => {
+      const meta = await backend.createGeneration(input);
+      creates += 1;
+      if (creates === 1) {
+        // Another machine's ordinary v2 Standard push lands right after the
+        // first replica (it fetched before the replica existed).
+        const pushed = await backend.createGeneration({
+          backupId: randomUUID(),
+          expectedParent: meta.generation,
+          privacyMode: 'standard',
+          payload: Buffer.from('other machine'),
+          bundleFormatVersion: V2,
+        });
+        concurrentBackupId = pushed.backupId;
+      }
+      return meta;
+    };
+    await expect(migrateStandardToProtected({ backend: racing, mmk })).rejects.toMatchObject({ code: 'conflict' });
+    expect((await backend.getProfile())?.privacyMode).toBe('standard');
+    // Nothing retired: the other machine's Standard push is intact and still latest.
+    expect((await backend.getLatest())?.backupId).toBe(concurrentBackupId);
+    expect((await backend.listGenerations()).filter((g) => g.privacyMode === 'standard')).toHaveLength(3);
+    void source;
   });
 });

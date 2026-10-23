@@ -18,6 +18,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import { BUNDLE_FORMAT, BUNDLE_FORMAT_V2 } from './bundle-codec.js';
+import { NONCE_BYTES, TAG_BYTES } from './cipher.js';
 import type { WrappedDek } from './mmk.js';
 
 /** Explicit size bounds — reject pathological payloads. */
@@ -56,6 +57,10 @@ export type MemoryGenerationMeta = {
   wrappedDek?: WrappedDek;
   state: GenerationState;
   softDeletedAt?: string | null;
+  /** Set only on a Protected replica created by `stak memory protect`: the
+   * `backupId` of the Standard original it re-encrypts (Task 13 fix round 3).
+   * Server-verified at create time — see `assertCreateGenerationAllowed`. */
+  replicaOf?: string | null;
 };
 
 export type RecoveryMethodRecord = {
@@ -93,7 +98,9 @@ export class RemoteMemoryError extends Error {
       | 'session-consumed'
       | 'session-expired'
       | 'no-envelope'
-      | 'incompatible-format',
+      | 'incompatible-format'
+      | 'invalid-replica'
+      | 'protect-in-progress',
     message: string,
   ) {
     super(message);
@@ -112,34 +119,87 @@ export type CreateGenerationInput = {
   wrappedDek?: WrappedDek;
   now?: () => Date;
   /**
-   * Task 13 fix round 2, Important-3: set ONLY by `migrateStandardToProtected`'s
-   * own internal re-encryption loop. Exempts this one create from the
-   * v1-after-v2 incompatible-format gate (never from the ordinary
-   * expectedParent/conflict check, which still applies normally).
-   *
-   * Why this is needed: the gate (spec §9.3/A.5) correctly refuses an OLD CLI
-   * pushing a stale v1 bundle once an account has moved to v2. But
-   * `migrateStandardToProtected` legitimately needs to create a Protected
-   * REPLICA of each EXISTING Standard generation, byte-identical in content and
-   * preserving that ORIGINAL generation's own format (a v1 original must stay a
-   * v1 replica — relabeling it v2 would misrepresent content that never had a
-   * canonical manifest). Once an account's history contains ANY v2-format
-   * generation, it necessarily has a HIGHER generation number than an earlier
-   * v1 one (generation numbers only increase) — so there is NO copy order, and
-   * no retirement timing, under which the gate's plain "does the account's
-   * current latest already have a higher format than this input" check can
-   * ever allow a v1-format replica to be created again, even though this is
-   * the CURRENT, up-to-date CLI faithfully reproducing OLD content under
-   * verified, controlled conditions (not a stale client introducing new data).
-   * Confirmed by trial: reordering the copy loop alone (oldest-first) still
-   * fails, because the not-yet-retired, originally-pushed v2 Standard
-   * generation (or, in the opposite order, the freshly-created v2 Protected
-   * replica) is unconditionally "latest" by generation number the entire time
-   * retirement is deferred to the end (required for the existing
-   * verify-before-delete safety contract). This flag is the narrowest fix that
-   * preserves both that safety contract and per-generation format fidelity.
+   * Task 13 fix round 3: set ONLY by `migrateStandardToProtected` — the
+   * `backupId` of the committed Standard generation this create is a Protected
+   * replica of. Never trusted as a claim: `assertCreateGenerationAllowed`
+   * verifies it against the backend's OWN records (same account, committed,
+   * Standard, same `bundleFormatVersion`, no existing replica, payload exactly
+   * `original.payloadBytes + REPLICA_PAYLOAD_OVERHEAD_BYTES`, account still
+   * Standard, create itself Protected) before it exempts anything.
    */
-  isMigrationReplica?: boolean;
+  replicaOf?: string;
+};
+
+/** AES-256-GCM adds exactly a 12-byte nonce and a 16-byte tag around a
+ * same-length ciphertext (`cipher.ts`; `modes.ts`'s `nonce||ciphertext||tag`
+ * payload layout), so a faithful Protected replica of a Standard payload of N
+ * bytes is always exactly N + 28 bytes. */
+export const REPLICA_PAYLOAD_OVERHEAD_BYTES = NONCE_BYTES + TAG_BYTES;
+
+export const INCOMPATIBLE_FORMAT_MESSAGE =
+  "This account's Memory was upgraded by a newer STAK CLI. Update with `npm i -g @memstk/cli@beta`.";
+
+/**
+ * The create-time format gate (spec §9.3/A.5) and the protect-replica
+ * exemption, shared VERBATIM by every backend-facing layer (the in-memory
+ * backend below and `@stack/cloud-server`'s `memoryCreateGeneration`) so they
+ * can never drift apart. Task 13 fix round 3:
+ *
+ *  - STICKY gate: a `stack-mem-bundle-v1` create is refused once the account
+ *    has EVER committed a v2 generation (any generation in `committed` is v2)
+ *    — never decided from `latest` alone, which a v1 replica can occupy.
+ *  - The ONLY exception is a server-verified protect replica (`replicaOf`):
+ *    the named original must be one of this account's committed Standard
+ *    generations with the SAME `bundleFormatVersion`, must not already have a
+ *    replica, and the payload must be exactly `original.payloadBytes + 28`
+ *    (AEAD envelope); the account must still be Standard and this create must
+ *    be Protected. Plaintext is never read. A create naming a `replicaOf` that
+ *    fails any check is refused outright, whatever its format.
+ *
+ * `committed` is every COMMITTED generation of this account (any order);
+ * `original` is the account's own record for `input.replicaOf` (any state),
+ * or null.
+ */
+export const assertCreateGenerationAllowed = (
+  input: {
+    bundleFormatVersion: string;
+    privacyMode: PrivacyMode;
+    payloadBytes: number;
+    replicaOf?: string | undefined;
+  },
+  context: {
+    profile: MemoryProfile | null;
+    committed: MemoryGenerationMeta[];
+    original: MemoryGenerationMeta | null;
+  },
+): void => {
+  let verifiedReplica = false;
+  if (input.replicaOf !== undefined) {
+    const refuse = (why: string): never => {
+      throw new RemoteMemoryError('invalid-replica', `Refused Protected replica: ${why}.`);
+    };
+    const original = context.original;
+    if (!original || original.backupId !== input.replicaOf)
+      return refuse('the original generation does not exist');
+    if (original.state !== 'committed') refuse('the original generation is not committed');
+    if (original.privacyMode !== 'standard') refuse('the original generation is not Standard');
+    if (original.bundleFormatVersion !== input.bundleFormatVersion)
+      refuse('the bundle format differs from the original');
+    if (context.committed.some((g) => g.replicaOf === input.replicaOf))
+      refuse('the original generation already has a replica');
+    if (input.payloadBytes !== original.payloadBytes + REPLICA_PAYLOAD_OVERHEAD_BYTES)
+      refuse('the payload length does not match the original');
+    if ((context.profile?.privacyMode ?? 'standard') !== 'standard')
+      refuse('the account is no longer Standard');
+    if (input.privacyMode !== 'protected') refuse('a replica must be Protected');
+    verifiedReplica = true;
+  }
+  if (
+    !verifiedReplica &&
+    input.bundleFormatVersion === BUNDLE_FORMAT &&
+    context.committed.some((g) => g.bundleFormatVersion === BUNDLE_FORMAT_V2)
+  )
+    throw new RemoteMemoryError('incompatible-format', INCOMPATIBLE_FORMAT_MESSAGE);
 };
 
 export type AddRecoveryMethodInput = {
@@ -161,10 +221,10 @@ export type CreateRecoverySessionInput = {
  * Per-user remote Memory backend. Identity is bound at construction, never passed.
  *
  * Phase: STAK-native Project Memory. `createGeneration` must reject a
- * `stack-mem-bundle-v1` payload once this account's latest committed generation
- * is `stack-mem-bundle-v2` (RemoteMemoryError 'incompatible-format') — every
- * implementation of this interface (in-memory, and any future production
- * backend) must enforce this, not just the one below.
+ * `stack-mem-bundle-v1` payload once this account has EVER committed a
+ * `stack-mem-bundle-v2` generation (RemoteMemoryError 'incompatible-format'),
+ * except for a verified protect replica — see `assertCreateGenerationAllowed`,
+ * which the in-memory backend and the Cloud server both run.
  */
 export interface RemoteMemoryBackend {
   getProfile(): Promise<MemoryProfile | null>;
@@ -329,30 +389,24 @@ class InMemoryRemoteMemoryBackend implements RemoteMemoryBackend {
           input.expectedParent,
         )}. Refresh and retry.`,
       );
-    // The `isMigrationReplica` exemption is narrowed to the EXACT, server-
-    // verifiable window `migrateStandardToProtected` actually runs in: the
-    // account's CURRENT privacy mode is still 'standard' (migration hasn't
-    // finalized yet) and this specific create is itself 'protected'. Outside
-    // that window the flag has no effect — an ordinary v1 push after an
-    // account has already finished moving to Protected (or Standard v2) is
-    // still refused exactly as before. This keeps the exemption from becoming
-    // a general-purpose bypass of the gate.
-    const currentPrivacyMode = this.store.profiles.get(this.userId)?.privacyMode ?? 'standard';
-    const isVerifiedMigrationWindow =
-      input.isMigrationReplica === true &&
-      currentPrivacyMode === 'standard' &&
-      input.privacyMode === 'protected';
-    if (
-      !isVerifiedMigrationWindow &&
-      latest &&
-      latest.bundleFormatVersion !== input.bundleFormatVersion &&
-      latest.bundleFormatVersion === BUNDLE_FORMAT_V2 &&
-      input.bundleFormatVersion === BUNDLE_FORMAT
-    )
-      throw new RemoteMemoryError(
-        'incompatible-format',
-        "This account's Memory was upgraded by a newer STAK CLI. Update with `npm i -g @memstk/cli@beta`.",
-      );
+    // Sticky v1-after-v2 gate + server-verified protect-replica exemption
+    // (Task 13 fix round 3) — the SAME function the Cloud server runs.
+    assertCreateGenerationAllowed(
+      {
+        bundleFormatVersion: input.bundleFormatVersion,
+        privacyMode: input.privacyMode,
+        payloadBytes: input.payload.byteLength,
+        ...(input.replicaOf !== undefined ? { replicaOf: input.replicaOf } : {}),
+      },
+      {
+        profile: this.store.profiles.get(this.userId) ?? null,
+        committed: await this.listGenerations(),
+        original:
+          input.replicaOf !== undefined
+            ? (this.myGenerations().find((g) => g.backupId === input.replicaOf) ?? null)
+            : null,
+      },
+    );
     if (
       this.myGenerations().some((record) => record.backupId === input.backupId)
     )
@@ -379,6 +433,7 @@ class InMemoryRemoteMemoryBackend implements RemoteMemoryBackend {
       ...(input.wrappedDek ? { wrappedDek: input.wrappedDek } : {}),
       state: 'committed',
       softDeletedAt: null,
+      ...(input.replicaOf !== undefined ? { replicaOf: input.replicaOf } : {}),
     };
     const all = this.myGenerations();
     all.push(meta);

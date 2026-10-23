@@ -1,7 +1,8 @@
 import { CIPHER_VERSION, open } from '../remote/cipher.js';
 import { unwrapDekWithMmk } from '../remote/mmk.js';
 import { parseBundle } from '../remote/bundle-codec.js';
-import { RemoteMemoryError, type RemoteMemoryBackend } from '../remote/backend.js';
+import { RemoteMemoryError, type MemoryGenerationMeta, type RemoteMemoryBackend } from '../remote/backend.js';
+import { PROTECT_IN_PROGRESS_MESSAGE } from '../remote/modes.js';
 import { hashBytes } from '../store.js';
 import { portableRegistrySnapshotSchema, type LocalRegistry, type PortableRegistrySnapshot } from '../project/registry.js';
 import { convertV1Bundle } from './convert-v1.js';
@@ -16,6 +17,23 @@ const protectedAad = (backupId: string): Buffer =>
   Buffer.from(JSON.stringify({ v: CIPHER_VERSION, mode: 'protected', backupId }), 'utf8');
 
 export type RemoteCanonicalObject = { contentHash: string; bytes: Uint8Array };
+
+/**
+ * Task 13 fix round 3 (7(c) minor): generation `n` is gone from the committed
+ * set because `stak memory protect` retired it — find the committed Protected
+ * replica that re-encrypts it (`replicaOf`), whose plaintext is byte-identical.
+ */
+const replicaOfRetiredGeneration = async (
+  backend: RemoteMemoryBackend,
+  generation: number,
+): Promise<MemoryGenerationMeta | null> => {
+  for (const candidate of await backend.listGenerations()) {
+    if (candidate.privacyMode !== 'protected' || typeof candidate.replicaOf !== 'string') continue;
+    const original = await backend.getGenerationById(candidate.replicaOf);
+    if (original && original.generation === generation) return candidate;
+  }
+  return null;
+};
 
 /**
  * Fetch Cloud's latest generation and decode it into canonical Memory — reading
@@ -43,7 +61,12 @@ export type RemoteCanonicalObject = { contentHash: string; bytes: Uint8Array };
  * current latest (Task 13 fix round 2, finding 7 / spec Appendix A.4: seeding
  * `canonical/base.json` from the specific Cloud generation this machine last
  * pushed or recovered in v1 — never assuming Cloud's current latest is this
- * machine's base).
+ * machine's base). When that generation was retired by `stak memory protect`,
+ * its Protected replica (same plaintext) is used instead.
+ *
+ * Fetching LATEST fails closed with `RemoteMemoryError('protect-in-progress')`
+ * when latest is a Protected replica but the account is still Standard (an
+ * interrupted `stak memory protect`).
  */
 export const fetchRemoteCanonical = async (options: {
   backend: RemoteMemoryBackend;
@@ -58,9 +81,19 @@ export const fetchRemoteCanonical = async (options: {
 } | null> => {
   const meta =
     options.generation !== undefined
-      ? await options.backend.getGeneration(options.generation)
+      ? ((await options.backend.getGeneration(options.generation)) ??
+        (await replicaOfRetiredGeneration(options.backend, options.generation)))
       : await options.backend.getLatest();
   if (!meta) return null;
+  // Task 13 fix round 3: Cloud latest is a Protected replica while the account
+  // is still Standard -> `stak memory protect` was interrupted mid-migration.
+  // Fail closed (no merge, no materialize, no native deletes) until protect is
+  // re-run and finalizes.
+  if (options.generation === undefined && meta.privacyMode === 'protected' && typeof meta.replicaOf === 'string') {
+    const profile = await options.backend.getProfile();
+    if ((profile?.privacyMode ?? 'standard') === 'standard')
+      throw new RemoteMemoryError('protect-in-progress', PROTECT_IN_PROGRESS_MESSAGE);
+  }
   const payload = await options.backend.getPayload(meta.backupId);
   if (hashBytes(payload) !== meta.payloadSha256)
     throw new RemoteMemoryError('integrity', 'Payload failed its integrity hash.');

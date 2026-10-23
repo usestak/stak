@@ -65,6 +65,7 @@ const toGeneration = (dto: MemoryGenerationDto): MemoryGenerationMeta => ({
   ...(dto.wrappedDek ? { wrappedDek: dto.wrappedDek as WrappedDek } : {}),
   state: dto.state,
   softDeletedAt: dto.softDeletedAt ?? null,
+  ...(dto.replicaOf ? { replicaOf: dto.replicaOf } : {}),
 });
 
 const toMethod = (dto: MemoryRecoveryMethodDto): RecoveryMethodRecord => ({
@@ -129,7 +130,7 @@ export const stackCloudRemoteMemoryBackend = (
         bundleFormatVersion: input.bundleFormatVersion,
         ...(input.cryptoVersion ? { cryptoVersion: input.cryptoVersion } : {}),
         ...(input.wrappedDek ? { wrappedDek: input.wrappedDek } : {}),
-        ...(input.isMigrationReplica ? { isMigrationReplica: true } : {}),
+        ...(input.replicaOf !== undefined ? { replicaOf: input.replicaOf } : {}),
       })
       .catch(normalizeConflict);
     return toGeneration(result.generation);

@@ -45,6 +45,7 @@ const mapGeneration = (row: any): MemoryGenerationMeta => ({
   ...(row.wrapped_dek ? { wrappedDek: row.wrapped_dek } : {}),
   state: row.state,
   softDeletedAt: row.soft_deleted_at ?? null,
+  ...(row.replica_of ? { replicaOf: row.replica_of } : {}),
 });
 
 const mapMethod = (row: any): RecoveryMethodRecord => ({
@@ -216,6 +217,11 @@ export const supabaseRemoteMemoryBackend = (
         p_bundle_format_version: input.bundleFormatVersion,
         p_crypto_version: input.cryptoVersion ?? null,
         p_wrapped_dek: input.wrappedDek ?? null,
+        // Task 13 fix round 3 (migration 0018): the server already verified
+        // this protect replica's claim (`assertCreateGenerationAllowed`); the
+        // column's per-account unique index enforces one replica per original
+        // atomically, even against a concurrent second create.
+        p_replica_of: input.replicaOf ?? null,
         p_now: nowIso,
       });
       if (error) {
@@ -223,6 +229,11 @@ export const supabaseRemoteMemoryBackend = (
           throw new RemoteMemoryError(
             'conflict',
             'Cloud latest generation moved. Refresh and retry.',
+          );
+        if (error.message.includes('memory_backups_user_replica_of_key'))
+          throw new RemoteMemoryError(
+            'invalid-replica',
+            'Refused Protected replica: the original generation already has a replica.',
           );
         throw new Error(`Memory commit failed: ${error.message}`);
       }

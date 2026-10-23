@@ -5,7 +5,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { memoryManifestSchema } from '../domain.js';
-import { writeMemoryManifest, writeMemoryObject, hashBytes } from '../store.js';
+import { writeMemoryManifest, writeMemoryObject, hashBytes, readMemoryManifest } from '../store.js';
+import { v1ManifestFingerprint, writeLocalRecoveryState } from '../local-recovery-state.js';
 import { claudeNativeTargetOf } from './claude-project-adapter.js';
 import { readCanonicalMain } from './store.js';
 import { migrateLocalStore } from './migrate.js';
@@ -118,96 +119,35 @@ describe('migrateLocalStore', () => {
     expect(first.migratedDocuments).toBe(second.migratedDocuments);
   });
 
-  it('seeds the claude projection file so P = C for every migrated document WHOSE native file actually exists with that content (Task 13 fix round 2, finding 5)', async () => {
-    const body = Buffer.from('seed me');
-    const hash = await putObject(body);
-    await writeMemoryManifest({
-      stackHome,
-      manifest: {
-        schemaVersion: 1,
-        provider: 'claude',
-        createdAt: '2026-10-20T00:00:00.000Z',
-        items: [
-          {
-            provider: 'claude',
-            kind: 'auto-memory',
-            scope: 'project',
-            logicalId: 'claude/auto-memory/github.com/acme/widgets/a.md',
-            project: { kind: 'git', canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' },
-            contentHash: hash,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
-            capturedAt: '2026-10-20T00:00:00.000Z',
-            sensitivity: 'private',
-          },
-        ],
-      },
-    });
-    const { readProjection } = await import('./store.js');
-
-    // Without a locator (or with one that can't resolve the project's
-    // directory), nothing is seeded — the robust, safe default.
-    const noLocatorResult = await migrateLocalStore(stackHome);
-    void noLocatorResult;
-    const mainBefore = await readCanonicalMain(stackHome);
-    const projectId = mainBefore.projects[0]!.projectId;
-    const projectionNoLocator = await readProjection(stackHome, 'claude');
-    expect(projectionNoLocator.projects[projectId]).toBeUndefined();
-  });
-
-  it('seeds P = C when the native file is located AND matches; seeds nothing for a path whose native file is absent or differs', async () => {
+  // Task 13 fix round 3 (finding C): seeding depends on where the migrated v1
+  // manifest came from. Fixture: three auto-memory docs a/b/c for one project.
+  const writeAbcManifest = async () => {
     const bodyA = Buffer.from('seed me');
     const hashA = await putObject(bodyA);
-    const bodyB = Buffer.from('edited since backup');
     const hashBOriginal = await putObject(Buffer.from('original b'));
+    const item = (name: string, contentHash: string) => ({
+      provider: 'claude' as const,
+      kind: 'auto-memory' as const,
+      scope: 'project' as const,
+      logicalId: `claude/auto-memory/github.com/acme/widgets/${name}`,
+      project: { kind: 'git' as const, canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' },
+      contentHash,
+      restoreTarget: { base: 'claude-project-memory' as const, relativePath: name },
+      capturedAt: '2026-10-20T00:00:00.000Z',
+      sensitivity: 'private' as const,
+    });
     await writeMemoryManifest({
       stackHome,
       manifest: {
         schemaVersion: 1,
         provider: 'claude',
         createdAt: '2026-10-20T00:00:00.000Z',
-        items: [
-          {
-            provider: 'claude',
-            kind: 'auto-memory',
-            scope: 'project',
-            logicalId: 'claude/auto-memory/github.com/acme/widgets/a.md',
-            project: { kind: 'git', canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' },
-            contentHash: hashA,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
-            capturedAt: '2026-10-20T00:00:00.000Z',
-            sensitivity: 'private',
-          },
-          {
-            provider: 'claude',
-            kind: 'auto-memory',
-            scope: 'project',
-            logicalId: 'claude/auto-memory/github.com/acme/widgets/b.md',
-            project: { kind: 'git', canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' },
-            contentHash: hashBOriginal,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'b.md' },
-            capturedAt: '2026-10-20T00:00:00.000Z',
-            sensitivity: 'private',
-          },
-          {
-            provider: 'claude',
-            kind: 'auto-memory',
-            scope: 'project',
-            logicalId: 'claude/auto-memory/github.com/acme/widgets/c.md',
-            project: { kind: 'git', canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' },
-            contentHash: hashA,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'c.md' },
-            capturedAt: '2026-10-20T00:00:00.000Z',
-            sensitivity: 'private',
-          },
-        ],
+        items: [item('a.md', hashA), item('b.md', hashBOriginal), item('c.md', hashA)],
       },
     });
-
-    // Native files: a.md matches, b.md is absent entirely, c.md exists but
-    // holds DIFFERENT content than what was migrated (edited since the
-    // backup). `claudeNativeTargetOf`'s `notes/` mapping depends only on the
-    // project's directory, not its (randomly minted) Project ID, so these can
-    // be written before migration ever runs.
+    // Native files: a.md matches, b.md is absent, c.md holds DIFFERENT content.
+    // `claudeNativeTargetOf`'s `notes/` mapping depends only on the project's
+    // directory, not its (randomly minted) Project ID.
     const projectDir = path.join(stackHome, 'project-dir');
     await mkdir(projectDir, { recursive: true });
     const claudeHome = path.join(stackHome, 'claude-home');
@@ -216,20 +156,92 @@ describe('migrateLocalStore', () => {
     await mkdir(path.dirname(targetA), { recursive: true });
     await writeFile(targetA, bodyA);
     const targetC = claudeNativeTargetOf({ projectId: dummyProjectId, dir: projectDir }, 'notes/c.md', claudeHome);
-    await mkdir(path.dirname(targetC), { recursive: true });
-    await writeFile(targetC, bodyB); // DIFFERENT content than the migrated c.md
+    await writeFile(targetC, Buffer.from('edited since backup'));
+    return { hashA, hashBOriginal, projectDir, claudeHome };
+  };
 
-    await migrateLocalStore(stackHome, {
-      locateProjectDir: async () => projectDir,
-      claudeHome,
+  const recordRecover = async (options: { withFingerprint: boolean }) => {
+    const manifest = await readMemoryManifest(stackHome);
+    await writeLocalRecoveryState(stackHome, {
+      schemaVersion: 1,
+      recoveredGeneration: 0,
+      cloudLatestAtRecovery: 0,
+      recoveredAt: '2026-10-21T00:00:00.000Z',
+      privacyMode: 'standard',
+      ...(options.withFingerprint && manifest
+        ? { recoveredManifestFingerprint: v1ManifestFingerprint(manifest) }
+        : {}),
     });
+  };
+
+  const projectionFor = async () => {
     const { readProjection } = await import('./store.js');
     const projection = await readProjection(stackHome, 'claude');
     const main = await readCanonicalMain(stackHome);
-    const projectId = main.projects[0]!.projectId;
-    expect(projection.projects[projectId]?.['notes/a.md']).toBe(hashA); // exists, matches -> seeded
-    expect(projection.projects[projectId]?.['notes/b.md']).toBeUndefined(); // absent -> NOT seeded
-    expect(projection.projects[projectId]?.['notes/c.md']).toBeUndefined(); // exists but differs -> NOT seeded
+    return projection.projects[main.projects[0]!.projectId];
+  };
+
+  it('a LOCALLY produced manifest seeds P = C for every migrated document, native file present or not (spec §9.1 step 4; Task 13 fix round 3, C)', async () => {
+    const { hashA, hashBOriginal } = await writeAbcManifest();
+    // No locator needed: the manifest was scanned from this machine's own files.
+    await migrateLocalStore(stackHome);
+    const seeded = await projectionFor();
+    expect(seeded?.['notes/a.md']).toBe(hashA);
+    expect(seeded?.['notes/b.md']).toBe(hashBOriginal); // deleted since -> later an import-delete
+    expect(seeded?.['notes/c.md']).toBe(hashA); // edited since -> later an import-edit
+  });
+
+  it('a manifest last touched by a PUSH (provenance without a recover fingerprint) is local: seeds P = C for all', async () => {
+    const { hashBOriginal } = await writeAbcManifest();
+    await recordRecover({ withFingerprint: false });
+    await migrateLocalStore(stackHome);
+    expect((await projectionFor())?.['notes/b.md']).toBe(hashBOriginal);
+  });
+
+  it('a manifest restored by a Cloud recover seeds ONLY native files that exist with matching content (fresh machine; Task 13 fix round 2, finding 5)', async () => {
+    const { hashA, projectDir, claudeHome } = await writeAbcManifest();
+    await recordRecover({ withFingerprint: true });
+    await migrateLocalStore(stackHome, { locateProjectDir: async () => projectDir, claudeHome });
+    const seeded = await projectionFor();
+    expect(seeded?.['notes/a.md']).toBe(hashA); // exists, matches -> seeded
+    expect(seeded?.['notes/b.md']).toBeUndefined(); // absent -> NOT seeded (materialized later)
+    expect(seeded?.['notes/c.md']).toBeUndefined(); // differs -> NOT seeded
+  });
+
+  it('a recovered manifest with no locatable directory seeds nothing', async () => {
+    await writeAbcManifest();
+    await recordRecover({ withFingerprint: true });
+    await migrateLocalStore(stackHome);
+    expect(await projectionFor()).toBeUndefined();
+  });
+
+  it('a recover fingerprint that no longer matches the manifest (staged locally since) is local: seeds P = C for all', async () => {
+    const { hashBOriginal } = await writeAbcManifest();
+    await recordRecover({ withFingerprint: true });
+    // A local v1 `stak add` since the recover rewrote the manifest.
+    const manifest = await readMemoryManifest(stackHome);
+    await writeMemoryManifest({ stackHome, manifest: { ...manifest!, createdAt: '2026-10-22T00:00:00.000Z' } });
+    await migrateLocalStore(stackHome);
+    expect((await projectionFor())?.['notes/b.md']).toBe(hashBOriginal);
+  });
+
+  it('calls the directory locator only AFTER the build step, so a Project ID minted during migration is located', async () => {
+    const { projectDir, claudeHome } = await writeAbcManifest();
+    await recordRecover({ withFingerprint: true });
+    const asked: string[] = [];
+    await migrateLocalStore(stackHome, {
+      locateProjectDir: async (projectId) => {
+        asked.push(projectId);
+        // The registry already holds the freshly minted ID by now.
+        const { readLocalRegistry } = await import('../project/registry-store.js');
+        const registry = await readLocalRegistry(stackHome);
+        return registry.projects.some((p) => p.projectId === projectId) ? projectDir : undefined;
+      },
+      claudeHome,
+    });
+    const main = await readCanonicalMain(stackHome);
+    expect(asked).toEqual([main.projects[0]!.projectId]);
+    expect((await projectionFor())?.['notes/a.md']).toBeDefined();
   });
 
   it('resumes correctly when interrupted after the backup but before main.json', async () => {

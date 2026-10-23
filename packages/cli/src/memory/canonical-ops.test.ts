@@ -11,6 +11,7 @@ import {
   encodeClaudeProjectKey,
   fetchRemoteCanonical,
   fileLocalMemoryKeyStore,
+  generateRecoveryKey,
   gitClaimOf,
   recordFor,
   hashBytes,
@@ -21,7 +22,9 @@ import {
   pushCanonicalMemory,
   readCanonicalBase,
   readCanonicalMain,
+  readLocalRecoveryState,
   readLocalRegistry,
+  readMemoryManifest,
   resolveOrMintProject,
   RemoteMemoryError,
   setBinding,
@@ -34,6 +37,7 @@ import {
   writeMemoryManifest,
   writeMemoryObject,
   writePortableSnapshot,
+  v1ManifestFingerprint,
   type BackupResult,
   type RemoteMemoryBackend,
 } from '@stack/memory';
@@ -41,11 +45,18 @@ import {
 import {
   canonicalMemoryStatus,
   materializeCanonicalProjects,
+  migrateWithProjectionSeed,
   pullMemoryViaCanonical,
   pushMemoryViaCanonical,
   stageCanonicalMemory,
 } from './canonical-ops.js';
-import { publishCanonicalGeneration, pushStagedMemory, runMemoryCloudRecover } from './cloud-ops.js';
+import {
+  publishCanonicalGeneration,
+  pushStagedMemory,
+  runMemoryCloudBackup,
+  runMemoryCloudProtect,
+  runMemoryCloudRecover,
+} from './cloud-ops.js';
 
 let root: string;
 let stackHome: string;
@@ -1358,5 +1369,287 @@ describe('pushMemoryViaCanonical / pullMemoryViaCanonical (Task 13)', () => {
     expect(result.unavailable[0]?.projectId).toBe(minted.projectId);
     // Nothing was written anywhere under `claudeHome` — never guess a directory.
     await expect(stat(path.join(claudeHome, 'projects'))).rejects.toThrow();
+  });
+});
+
+describe('Task 13 fix round 3', () => {
+  const secureKeys = (dir: string) =>
+    fileLocalMemoryKeyStore(dir, {
+      harden: () => Promise.resolve(true),
+      verify: () => Promise.resolve(true),
+    });
+  const fakeBackup = (): Promise<BackupResult> =>
+    Promise.resolve({ provider: 'claude', files: 0, projects: 0, createdAt: '2026-10-23T00:00:00.000Z' });
+  const deps = (home: string, backend: RemoteMemoryBackend | null, keysDir: string) => ({
+    stackHome: home,
+    backend,
+    localKeyStore: secureKeys(keysDir),
+    runLocalBackup: fakeBackup,
+  });
+
+  describe('B: Skills-only account never publishes a Memory generation', () => {
+    it('push then push: zero generations', async () => {
+      const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'r3-skills-push-push');
+      const keys = path.join(root, 'keys');
+      expect((await pushMemoryViaCanonical(deps(stackHome, backend, keys), { claudeHome })).status).toBe('nothing-staged');
+      // Migration has now written an empty manifests/current.json and its
+      // completion marker — the second push must still publish nothing.
+      expect(await exists(migrationMarkerPath())).toBe(true);
+      expect((await pushMemoryViaCanonical(deps(stackHome, backend, keys), { claudeHome })).status).toBe('nothing-staged');
+      expect(await backend.listGenerations()).toHaveLength(0);
+      expect(await backend.getProfile()).toBeNull();
+    });
+
+    it('pull then push: zero generations', async () => {
+      const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'r3-skills-pull-push');
+      const keys = path.join(root, 'keys');
+      expect((await pullMemoryViaCanonical(deps(stackHome, backend, keys), { claudeHome })).status).toBe('up-to-date');
+      expect((await pushMemoryViaCanonical(deps(stackHome, backend, keys), { claudeHome })).status).toBe('nothing-staged');
+      expect(await backend.listGenerations()).toHaveLength(0);
+    });
+
+    it('`stak memory backup` twice: zero generations', async () => {
+      const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'r3-skills-backup');
+      const keys = path.join(root, 'keys');
+      expect((await runMemoryCloudBackup(deps(stackHome, backend, keys))).cloud.status).toBe('nothing-staged');
+      expect((await runMemoryCloudBackup(deps(stackHome, backend, keys))).cloud.status).toBe('nothing-staged');
+      expect(await backend.listGenerations()).toHaveLength(0);
+    });
+  });
+
+  describe('C: projection seeding for an ESTABLISHED v1 upgrader (spec §9.1 step 4)', () => {
+    const gitRemote = 'https://github.com/acme/established.git';
+    const git = { kind: 'git' as const, canonical: 'github.com/acme/established', host: 'github.com', owner: 'acme', repo: 'established' };
+
+    /** A v1 user's machine: `stak add` captured a.md and b.md FROM this
+     * machine's native files (local manifest). Since then the user edited
+     * a.md and deleted b.md natively, without running `stak add`. */
+    const establishedV1Machine = async () => {
+      const nativeDir = path.join(claudeHome, 'projects', encodeClaudeProjectKey(path.resolve(projectDir)), 'memory');
+      await mkdir(nativeDir, { recursive: true });
+      const items = [];
+      for (const name of ['a.md', 'b.md']) {
+        const body = Buffer.from(`captured ${name}`, 'utf8');
+        await writeMemoryObject({ stackHome, contentHash: hashBytes(body), bytes: body });
+        items.push({
+          provider: 'claude' as const,
+          kind: 'auto-memory' as const,
+          scope: 'project' as const,
+          logicalId: `claude/auto-memory/github.com/acme/established/${name}`,
+          project: git,
+          contentHash: hashBytes(body),
+          restoreTarget: { base: 'claude-project-memory' as const, relativePath: name },
+          capturedAt: '2026-10-20T00:00:00.000Z',
+          sensitivity: 'private' as const,
+        });
+      }
+      await writeMemoryManifest({
+        stackHome,
+        manifest: { schemaVersion: 1, provider: 'claude', createdAt: '2026-10-20T00:00:00.000Z', items },
+      });
+      await writeFile(path.join(nativeDir, 'a.md'), 'edited since add', 'utf8');
+      // b.md: deleted natively (never written here).
+      return { nativeDir, discovery: { claudeHome, projects: [{ dir: projectDir, gitRemote }] } };
+    };
+
+    const assertNormalChanges = async (nativeDir: string, discovery: { claudeHome: string; projects: { dir: string; gitRemote: string }[] }) => {
+      // The edit is NOT overwritten and the deletion is NOT re-materialized…
+      expect(await readFile(path.join(nativeDir, 'a.md'), 'utf8')).toBe('edited since add');
+      expect(await exists(path.join(nativeDir, 'b.md'))).toBe(false);
+      // …and both show up as ordinary pending changes, never as conflicts.
+      const status = await canonicalMemoryStatus(stackHome, discovery);
+      expect(status.projects).toHaveLength(1);
+      expect(status.projects[0]?.conflicts).toEqual([]);
+      expect(status.projects[0]?.pending).toBe(2);
+      // `stak add .` imports the edit and records the deletion.
+      const staged = await stageCanonicalMemory(stackHome, discovery);
+      expect(staged.projects[0]?.imported.sort()).toEqual(['notes/a.md', 'notes/b.md']);
+      const main = await readCanonicalMain(stackHome);
+      const docs = main.projects[0]?.documents ?? [];
+      expect(docs.find((d) => d.path === 'notes/a.md')).toMatchObject({ state: 'present', contentHash: hashBytes(Buffer.from('edited since add')) });
+      expect(docs.find((d) => d.path === 'notes/b.md')?.state).toBe('deleted');
+    };
+
+    it('first migration via `stak pull`: an edited file is an import-edit (not a conflict); a deleted file is an import-delete (not re-materialized)', async () => {
+      const { nativeDir, discovery } = await establishedV1Machine();
+      const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'r3-established-pull');
+      const pulled = await pullMemoryViaCanonical(deps(stackHome, backend, path.join(root, 'keys')), discovery);
+      expect(pulled.status).toBe('up-to-date');
+      expect(pulled.conflicts ?? []).toEqual([]);
+      await assertNormalChanges(nativeDir, discovery);
+    });
+
+    it('first migration via `stak memory backup` (with the injected projection-seeding migrate) also seeds', async () => {
+      const { nativeDir, discovery } = await establishedV1Machine();
+      const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'r3-established-backup');
+      const keys = path.join(root, 'keys');
+      const backedUp = await runMemoryCloudBackup(deps(stackHome, backend, keys), {
+        migrate: (home) => migrateWithProjectionSeed(home, discovery),
+      });
+      expect(backedUp.cloud.status).toBe('standard');
+      // A later pull materializes nothing over the user's native state.
+      await pullMemoryViaCanonical(deps(stackHome, backend, keys), discovery);
+      await assertNormalChanges(nativeDir, discovery);
+    });
+
+    it('first migration via the default `stak memory backup` migrate (no locator) seeds a local manifest too', async () => {
+      const { nativeDir, discovery } = await establishedV1Machine();
+      const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'r3-established-backup-default');
+      const keys = path.join(root, 'keys');
+      await runMemoryCloudBackup(deps(stackHome, backend, keys));
+      await pullMemoryViaCanonical(deps(stackHome, backend, keys), discovery);
+      await assertNormalChanges(nativeDir, discovery);
+    });
+
+    it('a Cloud recover on this CLI records the manifest fingerprint that marks it as Cloud-origin', async () => {
+      await establishedV1Machine();
+      const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'r3-recover-fingerprint');
+      await standardCloudBackup({ stackHome, backend });
+      const fresh = path.join(root, 'fp-fresh');
+      expect((await runMemoryCloudRecover(deps(fresh, backend, path.join(root, 'fp-keys')))).status).toBe('recovered');
+      const state = await readLocalRecoveryState(fresh);
+      const manifest = await readMemoryManifest(fresh);
+      expect(state?.recoveredManifestFingerprint).toBe(v1ManifestFingerprint(manifest!));
+    });
+  });
+
+  describe('A: an interrupted `stak memory protect` fails closed, and re-running it completes', () => {
+    it('pull and push fail closed (no merge, no native writes or deletes, no generation); re-running protect resumes and finalizes', async () => {
+      await bindProject(projectDir);
+      await writeFile(path.join(projectDir, 'CLAUDE.local.md'), 'private', 'utf8');
+      await writeAutoMemory(encodeClaudeProjectKey(path.resolve(projectDir)), 'MEMORY.md', 'notes body');
+      await stageCanonicalMemory(stackHome, { claudeHome });
+      const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'r3-protect-interrupted');
+      const keys = path.join(root, 'keys');
+      expect((await pushMemoryViaCanonical(deps(stackHome, backend, keys), { claudeHome })).status).toBe('pushed');
+
+      // Interrupt protect after the replica is committed and the original
+      // retired, right before the account is finalized as Protected.
+      const interrupted: RemoteMemoryBackend = Object.create(backend);
+      interrupted.setPrivacyMode = () => Promise.reject(new Error('connection reset'));
+      await expect(
+        runMemoryCloudProtect({ ...deps(stackHome, interrupted, keys), backend: interrupted }, { recoveryKey: generateRecoveryKey() }),
+      ).rejects.toThrow('connection reset');
+      expect((await backend.getProfile())?.privacyMode).toBe('standard');
+      expect((await backend.getLatest())?.replicaOf).toBeTruthy();
+      const generationsBefore = (await backend.listGenerations()).length;
+
+      // The user deletes a native file meanwhile; a fail-closed pull must
+      // neither merge nor materialize anything (no re-write, no delete).
+      await rm(path.join(projectDir, 'CLAUDE.local.md'));
+      const memoryFile = path.join(claudeHome, 'projects', encodeClaudeProjectKey(path.resolve(projectDir)), 'memory', 'MEMORY.md');
+      const mainBefore = await readFile(canonicalMainPath(), 'utf8');
+      await expect(pullMemoryViaCanonical(deps(stackHome, backend, keys), { claudeHome })).rejects.toMatchObject({
+        code: 'protect-in-progress',
+        message: expect.stringContaining('stak memory protect'),
+      });
+      await expect(pushMemoryViaCanonical(deps(stackHome, backend, keys), { claudeHome })).rejects.toMatchObject({
+        code: 'protect-in-progress',
+      });
+      const backup = await runMemoryCloudBackup(deps(stackHome, backend, keys));
+      expect(backup.cloud).toMatchObject({ status: 'failed', message: expect.stringContaining('stak memory protect') });
+      expect(await exists(path.join(projectDir, 'CLAUDE.local.md'))).toBe(false);
+      expect(await readFile(memoryFile, 'utf8')).toBe('notes body');
+      expect(await readFile(canonicalMainPath(), 'utf8')).toBe(mainBefore);
+      expect(await backend.listGenerations()).toHaveLength(generationsBefore);
+
+      // Re-run protect: resumes with this device's key and finalizes.
+      const resumed = await runMemoryCloudProtect({ ...deps(stackHome, backend, keys), backend }, { recoveryKey: generateRecoveryKey() });
+      expect(resumed).toMatchObject({ status: 'protected', migrated: 0 });
+      expect((await backend.getProfile())?.privacyMode).toBe('protected');
+      const pulled = await pullMemoryViaCanonical(deps(stackHome, backend, keys), { claudeHome });
+      expect(pulled.status).toBe('up-to-date');
+      expect(await readFile(memoryFile, 'utf8')).toBe('notes body');
+    });
+  });
+});
+
+describe('Task 13 fix round 3 (Minors)', () => {
+  const secureKeys = (dir: string) =>
+    fileLocalMemoryKeyStore(dir, {
+      harden: () => Promise.resolve(true),
+      verify: () => Promise.resolve(true),
+    });
+  const fakeBackup = (): Promise<BackupResult> =>
+    Promise.resolve({ provider: 'claude', files: 0, projects: 0, createdAt: '2026-10-23T00:00:00.000Z' });
+  const deps = (home: string, backend: RemoteMemoryBackend | null, keysDir: string) => ({
+    stackHome: home,
+    backend,
+    localKeyStore: secureKeys(keysDir),
+    runLocalBackup: fakeBackup,
+  });
+  const doc = async (home: string, body: string) => {
+    const bytes = Buffer.from(body, 'utf8');
+    await writeMemoryObject({ stackHome: home, contentHash: hashBytes(bytes), bytes });
+    return { path: 'notes/n.md', state: 'present' as const, contentHash: hashBytes(bytes), importedFrom: 'claude' as const, importedAt: '2026-10-23T00:00:00.000Z' };
+  };
+
+  it('a snapshot-only claim never locates into a directory that is already another project\'s write target', async () => {
+    const boundId = await bindProject(projectDir);
+    const gitRemote = 'https://github.com/acme/collide.git';
+    const identity = canonicalGitIdentity(gitRemote)!;
+    const snapshotOnlyId = mintProjectId();
+    const snapshot = toPortableSnapshot(resolveOrMintProject(emptyRegistry(), identity, () => snapshotOnlyId).registry);
+    await writeCanonicalMain(stackHome, {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [
+        { projectId: boundId, documents: [await doc(stackHome, 'bound project')] },
+        { projectId: snapshotOnlyId, documents: [await doc(stackHome, 'snapshot project')] },
+      ],
+    });
+    const outcome = await materializeCanonicalProjects(stackHome, {
+      claudeHome,
+      projects: [{ dir: projectDir, gitRemote }],
+      remoteRegistrySnapshot: snapshot,
+    });
+    expect(outcome.unavailable.map((p) => p.projectId)).toEqual([snapshotOnlyId]);
+    const written = path.join(claudeHome, 'projects', encodeClaudeProjectKey(path.resolve(projectDir)), 'memory', 'n.md');
+    expect(await readFile(written, 'utf8')).toBe('bound project');
+    // The snapshot claim was never imported for a project that wasn't materialized.
+    expect(recordFor(await readLocalRegistry(stackHome), snapshotOnlyId)).toBeUndefined();
+  });
+
+  it('7(c): when the last-known v1 generation was retired by protect, its Protected replica seeds the base (clean push, no false conflict)', async () => {
+    const homeA = path.join(root, 'c7-a');
+    const git = { kind: 'git' as const, canonical: 'github.com/acme/c7', host: 'github.com', owner: 'acme', repo: 'c7' };
+    const item = (contentHash: string, capturedAt: string) => ({
+      provider: 'claude' as const,
+      kind: 'auto-memory' as const,
+      scope: 'project' as const,
+      logicalId: 'claude/auto-memory/github.com/acme/c7/a.md',
+      project: git,
+      contentHash,
+      restoreTarget: { base: 'claude-project-memory' as const, relativePath: 'a.md' },
+      capturedAt,
+      sensitivity: 'private' as const,
+    });
+    // A Phase-15B-era v1 user: the project already has a registry claim, so
+    // the v1 bundle's conversion resolves it to the SAME Project ID.
+    await writeLocalRegistry(homeA, resolveOrMintProject(await readLocalRegistry(homeA), git).registry);
+    const original = Buffer.from('original note', 'utf8');
+    await writeMemoryObject({ stackHome: homeA, contentHash: hashBytes(original), bytes: original });
+    await writeMemoryManifest({
+      stackHome: homeA,
+      manifest: { schemaVersion: 1, provider: 'claude', createdAt: '2026-10-23T00:00:00.000Z', items: [item(hashBytes(original), '2026-10-23T00:00:00.000Z')] },
+    });
+    const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'r3-c7');
+    const keys = path.join(root, 'c7-keys');
+    expect((await pushStagedMemory(deps(homeA, backend, keys))).status).toBe('standard'); // v1 gen 0, provenance = 0
+    // Protect: gen 0 is retired, its replica (gen 1) takes over.
+    expect((await runMemoryCloudProtect({ ...deps(homeA, backend, keys), backend }, { recoveryKey: generateRecoveryKey() })).status).toBe('protected');
+    expect(await backend.getGeneration(0)).toBeNull();
+
+    // An unpushed local edit, then the first canonical push.
+    const edited = Buffer.from('edited, never pushed', 'utf8');
+    await writeMemoryObject({ stackHome: homeA, contentHash: hashBytes(edited), bytes: edited });
+    await writeMemoryManifest({
+      stackHome: homeA,
+      manifest: { schemaVersion: 1, provider: 'claude', createdAt: '2026-10-23T00:00:01.000Z', items: [item(hashBytes(edited), '2026-10-23T00:00:01.000Z')] },
+    });
+    const pushed = await pushMemoryViaCanonical(deps(homeA, backend, keys), {});
+    expect(pushed.status).toBe('pushed');
+    expect(pushed.generation).toBe(2);
+    const docs = (await readCanonicalMain(homeA)).projects[0]?.documents ?? [];
+    expect(docs.some((d) => d.state === 'present' && d.contentHash === hashBytes(edited))).toBe(true);
   });
 });

@@ -50,6 +50,9 @@ export const memoryGenerationSchema = z.object({
   wrappedDek: memoryWrappedDekSchema.optional(),
   state: memoryGenerationStateSchema,
   softDeletedAt: z.iso.datetime({ offset: true }).nullable().optional(),
+  /** Task 13 fix round 3: on a Protected replica made by `stak memory
+   * protect`, the backupId of the Standard original it re-encrypts. */
+  replicaOf: z.string().min(1).nullable().optional(),
 });
 export type MemoryGenerationDto = z.infer<typeof memoryGenerationSchema>;
 
@@ -99,14 +102,14 @@ export const memoryCreateGenerationRequestSchema = z.object({
   cryptoVersion: z.string().min(1).optional(),
   wrappedDek: memoryWrappedDekSchema.optional(),
   /**
-   * Task 13 fix round 2, Important-3: set ONLY by `migrateStandardToProtected`'s
-   * own internal re-encryption loop (see `@stack/memory`'s
-   * `CreateGenerationInput.isMigrationReplica` for the full rationale). The
-   * server independently verifies the exemption window (account currently
-   * Standard, this create itself Protected) before honoring it — never a
-   * general-purpose client-settable bypass of the v1-after-v2 gate.
+   * Task 13 fix round 3: set ONLY by `stak memory protect`'s migration — the
+   * backupId of the committed Standard generation this create replicates. The
+   * server verifies it against its own records (same account, committed,
+   * Standard, same format, no existing replica, payload length = original +
+   * 28, account still Standard, create Protected) before it exempts the create
+   * from the sticky v1-after-v2 gate; an invalid claim is refused outright.
    */
-  isMigrationReplica: z.boolean().optional(),
+  replicaOf: z.string().min(1).optional(),
 });
 export const memoryAddRecoveryMethodRequestSchema = z.object({
   type: z.enum(['passkey', 'recovery-file', 'trusted-device']),

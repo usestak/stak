@@ -46,7 +46,7 @@ import {
 } from '@stack/memory';
 
 import { resolveCanonicalProjectId } from './canonical-identity.js';
-import { publishCanonicalGeneration, type MemoryCloudDeps } from './cloud-ops.js';
+import { hasNothingToPush, publishCanonicalGeneration, type MemoryCloudDeps } from './cloud-ops.js';
 
 export type CanonicalProjectSummary = {
   projectId: string;
@@ -616,26 +616,39 @@ export type CanonicalMemoryStageResult = {
 
 /**
  * Run `migrateLocalStore` wired with a discovery-based project-directory
- * locator (Task 13 fix round 2, finding 5 — the "C1 residual"), so its
- * projection-seeding step can confirm a migrated document's native file
- * ACTUALLY exists on this machine before ever treating it as "last synced" —
- * never seeding for a path that's only in `main` because it arrived via a
- * recovered v1 Cloud bundle this machine's native files never held. Read-only
- * (`'status'` mode — never mints, never writes the registry); a fresh machine
- * that just ran `runMemoryCloudRecover` already has the recovered bundle's
- * portable registry snapshot merged into its LOCAL registry (via
- * `reconcileRegistryAfterRecover`, inside `cloudRecover`), so this ordinary
- * discovery-based locator is sufficient without needing migration itself to
- * know about remote snapshots.
+ * locator, used by its projection-seeding step ONLY when the migrated v1
+ * manifest came from a Cloud recover (then a document is seeded as "last
+ * synced" only when its native file demonstrably exists with that content —
+ * see `migrate.ts`'s `seedClaudeProjection`).
+ *
+ * Task 13 fix round 3 (finding C):
+ *  - No discovery at all once the completion marker exists (every push, pull
+ *    and add after the first) — migration is a no-op then.
+ *  - The locator is LAZY: discovery runs on its first call, which migration
+ *    makes AFTER its build step has minted and persisted any new Project IDs,
+ *    so projects minted during migration are located too.
+ * Read-only discovery (`'status'` mode — never mints, never writes the
+ * registry). Exported so `stak memory backup`'s `runMemoryCloudBackup` can
+ * migrate the same way (injected through its options; see `cloud-ops.ts`).
  */
-const migrateWithProjectionSeed = async (
+export const migrateWithProjectionSeed = async (
   stackHome: string,
   options: CanonicalDiscoveryOptions,
 ): Promise<void> => {
-  const { resolved } = await enumerateSyncableProjects(stackHome, options, 'status');
-  const dirByProjectId = new Map(resolved.map((r) => [r.projectId, r.dir]));
+  if (await isLocalStoreMigrated(stackHome)) return;
+  let dirByProjectId: Map<string, string> | undefined;
   await migrateLocalStore(stackHome, {
-    locateProjectDir: async (projectId) => dirByProjectId.get(projectId),
+    locateProjectDir: async (projectId) => {
+      if (!dirByProjectId) {
+        const { resolved } = await enumerateSyncableProjects(stackHome, options, 'status');
+        dirByProjectId = new Map(resolved.map((r) => [r.projectId, r.dir]));
+        // Also every bound directory (`stak project map`), for a project whose
+        // native folder discovery can't see yet.
+        for (const binding of (await readLocalRegistry(stackHome)).bindings)
+          if (!dirByProjectId.has(binding.projectId)) dirByProjectId.set(binding.projectId, path.resolve(binding.dir));
+      }
+      return dirByProjectId.get(projectId);
+    },
     ...(options.claudeHome ? { claudeHome: options.claudeHome } : {}),
   });
 };
@@ -771,7 +784,15 @@ const locateMaterializeTargets = async (
     const gitClaim = localClaim ?? remoteClaim;
     if (!gitClaim) continue; // no binding, no git claim (local or remote) to match a candidate against
     const claimCanonical = gitClaim.canonical.toLowerCase();
+    const viaSnapshotOnly = !localClaim;
     for (const candidate of options.projects ?? []) {
+      // Task 13 fix round 3 (Minor): a snapshot-only claim never takes a
+      // directory that is already the write target of a DIFFERENT project —
+      // one directory must never receive two projects' Memory.
+      if (viaSnapshotOnly) {
+        const candidateDir = path.resolve(candidate.dir);
+        if ([...targets].some(([otherId, dir]) => otherId !== project.projectId && dir === candidateDir)) continue;
+      }
       const remote =
         candidate.gitRemote ?? (options.gitRemoteOf ? await options.gitRemoteOf(candidate.dir) : undefined);
       const identity = canonicalGitIdentity(remote);
@@ -1002,13 +1023,6 @@ export const pushMemoryViaCanonical = async (
   deps: MemoryCloudDeps,
   discovery: CanonicalDiscoveryOptions = {},
 ): Promise<CanonicalPushOutcome> => {
-  // Captured BEFORE migration runs: `migrateLocalStore`'s own `slimToGlobal`
-  // step unconditionally writes `manifests/current.json` (even with zero
-  // items) on every call where the completion marker doesn't exist yet — so
-  // checking "did a manifest ever exist" AFTER calling it would always see a
-  // manifest this SAME call just created, defeating the Important-7(a) guard
-  // below every single time.
-  const hadManifestBeforeMigration = (await readMemoryManifest(deps.stackHome)) !== null;
   await migrateWithProjectionSeed(deps.stackHome, discovery);
   // Not signed in: Memory stays staged locally only (Task 13 Minor fix — this
   // used to fall through to `up-to-date`, rendering a nonsensical "already up
@@ -1022,14 +1036,12 @@ export const pushMemoryViaCanonical = async (
   // Spec Appendix A.4 / Task 13 finding 7: lazily seed base from this
   // machine's own last-known v1 generation, before the first canonical merge.
   await seedBaseFromLastKnownV1Generation(deps, mmk);
-  // Task 13 Important-7(a): a pure Skills-only account (nothing EVER staged on
-  // this machine — no v1 manifest at all — and Cloud has no Memory history
-  // either) must not publish an empty Memory generation just because push ran.
-  const localMain = await readCanonicalMain(deps.stackHome);
-  if (localMain.projects.length === 0 && !hadManifestBeforeMigration) {
-    const probe = await remote.fetch();
-    if (!probe) return { status: 'nothing-staged' };
-  }
+  // Task 13 Important-7(a) / fix round 3 (finding B): a Skills-only account
+  // with no Memory anywhere (Cloud has no generation, canonical main has no
+  // documents, the global v1 manifest has no items) publishes nothing — a
+  // stateless content check, so a second push or a pull-then-push can never
+  // slip past it.
+  if (await hasNothingToPush(deps)) return { status: 'nothing-staged' };
   const outcome = await pushCanonicalMemory({
     getLocalMain: () => readCanonicalMain(deps.stackHome),
     getBase: () => readCanonicalBase(deps.stackHome),

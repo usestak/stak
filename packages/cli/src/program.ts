@@ -110,6 +110,7 @@ import { registerOpenCommand } from './commands/open.js';
 import { stackCloudRemoteMemoryBackend } from './memory/cloud-backend.js';
 import {
   canonicalMemoryStatus,
+  migrateWithProjectionSeed,
   pullMemoryViaCanonical,
   pushMemoryViaCanonical,
   stageCanonicalMemory,
@@ -1042,8 +1043,14 @@ const defaultDependencies: ProgramDependencies = {
       risksDuplicatingLocalProjects,
     };
   },
-  memoryCloudBackup: async () =>
-    runMemoryCloudBackup(await buildMemoryCloudDeps()),
+  // Task 13 fix round 3 (finding C): migrate with the same projection-seeding
+  // locator push/pull use, so `stak memory backup` run first seeds identically.
+  memoryCloudBackup: async () => {
+    const discovery = await memoryDiscoveryOptions();
+    return runMemoryCloudBackup(await buildMemoryCloudDeps(), {
+      migrate: (home) => migrateWithProjectionSeed(home, discovery),
+    });
+  },
   memoryCloudRecover: async (options) =>
     runMemoryCloudRecover(await buildMemoryCloudDeps(), options),
   memoryGenerations: async () =>

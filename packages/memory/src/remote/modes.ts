@@ -217,15 +217,84 @@ export const cloudRecover = async (options: {
 
 export type MigrationResult = {
   migrated: number;
+  /** Originals that already had a verified replica from an earlier,
+   * interrupted run and were therefore not copied again (resume). */
+  resumed: number;
   retiredStandard: number;
   finalized: boolean;
 };
 
 /**
- * Migrate all Standard generations to Protected replacements, verify each decrypts
+ * Is a `stak memory protect` migration in progress (or interrupted) for this
+ * account? True exactly when the account is still Standard but already holds
+ * at least one committed Protected replica (`replicaOf`) — the window between
+ * the first replica create and finalize (Task 13 fix round 3).
+ */
+export const isProtectInProgress = async (
+  backend: RemoteMemoryBackend,
+): Promise<boolean> => {
+  const profile = await backend.getProfile();
+  if ((profile?.privacyMode ?? 'standard') !== 'standard') return false;
+  const generations = await backend.listGenerations();
+  return generations.some(
+    (g) => g.privacyMode === 'protected' && typeof g.replicaOf === 'string',
+  );
+};
+
+export const PROTECT_IN_PROGRESS_MESSAGE =
+  'Protecting your Cloud Memory was interrupted before it finished. Nothing was changed on this machine. Run `stak memory protect` again to complete it.';
+
+/** Decrypt a Protected replica and confirm it holds EXACTLY the original
+ * Standard payload's bytes. */
+const verifyReplica = (
+  replicaPayload: Uint8Array,
+  replicaBackupId: string,
+  wrappedDek: MemoryGenerationMeta['wrappedDek'],
+  mmk: Buffer,
+  expectedSha: string,
+): void => {
+  if (!wrappedDek)
+    throw new RemoteMemoryError(
+      'integrity',
+      'A migrated backup is missing its wrapped key; account remains Standard.',
+    );
+  let roundTrip: Uint8Array;
+  try {
+    const dek = unwrapDekWithMmk(wrappedDek, mmk, replicaBackupId);
+    roundTrip = open(splitPayload(replicaPayload), dek, protectedBundleAad(replicaBackupId));
+  } catch {
+    throw new RemoteMemoryError(
+      'integrity',
+      "A migrated backup can't be opened with this device's Memory key; account remains Standard.",
+    );
+  }
+  if (hashBytes(roundTrip) !== expectedSha)
+    throw new RemoteMemoryError(
+      'integrity',
+      'A migrated backup failed verification; account remains Standard.',
+    );
+};
+
+/**
+ * Migrate all Standard generations to Protected replicas, verify each decrypts
  * back to the original bytes, then retire the Standard payloads and finalize the
  * account as Protected. On any failure the account stays Standard and no Standard
  * payload is retired (no partial/false "Protected" state).
+ *
+ * Task 13 fix round 3:
+ *  - Each replica names its original via `replicaOf`, which the server verifies
+ *    (see `assertCreateGenerationAllowed`) — the only way a v1-format replica
+ *    passes the sticky v1-after-v2 gate.
+ *  - `expectedParent` is CHAINED from this run's own previous create (starting
+ *    from the latest seen once, up front), never re-read from `getLatest()`
+ *    per copy: a concurrent push landing mid-migration makes the next create
+ *    conflict, aborting the migration, instead of being silently stranded as
+ *    Standard plaintext behind a later replica.
+ *  - Resumable: an original that already has a replica (an earlier interrupted
+ *    run) is not copied again; its replica is downloaded and verified against
+ *    the original with THIS MMK before anything is retired.
+ *  - Oldest-first, so the newest original's replica is created last and is the
+ *    account's latest after finalize.
  */
 export const migrateStandardToProtected = async (options: {
   backend: RemoteMemoryBackend;
@@ -233,25 +302,33 @@ export const migrateStandardToProtected = async (options: {
   now?: () => Date;
 }): Promise<MigrationResult> => {
   const generations = await options.backend.listGenerations();
-  // Oldest first (Task 13 fix round 2, Important-3): `listGenerations` returns
-  // newest-first (both the in-memory store and the Supabase backend sort
-  // `generation DESC`). Copying newest-first broke a v1→v2 account in two
-  // ways: (a) a v2 Standard generation got copied BEFORE its earlier v1
-  // siblings, and the server's v1-after-v2 gate (Critical-2) then rejected the
-  // v1 copy that followed; (b) `createGeneration`'s own incrementing numbering
-  // meant the LAST copy created — the oldest original — ended up with the
-  // HIGHEST new generation number, silently making the oldest generation the
-  // new "latest". Copying oldest-first preserves both the original format
-  // order and which copy ends up actually being latest.
+  // `listGenerations` is newest-first; copy oldest-first (see above).
   const standards = generations
     .filter((generation) => generation.privacyMode === 'standard')
     .sort((a, b) => a.generation - b.generation);
+  const replicaByOriginal = new Map<string, MemoryGenerationMeta>();
+  for (const generation of generations)
+    if (generation.privacyMode === 'protected' && typeof generation.replicaOf === 'string')
+      replicaByOriginal.set(generation.replicaOf, generation);
 
-  const retired: string[] = [];
-  const replacements: MemoryGenerationMeta[] = [];
+  // Read ONCE; every later create chains from the previous create's own result.
+  let expectedParent = (await options.backend.getLatest())?.generation ?? null;
+  let migrated = 0;
+  let resumed = 0;
   for (const standard of standards) {
     const bundleBytes = await options.backend.getPayload(standard.backupId);
     verifyPayload(bundleBytes, standard.payloadSha256);
+
+    const existing = replicaByOriginal.get(standard.backupId);
+    if (existing) {
+      // Resume: verify the earlier run's replica with THIS key before trusting it.
+      const replicaPayload = await options.backend.getPayload(existing.backupId);
+      verifyPayload(replicaPayload, existing.payloadSha256);
+      verifyReplica(replicaPayload, existing.backupId, existing.wrappedDek, options.mmk, standard.payloadSha256);
+      resumed += 1;
+      continue;
+    }
+
     const backupId = randomUUID();
     const dek = randomKey();
     const aad = protectedBundleAad(backupId);
@@ -262,46 +339,36 @@ export const migrateStandardToProtected = async (options: {
       sealed.tag,
     ]);
     const wrappedDek = wrapDekWithMmk(dek, options.mmk, backupId);
-    const latest = await options.backend.getLatest();
+    // Verify the replica decrypts back to the ORIGINAL bytes before uploading it.
+    verifyReplica(payload, backupId, wrappedDek, options.mmk, standard.payloadSha256);
     const meta = await options.backend.createGeneration({
       backupId,
-      expectedParent: latest?.generation ?? null,
+      expectedParent,
       privacyMode: 'protected',
       payload,
       // Preserve the ORIGINAL generation's own format — re-encrypting a Standard
-      // payload never changes whether the plaintext bundle inside it was v1 or
-      // v2 (see `standardCloudBackup`'s identical fix).
+      // payload never changes whether the plaintext bundle inside it was v1 or v2.
       bundleFormatVersion: standard.bundleFormatVersion,
       cryptoVersion: CIPHER_VERSION,
       wrappedDek,
-      // See `CreateGenerationInput.isMigrationReplica`'s doc comment: no copy
-      // order or retirement timing can satisfy the ordinary v1-after-v2 gate
-      // once an account's history contains a higher-numbered v2 generation —
-      // this verified, format-preserving replica of an EXISTING generation is
-      // exempted from that gate (never from the expectedParent/conflict check).
-      isMigrationReplica: true,
+      replicaOf: standard.backupId,
       ...(options.now ? { now: options.now } : {}),
     });
-    // Verify the replacement decrypts back to the ORIGINAL bytes before trusting it.
-    const check = unwrapDekWithMmk(wrappedDek, options.mmk, backupId);
-    const roundTrip = open(splitPayload(payload), check, aad);
-    if (hashBytes(roundTrip) !== standard.payloadSha256)
-      throw new RemoteMemoryError(
-        'integrity',
-        'A migrated backup failed verification; account remains Standard.',
-      );
-    replacements.push(meta);
+    expectedParent = meta.generation;
+    migrated += 1;
   }
 
   // All verified: retire Standard payloads and finalize.
+  let retiredStandard = 0;
   for (const standard of standards) {
     await options.backend.retireGeneration(standard.backupId, options.now);
-    retired.push(standard.backupId);
+    retiredStandard += 1;
   }
   await options.backend.setPrivacyMode('protected');
   return {
-    migrated: replacements.length,
-    retiredStandard: retired.length,
+    migrated,
+    resumed,
+    retiredStandard,
     finalized: true,
   };
 };

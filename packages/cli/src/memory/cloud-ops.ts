@@ -28,6 +28,7 @@ import {
   fetchRemoteCanonical,
   generateMmk,
   hashBytes,
+  isProtectInProgress,
   migrateLocalStore,
   migrateStandardToProtected,
   newKeyring,
@@ -48,6 +49,7 @@ import {
   writeLocalRecoveryState,
   writeMemoryObject,
   writePendingMerge,
+  v1ManifestFingerprint,
   type BackupResult,
   type CanonicalMainManifest,
   type DiscoveredMemoryItem,
@@ -174,6 +176,10 @@ const recordRecoveryProvenance = async (
     /** The staged state's semantic digest at the moment it reached this generation —
      * lets a later push detect "nothing changed" (see `resolveMemoryPushState`). */
     semanticDigest?: string;
+    /** Recover only (Task 13 fix round 3): fingerprint of the v1 manifest the
+     * recover just restored — see `LocalRecoveryState.recoveredManifestFingerprint`.
+     * Every push omits it, which is what clears the "came from Cloud" signal. */
+    recoveredManifestFingerprint?: string;
   },
 ): Promise<void> => {
   await writeLocalRecoveryState(deps.stackHome, {
@@ -185,7 +191,36 @@ const recordRecoveryProvenance = async (
     ...(recovered.semanticDigest
       ? { semanticDigest: recovered.semanticDigest }
       : {}),
+    ...(recovered.recoveredManifestFingerprint
+      ? { recoveredManifestFingerprint: recovered.recoveredManifestFingerprint }
+      : {}),
   });
+};
+
+/** Fingerprint of the v1 manifest currently on disk (right after a recover). */
+const restoredManifestFingerprint = async (
+  stackHome: string,
+): Promise<{ recoveredManifestFingerprint?: string }> => {
+  const manifest = await readMemoryManifest(stackHome).catch(() => null);
+  return manifest ? { recoveredManifestFingerprint: v1ManifestFingerprint(manifest) } : {};
+};
+
+/**
+ * Task 13 fix round 3 (finding B): a STATELESS "is there anything to push at
+ * all?" check, replacing the old "did a manifest exist before migration"
+ * guard (which migration's own empty `manifests/current.json` defeated on
+ * every second push or pull). Nothing to push exactly when Cloud has no Memory
+ * generation, local canonical main has no documents, and the global v1
+ * manifest has no items — then no generation is published. Run AFTER
+ * migration (so any v1 project content has already moved into canonical main).
+ */
+export const hasNothingToPush = async (deps: MemoryCloudDeps): Promise<boolean> => {
+  if (!deps.backend) return false;
+  if ((await deps.backend.getLatest()) !== null) return false;
+  const main = await readCanonicalMain(deps.stackHome);
+  if (main.projects.some((project) => project.documents.length > 0)) return false;
+  const manifest = await readMemoryManifest(deps.stackHome);
+  return (manifest?.items.length ?? 0) === 0;
 };
 
 /**
@@ -461,21 +496,24 @@ const seedBaseFromLastKnownV1Generation = async (
 
 export const runMemoryCloudBackup = async (
   deps: MemoryCloudDeps,
+  options: {
+    /** Runs the local v1 -> canonical migration. `program.ts` passes
+     * `canonical-ops.ts`'s `migrateWithProjectionSeed` (with this machine's
+     * discovery), so a migration triggered by `stak memory backup` seeds the
+     * projection exactly like one triggered by push/pull (Task 13 fix round 3,
+     * finding C) — injected rather than imported to avoid a circular import
+     * between this module and `canonical-ops.ts`. Defaults to a plain
+     * `migrateLocalStore` with no directory locator. */
+    migrate?: (stackHome: string) => Promise<void>;
+  } = {},
 ): Promise<MemoryBackupOutcome> => {
   const local = await deps.runLocalBackup();
-  // Captured right after the local backup (which legitimately creates/updates
-  // the real manifest) but BEFORE migration runs: `migrateLocalStore`'s own
-  // `slimToGlobal` step unconditionally writes `manifests/current.json` (even
-  // with zero items) on every call before its completion marker exists —
-  // checking "did a manifest ever exist" AFTER calling it would always see a
-  // manifest this SAME call just created, defeating the Important-7(a) guard
-  // below every single time.
-  const hadManifestBeforeMigration = (await readMemoryManifest(deps.stackHome)) !== null;
   // NOTE: concurrent STAK commands against the same stackHome are not
   // serialized across processes (see `canonical-ops.ts`'s `pushMemoryViaCanonical`/
   // `pullMemoryViaCanonical` for the same caveat) — a cross-process lock is a
   // known, deferred design gap.
-  await migrateLocalStore(deps.stackHome);
+  if (options.migrate) await options.migrate(deps.stackHome);
+  else await migrateLocalStore(deps.stackHome);
   if (!deps.backend) return { local, cloud: { status: 'skipped' } };
   // Task 13 fix round 2 (Minor): `getProfile`/`loadMmk` moved INSIDE the try —
   // a network error reading the profile (or anything else below) now returns
@@ -510,17 +548,10 @@ export const runMemoryCloudBackup = async (
     // machine's own last-known v1 generation, before the first canonical merge.
     await seedBaseFromLastKnownV1Generation(deps, mmk);
 
-    const main = await readCanonicalMain(deps.stackHome);
-    // Task 13 Important-7(a): a pure Skills-only account (nothing EVER staged
-    // on this machine — no v1 manifest at all — and Cloud has no Memory history
-    // either) must not publish an empty Memory generation just because this
-    // function ran. A machine with staged GLOBAL memory (a real v1 manifest)
-    // but no Project memory yet still proceeds normally below — this guard is
-    // about truly having NOTHING, not merely an empty canonical manifest.
-    if (main.projects.length === 0 && !hadManifestBeforeMigration) {
-      const remote = await fetchRemote();
-      if (!remote) return { local, cloud: { status: 'nothing-staged' } };
-    }
+    // Task 13 Important-7(a) / fix round 3 (finding B): a Skills-only account
+    // with no Memory anywhere must not publish an empty Memory generation —
+    // decided statelessly from content, never from file existence.
+    if (await hasNothingToPush(deps)) return { local, cloud: { status: 'nothing-staged' } };
 
     // Spec §9.3: `stak memory backup` is a deprecated alias for the Memory HALF
     // of `stak push` — it must merge against Cloud exactly like push does
@@ -629,6 +660,7 @@ export const runMemoryCloudRecover = async (
       generation: result.generation,
       privacyMode: 'standard',
       cloudLatest,
+      ...(await restoredManifestFingerprint(deps.stackHome)),
     });
     await seedRecoveredProjectNames(deps);
     return {
@@ -664,6 +696,7 @@ export const runMemoryCloudRecover = async (
     generation: result.generation,
     privacyMode: 'protected',
     cloudLatest,
+    ...(await restoredManifestFingerprint(deps.stackHome)),
   });
   await seedRecoveredProjectNames(deps);
   return {
@@ -710,10 +743,19 @@ export const runMemoryCloudProtect = async (
   deps: MemoryCloudDeps & { backend: RemoteMemoryBackend },
   options: { recoveryKey: RecoveryKeyArtifacts },
 ): Promise<ProtectOutcome> => {
-  const mmk = generateMmk();
+  // Task 13 fix round 3: RESUME an interrupted protect with the SAME Memory
+  // key this device already enrolled for it — the replicas already in Cloud
+  // are encrypted under it, and a fresh key would make them unreadable (the
+  // migration refuses to finalize in that case: it verifies every existing
+  // replica with the key it is given). A fresh recovery file is still issued
+  // below, because the interrupted run never wrote one.
+  const resumeMmk = (await isProtectInProgress(deps.backend))
+    ? await deps.localKeyStore.loadMmk().catch(() => null)
+    : null;
+  const mmk = resumeMmk ?? generateMmk();
   // Enroll this device FIRST and fail closed: if local key storage can't be
   // secured, persist nothing and finalize nothing in Cloud.
-  if (!(await enrollDeviceSafe(deps.localKeyStore, mmk)))
+  if (!resumeMmk && !(await enrollDeviceSafe(deps.localKeyStore, mmk)))
     return { status: 'insecure-local-key' };
   const keyring = newKeyring();
   const { wrapper } = addRecoveryFileWrapper({
@@ -994,6 +1036,16 @@ export const runPasskeyProtect = async (
   if (!deps.backend) return { status: 'not-authenticated' };
   const now = deps.now ?? (() => new Date());
   const sleep = deps.sleep ?? defaultSleep;
+  // Task 13 fix round 3: resume an interrupted protect with the key this
+  // device already enrolled for it (the first run's passkey wrapper already
+  // wraps that same key) — never a new key the existing replicas can't use.
+  if (await isProtectInProgress(deps.backend)) {
+    const resumeMmk = await deps.localKeyStore.loadMmk().catch(() => null);
+    if (resumeMmk) {
+      const resumed = await migrateStandardToProtected({ backend: deps.backend, mmk: resumeMmk, now });
+      return { status: 'protected', migrated: resumed.migrated };
+    }
+  }
   const { session, initiatorPrivateKey } = await createRecoverySession({
     userId: 'stack-memory',
     ttlMs: deps.ttlMs ?? 5 * 60_000,
@@ -1119,6 +1171,7 @@ export const runPasskeyRecover = async (
     cloudLatestAtRecovery: cloudLatest,
     recoveredAt: now().toISOString(),
     privacyMode: 'protected',
+    ...(await restoredManifestFingerprint(deps.stackHome)),
   });
   await seedRecoveredProjectNames(deps);
   return {

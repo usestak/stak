@@ -2,8 +2,9 @@ import { readFile } from 'node:fs/promises';
 
 import { z } from 'zod';
 
+import type { MemoryManifest } from './domain.js';
 import { atomicWriteFile } from './remote/secure-file.js';
-import { memoryStorePaths } from './store.js';
+import { hashBytes, memoryStorePaths } from './store.js';
 
 /**
  * Machine-local recovery provenance (Phase 15B.6).
@@ -35,6 +36,16 @@ export const localRecoveryStateSchema = z.object({
    * made (callers must not treat it as "unchanged").
    */
   semanticDigest: z.string().optional(),
+  /**
+   * Task 13 fix round 3: written ONLY by a Cloud recover (never by a push) —
+   * the `v1ManifestFingerprint` of the v1 manifest that recover just restored.
+   * Migration compares it with the manifest it is about to migrate: a match
+   * means "this manifest came from Cloud and nothing was added locally since",
+   * so this machine's native files can't be assumed to hold it. Absent (any
+   * push, or any state written by an older CLI) means the manifest is treated
+   * as locally produced.
+   */
+  recoveredManifestFingerprint: z.string().optional(),
 });
 export type LocalRecoveryState = z.infer<typeof localRecoveryStateSchema>;
 
@@ -48,6 +59,11 @@ export class LocalRecoveryStateError extends Error {
     this.name = 'LocalRecoveryStateError';
   }
 }
+
+/** Stable fingerprint of a (schema-parsed) v1 manifest — see
+ * `recoveredManifestFingerprint`. */
+export const v1ManifestFingerprint = (manifest: MemoryManifest): string =>
+  hashBytes(Buffer.from(JSON.stringify(manifest), 'utf8'));
 
 /** Read the local recovery provenance, or null when none has been recorded. */
 export const readLocalRecoveryState = async (

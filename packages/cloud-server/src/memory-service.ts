@@ -7,9 +7,8 @@
  * backups (payloads are ciphertext).
  */
 import {
-  BUNDLE_FORMAT,
-  BUNDLE_FORMAT_V2,
   RemoteMemoryError,
+  assertCreateGenerationAllowed,
   type MemoryGenerationMeta,
   type MemoryProfile,
   type RecoveryMethodRecord,
@@ -29,6 +28,7 @@ import type {
 
 import {
   CloudServiceError,
+  invalidRequest,
   memoryConflict,
   memoryIncompatibleFormat,
   memoryIntegrity,
@@ -72,6 +72,8 @@ const mapError = (error: unknown): never => {
         throw memoryNoEnvelope(error.message);
       case 'incompatible-format':
         throw memoryIncompatibleFormat(error.message);
+      case 'invalid-replica':
+        throw invalidRequest(error.message);
       default:
         throw error;
     }
@@ -102,6 +104,7 @@ const generationDto = (meta: MemoryGenerationMeta): MemoryGenerationDto => ({
   ...(meta.wrappedDek ? { wrappedDek: meta.wrappedDek } : {}),
   state: meta.state,
   softDeletedAt: meta.softDeletedAt ?? null,
+  ...(meta.replicaOf ? { replicaOf: meta.replicaOf } : {}),
 });
 
 const methodDto = (record: RecoveryMethodRecord): MemoryRecoveryMethodDto => ({
@@ -202,44 +205,40 @@ export const createMemoryMethods = (config: MemoryServiceConfig) => {
       request: MemoryCreateGenerationRequest,
     ) =>
       run(async () => {
-        // Spec §9.3/A.5: once an account's latest generation is v2, the server
-        // refuses an old-format (v1) create outright, with the exact `@beta`
-        // message — regardless of which storage backend is configured. Enforced
-        // HERE (backend-agnostic middle layer), not duplicated per backend,
-        // because production's real backend (Supabase, via `memoryBackendFor`)
-        // has no such check of its own; only the in-memory test fake did.
+        // Spec §9.3/A.5 + Task 13 fix round 3: the STICKY v1-after-v2 gate
+        // (refuse a v1 create once this account has EVER committed a v2
+        // generation) and the server-verified protect-replica exemption
+        // (`replicaOf`), enforced HERE — backend-agnostic, because production's
+        // real backend (Supabase, via `memoryBackendFor`) has no such check of
+        // its own — via the SAME function the in-memory backend runs, so the
+        // two can never drift apart. Decided entirely from this account's own
+        // server-side records; nothing the client claims is trusted, and the
+        // payload is never decrypted or parsed.
         const backend = backendFor(user.userId);
-        const latest = await backend.getLatest();
-        // Task 13 fix round 2, Important-3: `migrateStandardToProtected`'s own
-        // internal re-encryption loop creates format-preserving Protected
-        // REPLICAS of a Standard account's existing generations — a v1
-        // original must stay a v1 replica. Once an account's history has ANY
-        // v2 generation, no copy order or retirement timing can satisfy this
-        // gate for an earlier v1 one (see `CreateGenerationInput.isMigrationReplica`'s
-        // doc comment in `@stack/memory`). The exemption is narrowed to the
-        // EXACT, independently-verifiable window that function runs in: the
-        // account's CURRENT profile is still 'standard' and this create is
-        // itself 'protected' — never a general-purpose bypass.
-        const profile = await backend.getProfile();
-        const isVerifiedMigrationWindow =
-          request.isMigrationReplica === true &&
-          (profile?.privacyMode ?? 'standard') === 'standard' &&
-          request.privacyMode === 'protected';
-        if (
-          !isVerifiedMigrationWindow &&
-          latest &&
-          latest.bundleFormatVersion === BUNDLE_FORMAT_V2 &&
-          request.bundleFormatVersion === BUNDLE_FORMAT
-        )
-          throw memoryIncompatibleFormat();
         const payload = Buffer.from(request.payloadB64, 'base64');
+        assertCreateGenerationAllowed(
+          {
+            bundleFormatVersion: request.bundleFormatVersion,
+            privacyMode: request.privacyMode,
+            payloadBytes: payload.byteLength,
+            ...(request.replicaOf !== undefined ? { replicaOf: request.replicaOf } : {}),
+          },
+          {
+            profile: await backend.getProfile(),
+            committed: await backend.listGenerations(),
+            original:
+              request.replicaOf !== undefined
+                ? await backend.getGenerationById(request.replicaOf)
+                : null,
+          },
+        );
         const meta = await backend.createGeneration({
           backupId: request.backupId,
           expectedParent: request.expectedParent,
           privacyMode: request.privacyMode,
           payload,
           bundleFormatVersion: request.bundleFormatVersion,
-          ...(request.isMigrationReplica ? { isMigrationReplica: true } : {}),
+          ...(request.replicaOf !== undefined ? { replicaOf: request.replicaOf } : {}),
           ...(request.cryptoVersion
             ? { cryptoVersion: request.cryptoVersion }
             : {}),
