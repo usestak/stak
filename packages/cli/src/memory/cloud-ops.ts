@@ -15,6 +15,7 @@
  * from the authenticated cloud client.
  */
 import { applyRecoveredProjectNames } from './project-ops.js';
+import { assertNoCurrentPendingMerge, MemorySyncError } from './pending-merge.js';
 import {
   BundleError,
   CIPHER_VERSION,
@@ -542,6 +543,16 @@ export const runMemoryCloudBackup = async (
       !(await deps.localKeyStore.loadMmk().catch(() => null))
     )
       return { local, cloud: { status: 'protected-locked' } };
+    // Task 14 fix round 1 — spec A.6 `merge-pending`, the same gate as `stak
+    // push`: a still-current pending merge against an unmoved Cloud stops here
+    // before anything changes (its partial resolutions are kept).
+    try {
+      await assertNoCurrentPendingMerge(deps);
+    } catch (error) {
+      if (error instanceof MemorySyncError)
+        return { local, cloud: { status: 'conflict', conflicts: error.conflicts } };
+      throw error;
+    }
     const mmk = (await deps.localKeyStore.loadMmk().catch(() => undefined)) ?? undefined;
     // Also persists every object the fetched generation carries into this
     // machine's local content store (same fix as `canonical-ops.ts`'s
@@ -557,7 +568,7 @@ export const runMemoryCloudBackup = async (
       if (!result) return null;
       for (const object of result.objects)
         await writeMemoryObject({ stackHome: deps.stackHome, contentHash: object.contentHash, bytes: object.bytes });
-      return { generation: result.generation, main: result.main };
+      return { generation: result.generation, contentGeneration: result.contentGeneration, main: result.main };
     };
 
     // Spec Appendix A.4 / Task 13 finding 7: lazily seed base from this

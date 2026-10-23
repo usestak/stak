@@ -117,7 +117,8 @@ export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> 
     const remoteGeneration = remote!.generation; // non-null: isFastForward handles the null/null case
     const { merged, conflicts } = mergeCanonical(baseMain, local, remote!.main);
     if (conflicts.length > 0) {
-      await deps.savePendingMerge({ basedOnGeneration: pendingMergeGenerationOf(remote!), merged, conflicts });
+      // = `pendingMergeGenerationOf(remote)`: the generation the content came from.
+      await deps.savePendingMerge({ basedOnGeneration: remote?.contentGeneration ?? remoteGeneration, merged, conflicts });
       return { status: 'conflict', conflicts };
     }
     if (canonicalDigest(merged) === canonicalDigest(remote!.main)) {

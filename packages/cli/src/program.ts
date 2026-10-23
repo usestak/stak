@@ -86,7 +86,6 @@ import {
 } from '@stack/memory';
 import {
   CloudResponseInvalidError,
-  LocalEnvironmentConflictError,
   createCloudClient,
   NotAuthenticatedError,
 } from '@stack/cloud-client';
@@ -122,6 +121,7 @@ import {
   type CanonicalPullOutcome,
   type UnlocatableProject,
 } from './memory/canonical-ops.js';
+import { mergePendingMessage, MemorySyncError } from './memory/pending-merge.js';
 import { stageMemoryWithProjectDedup } from './memory/stage-memory.js';
 import {
   freshRegistryRisksDuplication,
@@ -985,10 +985,11 @@ const defaultDependencies: ProgramDependencies = {
   applyMemoryPush: async () => {
     const deps = await buildMemoryCloudDeps();
     const outcome = await pushMemoryViaCanonical(deps, await memoryDiscoveryOptions());
+    // Spec A.6 / §10 `merge-pending` (Task 14 fix round 1): a fresh merge
+    // conflict and a still-pending one (thrown by the gate inside
+    // `pushMemoryViaCanonical`) surface under the same code and message.
     if (outcome.status === 'conflict')
-      throw new LocalEnvironmentConflictError(
-        `Memory has ${outcome.conflicts?.length ?? 0} unresolved conflict(s). Resolve with \`stak memory resolve\`, then push again.`,
-      );
+      throw new MemorySyncError('merge-pending', mergePendingMessage(outcome.conflicts ?? []));
     if (outcome.status === 'retry-exhausted')
       throw new StackCompositionError(
         'memory-push-retry-exhausted',
@@ -1022,8 +1023,16 @@ const defaultDependencies: ProgramDependencies = {
   // Task 13: canonical (Project) Memory's own pull — additive, runs on every `stak
   // pull` regardless of `memoryPullPreflight` (which only gates the legacy
   // fresh-machine full-recover path above). Never publishes.
-  applyCanonicalPull: async () =>
-    pullMemoryViaCanonical(await buildMemoryCloudDeps(), await memoryDiscoveryOptions()),
+  // A still-pending merge (the `merge-pending` gate) is reported like any
+  // other pull conflict: "run `stak memory resolve`", never as a failure.
+  applyCanonicalPull: async () => {
+    try {
+      return await pullMemoryViaCanonical(await buildMemoryCloudDeps(), await memoryDiscoveryOptions());
+    } catch (error) {
+      if (error instanceof MemorySyncError) return { status: 'conflict', conflicts: error.conflicts };
+      throw error;
+    }
+  },
   cloudPreparePublish: (options) => cloudPreparePublish(cloudDeps, options),
   cloudApplyPublish: (plan) => cloudApplyPublish(cloudDeps, plan),
   memoryScan: async () => (await memoryAdapter()).discover(),
