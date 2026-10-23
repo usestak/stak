@@ -1854,4 +1854,48 @@ describe('Task 13 fix round 5', () => {
     expect(pushed.status).toBe('pushed');
     expect(pushed.generation).toBe(latest.generation + 1);
   });
+
+  it('after every generation is retired (Delete Cloud Memory), a pull changes nothing locally and the next push re-uploads local content (fix round 6)', async () => {
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, 'r6-emptied');
+    const homeX = path.join(root, 'x6-stack');
+    const claudeX = path.join(root, 'x6-claude');
+    const dirX = path.join(root, 'x6-proj');
+    const homeY = path.join(root, 'y6-stack');
+    const claudeY = path.join(root, 'y6-claude');
+    const dirY = path.join(root, 'y6-proj');
+    await mkdir(dirX, { recursive: true });
+    await mkdir(dirY, { recursive: true });
+    const projectId = await bindAt(homeX, dirX);
+    await bindAt(homeY, dirY, projectId);
+    const keysX = path.join(root, 'x6-keys');
+    const keysY = path.join(root, 'y6-keys');
+
+    await writeMemoryFile(memoryFileOf(claudeX, dirX), 'v1');
+    await stageCanonicalMemory(homeX, { claudeHome: claudeX });
+    expect((await pushMemoryViaCanonical(deps(homeX, backend, keysX), { claudeHome: claudeX })).status).toBe('pushed');
+    await pullMemoryViaCanonical(deps(homeY, backend, keysY), { claudeHome: claudeY });
+    await writeMemoryFile(memoryFileOf(claudeX, dirX), 'v2');
+    await stageCanonicalMemory(homeX, { claudeHome: claudeX });
+    expect((await pushMemoryViaCanonical(deps(homeX, backend, keysX), { claudeHome: claudeX })).status).toBe('pushed');
+    // Y's base is now BEHIND the counter (it last synced v1).
+
+    // Delete Cloud Memory: every generation retired, the counter is not reset.
+    for (const backupId of await backend.listAllBackupIds()) await backend.retireGeneration(backupId);
+    expect(await backend.getLatest()).toBeNull();
+    expect((await backend.getProfile())?.latestGeneration).toBe(1);
+
+    const yMainBefore = await readFile(path.join(homeY, 'memory', 'canonical', 'main.json'), 'utf8');
+    const pulled = await pullMemoryViaCanonical(deps(homeY, backend, keysY), { claudeHome: claudeY });
+    expect(pulled.status).toBe('up-to-date');
+    expect(await readFile(memoryFileOf(claudeY, dirY), 'utf8')).toBe('v1'); // native untouched
+    expect(await readFile(path.join(homeY, 'memory', 'canonical', 'main.json'), 'utf8')).toBe(yMainBefore);
+
+    // Y pushes: a fast-forward re-upload of its own content at counter + 1.
+    const pushed = await pushMemoryViaCanonical(deps(homeY, backend, keysY), { claudeHome: claudeY });
+    expect(pushed).toMatchObject({ status: 'pushed', generation: 2 });
+    const cloud = await fetchRemoteCanonical({ backend, localRegistry: await readLocalRegistry(homeY) });
+    expect(cloud?.main).toEqual(await readCanonicalMain(homeY));
+    expect(cloud?.main.projects[0]?.documents.every((d) => d.state === 'present')).toBe(true);
+  });
 });

@@ -368,6 +368,14 @@ export const publishCanonicalGeneration = async (
   expectedParent: number | null,
 ): Promise<{ generation: number; privacyMode: 'standard' | 'protected' }> => {
   if (!deps.backend) throw new Error('No Cloud backend configured.');
+  // Task 13 fix round 6: the canonical engine publishes with `expectedParent:
+  // null` whenever Cloud has NO committed generation. On an account that has
+  // had generations (all since retired, e.g. Delete Cloud Memory) the commit
+  // checks against the never-reset counter, so use it — but only while there
+  // is still no committed generation; if one appeared, keep null and let the
+  // commit conflict and the engine re-fetch.
+  if (expectedParent === null && (await deps.backend.getLatest()) === null)
+    expectedParent = (await deps.backend.getProfile())?.latestGeneration ?? null;
   const semanticDigest = await computeSemanticDigest(deps.stackHome, main);
   const profile = await deps.backend.getProfile();
   const mode = profile?.privacyMode ?? 'standard';

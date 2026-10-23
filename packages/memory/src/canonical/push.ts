@@ -74,9 +74,14 @@ export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> 
       return { status: 'up-to-date', generation: remote.generation };
     }
 
+    // Task 13 fix round 6: no committed Cloud generation at all (`remote ===
+    // null` — never pushed, or every generation retired) is always a
+    // fast-forward: re-upload local as-is, never merge against "nothing" (which
+    // would read as Cloud having deleted everything). The publisher resolves
+    // the parent for an emptied account from the commit counter.
     const isFastForward =
-      (base === null && remote === null) ||
-      (base !== null && remote !== null && base.generation === remote.generation);
+      remote === null ||
+      (base !== null && base.generation === remote.generation);
 
     if (isFastForward) {
       const expectedParent = remote?.generation ?? null;

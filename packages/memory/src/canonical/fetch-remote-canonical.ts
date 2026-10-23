@@ -84,20 +84,20 @@ export const fetchRemoteCanonical = async (options: {
       ? ((await options.backend.getGeneration(options.generation)) ??
         (await replicaOfRetiredGeneration(options.backend, options.generation)))
       : await options.backend.getLatest();
-  // Task 13 fix round 5: when fetching LATEST, the returned `generation` is the
-  // account's commit counter (`profile.latestGeneration`) — exactly what
-  // `createGeneration` checks `expectedParent` against in both backends — not
-  // the number of the latest COMMITTED generation. They differ once the
-  // highest generation has been retired (protect's escape crash window, Delete
-  // Cloud Memory); using the committed number made every later push conflict
-  // until retry-exhausted. The content still comes from the latest committed
-  // generation (or is empty when none is left).
+  // Task 13 fix rounds 5-6: no committed generation at all (never pushed, or
+  // Delete Cloud Memory retired everything) is "nothing in Cloud" — null —
+  // NEVER empty content, which a machine with an older base would merge as
+  // "Cloud deleted everything" and turn into native deletes. A push then
+  // fast-forwards (see `pushCanonicalMemory`) and `publishCanonicalGeneration`
+  // supplies the commit counter as its parent.
+  if (!meta) return null;
+  // When latest IS committed, the returned `generation` is the account's commit
+  // counter (`profile.latestGeneration`, what `createGeneration` checks
+  // `expectedParent` against in both backends) whenever it is higher than the
+  // latest committed generation's own number — i.e. the highest generation was
+  // retired but others remain. Content still comes from the latest committed one.
   const head =
     options.generation === undefined ? ((await options.backend.getProfile())?.latestGeneration ?? null) : null;
-  if (!meta)
-    return head === null
-      ? null
-      : { generation: head, main: emptyCanonicalMain(), objects: [], registrySnapshot: undefined };
   // Task 13 fix round 3: Cloud latest is a Protected replica while the account
   // is still Standard -> `stak memory protect` was interrupted mid-migration.
   // Fail closed (no merge, no materialize, no native deletes) until protect is
