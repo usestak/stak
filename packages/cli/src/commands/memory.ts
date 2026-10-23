@@ -7,6 +7,17 @@ import type {
 } from '@stack/memory';
 import { toManifestItem } from '@stack/memory';
 
+import { StackCompositionError } from '@stack/core';
+
+import type {
+  ConflictDiff,
+  ConflictSide,
+  KeepSide,
+  MaterializeOutcome,
+  PendingConflictSummary,
+  ResolveConflictOutcome,
+} from '../memory/canonical-ops.js';
+import { canonicalExtraNotes } from '../ui/cloud.js';
 import type {
   CloudRecoverOutcome,
   MemoryBackupOutcome,
@@ -71,8 +82,89 @@ export type MemoryCommandDependencies = {
       }
   >;
   memoryCloudStatus(): Promise<MemoryCloudStatus>;
+  /** Task 14: `stak memory resolve` / `diff` / `materialize`. Optional so
+   * existing test harnesses need no change; missing = "not available". */
+  memoryListConflicts?(): Promise<PendingConflictSummary[]>;
+  memoryResolveConflict?(options: {
+    project: string;
+    path: string;
+    keep: KeepSide;
+  }): Promise<ResolveConflictOutcome>;
+  memoryDiffConflict?(options: {
+    project: string;
+    path: string;
+  }): Promise<ConflictDiff>;
+  memoryMaterialize?(options: { project?: string }): Promise<MaterializeOutcome>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
+};
+
+const KEEP_SIDES: readonly KeepSide[] = ['local', 'cloud', 'both'];
+
+const renderConflictSide = (side: ConflictSide): string =>
+  side.state === 'present'
+    ? side.text.endsWith('\n')
+      ? side.text
+      : `${side.text}\n`
+    : side.state === 'deleted'
+      ? '(deleted)\n'
+      : '(absent)\n';
+
+const renderPendingConflicts = (pending: PendingConflictSummary[]): string => {
+  if (pending.length === 0) return 'No pending Memory conflicts.\n';
+  const lines = [
+    `${pending.length} pending Memory conflict(s):`,
+    '',
+    ...pending.map((c) => `  ${c.projectId}  ${c.name}  ${c.path}  (${c.reason})`),
+    '',
+    'See both versions: stak memory diff <project> <path>',
+    'Resolve:           stak memory resolve <project> <path> --keep local|cloud|both',
+    'Then:              stak push',
+  ];
+  return `${lines.join('\n')}\n`;
+};
+
+const renderResolveOutcome = (outcome: ResolveConflictOutcome): string => {
+  const kept = outcome.altPath
+    ? `kept both: Cloud's version at ${outcome.path}, yours at ${outcome.altPath}`
+    : `kept ${outcome.keep}${outcome.state === 'deleted' ? ' (deleted)' : ''}`;
+  const lines = [`Resolved ${outcome.path} in ${outcome.name}: ${kept}.`];
+  if (outcome.remaining > 0)
+    lines.push(
+      `${outcome.remaining} Memory conflict(s) left. Run \`stak memory resolve\` to list them.`,
+    );
+  else {
+    lines.push('All Memory conflicts resolved. Run `stak push` to publish.');
+    const notes = outcome.materialize
+      ? canonicalExtraNotes({
+          unavailable: outcome.materialize.unavailable,
+          conflicts: outcome.materialize.conflicts,
+        })
+      : [];
+    if (notes.length > 0) lines.push(`Agent files: ${notes.join('; ')}.`);
+  }
+  return `${lines.join('\n')}\n`;
+};
+
+const renderMaterializeOutcome = (outcome: MaterializeOutcome): string => {
+  const lines = [
+    `Materialized Memory for ${outcome.materialized} project(s): ${outcome.written} file(s) written, ${outcome.deleted} removed.`,
+  ];
+  const notes = canonicalExtraNotes({
+    unavailable: outcome.unavailable,
+    conflicts: outcome.conflicts,
+  });
+  if (notes.length > 0) lines.push(`${notes.join('; ')}.`);
+  return `${lines.join('\n')}\n`;
+};
+
+const required = <T>(dependency: T | undefined): T => {
+  if (dependency === undefined)
+    throw new StackCompositionError(
+      'memory-command-unavailable',
+      'This Memory command is not available.',
+    );
+  return dependency;
 };
 
 type Flags = {
@@ -471,6 +563,85 @@ export const registerMemoryCommand = (
       }
       dependencies.writeOut(renderMemoryCloudStatus(local, cloud));
     });
+
+  // Task 14 — spec §8.3: diff (opt-in, the only command that shows content),
+  // resolve, then push.
+  memory
+    .command('diff <project> <path>')
+    .description(
+      'Show both versions of a pending Memory conflict (prints Memory content)',
+    )
+    .action(async (project: string, docPath: string) => {
+      const diff = await required(dependencies.memoryDiffConflict)({
+        project,
+        path: docPath,
+      });
+      dependencies.writeOut(
+        `${diff.name}  ${diff.path}  (${diff.reason}, against Cloud generation ${diff.generation})\n` +
+          `--- local ---\n${renderConflictSide(diff.local)}` +
+          `--- cloud ---\n${renderConflictSide(diff.cloud)}`,
+      );
+    });
+
+  memory
+    .command('resolve [project] [path]')
+    .description(
+      'Resolve a Memory conflict: keep local, keep cloud, or keep both (no arguments: list conflicts)',
+    )
+    .option('--keep <side>', 'local | cloud | both')
+    .action(
+      async (
+        project: string | undefined,
+        docPath: string | undefined,
+        options: { keep?: string },
+      ) => {
+        if (project === undefined) {
+          dependencies.writeOut(
+            renderPendingConflicts(
+              await required(dependencies.memoryListConflicts)(),
+            ),
+          );
+          return;
+        }
+        if (docPath === undefined)
+          throw new StackCompositionError(
+            'memory-resolve-usage',
+            'Usage: stak memory resolve <project> <path> --keep local|cloud|both',
+          );
+        const keep = options.keep as KeepSide | undefined;
+        if (keep === undefined || !KEEP_SIDES.includes(keep))
+          throw new StackCompositionError(
+            'memory-resolve-usage',
+            'Choose a side: --keep local, --keep cloud, or --keep both.',
+          );
+        const outcome = await required(dependencies.memoryResolveConflict)({
+          project,
+          path: docPath,
+          keep,
+        });
+        dependencies.writeOut(renderResolveOutcome(outcome));
+      },
+    );
+
+  memory
+    .command('materialize [project]')
+    .description(
+      'Rebuild agent Memory files from STAK Memory (all projects on this machine, or one)',
+    )
+    .option('--agent <agent>', 'agent to write (claude)', 'claude')
+    .action(
+      async (project: string | undefined, options: { agent: string }) => {
+        if (options.agent !== 'claude')
+          throw new StackCompositionError(
+            'memory-materialize-agent',
+            `Unsupported agent "${options.agent}". Only claude is supported in this version.`,
+          );
+        const outcome = await required(dependencies.memoryMaterialize)(
+          project !== undefined ? { project } : {},
+        );
+        dependencies.writeOut(renderMaterializeOutcome(outcome));
+      },
+    );
 
   memory
     .command('restore')

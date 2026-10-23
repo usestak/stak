@@ -40,15 +40,29 @@ import {
   writeMemoryObject,
   writePendingMerge,
   projectIdentityKey,
+  canonicalDigest,
+  documentOf,
+  emptyCanonicalMain,
+  keepBothPath,
+  mergeCanonical,
+  pendingMergeSchema,
+  projectMemoryOf,
+  readMemoryObject,
+  readPendingMerge,
+  RemoteMemoryError,
+  type CanonicalDoc,
+  type CanonicalMainManifest,
   type ClaudeProjectInput,
   type DiscoveredMemoryItem,
   type LocalRegistry,
   type ManifestItem,
+  type PendingMerge,
   type PortableProjectRecord,
   type PortableRegistrySnapshot,
   type ProjectIdentity,
   type ScanResult,
 } from '@stack/memory';
+import { StackCompositionError } from '@stack/core';
 
 import { resolveCanonicalProjectId } from './canonical-identity.js';
 import { hasNothingToPush, publishCanonicalGeneration, type MemoryCloudDeps } from './cloud-ops.js';
@@ -831,6 +845,10 @@ export type MaterializeOutcome = {
    * when some projects actually have unresolved native conflicts
    * (Task 13 Important-5). */
   conflicts: { projectId: string; path: string; reason: string }[];
+  /** Native files written / deleted across every materialized project (Task 14:
+   * reported by `stak memory materialize`). */
+  written: number;
+  deleted: number;
 };
 
 /**
@@ -870,9 +888,16 @@ const nativeHashAt = async (
 export const materializeCanonicalProjects = async (
   stackHome: string,
   options: CanonicalDiscoveryOptions = {},
+  /** Task 14: restrict this call to these Project IDs (`stak memory materialize
+   * <project>`, and the projects a final `stak memory resolve` changed). Every
+   * guard below applies unchanged; omitted = every project. */
+  filter?: { projectIds: readonly string[] },
 ): Promise<MaterializeOutcome> => {
+  const only = filter ? new Set(filter.projectIds) : undefined;
   let registry = await readLocalRegistry(stackHome);
   let materialized = 0;
+  let written = 0;
+  let deleted = 0;
   const conflicts: { projectId: string; path: string; reason: string }[] = [];
   let targets: Map<string, string>;
   let unavailable: string[];
@@ -889,9 +914,13 @@ export const materializeCanonicalProjects = async (
       materialized: 0,
       unavailable: [],
       conflicts: [{ projectId: '', path: '', reason: error instanceof Error ? error.message : 'materialize failed' }],
+      written: 0,
+      deleted: 0,
     };
   }
+  if (only) unavailable = unavailable.filter((projectId) => only.has(projectId));
   for (const [projectId, dir] of targets) {
+    if (only && !only.has(projectId)) continue;
     // Task 13 fix round 4: scan with the candidate's own git remote (exactly as
     // enumeration does), so native items resolve to the same identity.
     const candidate = (options.projects ?? []).find((c) => path.resolve(c.dir) === path.resolve(dir));
@@ -926,7 +955,9 @@ export const materializeCanonicalProjects = async (
         }
         actions.push(action);
       }
-      await applyMaterializeActions({ projectId, dir }, stackHome, actions, options.claudeHome);
+      const applied = await applyMaterializeActions({ projectId, dir }, stackHome, actions, options.claudeHome);
+      written += applied.written.length;
+      deleted += applied.deleted.length;
       materialized += 1;
       // Task 13 fix round 2 (Important-4 residual, I6 follow-up): a project
       // located ONLY via the remote snapshot's claim, once actually
@@ -960,6 +991,8 @@ export const materializeCanonicalProjects = async (
       name: nameHintFor(registry, projectId) ?? shortProjectId(projectId),
     })),
     conflicts,
+    written,
+    deleted,
   };
 };
 
@@ -1177,4 +1210,456 @@ export const pullMemoryViaCanonical = async (
   return outcome.status === 'merged-local'
     ? { status: 'merged', ...extras }
     : { status: 'up-to-date', ...extras };
+};
+
+/* -------------------------------------------------------------------------- */
+/* Task 14: `stak memory resolve` / `stak memory diff` / `stak memory materialize` */
+/* -------------------------------------------------------------------------- */
+
+export type MemoryResolveErrorCode =
+  | 'no-pending-merge'
+  | 'conflict-not-found'
+  | 'project-not-found'
+  | 'ambiguous-project'
+  /** Spec Appendix A.6: "Project not on this machine". */
+  | 'project-unbound'
+  /** Cloud's side of the merge can't be read right now (signed out, locked,
+   * generation gone, unreadable). Never treated as an empty Cloud. */
+  | 'cloud-unavailable'
+  /** Local Memory or the sync base moved since the pending merge was made. */
+  | 'merge-stale';
+
+/** Every resolve/diff/materialize refusal. Thrown BEFORE anything is written.
+ * A `StackCompositionError` so the CLI prints its message plainly. */
+export class MemoryResolveError extends StackCompositionError {
+  constructor(code: MemoryResolveErrorCode, message: string) {
+    super(code, message);
+    this.name = 'MemoryResolveError';
+  }
+}
+
+export type KeepSide = 'local' | 'cloud' | 'both';
+
+export type PendingConflictSummary = {
+  projectId: string;
+  /** Display name for output (registry name hint, else the short Project ID). */
+  name: string;
+  path: string;
+  reason: string;
+};
+
+const conflictKey = (projectId: string, docPath: string): string => `${projectId}\u0000${docPath}`;
+
+const projectNameOf = (registry: LocalRegistry, projectId: string): string =>
+  nameHintFor(registry, projectId) ?? shortProjectId(projectId);
+
+const readPending = async (stackHome: string): Promise<PendingMerge | null> =>
+  readPendingMerge(stackHome, pendingMergeSchema);
+
+const requirePending = async (stackHome: string): Promise<PendingMerge> => {
+  const pending = await readPending(stackHome);
+  if (!pending || pending.conflicts.length === 0)
+    throw new MemoryResolveError('no-pending-merge', 'No pending Memory conflicts. Nothing to resolve.');
+  return pending;
+};
+
+/** A full Project ID or a unique prefix of one — the same selector rule `stak
+ * project map|name|archive` use (they accept no display names either). */
+const selectProjectId = (selector: string, projectIds: Iterable<string>): string => {
+  const ids = [...new Set(projectIds)];
+  if (ids.includes(selector)) return selector;
+  const matches = ids.filter((id) => id.startsWith(selector));
+  if (matches.length === 1) return matches[0] as string;
+  if (matches.length === 0)
+    throw new MemoryResolveError('project-not-found', `No project matches "${selector}".`);
+  throw new MemoryResolveError(
+    'ambiguous-project',
+    `"${selector}" matches more than one project (${matches.join(', ')}). Use a longer Project ID.`,
+  );
+};
+
+const findPendingConflict = (pending: PendingMerge, selector: string, docPath: string) => {
+  const projectId = selectProjectId(selector, pending.conflicts.map((c) => c.projectId));
+  const conflict = pending.conflicts.find((c) => c.projectId === projectId && c.path === docPath);
+  if (!conflict)
+    throw new MemoryResolveError(
+      'conflict-not-found',
+      `No pending Memory conflict for ${docPath} in that project. Run \`stak memory resolve\` to list them.`,
+    );
+  return conflict;
+};
+
+/** `stak memory resolve` with no arguments: the pending conflicts, in merge order. */
+export const listPendingConflicts = async (stackHome: string): Promise<PendingConflictSummary[]> => {
+  const pending = await readPending(stackHome);
+  if (!pending) return [];
+  const registry = await readLocalRegistry(stackHome);
+  return pending.conflicts.map((c) => ({
+    projectId: c.projectId,
+    name: projectNameOf(registry, c.projectId),
+    path: c.path,
+    reason: c.reason,
+  }));
+};
+
+/**
+ * Cloud's canonical Memory at EXACTLY `generation` (Task 14 C4/C5: a
+ * resolution belongs to the generation its merge was made against — never
+ * latest). Fails closed: signed out, Protected-and-locked, a generation that is
+ * gone (retired with no Protected replica), or an unreadable one all THROW —
+ * never an empty Cloud, which would turn "keep cloud" into a mass deletion.
+ * A generation retired by `stak memory protect` is read from its committed
+ * replica (`fetchRemoteCanonical`'s existing mapping). Bundled objects are
+ * persisted so Cloud-side content can be shown and materialized.
+ */
+const fetchCloudAtGeneration = async (
+  deps: MemoryCloudDeps,
+  generation: number,
+): Promise<{ main: CanonicalMainManifest; registrySnapshot: PortableRegistrySnapshot | undefined }> => {
+  if (!deps.backend)
+    throw new MemoryResolveError(
+      'cloud-unavailable',
+      `Not signed in. Resolving a Memory conflict needs Cloud's version (generation ${generation}). Run \`stak login\`, then try again. Nothing was changed.`,
+    );
+  const profile = await deps.backend.getProfile();
+  const mmk = (await deps.localKeyStore.loadMmk().catch(() => null)) ?? undefined;
+  if ((profile?.privacyMode ?? 'standard') === 'protected' && !mmk)
+    throw new MemoryResolveError(
+      'cloud-unavailable',
+      'Protected Memory is locked on this device, so Cloud\'s version can\'t be read (`stak memory protect`). Nothing was changed.',
+    );
+  let result: Awaited<ReturnType<typeof fetchRemoteCanonical>>;
+  try {
+    result = await fetchRemoteCanonical({
+      backend: deps.backend,
+      ...(mmk ? { mmk } : {}),
+      localRegistry: await readLocalRegistry(deps.stackHome),
+      generation,
+    });
+  } catch (error) {
+    if (error instanceof RemoteMemoryError)
+      throw new MemoryResolveError(
+        'cloud-unavailable',
+        `Could not read Cloud's version (generation ${generation}): ${error.message} Nothing was changed.`,
+      );
+    throw error;
+  }
+  if (!result)
+    throw new MemoryResolveError(
+      'cloud-unavailable',
+      `STAK Cloud no longer has generation ${generation}, which this merge was made against. Nothing was changed. Run \`stak push\` (or \`stak pull\`) to merge again against Cloud's current Memory.`,
+    );
+  for (const object of result.objects)
+    await writeMemoryObject({ stackHome: deps.stackHome, contentHash: object.contentHash, bytes: object.bytes });
+  return { main: result.main, registrySnapshot: result.registrySnapshot };
+};
+
+const stableDoc = (doc: CanonicalDoc | undefined): string =>
+  doc === undefined
+    ? 'absent'
+    : JSON.stringify(Object.fromEntries(Object.entries(doc).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))));
+
+const docsByKey = (main: CanonicalMainManifest): Map<string, CanonicalDoc> => {
+  const out = new Map<string, CanonicalDoc>();
+  for (const project of main.projects)
+    for (const doc of project.documents) out.set(conflictKey(project.projectId, doc.path), doc);
+  return out;
+};
+
+/**
+ * Refuse to apply a resolution to a pending merge that no longer describes
+ * this machine (Task 14): push/pull wrote `merged` from (base, local, Cloud r)
+ * at the time of the conflict. If local Memory changed since (e.g. `stak add .`
+ * staged another edit) or the base moved, writing `merged` into main would
+ * silently drop that newer local state. Recompute the same merge and require
+ * that it still agrees with the pending one — every clean document identical,
+ * and the conflict set exactly the pending + already-resolved conflicts.
+ */
+const assertPendingMergeCurrent = async (
+  deps: MemoryCloudDeps,
+  pending: PendingMerge,
+  local: CanonicalMainManifest,
+  cloudMain: CanonicalMainManifest,
+): Promise<void> => {
+  const base = await effectiveCanonicalBase(deps.backend, await readCanonicalBase(deps.stackHome));
+  const recomputed = mergeCanonical(base?.main ?? emptyCanonicalMain(), local, cloudMain);
+  const resolved = pending.resolved ?? [];
+  const expectedConflicts = new Set([
+    ...pending.conflicts.map((c) => conflictKey(c.projectId, c.path)),
+    ...resolved.map((r) => conflictKey(r.projectId, r.path)),
+  ]);
+  const actualConflicts = new Set(recomputed.conflicts.map((c) => conflictKey(c.projectId, c.path)));
+  const resolvedKeys = new Set(
+    resolved.flatMap((r) => [
+      conflictKey(r.projectId, r.path),
+      ...(r.altPath ? [conflictKey(r.projectId, r.altPath)] : []),
+    ]),
+  );
+  const pendingDocs = docsByKey(pending.merged);
+  const recomputedDocs = docsByKey(recomputed.merged);
+  const stale =
+    expectedConflicts.size !== actualConflicts.size ||
+    [...expectedConflicts].some((key) => !actualConflicts.has(key)) ||
+    [...recomputedDocs].some(([key, doc]) => stableDoc(pendingDocs.get(key)) !== stableDoc(doc)) ||
+    [...pendingDocs.keys()].some((key) => !recomputedDocs.has(key) && !resolvedKeys.has(key));
+  if (stale)
+    throw new MemoryResolveError(
+      'merge-stale',
+      'Local Memory has changed since this merge was prepared (for example by `stak add .`). Nothing was changed. Run `stak push` (or `stak pull`) to merge again, then resolve the conflicts it lists.',
+    );
+};
+
+/**
+ * Spec §8.3 / Appendix A.4 + Task 14 C3: each side is a DOCUMENT STATE,
+ * deletions included. Returns the document for the original path, plus the
+ * local copy at the keep-both path when both sides are present.
+ */
+const resolvedDocsFor = (
+  keep: KeepSide,
+  docPath: string,
+  local: CanonicalDoc | undefined,
+  cloud: CanonicalDoc | undefined,
+  deletedAt: string,
+  isTaken: (candidate: string) => boolean,
+): { primary: CanonicalDoc; alt?: CanonicalDoc } => {
+  const tombstone = (lastContentHash: string): CanonicalDoc => ({
+    path: docPath,
+    state: 'deleted',
+    lastContentHash,
+    deletedAt,
+  });
+  const unreachable = () =>
+    new MemoryResolveError('conflict-not-found', `Neither side has ${docPath}; there is nothing to resolve.`);
+  if (keep === 'local') {
+    if (local) return { primary: local };
+    // Local is absent: keeping local means the deletion. A tombstone of Cloud's
+    // content propagates it instead of letting Cloud's copy come back.
+    if (cloud?.state === 'present') return { primary: tombstone(cloud.contentHash) };
+    if (cloud) return { primary: cloud };
+    throw unreachable();
+  }
+  if (keep === 'cloud') {
+    if (cloud) return { primary: cloud };
+    // Cloud is absent: keeping Cloud means the deletion — never leave a present
+    // local document silently in place.
+    if (local?.state === 'present') return { primary: tombstone(local.contentHash) };
+    if (local) return { primary: local };
+    throw unreachable();
+  }
+  // keep both: Cloud keeps the original path; local's PRESENT content goes to
+  // the deterministic keep-both path. One side gone -> the present side at the
+  // original path and nothing else. Neither present -> the deletion (Cloud's).
+  if (cloud?.state === 'present' && local?.state === 'present') {
+    const altPath = keepBothPath(docPath, local.contentHash, isTaken);
+    return { primary: cloud, alt: { ...local, path: altPath } };
+  }
+  if (cloud?.state === 'present') return { primary: cloud };
+  if (local?.state === 'present') return { primary: local };
+  return resolvedDocsFor('cloud', docPath, local, cloud, deletedAt, isTaken);
+};
+
+const projectsWithChangedDocs = (before: CanonicalMainManifest, after: CanonicalMainManifest): string[] => {
+  const ids = new Set([...before.projects, ...after.projects].map((p) => p.projectId));
+  const digestOf = (main: CanonicalMainManifest, projectId: string) =>
+    canonicalDigest({
+      schemaVersion: main.schemaVersion,
+      projects: [{ projectId, documents: projectMemoryOf(main, projectId)?.documents ?? [] }],
+    });
+  return [...ids].filter((id) => digestOf(before, id) !== digestOf(after, id)).sort();
+};
+
+export type ResolveConflictOutcome = {
+  projectId: string;
+  name: string;
+  path: string;
+  keep: KeepSide;
+  /** The resolved state at the original path. */
+  state: 'present' | 'deleted';
+  /** Keep both with both sides present: where the local copy was kept. */
+  altPath?: string;
+  /** Conflicts still pending after this one. */
+  remaining: number;
+  /** Present only after the LAST conflict: materializing the changed projects
+   * (N = P rule and the write guard apply — a refused write is reported here,
+   * never a failure of the already-recorded resolution). */
+  materialize?: MaterializeOutcome;
+};
+
+/**
+ * Resolve one pending conflict (spec §8.3, Appendix A.4: "Resolution writes
+ * the chosen content into L and sets the merge base to r").
+ *  - The chosen document state is applied into the pending merge's `merged`
+ *    and that conflict is removed.
+ *  - While other conflicts remain, ONLY `merge.json` is updated — main and
+ *    base stay as they are, so no unresolved path is lost.
+ *  - On the last conflict: main <- merged, base <- { r, Cloud's main at r },
+ *    `merge.json` cleared, then the changed projects are materialized. The
+ *    next push against r fast-forwards; against r' > r it re-merges (base r).
+ * Cloud's side is always read at exactly r and fails closed (see
+ * `fetchCloudAtGeneration`); a stale pending merge is refused. Nothing is
+ * written before every check has passed.
+ */
+export const resolvePendingConflict = async (
+  deps: MemoryCloudDeps,
+  discovery: CanonicalDiscoveryOptions,
+  projectSelector: string,
+  docPath: string,
+  keep: KeepSide,
+): Promise<ResolveConflictOutcome> => {
+  const pending = await requirePending(deps.stackHome);
+  const conflict = findPendingConflict(pending, projectSelector, docPath);
+  const { projectId } = conflict;
+  const cloud = await fetchCloudAtGeneration(deps, pending.basedOnGeneration);
+  const local = await readCanonicalMain(deps.stackHome);
+  await assertPendingMergeCurrent(deps, pending, local, cloud.main);
+
+  const documents = [...(projectMemoryOf(pending.merged, projectId)?.documents ?? [])];
+  const taken = new Set([
+    ...documents.map((d) => d.path),
+    ...pending.conflicts.filter((c) => c.projectId === projectId).map((c) => c.path),
+  ]);
+  const now = (deps.now ?? (() => new Date()))().toISOString();
+  const { primary, alt } = resolvedDocsFor(
+    keep,
+    docPath,
+    documentOf(local, projectId, docPath),
+    documentOf(cloud.main, projectId, docPath),
+    now,
+    (candidate) => taken.has(candidate),
+  );
+  const nextDocuments = [...documents.filter((d) => d.path !== docPath && d.path !== alt?.path), primary, ...(alt ? [alt] : [])].sort(
+    (a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
+  );
+  const nextMerged: CanonicalMainManifest = {
+    ...pending.merged,
+    projects: projectMemoryOf(pending.merged, projectId)
+      ? pending.merged.projects.map((p) => (p.projectId === projectId ? { projectId, documents: nextDocuments } : p))
+      : [...pending.merged.projects, { projectId, documents: nextDocuments }],
+  };
+  const nextConflicts = pending.conflicts.filter((c) => c !== conflict);
+  const registry = await readLocalRegistry(deps.stackHome);
+  const outcome: ResolveConflictOutcome = {
+    projectId,
+    name: projectNameOf(registry, projectId),
+    path: docPath,
+    keep,
+    state: primary.state,
+    ...(alt ? { altPath: alt.path } : {}),
+    remaining: nextConflicts.length,
+  };
+
+  if (nextConflicts.length > 0) {
+    await writePendingMerge(deps.stackHome, {
+      basedOnGeneration: pending.basedOnGeneration,
+      merged: nextMerged,
+      conflicts: nextConflicts,
+      resolved: [...(pending.resolved ?? []), { projectId, path: docPath, keep, ...(alt ? { altPath: alt.path } : {}) }],
+    } satisfies PendingMerge);
+    return outcome;
+  }
+
+  // Last conflict: main first, then base, then clear — an interruption leaves
+  // a state the next push re-merges into the same conflicts (never a silent
+  // fast-forward over Cloud's changes).
+  const changed = projectsWithChangedDocs(local, nextMerged);
+  await writeCanonicalMain(deps.stackHome, nextMerged);
+  await writeCanonicalBase(deps.stackHome, { generation: pending.basedOnGeneration, main: cloud.main });
+  await clearPendingMerge(deps.stackHome);
+  let materialize: MaterializeOutcome;
+  try {
+    materialize = await materializeCanonicalProjects(
+      deps.stackHome,
+      { ...discovery, remoteRegistrySnapshot: cloud.registrySnapshot },
+      { projectIds: changed },
+    );
+  } catch (error) {
+    materialize = {
+      materialized: 0,
+      unavailable: [],
+      conflicts: [{ projectId: '', path: '', reason: error instanceof Error ? error.message : 'materialize failed' }],
+      written: 0,
+      deleted: 0,
+    };
+  }
+  return { ...outcome, materialize };
+};
+
+export type ConflictSide = { state: 'present'; text: string } | { state: 'deleted' } | { state: 'absent' };
+
+export type ConflictDiff = {
+  projectId: string;
+  name: string;
+  path: string;
+  reason: string;
+  /** The Cloud generation the merge (and so any resolution) belongs to. */
+  generation: number;
+  local: ConflictSide;
+  cloud: ConflictSide;
+};
+
+/**
+ * `stak memory diff <project> <path>`: both sides of one pending conflict —
+ * local canonical Memory vs Cloud at exactly the merge's generation — decoded
+ * as UTF-8 text (Memory documents are Markdown). A tombstone is `deleted` and
+ * a missing document is `absent`, never an empty string. Read-only except for
+ * persisting Cloud's content objects into the local store.
+ */
+export const diffPendingConflict = async (
+  deps: MemoryCloudDeps,
+  projectSelector: string,
+  docPath: string,
+): Promise<ConflictDiff> => {
+  const pending = await requirePending(deps.stackHome);
+  const conflict = findPendingConflict(pending, projectSelector, docPath);
+  const cloud = await fetchCloudAtGeneration(deps, pending.basedOnGeneration);
+  const local = await readCanonicalMain(deps.stackHome);
+  const sideOf = async (doc: CanonicalDoc | undefined): Promise<ConflictSide> => {
+    if (!doc) return { state: 'absent' };
+    if (doc.state === 'deleted') return { state: 'deleted' };
+    const bytes = await readMemoryObject({ stackHome: deps.stackHome, contentHash: doc.contentHash });
+    return { state: 'present', text: Buffer.from(bytes).toString('utf8') };
+  };
+  return {
+    projectId: conflict.projectId,
+    name: projectNameOf(await readLocalRegistry(deps.stackHome), conflict.projectId),
+    path: docPath,
+    reason: conflict.reason,
+    generation: pending.basedOnGeneration,
+    local: await sideOf(documentOf(local, conflict.projectId, docPath)),
+    cloud: await sideOf(documentOf(cloud.main, conflict.projectId, docPath)),
+  };
+};
+
+/**
+ * `stak memory materialize [project]` (spec §5): rebuild agent files from STAK
+ * Memory through Task 13's own materialize path (`locateMaterializeTargets` +
+ * `materializeCanonicalProjects`), so the N = P overwrite rule, the write
+ * guard, the mass-delete guard, the path fence and "never mint" all apply.
+ * Migrates first, like push/pull. With a project: a project that can't be
+ * located on this machine fails with the spec's "not available on this
+ * machine" wording and nothing is written. Without one: every located project,
+ * with unavailable projects and conflicts reported the way push/pull do.
+ */
+export const materializeMemory = async (
+  stackHome: string,
+  discovery: CanonicalDiscoveryOptions,
+  options: { project?: string } = {},
+): Promise<MaterializeOutcome> => {
+  await migrateWithProjectionSeed(stackHome, discovery);
+  if (options.project === undefined) return materializeCanonicalProjects(stackHome, discovery);
+  const main = await readCanonicalMain(stackHome);
+  const registry = await readLocalRegistry(stackHome);
+  const projectId = selectProjectId(options.project, [
+    ...main.projects.map((p) => p.projectId),
+    ...registry.projects.map((p) => p.projectId),
+  ]);
+  const { targets } = await locateMaterializeTargets(stackHome, discovery);
+  if (!targets.has(projectId)) {
+    const name = projectNameOf(registry, projectId);
+    throw new MemoryResolveError(
+      'project-unbound',
+      `${name} is not available on this machine. Map it with \`stak project map ${projectId} <dir>\` before writing it out. Nothing was written.`,
+    );
+  }
+  return materializeCanonicalProjects(stackHome, discovery, { projectIds: [projectId] });
 };

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   CANONICAL_MAIN_SCHEMA_VERSION,
+  canonicalDigest,
   canonicalGitIdentity,
   emptyRegistry,
   encodeClaudeProjectKey,
@@ -46,7 +47,11 @@ import {
 import { renderCombinedPullResult } from '../ui/cloud.js';
 import {
   canonicalMemoryStatus,
+  diffPendingConflict,
+  listPendingConflicts,
   materializeCanonicalProjects,
+  materializeMemory,
+  resolvePendingConflict,
   migrateWithProjectionSeed,
   pullMemoryViaCanonical,
   pushMemoryViaCanonical,
@@ -1945,5 +1950,513 @@ describe('Task 13 fix round 5', () => {
     const pushed = await pushMemoryViaCanonical(deps(homeX, backend, keysX), { claudeHome: claudeX });
     expect(pushed.status).toBe('conflict');
     expect((await backend.getLatest())?.generation).toBe(2);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Task 14: `stak memory resolve` / `diff` / `materialize`                     */
+/* -------------------------------------------------------------------------- */
+
+describe('Task 14: resolve / diff / materialize', () => {
+  const secureKeys = (dir: string) =>
+    fileLocalMemoryKeyStore(dir, {
+      harden: () => Promise.resolve(true),
+      verify: () => Promise.resolve(true),
+    });
+  const fakeBackup = (): Promise<BackupResult> =>
+    Promise.resolve({ provider: 'claude', files: 0, projects: 0, createdAt: '2026-10-23T00:00:00.000Z' });
+
+  type Machine = { home: string; claude: string; dir: string; keys: string };
+  const machine = async (tag: string): Promise<Machine> => {
+    const m = {
+      home: path.join(root, `${tag}-stack`),
+      claude: path.join(root, `${tag}-claude`),
+      dir: path.join(root, `${tag}-proj`),
+      keys: path.join(root, `${tag}-keys`),
+    };
+    await mkdir(m.dir, { recursive: true });
+    return m;
+  };
+  const depsOf = (m: Machine, backend: RemoteMemoryBackend | null, keys = m.keys) => ({
+    stackHome: m.home,
+    backend,
+    localKeyStore: secureKeys(keys),
+    runLocalBackup: fakeBackup,
+  });
+  const discoveryOf = (m: Machine) => ({ claudeHome: m.claude });
+  const bindAt = async (m: Machine, fixedProjectId?: string) => {
+    let registry = await readLocalRegistry(m.home);
+    const minted = resolveOrMintProject(
+      registry,
+      { kind: 'local', vendorKey: `v-${path.basename(m.home)}` },
+      fixedProjectId ? () => fixedProjectId : mintProjectId,
+    );
+    registry = setBinding(minted.registry, { projectId: minted.projectId, dir: m.dir, boundAt: '2026-10-23T00:00:00.000Z', provenance: 'user-map' });
+    await writeLocalRegistry(m.home, registry);
+    return minted.projectId;
+  };
+  const nativeOf = (m: Machine, name = 'MEMORY.md') =>
+    path.join(m.claude, 'projects', encodeClaudeProjectKey(path.resolve(m.dir)), 'memory', name);
+  const writeNative = async (m: Machine, body: string, name = 'MEMORY.md') => {
+    await mkdir(path.dirname(nativeOf(m, name)), { recursive: true });
+    await writeFile(nativeOf(m, name), body, 'utf8');
+  };
+  const removeNative = async (m: Machine, name = 'MEMORY.md') => rm(nativeOf(m, name), { force: true });
+  const stage = (m: Machine) => stageCanonicalMemory(m.home, discoveryOf(m));
+  const push = (m: Machine, backend: RemoteMemoryBackend | null, keys?: string) =>
+    pushMemoryViaCanonical(depsOf(m, backend, keys), discoveryOf(m));
+  const pull = (m: Machine, backend: RemoteMemoryBackend | null) => pullMemoryViaCanonical(depsOf(m, backend), discoveryOf(m));
+  /** Drop `notes/MEMORY.md` from a machine's canonical main entirely ("absent", not a tombstone). */
+  const dropFromMain = async (m: Machine) => {
+    const main = await readCanonicalMain(m.home);
+    await writeCanonicalMain(m.home, {
+      ...main,
+      projects: main.projects.map((p) => ({ ...p, documents: p.documents.filter((d) => d.path !== 'notes/MEMORY.md') })),
+    });
+  };
+  const canonicalFile = (m: Machine, name: string) => path.join(m.home, 'memory', 'canonical', name);
+  const mergePath = (m: Machine) => canonicalFile(m, 'merge.json');
+  const docAt = async (m: Machine, projectId: string, docPath = 'notes/MEMORY.md') =>
+    (await readCanonicalMain(m.home)).projects.find((p) => p.projectId === projectId)?.documents.find((d) => d.path === docPath);
+  const hashOf = (body: string) => hashBytes(Buffer.from(body, 'utf8'));
+  const present = (body: string) => ({ state: 'present', contentHash: hashOf(body) });
+  const deleted = (body: string) => ({ state: 'deleted', lastContentHash: hashOf(body) });
+
+  /** X (the "Cloud" side) and Y (the "local" side) share one project. Both
+   * start synced at `notes/MEMORY.md` = "a" (generation 0). `notes/keep.md`
+   * is there so deleting MEMORY.md is a real deletion, not an emptied memory
+   * folder (which the mass-delete guard treats as "not materialized"). */
+  const synced = async (tag: string) => {
+    const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), `t14-${tag}`);
+    const X = await machine(`${tag}-x`);
+    const Y = await machine(`${tag}-y`);
+    const projectId = await bindAt(X);
+    await bindAt(Y, projectId);
+    await writeNative(X, 'kept', 'keep.md');
+    await writeNative(X, 'a');
+    await stage(X);
+    expect((await push(X, backend)).status).toBe('pushed');
+    await pull(Y, backend);
+    expect(await readFile(nativeOf(Y), 'utf8')).toBe('a');
+    return { backend, X, Y, projectId };
+  };
+
+  type SideChange = 'edit' | 'delete' | 'edit-then-delete' | 'absent';
+  const change = async (m: Machine, kind: SideChange, body: string) => {
+    if (kind === 'edit') {
+      await writeNative(m, body);
+      await stage(m);
+    } else if (kind === 'delete') {
+      await removeNative(m);
+      await stage(m);
+    } else if (kind === 'edit-then-delete') {
+      await writeNative(m, body);
+      await stage(m);
+      await removeNative(m);
+      await stage(m);
+    } else {
+      await dropFromMain(m);
+    }
+  };
+
+  /** The Cloud side (X) changes and pushes generation 1; the local side (Y) changes and its push conflicts. */
+  const conflicted = async (tag: string, cloud: SideChange, local: SideChange) => {
+    const s = await synced(tag);
+    await change(s.X, cloud, 'c');
+    expect((await push(s.X, s.backend)).status).toBe('pushed');
+    await change(s.Y, local, 'b');
+    const pushedY = await push(s.Y, s.backend);
+    expect(pushedY.status).toBe('conflict');
+    return s;
+  };
+
+  type Expected = { state: string; contentHash?: string; lastContentHash?: string };
+  const cases: {
+    name: string;
+    cloud: SideChange;
+    local: SideChange;
+    reason: string;
+    expected: Record<'local' | 'cloud' | 'both', Expected>;
+    bothAlt?: { state: string; contentHash: string };
+  }[] = [
+    {
+      name: 'edit-edit',
+      cloud: 'edit',
+      local: 'edit',
+      reason: 'edit-edit',
+      expected: { local: present('b'), cloud: present('c'), both: present('c') },
+      bothAlt: present('b'),
+    },
+    {
+      name: 'edit-delete, local edited, Cloud tombstone',
+      cloud: 'delete',
+      local: 'edit',
+      reason: 'edit-delete',
+      expected: { local: present('b'), cloud: deleted('a'), both: present('b') },
+    },
+    {
+      name: 'edit-delete, local tombstone, Cloud edited',
+      cloud: 'edit',
+      local: 'delete',
+      reason: 'edit-delete',
+      expected: { local: deleted('a'), cloud: present('c'), both: present('c') },
+    },
+    {
+      name: 'edit-delete, local edited, Cloud absent',
+      cloud: 'absent',
+      local: 'edit',
+      reason: 'edit-delete',
+      // keep cloud = the deletion: a tombstone of the content it deletes (local's).
+      expected: { local: present('b'), cloud: deleted('b'), both: present('b') },
+    },
+    {
+      name: 'edit-delete, local absent, Cloud edited',
+      cloud: 'edit',
+      local: 'absent',
+      reason: 'edit-delete',
+      // keep local = the deletion: a tombstone carrying Cloud's hash, so it propagates.
+      expected: { local: deleted('c'), cloud: present('c'), both: present('c') },
+    },
+    {
+      name: 'delete-delete, differing tombstones',
+      cloud: 'edit-then-delete',
+      local: 'edit-then-delete',
+      reason: 'delete-delete',
+      expected: { local: deleted('b'), cloud: deleted('c'), both: deleted('c') },
+    },
+    {
+      name: 'delete-delete, local absent, Cloud tombstone',
+      cloud: 'delete',
+      local: 'absent',
+      reason: 'delete-delete',
+      expected: { local: deleted('a'), cloud: deleted('a'), both: deleted('a') },
+    },
+    {
+      name: 'delete-delete, local tombstone, Cloud absent',
+      cloud: 'absent',
+      local: 'delete',
+      reason: 'delete-delete',
+      expected: { local: deleted('a'), cloud: deleted('a'), both: deleted('a') },
+    },
+  ];
+  const bodyOf = (hash: string | undefined) =>
+    ['a', 'b', 'c'].find((body) => hashOf(body) === hash);
+
+  let caseIndex = 0;
+  for (const c of cases)
+    for (const keep of ['local', 'cloud', 'both'] as const) {
+      caseIndex += 1;
+      const tag = `m${caseIndex}`;
+      it(`${c.name}: keep ${keep}`, async () => {
+        const { backend, X, Y, projectId } = await conflicted(tag, c.cloud, c.local);
+        expect(await listPendingConflicts(Y.home)).toEqual([
+          expect.objectContaining({ projectId, path: 'notes/MEMORY.md', reason: c.reason }),
+        ]);
+        const generationsBefore = (await backend.listGenerations()).length;
+
+        const outcome = await resolvePendingConflict(depsOf(Y, backend), discoveryOf(Y), projectId, 'notes/MEMORY.md', keep);
+        expect(outcome.remaining).toBe(0);
+
+        // Main holds the chosen document state; merge.json is gone; base is r with Cloud's content at r.
+        expect(await docAt(Y, projectId)).toMatchObject(c.expected[keep]);
+        expect(await exists(mergePath(Y))).toBe(false);
+        const base = await readCanonicalBase(Y.home);
+        expect(base?.generation).toBe(1);
+        expect(base?.main).toEqual(
+          (await fetchRemoteCanonical({ backend, localRegistry: await readLocalRegistry(Y.home), generation: 1 }))?.main,
+        );
+
+        if (keep === 'both' && c.bothAlt) {
+          const hex = c.bothAlt.contentHash.slice('sha256:'.length);
+          expect(outcome.altPath).toBe(`notes/MEMORY.conflict-${hex.slice(0, 12)}.md`);
+          expect(await docAt(Y, projectId, outcome.altPath)).toMatchObject(c.bothAlt);
+          // Materialized: the original path holds Cloud's version, the alt path local's.
+          expect(await readFile(nativeOf(Y), 'utf8')).toBe('c');
+          expect(await readFile(nativeOf(Y, path.posix.basename(outcome.altPath ?? '')), 'utf8')).toBe('b');
+        } else {
+          expect(outcome.altPath).toBeUndefined();
+          const docs = (await readCanonicalMain(Y.home)).projects.find((p) => p.projectId === projectId)?.documents ?? [];
+          expect(docs.some((d) => d.path.includes('.conflict-'))).toBe(false);
+          // The native file reflects the resolved state.
+          const expected = c.expected[keep];
+          if (expected.state === 'present') expect(await readFile(nativeOf(Y), 'utf8')).toBe(bodyOf(expected.contentHash));
+          else expect(await exists(nativeOf(Y))).toBe(false);
+        }
+
+        // The next push goes against r: no conflict, at most one generation, Cloud = local.
+        const pushed = await push(Y, backend);
+        expect(['pushed', 'up-to-date']).toContain(pushed.status);
+        const localMain = await readCanonicalMain(Y.home);
+        const cloudNow = await fetchRemoteCanonical({ backend, localRegistry: await readLocalRegistry(Y.home) });
+        expect(cloudNow && canonicalDigest(cloudNow.main)).toBe(canonicalDigest(localMain));
+        expect((await backend.listGenerations()).length - generationsBefore).toBe(pushed.status === 'pushed' ? 1 : 0);
+        // And the other machine pulls the resolution with no conflict.
+        expect((await pull(X, backend)).status).not.toBe('conflict');
+      });
+    }
+
+  it('C2: resolve keep local, then push: exactly one generation, no conflict reappears, Cloud holds the resolution', async () => {
+    const { backend, Y, projectId } = await conflicted('c2ff', 'edit', 'edit');
+    const before = (await backend.listGenerations()).length;
+    await resolvePendingConflict(depsOf(Y, backend), discoveryOf(Y), projectId, 'notes/MEMORY.md', 'local');
+    const pushed = await push(Y, backend);
+    expect(pushed.status).toBe('pushed');
+    expect(pushed.conflicts ?? []).toEqual([]);
+    expect((await backend.listGenerations()).length).toBe(before + 1);
+    const cloud = await fetchRemoteCanonical({ backend, localRegistry: await readLocalRegistry(Y.home) });
+    expect(cloud?.main.projects[0]?.documents.find((d) => d.path === 'notes/MEMORY.md')).toMatchObject(present('b'));
+    // A second push is a no-op.
+    expect((await push(Y, backend)).status).toBe('up-to-date');
+    expect((await backend.listGenerations()).length).toBe(before + 1);
+  });
+
+  it("C2: Cloud moves to r' after the resolution (a different file): the push re-merges against base r cleanly, one generation", async () => {
+    const { backend, X, Y, projectId } = await conflicted('c2moved', 'edit', 'edit');
+    await resolvePendingConflict(depsOf(Y, backend), discoveryOf(Y), projectId, 'notes/MEMORY.md', 'local');
+    await writeNative(X, 'x other', 'other.md');
+    await stage(X);
+    expect((await push(X, backend)).status).toBe('pushed');
+    const before = (await backend.listGenerations()).length;
+    const pushed = await push(Y, backend);
+    expect(pushed.status).toBe('pushed');
+    expect((await backend.listGenerations()).length).toBe(before + 1);
+    expect(await docAt(Y, projectId)).toMatchObject(present('b'));
+    expect(await docAt(Y, projectId, 'notes/other.md')).toMatchObject(present('x other'));
+  });
+
+  it('C2 / spec 8.3: Cloud changes the SAME document again after the resolution: a fresh conflict, never a blind replay', async () => {
+    const { backend, X, Y, projectId } = await conflicted('c2again', 'edit', 'edit');
+    await resolvePendingConflict(depsOf(Y, backend), discoveryOf(Y), projectId, 'notes/MEMORY.md', 'local');
+    await writeNative(X, 'd');
+    await stage(X);
+    expect((await push(X, backend)).status).toBe('pushed');
+    const before = (await backend.listGenerations()).length;
+    const pushed = await push(Y, backend);
+    expect(pushed.status).toBe('conflict');
+    expect(pushed.conflicts?.map((c) => c.path)).toEqual(['notes/MEMORY.md']);
+    expect((await backend.listGenerations()).length).toBe(before);
+  });
+
+  it('C2: with two conflicts, resolving one only updates merge.json (main and base untouched); resolving the last finalizes', async () => {
+    const s = await synced('c2partial');
+    await writeNative(s.X, 'a2', 'two.md');
+    await stage(s.X);
+    expect((await push(s.X, s.backend)).status).toBe('pushed');
+    await pull(s.Y, s.backend);
+    await writeNative(s.X, 'c');
+    await writeNative(s.X, 'c2', 'two.md');
+    await stage(s.X);
+    expect((await push(s.X, s.backend)).status).toBe('pushed');
+    await writeNative(s.Y, 'b');
+    await writeNative(s.Y, 'b2', 'two.md');
+    await stage(s.Y);
+    expect((await push(s.Y, s.backend)).status).toBe('conflict');
+    expect((await listPendingConflicts(s.Y.home)).map((c) => c.path)).toEqual(['notes/MEMORY.md', 'notes/two.md']);
+
+    const mainBefore = await readFile(canonicalFile(s.Y, 'main.json'), 'utf8');
+    const baseBefore = await readFile(canonicalFile(s.Y, 'base.json'), 'utf8');
+    const first = await resolvePendingConflict(depsOf(s.Y, s.backend), discoveryOf(s.Y), s.projectId, 'notes/MEMORY.md', 'cloud');
+    expect(first.remaining).toBe(1);
+    expect(await readFile(canonicalFile(s.Y, 'main.json'), 'utf8')).toBe(mainBefore);
+    expect(await readFile(canonicalFile(s.Y, 'base.json'), 'utf8')).toBe(baseBefore);
+    expect(await readFile(nativeOf(s.Y), 'utf8')).toBe('b'); // nothing materialized yet
+    expect((await listPendingConflicts(s.Y.home)).map((c) => c.path)).toEqual(['notes/two.md']);
+
+    const last = await resolvePendingConflict(depsOf(s.Y, s.backend), discoveryOf(s.Y), s.projectId, 'notes/two.md', 'local');
+    expect(last.remaining).toBe(0);
+    expect(await docAt(s.Y, s.projectId)).toMatchObject(present('c'));
+    expect(await docAt(s.Y, s.projectId, 'notes/two.md')).toMatchObject(present('b2'));
+    expect(await readFile(nativeOf(s.Y), 'utf8')).toBe('c');
+    expect(await exists(mergePath(s.Y))).toBe(false);
+    const pushed = await push(s.Y, s.backend);
+    expect(pushed.status).toBe('pushed');
+  });
+
+  it('accepts a unique Project ID prefix (like `stak project`) and rejects an unknown conflict path', async () => {
+    const { backend, Y, projectId } = await conflicted('prefix', 'edit', 'edit');
+    await expect(
+      resolvePendingConflict(depsOf(Y, backend), discoveryOf(Y), projectId, 'notes/nope.md', 'local'),
+    ).rejects.toThrow(/No pending Memory conflict/);
+    const outcome = await resolvePendingConflict(depsOf(Y, backend), discoveryOf(Y), projectId.slice(0, 10), 'notes/MEMORY.md', 'local');
+    expect(outcome.projectId).toBe(projectId);
+  });
+
+  it('no pending merge: resolve and diff say so, listing is empty', async () => {
+    const { backend, Y, projectId } = await synced('none');
+    expect(await listPendingConflicts(Y.home)).toEqual([]);
+    await expect(
+      resolvePendingConflict(depsOf(Y, backend), discoveryOf(Y), projectId, 'notes/MEMORY.md', 'local'),
+    ).rejects.toThrow(/No pending Memory conflicts/);
+    await expect(diffPendingConflict(depsOf(Y, backend), projectId, 'notes/MEMORY.md')).rejects.toThrow(/No pending Memory conflicts/);
+  });
+
+  describe('C4: fail closed on the Cloud side (nothing changes)', () => {
+    const snapshot = async (m: Machine) => ({
+      main: await readFile(canonicalFile(m, 'main.json'), 'utf8'),
+      base: await readFile(canonicalFile(m, 'base.json'), 'utf8'),
+      merge: await readFile(mergePath(m), 'utf8'),
+      native: await readFile(nativeOf(m), 'utf8'),
+    });
+
+    it('not signed in', async () => {
+      const { Y, projectId } = await conflicted('c4out', 'delete', 'edit');
+      const before = await snapshot(Y);
+      await expect(
+        resolvePendingConflict(depsOf(Y, null), discoveryOf(Y), projectId, 'notes/MEMORY.md', 'cloud'),
+      ).rejects.toThrow(/Not signed in/);
+      await expect(diffPendingConflict(depsOf(Y, null), projectId, 'notes/MEMORY.md')).rejects.toThrow(/Not signed in/);
+      expect(await snapshot(Y)).toEqual(before);
+    });
+
+    it('Protected and locked on this device', async () => {
+      const { backend, Y, projectId } = await conflicted('c4locked', 'delete', 'edit');
+      await backend.setPrivacyMode('protected');
+      const before = await snapshot(Y);
+      await expect(
+        resolvePendingConflict(depsOf(Y, backend), discoveryOf(Y), projectId, 'notes/MEMORY.md', 'cloud'),
+      ).rejects.toThrow(/locked/);
+      expect(await snapshot(Y)).toEqual(before);
+    });
+
+    it('generation r retired with no replica (Delete Cloud Memory)', async () => {
+      const { backend, Y, projectId } = await conflicted('c4retired', 'delete', 'edit');
+      for (const backupId of await backend.listAllBackupIds()) await backend.retireGeneration(backupId);
+      const before = await snapshot(Y);
+      await expect(
+        resolvePendingConflict(depsOf(Y, backend), discoveryOf(Y), projectId, 'notes/MEMORY.md', 'cloud'),
+      ).rejects.toThrow(/no longer has/);
+      await expect(diffPendingConflict(depsOf(Y, backend), projectId, 'notes/MEMORY.md')).rejects.toThrow(/no longer has/);
+      expect(await snapshot(Y)).toEqual(before);
+    });
+
+    it('C5: resolve and diff read exactly generation r, never latest', async () => {
+      const { backend, X, Y, projectId } = await conflicted('c5exact', 'edit', 'edit');
+      await writeNative(X, 'newer');
+      await stage(X);
+      expect((await push(X, backend)).status).toBe('pushed');
+      const diff = await diffPendingConflict(depsOf(Y, backend), projectId, 'notes/MEMORY.md');
+      expect(diff.cloud).toEqual({ state: 'present', text: 'c' });
+      await resolvePendingConflict(depsOf(Y, backend), discoveryOf(Y), projectId, 'notes/MEMORY.md', 'cloud');
+      expect(await docAt(Y, projectId)).toMatchObject(present('c'));
+      // The resolution belongs to r; Cloud's newer change is one-sided since r and merges in cleanly.
+      const pushed = await push(Y, backend);
+      expect(pushed.status).toBe('up-to-date');
+      expect(await docAt(Y, projectId)).toMatchObject(present('newer'));
+    });
+
+    it('generation r retired by `stak memory protect`: its committed Protected replica is read', async () => {
+      const { backend, X, Y, projectId } = await conflicted('c4replica', 'edit', 'edit');
+      expect(
+        (await runMemoryCloudProtect({ ...depsOf(X, backend), backend }, { recoveryKey: generateRecoveryKey() })).status,
+      ).toBe('protected');
+      expect(await backend.getGeneration(1)).toBeNull();
+      // Y uses a device key store that can unlock the account (the same one as X).
+      const outcome = await resolvePendingConflict(depsOf(Y, backend, X.keys), discoveryOf(Y), projectId, 'notes/MEMORY.md', 'cloud');
+      expect(outcome.remaining).toBe(0);
+      expect(await docAt(Y, projectId)).toMatchObject(present('c'));
+      expect((await readCanonicalBase(Y.home))?.generation).toBe(1);
+      expect((await push(Y, backend, X.keys)).status).not.toBe('conflict');
+    });
+  });
+
+  it('a pending merge made stale by a later `stak add .` is refused (nothing changes); push re-merges, then it resolves', async () => {
+    const { backend, Y, projectId } = await conflicted('stale', 'edit', 'edit');
+    await writeNative(Y, 'staged later', 'later.md');
+    await stage(Y);
+    const mainBefore = await readFile(canonicalFile(Y, 'main.json'), 'utf8');
+    await expect(
+      resolvePendingConflict(depsOf(Y, backend), discoveryOf(Y), projectId, 'notes/MEMORY.md', 'local'),
+    ).rejects.toThrow(/changed since this merge/);
+    expect(await readFile(canonicalFile(Y, 'main.json'), 'utf8')).toBe(mainBefore);
+    expect(await exists(mergePath(Y))).toBe(true);
+    expect((await push(Y, backend)).status).toBe('conflict');
+    const outcome = await resolvePendingConflict(depsOf(Y, backend), discoveryOf(Y), projectId, 'notes/MEMORY.md', 'local');
+    expect(outcome.remaining).toBe(0);
+    expect(await docAt(Y, projectId, 'notes/later.md')).toMatchObject(present('staged later'));
+  });
+
+  it('C6: when materialize refuses a write (native edited since), the resolution is still recorded and the refusal reported', async () => {
+    const { backend, Y, projectId } = await conflicted('c6', 'edit', 'edit');
+    await writeNative(Y, 'edited natively, not added');
+    const outcome = await resolvePendingConflict(depsOf(Y, backend), discoveryOf(Y), projectId, 'notes/MEMORY.md', 'cloud');
+    expect(outcome.remaining).toBe(0);
+    expect(await docAt(Y, projectId)).toMatchObject(present('c'));
+    expect(await exists(mergePath(Y))).toBe(false);
+    expect(await readFile(nativeOf(Y), 'utf8')).toBe('edited natively, not added');
+    expect(outcome.materialize?.conflicts.map((c) => c.path)).toContain('notes/MEMORY.md');
+  });
+
+  describe('diffPendingConflict (C7)', () => {
+    it('shows both sides as text', async () => {
+      const { backend, Y, projectId } = await conflicted('difftext', 'edit', 'edit');
+      const diff = await diffPendingConflict(depsOf(Y, backend), projectId, 'notes/MEMORY.md');
+      expect(diff).toMatchObject({ projectId, path: 'notes/MEMORY.md', reason: 'edit-edit', generation: 1 });
+      expect(diff.local).toEqual({ state: 'present', text: 'b' });
+      expect(diff.cloud).toEqual({ state: 'present', text: 'c' });
+    });
+    it('a tombstone side is "deleted", never empty text', async () => {
+      const { backend, Y, projectId } = await conflicted('diffdel', 'delete', 'edit');
+      const diff = await diffPendingConflict(depsOf(Y, backend), projectId, 'notes/MEMORY.md');
+      expect(diff.local).toEqual({ state: 'present', text: 'b' });
+      expect(diff.cloud).toEqual({ state: 'deleted' });
+    });
+    it('a missing side is "absent"', async () => {
+      const { backend, Y, projectId } = await conflicted('diffabs', 'edit', 'absent');
+      const diff = await diffPendingConflict(depsOf(Y, backend), projectId, 'notes/MEMORY.md');
+      expect(diff.local).toEqual({ state: 'absent' });
+      expect(diff.cloud).toEqual({ state: 'present', text: 'c' });
+    });
+  });
+
+  describe('materializeMemory', () => {
+    it('no args: rebuilds a deleted native folder for every located project', async () => {
+      const { Y } = await synced('matall');
+      await rm(path.join(Y.claude, 'projects'), { recursive: true, force: true });
+      const outcome = await materializeMemory(Y.home, discoveryOf(Y));
+      expect(outcome.written).toBe(2);
+      expect(await readFile(nativeOf(Y), 'utf8')).toBe('a');
+    });
+
+    it('one project: written; a native edit not yet added is never overwritten (N = P rule)', async () => {
+      const { Y, projectId } = await synced('matone');
+      await rm(path.join(Y.claude, 'projects'), { recursive: true, force: true });
+      expect((await materializeMemory(Y.home, discoveryOf(Y), { project: projectId })).written).toBe(2);
+      expect(await readFile(nativeOf(Y), 'utf8')).toBe('a');
+      await writeNative(Y, 'edited here');
+      const again = await materializeMemory(Y.home, discoveryOf(Y), { project: projectId });
+      expect(again.written).toBe(0);
+      expect(await readFile(nativeOf(Y), 'utf8')).toBe('edited here');
+    });
+
+    it('one project: a native file edited since while STAK Memory also changed is reported, never overwritten', async () => {
+      const { backend, X, Y, projectId } = await synced('matguard');
+      await writeNative(X, 'from X');
+      await stage(X);
+      expect((await push(X, backend)).status).toBe('pushed');
+      await writeNative(Y, 'edited on Y');
+      expect((await pull(Y, backend)).status).toBe('merged'); // canonical takes X's edit; native refused
+      const outcome = await materializeMemory(Y.home, discoveryOf(Y), { project: projectId });
+      expect(outcome.conflicts.map((c) => c.path)).toContain('notes/MEMORY.md');
+      expect(await readFile(nativeOf(Y), 'utf8')).toBe('edited on Y');
+    });
+
+    it('a project not on this machine fails with "not available on this machine" and writes nothing', async () => {
+      const { Y, projectId } = await synced('matunbound');
+      await writeLocalRegistry(Y.home, emptyRegistry());
+      await rm(path.join(Y.claude, 'projects'), { recursive: true, force: true });
+      await expect(materializeMemory(Y.home, discoveryOf(Y), { project: projectId })).rejects.toThrow(
+        /not available on this machine/,
+      );
+      expect(await exists(nativeOf(Y))).toBe(false);
+      // No-arg materialize reports it as unavailable instead, the same way push/pull do.
+      const all = await materializeMemory(Y.home, discoveryOf(Y));
+      expect(all.unavailable.map((p) => p.projectId)).toEqual([projectId]);
+      expect(await exists(nativeOf(Y))).toBe(false);
+    });
+
+    it('an unknown project selector is rejected', async () => {
+      const { Y } = await synced('matunknown');
+      await expect(materializeMemory(Y.home, discoveryOf(Y), { project: 'prj_doesnotexist' })).rejects.toThrow(/No project matches/);
+    });
   });
 });

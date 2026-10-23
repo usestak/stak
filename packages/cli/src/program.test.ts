@@ -1864,8 +1864,116 @@ describe('STAK CLI', () => {
       'recover',
       'status',
       'restore',
+      'resolve',
+      'diff',
+      'materialize',
     ])
       expect(result.output).toContain(sub);
+  });
+
+  describe('stak memory resolve / diff / materialize (Task 14)', () => {
+    const conflict = {
+      projectId: 'prj_abc123',
+      name: 'demo',
+      path: 'notes/MEMORY.md',
+      reason: 'edit-edit',
+    };
+
+    it('resolve with no arguments lists pending conflicts', async () => {
+      const listed = await runProgram(['memory', 'resolve'], {
+        memoryListConflicts: async () => [conflict],
+      });
+      expect(listed.output).toContain('1 pending Memory conflict(s)');
+      expect(listed.output).toContain('prj_abc123  demo  notes/MEMORY.md  (edit-edit)');
+      expect(listed.output).toContain('--keep local|cloud|both');
+      const none = await runProgram(['memory', 'resolve'], {
+        memoryListConflicts: async () => [],
+      });
+      expect(none.output).toContain('No pending Memory conflicts.');
+    });
+
+    it('resolve passes project, path and side through, and reports keep-both paths', async () => {
+      let seen: unknown;
+      const result = await runProgram(
+        ['memory', 'resolve', 'prj_abc', 'notes/MEMORY.md', '--keep', 'both'],
+        {
+          memoryResolveConflict: async (options) => {
+            seen = options;
+            return {
+              projectId: 'prj_abc123',
+              name: 'demo',
+              path: 'notes/MEMORY.md',
+              keep: 'both',
+              state: 'present',
+              altPath: 'notes/MEMORY.conflict-0123456789ab.md',
+              remaining: 0,
+              materialize: { materialized: 1, unavailable: [], conflicts: [], written: 2, deleted: 0 },
+            };
+          },
+        },
+      );
+      expect(seen).toEqual({ project: 'prj_abc', path: 'notes/MEMORY.md', keep: 'both' });
+      expect(result.output).toContain(
+        "kept both: Cloud's version at notes/MEMORY.md, yours at notes/MEMORY.conflict-0123456789ab.md",
+      );
+      expect(result.output).toContain('All Memory conflicts resolved. Run `stak push` to publish.');
+    });
+
+    it('resolve requires a valid --keep side', async () => {
+      await expect(
+        runProgram(['memory', 'resolve', 'prj_abc', 'notes/MEMORY.md'], {
+          memoryResolveConflict: async () => {
+            throw new Error('must not be called');
+          },
+        }),
+      ).rejects.toThrow(/--keep local, --keep cloud, or --keep both/);
+      await expect(
+        runProgram(['memory', 'resolve', 'prj_abc', 'notes/MEMORY.md', '--keep', 'mine']),
+      ).rejects.toThrow(/--keep local, --keep cloud, or --keep both/);
+    });
+
+    it('diff shows a deleted or absent side explicitly, never as empty text', async () => {
+      const result = await runProgram(['memory', 'diff', 'prj_abc', 'notes/MEMORY.md'], {
+        memoryDiffConflict: async () => ({
+          ...conflict,
+          generation: 4,
+          local: { state: 'present', text: 'local text' },
+          cloud: { state: 'deleted' },
+        }),
+      });
+      expect(result.output).toContain('--- local ---\nlocal text\n--- cloud ---\n(deleted)\n');
+      const absent = await runProgram(['memory', 'diff', 'prj_abc', 'notes/MEMORY.md'], {
+        memoryDiffConflict: async () => ({
+          ...conflict,
+          generation: 4,
+          local: { state: 'absent' },
+          cloud: { state: 'present', text: '' },
+        }),
+      });
+      expect(absent.output).toContain('--- local ---\n(absent)\n--- cloud ---\n\n');
+    });
+
+    it('materialize reports counts and unavailable projects; only --agent claude is accepted', async () => {
+      let seen: unknown;
+      const result = await runProgram(['memory', 'materialize', '--agent', 'claude'], {
+        memoryMaterialize: async (options) => {
+          seen = options;
+          return {
+            materialized: 1,
+            unavailable: [{ projectId: 'prj_x', name: 'elsewhere' }],
+            conflicts: [],
+            written: 3,
+            deleted: 1,
+          };
+        },
+      });
+      expect(seen).toEqual({});
+      expect(result.output).toContain('Materialized Memory for 1 project(s): 3 file(s) written, 1 removed.');
+      expect(result.output).toContain('1 project(s) not available on this machine (elsewhere)');
+      await expect(runProgram(['memory', 'materialize', '--agent', 'cursor'])).rejects.toThrow(
+        /Only claude is supported/,
+      );
+    });
   });
 
   const scanItems = [

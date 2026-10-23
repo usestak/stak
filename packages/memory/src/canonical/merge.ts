@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import {
   CANONICAL_MAIN_SCHEMA_VERSION,
+  canonicalMainManifestSchema,
   type CanonicalDoc,
   type CanonicalMainManifest,
   type CanonicalProjectMemory,
@@ -18,6 +19,28 @@ export const mergeConflictSchema = z.object({
   path: z.string(),
   reason: z.enum(['edit-edit', 'edit-delete', 'delete-delete']),
 });
+
+/** One conflict already resolved by `stak memory resolve` while others remain
+ * (Task 14) — kept so a later resolve can prove the pending merge still matches
+ * local Memory and the sync base before applying anything. */
+export const pendingMergeResolutionSchema = z.object({
+  projectId: z.string(),
+  path: z.string(),
+  keep: z.enum(['local', 'cloud', 'both']),
+  altPath: z.string().optional(),
+});
+export type PendingMergeResolution = z.infer<typeof pendingMergeResolutionSchema>;
+
+/** `canonical/merge.json` (spec Appendix A.1): written by push/pull on a
+ * conflict as `{ basedOnGeneration, merged, conflicts }`; `resolved` is added
+ * only by a partial `stak memory resolve`. */
+export const pendingMergeSchema = z.object({
+  basedOnGeneration: z.number().int().nonnegative(),
+  merged: canonicalMainManifestSchema,
+  conflicts: z.array(mergeConflictSchema),
+  resolved: z.array(pendingMergeResolutionSchema).optional(),
+});
+export type PendingMerge = z.infer<typeof pendingMergeSchema>;
 
 export type MergeOutcome = {
   merged: CanonicalMainManifest;

@@ -110,7 +110,11 @@ import { registerOpenCommand } from './commands/open.js';
 import { stackCloudRemoteMemoryBackend } from './memory/cloud-backend.js';
 import {
   canonicalMemoryStatus,
+  diffPendingConflict,
+  listPendingConflicts,
+  materializeMemory,
   migrateWithProjectionSeed,
+  resolvePendingConflict,
   pullMemoryViaCanonical,
   pushMemoryViaCanonical,
   stageCanonicalMemory,
@@ -139,7 +143,10 @@ import {
   type PasskeyRecoverResult,
 } from './memory/cloud-ops.js';
 import { defaultOpenBrowser } from './cloud/operations.js';
-import type { MemoryProtectCommandResult } from './commands/memory.js';
+import type {
+  MemoryCommandDependencies,
+  MemoryProtectCommandResult,
+} from './commands/memory.js';
 import type { MemoryBackupPreview } from './ui/memory.js';
 import { resolveScanRoots, scanSkills } from '@stack/scanner';
 import { isPublicStackRef } from '@stack/spec';
@@ -363,6 +370,10 @@ export type ProgramDependencies = {
     generation?: number;
   }): Promise<PasskeyRecoverResult>;
   memoryCloudStatus(): Promise<MemoryCloudStatus>;
+  memoryListConflicts?: NonNullable<MemoryCommandDependencies['memoryListConflicts']>;
+  memoryResolveConflict?: NonNullable<MemoryCommandDependencies['memoryResolveConflict']>;
+  memoryDiffConflict?: NonNullable<MemoryCommandDependencies['memoryDiffConflict']>;
+  memoryMaterialize?: NonNullable<MemoryCommandDependencies['memoryMaterialize']>;
   projectList(): Promise<ProjectListRow[]>;
   projectMap(options: {
     project: string;
@@ -1058,6 +1069,24 @@ const defaultDependencies: ProgramDependencies = {
     runMemoryGenerations(await buildMemoryCloudDeps()),
   memoryCloudStatus: async () =>
     readMemoryCloudStatus(await buildMemoryCloudDeps()),
+  // Task 14: `stak memory resolve` / `diff` / `materialize` (spec §5, §8.3).
+  memoryListConflicts: async () => listPendingConflicts(stackHome),
+  memoryResolveConflict: async ({ project, path: docPath, keep }) =>
+    resolvePendingConflict(
+      await buildMemoryCloudDeps(),
+      await memoryDiscoveryOptions(),
+      project,
+      docPath,
+      keep,
+    ),
+  memoryDiffConflict: async ({ project, path: docPath }) =>
+    diffPendingConflict(await buildMemoryCloudDeps(), project, docPath),
+  memoryMaterialize: async ({ project }) =>
+    materializeMemory(
+      stackHome,
+      await memoryDiscoveryOptions(),
+      project !== undefined ? { project } : {},
+    ),
   memoryCloudProtect: async (options) => {
     const deps = await buildMemoryCloudDeps();
     if (!deps.backend) return { status: 'not-authenticated' as const };

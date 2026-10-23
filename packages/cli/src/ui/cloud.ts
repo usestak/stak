@@ -514,7 +514,7 @@ export type PullCanonicalOutcome =
  * there is nothing worth saying (not attempted, or already up to date). */
 /** Unavailable-project and native-conflict notes shared by push's and pull's
  * canonical rendering (Task 13 Important-5) — never silently dropped. */
-const canonicalExtraNotes = (outcome: {
+export const canonicalExtraNotes = (outcome: {
   unavailable?: { projectId: string; name: string }[] | undefined;
   conflicts?: { projectId: string; path: string; reason: string }[] | undefined;
   restoredFromStak?: number | undefined;
