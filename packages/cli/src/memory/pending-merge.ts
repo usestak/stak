@@ -64,7 +64,7 @@ export class MemorySyncError extends StackCompositionError {
   }
 }
 
-/** Spec Â§10 "Merge pending: Resolve the listed conflicts, then push again". */
+/** Spec §10 "Merge pending: Resolve the listed conflicts, then push again". */
 export const mergePendingMessage = (conflicts: readonly { projectId: string; path: string; reason: string }[]): string =>
   [
     `Memory merge pending: ${conflicts.length} unresolved conflict(s).`,
@@ -79,9 +79,9 @@ export const readPending = async (stackHome: string): Promise<PendingMerge | nul
 
 /**
  * Cloud's canonical Memory at EXACTLY `generation` (Task 14 C4/C5: a
- * resolution belongs to the generation its merge was made against â€” never
+ * resolution belongs to the generation its merge was made against — never
  * latest). Fails closed: signed out, Protected-and-locked, a generation that is
- * gone (retired with no Protected replica), or an unreadable one all THROW â€”
+ * gone (retired with no Protected replica), or an unreadable one all THROW —
  * never an empty Cloud, which would turn "keep cloud" into a mass deletion.
  * A generation retired by `stak memory protect` is read from its committed
  * replica (`fetchRemoteCanonical`'s existing mapping). Bundled objects are
@@ -147,11 +147,11 @@ const docsByKey = (main: CanonicalMainManifest): Map<string, CanonicalDoc> => {
  * if local Memory changed since (e.g. `stak add .` staged another edit) or the
  * base moved, finishing it would silently drop that newer local state. So:
  *  1. recompute the same merge and require that it still agrees with the
- *     pending one â€” every clean document identical, and the conflict set
+ *     pending one — every clean document identical, and the conflict set
  *     exactly the pending + already-resolved conflicts;
  *  2. (fix round 1) for every conflict ALREADY resolved, require that local's
  *     document at that path is still exactly the state the resolution was
- *     made against â€” (1) alone cannot see a later edit there, because the
+ *     made against — (1) alone cannot see a later edit there, because the
  *     path is still a conflict either way.
  */
 export const assertPendingMergeCurrent = async (
@@ -192,14 +192,14 @@ export const assertPendingMergeCurrent = async (
 };
 
 /**
- * Spec A.6 / Â§8.2 / Â§10 `merge-pending` gate for push, pull and `stak memory
+ * Spec A.6 / §8.2 / §10 `merge-pending` gate for push, pull and `stak memory
  * backup` (Task 14 fix round 1). Throws `MemorySyncError('merge-pending')`,
  * changing nothing (merge.json and its partial resolutions are kept), when:
  *  - a merge is pending, AND
  *  - Cloud's latest is still the generation it was made against, AND
  *  - it still describes this machine (`assertPendingMergeCurrent`).
  * Otherwise returns, and the caller re-merges exactly as before: Cloud moved
- * on (spec Â§8.3: old decisions are never replayed blindly), or the merge is
+ * on (spec §8.3: old decisions are never replayed blindly), or the merge is
  * stale. Call it BEFORE anything that writes (base seeding, merging).
  */
 export const assertNoCurrentPendingMerge = async (deps: MemoryCloudDeps): Promise<void> => {
