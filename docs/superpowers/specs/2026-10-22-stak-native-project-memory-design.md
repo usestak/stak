@@ -473,6 +473,13 @@ remains for global memory only.
 5. On a `conflict` error from `createGeneration`, go back to step 1 (at most 3
    attempts total), then `cloud-moved-retry-exhausted`.
 
+**Base after the v1 → v2 upgrade (clarification, 2026-10-23).** Local migration seeds
+`base.json` from the Cloud generation this machine last pushed or recovered in v1
+(converted with `convertV1Bundle`), when that generation is known. The first push then
+merges normally against it. If it is not known, B stays empty and differing documents
+surface as conflicts (safe; never silently prefer either side). The Cloud latest is
+never assumed to be this machine's base.
+
 Resolution writes the chosen content into L and sets the merge base to r; a later push
 against r′ > r re-merges (base r, L, R′).
 
