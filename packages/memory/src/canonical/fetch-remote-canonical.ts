@@ -3,7 +3,7 @@ import { unwrapDekWithMmk } from '../remote/mmk.js';
 import { parseBundle } from '../remote/bundle-codec.js';
 import { RemoteMemoryError, type RemoteMemoryBackend } from '../remote/backend.js';
 import { hashBytes } from '../store.js';
-import type { LocalRegistry } from '../project/registry.js';
+import { portableRegistrySnapshotSchema, type LocalRegistry, type PortableRegistrySnapshot } from '../project/registry.js';
 import { convertV1Bundle } from './convert-v1.js';
 import { canonicalMainManifestSchema, emptyCanonicalMain, type CanonicalMainManifest } from './domain.js';
 
@@ -31,12 +31,24 @@ export type RemoteCanonicalObject = { contentHash: string; bytes: Uint8Array };
  * this same already-fetched, already-decrypted bundle. Without this, a
  * cross-machine pull would restore a canonical manifest whose documents point
  * at content that was never written anywhere on the pulling machine.
+ *
+ * Also returns the bundle's portable project-registry snapshot (`registryB64`),
+ * hash-verified, when present — read-only, Task 13 Important-6: a machine that
+ * has never locally learned a project's git claim can still use the SAME
+ * snapshot that traveled with this generation to locate that project's
+ * directory during materialize (never to mint a Project ID or create a
+ * binding — only the local registry does that).
  */
 export const fetchRemoteCanonical = async (options: {
   backend: RemoteMemoryBackend;
   mmk?: Buffer;
   localRegistry: LocalRegistry;
-}): Promise<{ generation: number; main: CanonicalMainManifest; objects: RemoteCanonicalObject[] } | null> => {
+}): Promise<{
+  generation: number;
+  main: CanonicalMainManifest;
+  objects: RemoteCanonicalObject[];
+  registrySnapshot: PortableRegistrySnapshot | undefined;
+} | null> => {
   const meta = await options.backend.getLatest();
   if (!meta) return null;
   const payload = await options.backend.getPayload(meta.backupId);
@@ -63,5 +75,12 @@ export const fetchRemoteCanonical = async (options: {
       throw new RemoteMemoryError('integrity', 'A bundled object does not match its content hash.');
     return { contentHash: object.contentHash, bytes };
   });
-  return { generation: meta.generation, main: main ?? emptyCanonicalMain(), objects };
+  let registrySnapshot: PortableRegistrySnapshot | undefined;
+  if (bundle.registryB64 && bundle.registrySha256) {
+    const registryBytes = Buffer.from(bundle.registryB64, 'base64');
+    if (hashBytes(registryBytes) !== bundle.registrySha256)
+      throw new RemoteMemoryError('integrity', 'The bundled project registry does not match its hash.');
+    registrySnapshot = portableRegistrySnapshotSchema.parse(JSON.parse(registryBytes.toString('utf8')));
+  }
+  return { generation: meta.generation, main: main ?? emptyCanonicalMain(), objects, registrySnapshot };
 };

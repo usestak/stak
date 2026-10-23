@@ -1742,6 +1742,71 @@ describe('STAK CLI', () => {
     expect(out).toContain('stak memory recover');
   });
 
+  it('Task 13 Important-8: a fresh-machine recover attempt that does NOT succeed (Protected locked, network error, …) skips the canonical pull entirely, so the next `stak pull` still auto-recovers', async () => {
+    const applyMemoryPull = vi.fn(async () => ({ status: 'needs-recovery-method' as const }));
+    const applyCanonicalPull = vi.fn(async () => ({ status: 'merged' as const }));
+    // The failed recover itself correctly makes `stak pull` report a partial
+    // failure (unchanged, pre-existing behavior) — this test is only about
+    // whether `applyCanonicalPull` ran, not about the overall exit status.
+    await expect(
+      runProgram(['pull', '--yes'], {
+        cloudPreparePull: async () => basePullPlan,
+        cloudApplyPull: async () => ({
+          status: 'restored',
+          environment: 'main',
+          desiredSkills: 2,
+          importedStackVersions: 1,
+          snapshotsDownloaded: 2,
+          referencesRestored: 0,
+          reusedFromStore: 0,
+          localSnapshotRecords: 2,
+          digest: basePullPlan.remoteDigest ?? `sha256:${'a'.repeat(64)}`,
+        }),
+        // Fresh machine: eligible for auto-recover.
+        memoryPullPreflight: async () => ({ eligible: true }),
+        applyMemoryPull,
+        applyCanonicalPull,
+      }),
+    ).rejects.toThrow('Pull did not fully succeed');
+    expect(applyMemoryPull).toHaveBeenCalledTimes(1);
+    // `applyCanonicalPull`'s own `migrateLocalStore` call writes
+    // `manifests/current.json` (even with zero items) and, eventually, the
+    // migration-complete marker — either of which would make the NEXT
+    // `stak pull` see this machine as already established and never retry the
+    // recover that just failed. It must not even run here.
+    expect(applyCanonicalPull).not.toHaveBeenCalled();
+  });
+
+  it('Task 13 Important-8 (contrast): a SUCCESSFUL fresh-machine recover still runs the canonical pull right after it', async () => {
+    const applyMemoryPull = vi.fn(async () => ({
+      status: 'recovered' as const,
+      privacyMode: 'standard' as const,
+      objects: 1,
+      files: 1,
+      generation: 0,
+    }));
+    const applyCanonicalPull = vi.fn(async () => ({ status: 'up-to-date' as const }));
+    await runProgram(['pull', '--yes'], {
+      cloudPreparePull: async () => basePullPlan,
+      cloudApplyPull: async () => ({
+        status: 'restored',
+        environment: 'main',
+        desiredSkills: 2,
+        importedStackVersions: 1,
+        snapshotsDownloaded: 2,
+        referencesRestored: 0,
+        reusedFromStore: 0,
+        localSnapshotRecords: 2,
+        digest: basePullPlan.remoteDigest ?? `sha256:${'a'.repeat(64)}`,
+      }),
+      memoryPullPreflight: async () => ({ eligible: true }),
+      applyMemoryPull,
+      applyCanonicalPull,
+    });
+    expect(applyMemoryPull).toHaveBeenCalledTimes(1);
+    expect(applyCanonicalPull).toHaveBeenCalledTimes(1);
+  });
+
   it('emits parseable pull dry-run JSON', async () => {
     const result = await runProgram(['pull', '--dry-run', '--json'], {
       cloudPreparePull: async () => basePullPlan,

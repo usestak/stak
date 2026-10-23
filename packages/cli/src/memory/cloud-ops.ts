@@ -21,9 +21,11 @@ import {
   addRecoveryFileWrapper,
   asBridgeFailure,
   bundleFromStore,
+  clearPendingMerge,
   cloudRecover,
   createRecoverySession,
   LocalKeyStoreError,
+  fetchRemoteCanonical,
   generateMmk,
   hashBytes,
   migrateLocalStore,
@@ -31,15 +33,21 @@ import {
   newKeyring,
   openMmkFromEnvelope,
   protectedCloudBackup,
+  pushCanonicalMemory,
+  readCanonicalBase,
   readCanonicalMain,
+  readLocalRegistry,
   resolveProjectForIdentity,
   standardCloudBackup,
   unwrapWithRecoveryKey,
   isHistoricalRecovery,
   readLocalRecoveryState,
   readMemoryManifest,
+  writeCanonicalBase,
   writeCanonicalMain,
   writeLocalRecoveryState,
+  writeMemoryObject,
+  writePendingMerge,
   type BackupResult,
   type CanonicalMainManifest,
   type DiscoveredMemoryItem,
@@ -47,6 +55,7 @@ import {
   type BridgeEnvelope,
   type BridgeFailureReason,
   type LocalMemoryKeyStore,
+  type MergeConflict,
   type MmkKeyring,
   type MmkWrapper,
   type RecoveryKeyArtifacts,
@@ -78,12 +87,39 @@ export type MemoryCloudDeps = {
   fetchProjectNames?: () => Promise<{ projectId: string; name?: string }[]>;
 };
 
+/** Canonical projects not locatable on this machine right now — named (spec
+ * §4.5), never a silent gap (Task 13 Important-5). */
+export type UnavailableCanonicalProject = { projectId: string; name: string };
+/** A native-vs-canonical materialize conflict, or a moved-folder source
+ * conflict, surfaced instead of being silently dropped (Task 13 Important-5). */
+export type CanonicalMaterializeConflict = { projectId: string; path: string; reason: string };
+
 export type CloudBackupOutcome =
   | { status: 'skipped' }
+  /** Nothing has ever been staged on THIS machine (no v1 manifest/`stak add .`
+   * ever ran) AND Cloud has no Memory history at all for this account either —
+   * a pure Skills-only account. Distinct from `skipped` (that means "not signed
+   * in"); this means "nothing to back up yet" (Task 13 Important-7(a)). */
+  | { status: 'nothing-staged' }
   | { status: 'protected-locked' }
   | { status: 'failed'; message: string }
-  | { status: 'standard'; generation: number }
-  | { status: 'protected'; generation: number };
+  | ({ status: 'standard'; generation: number } & CanonicalMaterializeExtras)
+  | ({ status: 'protected'; generation: number } & CanonicalMaterializeExtras)
+  /** Cloud already has exactly this machine's canonical Memory — no new
+   * generation was created (Task 13 Critical-3: `stak memory backup` merges
+   * like `stak push` now, so it can genuinely be a no-op). */
+  | ({ status: 'up-to-date'; generation: number } & CanonicalMaterializeExtras)
+  /** A real three-way-merge conflict against Cloud stopped the publish — no
+   * generation was created. Resolve with `stak memory resolve`, then back up
+   * again (same contract as `stak push`). */
+  | { status: 'conflict'; conflicts: MergeConflict[] };
+
+/** Never silently dropped (Task 13 Important-5) — a successful/no-op Cloud
+ * publish can still have unlocatable projects or native materialize conflicts. */
+export type CanonicalMaterializeExtras = {
+  unavailable?: UnavailableCanonicalProject[];
+  materializeConflicts?: CanonicalMaterializeConflict[];
+};
 
 export type MemoryBackupOutcome = {
   local: BackupResult;
@@ -158,12 +194,20 @@ const recordRecoveryProvenance = async (
  * identical staged state always hashes identically, regardless of Protected mode's
  * per-upload randomized ciphertext. Null when nothing is staged yet (no local
  * manifest). Read-only: never mutates the store.
+ *
+ * `canonicalMainOverride` bundles THAT canonical Memory instead of whatever's on
+ * disk (see `bundleFromStore`'s identical option) — so this digest reflects
+ * exactly what a publish is about to upload, never a stale on-disk value.
  */
 const computeSemanticDigest = async (
   stackHome: string,
+  canonicalMainOverride?: CanonicalMainManifest,
 ): Promise<string | null> => {
   try {
-    const { bytes } = await bundleFromStore(stackHome);
+    const { bytes } = await bundleFromStore(
+      stackHome,
+      canonicalMainOverride ? { canonicalMainOverride } : {},
+    );
     return hashBytes(bytes);
   } catch (error) {
     if (error instanceof BundleError && error.code === 'no-backup') return null;
@@ -243,12 +287,22 @@ export const pushStagedMemory = async (
 };
 
 /**
- * Upload exactly one new Cloud generation built from `main` (written to
- * `canonical/main.json` by this function before bundling — `bundleFromStore`
- * reads it straight off disk). Unlike `pushStagedMemory`, this lets any thrown
- * error (including `RemoteMemoryError('conflict', ...)`) propagate —
- * `pushCanonicalMemory`'s retry loop (`@stack/memory`'s `canonical/push.ts`)
- * depends on seeing that error, not a swallowed `{status:'failed'}` result.
+ * Upload exactly one new Cloud generation built from `main` — bundled directly
+ * from this IN-MEMORY value (`standardCloudBackup`/`protectedCloudBackup`'s
+ * `canonicalMainOverride`), never by writing `main` to `canonical/main.json`
+ * first. Task 13 Important-4 review finding: writing to disk before the upload
+ * even attempts broke "local main and base move together, only after a
+ * successful publish" — a failed or conflicting publish would otherwise leave
+ * disk holding content no generation ever actually committed, visible to every
+ * other command in between. This function writes NOTHING to local canonical
+ * storage, on success or failure; `pushCanonicalMemory`/`pullCanonicalMemory`'s
+ * own `setLocalMain`/`setBase` callbacks (wired by callers) persist `main` to
+ * disk — and ONLY after a publish they orchestrated actually succeeds.
+ *
+ * Unlike `pushStagedMemory`, this lets any thrown error (including
+ * `RemoteMemoryError('conflict', ...)`) propagate — `pushCanonicalMemory`'s
+ * retry loop (`@stack/memory`'s `canonical/push.ts`) depends on seeing that
+ * error, not a swallowed `{status:'failed'}` result.
  *
  * Deviates from the Task 13 brief's literal `Promise<{ generation: number }>`
  * return type by also returning `privacyMode`: `runMemoryCloudBackup`'s Cloud
@@ -260,9 +314,8 @@ export const publishCanonicalGeneration = async (
   deps: MemoryCloudDeps,
   main: CanonicalMainManifest,
 ): Promise<{ generation: number; privacyMode: 'standard' | 'protected' }> => {
-  await writeCanonicalMain(deps.stackHome, main);
   if (!deps.backend) throw new Error('No Cloud backend configured.');
-  const semanticDigest = await computeSemanticDigest(deps.stackHome);
+  const semanticDigest = await computeSemanticDigest(deps.stackHome, main);
   const profile = await deps.backend.getProfile();
   const mode = profile?.privacyMode ?? 'standard';
   if (mode === 'protected') {
@@ -272,6 +325,7 @@ export const publishCanonicalGeneration = async (
       stackHome: deps.stackHome,
       backend: deps.backend,
       mmk,
+      canonicalMainOverride: main,
       ...(deps.now ? { now: deps.now } : {}),
     });
     await recordRecoveryProvenance(deps, {
@@ -285,6 +339,7 @@ export const publishCanonicalGeneration = async (
   const result = await standardCloudBackup({
     stackHome: deps.stackHome,
     backend: deps.backend,
+    canonicalMainOverride: main,
     ...(deps.now ? { now: deps.now } : {}),
   });
   await recordRecoveryProvenance(deps, {
@@ -360,21 +415,91 @@ export const runMemoryCloudBackup = async (
   deps: MemoryCloudDeps,
 ): Promise<MemoryBackupOutcome> => {
   const local = await deps.runLocalBackup();
+  // Captured right after the local backup (which legitimately creates/updates
+  // the real manifest) but BEFORE migration runs: `migrateLocalStore`'s own
+  // `slimToGlobal` step unconditionally writes `manifests/current.json` (even
+  // with zero items) on every call before its completion marker exists —
+  // checking "did a manifest ever exist" AFTER calling it would always see a
+  // manifest this SAME call just created, defeating the Important-7(a) guard
+  // below every single time.
+  const hadManifestBeforeMigration = (await readMemoryManifest(deps.stackHome)) !== null;
+  // NOTE: concurrent STAK commands against the same stackHome are not
+  // serialized across processes (see `canonical-ops.ts`'s `pushMemoryViaCanonical`/
+  // `pullMemoryViaCanonical` for the same caveat) — a cross-process lock is a
+  // known, deferred design gap.
   await migrateLocalStore(deps.stackHome);
   if (!deps.backend) return { local, cloud: { status: 'skipped' } };
+  const profile = await deps.backend.getProfile();
+  if (
+    (profile?.privacyMode ?? 'standard') === 'protected' &&
+    !(await deps.localKeyStore.loadMmk())
+  )
+    return { local, cloud: { status: 'protected-locked' } };
   try {
-    const profile = await deps.backend.getProfile();
-    if (
-      (profile?.privacyMode ?? 'standard') === 'protected' &&
-      !(await deps.localKeyStore.loadMmk())
-    )
-      return { local, cloud: { status: 'protected-locked' } };
-    const main = await readCanonicalMain(deps.stackHome);
-    const result = await publishCanonicalGeneration(deps, main);
-    return {
-      local,
-      cloud: { status: result.privacyMode, generation: result.generation },
+    const mmk = (await deps.localKeyStore.loadMmk().catch(() => undefined)) ?? undefined;
+    // Also persists every object the fetched generation carries into this
+    // machine's local content store (same fix as `canonical-ops.ts`'s
+    // `remoteOf` — a materialize/merge elsewhere needs the actual bytes, not
+    // just the manifest metadata).
+    const fetchRemote = async () => {
+      if (!deps.backend) return null;
+      const result = await fetchRemoteCanonical({
+        backend: deps.backend,
+        ...(mmk ? { mmk } : {}),
+        localRegistry: await readLocalRegistry(deps.stackHome),
+      });
+      if (!result) return null;
+      for (const object of result.objects)
+        await writeMemoryObject({ stackHome: deps.stackHome, contentHash: object.contentHash, bytes: object.bytes });
+      return { generation: result.generation, main: result.main };
     };
+
+    const main = await readCanonicalMain(deps.stackHome);
+    // Task 13 Important-7(a): a pure Skills-only account (nothing EVER staged
+    // on this machine — no v1 manifest at all — and Cloud has no Memory history
+    // either) must not publish an empty Memory generation just because this
+    // function ran. A machine with staged GLOBAL memory (a real v1 manifest)
+    // but no Project memory yet still proceeds normally below — this guard is
+    // about truly having NOTHING, not merely an empty canonical manifest.
+    if (main.projects.length === 0 && !hadManifestBeforeMigration) {
+      const remote = await fetchRemote();
+      if (!remote) return { local, cloud: { status: 'nothing-staged' } };
+    }
+
+    // Spec §9.3: `stak memory backup` is a deprecated alias for the Memory HALF
+    // of `stak push` — it must merge against Cloud exactly like push does
+    // (fetch, three-way merge, at most one generation, conflict stops the
+    // publish entirely), never blindly overwrite it (Task 13 Critical-3).
+    const outcome = await pushCanonicalMemory({
+      getLocalMain: () => readCanonicalMain(deps.stackHome),
+      getBase: () => readCanonicalBase(deps.stackHome),
+      setLocalMain: (nextMain) => writeCanonicalMain(deps.stackHome, nextMain),
+      setBase: (base) => writeCanonicalBase(deps.stackHome, base),
+      fetchRemote,
+      publish: async (nextMain) => {
+        const result = await publishCanonicalGeneration(deps, nextMain);
+        return { generation: result.generation };
+      },
+      savePendingMerge: (pending) => writePendingMerge(deps.stackHome, pending),
+      clearPendingMerge: () => clearPendingMerge(deps.stackHome),
+    });
+
+    if (outcome.status === 'conflict')
+      return { local, cloud: { status: 'conflict', conflicts: outcome.conflicts } };
+    if (outcome.status === 'retry-exhausted')
+      return {
+        local,
+        cloud: {
+          status: 'failed',
+          message: 'STAK Cloud kept moving while backing up Memory. Try again.',
+        },
+      };
+    if (outcome.status === 'up-to-date')
+      return { local, cloud: { status: 'up-to-date', generation: outcome.generation } };
+    // 'pushed': a generation was actually created, in whichever privacy mode
+    // this account is currently in (read once, above, before publishing).
+    const mode: 'standard' | 'protected' = profile?.privacyMode ?? 'standard';
+    return { local, cloud: { status: mode, generation: outcome.generation } };
   } catch (error) {
     return { local, cloud: { status: 'failed', message: errorMessage(error) } };
   }

@@ -14,8 +14,8 @@
 import { randomUUID } from 'node:crypto';
 
 import { hashBytes } from '../store.js';
+import type { CanonicalMainManifest } from '../canonical/domain.js';
 import {
-  BUNDLE_FORMAT,
   bundleFromStore,
   restoreBundleToStore,
 } from './bundle-codec.js';
@@ -77,16 +77,26 @@ export const standardCloudBackup = async (options: {
   stackHome: string;
   backend: RemoteMemoryBackend;
   now?: () => Date;
+  /** Bundle this canonical Memory instead of whatever's on disk (Task 13
+   * Important-4 fix) — see `bundleFromStore`'s identical option. */
+  canonicalMainOverride?: CanonicalMainManifest;
 }): Promise<CloudBackupResult> => {
   await options.backend.ensureProfile(REMOTE_FORMAT_VERSION);
-  const { bytes } = await bundleFromStore(options.stackHome);
+  const { bundle, bytes } = await bundleFromStore(
+    options.stackHome,
+    options.canonicalMainOverride ? { canonicalMainOverride: options.canonicalMainOverride } : {},
+  );
   const latest = await options.backend.getLatest();
   const meta = await options.backend.createGeneration({
     backupId: randomUUID(),
     expectedParent: latest?.generation ?? null,
     privacyMode: 'standard',
     payload: bytes,
-    bundleFormatVersion: BUNDLE_FORMAT,
+    // The bundle's OWN format, never hard-coded — a store with canonical Memory
+    // produces a v2 bundle, and the server's v1-after-v2 gate (spec §9.3/A.5)
+    // depends on this metadata actually reflecting that (see Task 13 Critical-2
+    // review finding: hard-coding v1 here made that gate dead code).
+    bundleFormatVersion: bundle.bundleFormat,
     ...(options.now ? { now: options.now } : {}),
   });
   return toResult(meta);
@@ -98,8 +108,14 @@ export const protectedCloudBackup = async (options: {
   backend: RemoteMemoryBackend;
   mmk: Buffer;
   now?: () => Date;
+  /** Bundle this canonical Memory instead of whatever's on disk (Task 13
+   * Important-4 fix) — see `bundleFromStore`'s identical option. */
+  canonicalMainOverride?: CanonicalMainManifest;
 }): Promise<CloudBackupResult> => {
-  const { bytes: bundleBytes } = await bundleFromStore(options.stackHome);
+  const { bundle, bytes: bundleBytes } = await bundleFromStore(
+    options.stackHome,
+    options.canonicalMainOverride ? { canonicalMainOverride: options.canonicalMainOverride } : {},
+  );
   const backupId = randomUUID();
   const dek = randomKey();
   const sealed = seal(bundleBytes, dek, protectedBundleAad(backupId));
@@ -111,7 +127,9 @@ export const protectedCloudBackup = async (options: {
     expectedParent: latest?.generation ?? null,
     privacyMode: 'protected',
     payload,
-    bundleFormatVersion: BUNDLE_FORMAT,
+    // The bundle's OWN format (see `standardCloudBackup`'s identical comment) —
+    // encryption never changes what format the PLAINTEXT bundle inside it is.
+    bundleFormatVersion: bundle.bundleFormat,
     cryptoVersion: CIPHER_VERSION,
     wrappedDek,
     ...(options.now ? { now: options.now } : {}),
@@ -217,7 +235,10 @@ export const migrateStandardToProtected = async (options: {
       expectedParent: latest?.generation ?? null,
       privacyMode: 'protected',
       payload,
-      bundleFormatVersion: BUNDLE_FORMAT,
+      // Preserve the ORIGINAL generation's own format — re-encrypting a Standard
+      // payload never changes whether the plaintext bundle inside it was v1 or
+      // v2 (see `standardCloudBackup`'s identical fix).
+      bundleFormatVersion: standard.bundleFormatVersion,
       cryptoVersion: CIPHER_VERSION,
       wrappedDek,
       ...(options.now ? { now: options.now } : {}),

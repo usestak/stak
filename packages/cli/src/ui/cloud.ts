@@ -380,10 +380,7 @@ export type PushSkillOutcome =
  * (not signed in), since the fix is different (`stak add .` vs. `stak login`). */
 export type MemoryPushOutcome =
   | CloudBackupOutcome
-  | { status: 'nothing-staged' }
-  /** Staged MAIN already equals the latest Cloud generation — no generation was
-   * created. `stak push` is a sync operation, not "always make another backup". */
-  | { status: 'up-to-date'; generation: number };
+  | { status: 'nothing-staged' };
 
 export type PushMemoryOutcome =
   | { status: 'not-attempted' }
@@ -435,9 +432,17 @@ export const renderCombinedPushResult = (
     const outcome = memory.outcome;
     if (outcome.status === 'nothing-staged')
       lines.push('  nothing staged yet — run `stak add .` to stage Memory changes.');
-    else if (outcome.status === 'up-to-date')
-      lines.push(`  already up to date (generation ${outcome.generation}).`);
-    else if (outcome.status === 'skipped')
+    else if (outcome.status === 'up-to-date') {
+      const notes = canonicalExtraNotes({
+        unavailable: outcome.unavailable,
+        conflicts: outcome.materializeConflicts,
+      });
+      lines.push(
+        notes.length > 0
+          ? `  already up to date (generation ${outcome.generation}); ${notes.join('; ')}.`
+          : `  already up to date (generation ${outcome.generation}).`,
+      );
+    } else if (outcome.status === 'skipped')
       lines.push('  staged locally (sign in to sync Memory to Cloud).');
     else if (outcome.status === 'protected-locked')
       lines.push(
@@ -445,7 +450,23 @@ export const renderCombinedPushResult = (
       );
     else if (outcome.status === 'failed')
       lines.push(`  staged locally; Cloud sync FAILED: ${outcome.message}`);
-    else lines.push(`  synced to Cloud (generation ${outcome.generation}).`);
+    // 'conflict' is unreachable in practice here — `applyMemoryPush` (program.ts)
+    // throws before ever returning it as part of this outcome — but handled for
+    // type completeness since `CloudBackupOutcome` (shared with `stak memory
+    // backup`) now includes it.
+    else if (outcome.status === 'conflict')
+      lines.push(`  ${outcome.conflicts.length} unresolved conflict(s) with Cloud.`);
+    else {
+      const notes = canonicalExtraNotes({
+        unavailable: outcome.unavailable,
+        conflicts: outcome.materializeConflicts,
+      });
+      lines.push(
+        notes.length > 0
+          ? `  synced to Cloud (generation ${outcome.generation}); ${notes.join('; ')}.`
+          : `  synced to Cloud (generation ${outcome.generation}).`,
+      );
+    }
   }
   lines.push(
     '',
@@ -489,15 +510,37 @@ export type PullCanonicalOutcome =
 
 /** A short, terse line for a non-`up-to-date` canonical outcome — `null` when
  * there is nothing worth saying (not attempted, or already up to date). */
+/** Unavailable-project and native-conflict notes shared by push's and pull's
+ * canonical rendering (Task 13 Important-5) — never silently dropped. */
+const canonicalExtraNotes = (outcome: {
+  unavailable?: { projectId: string; name: string }[] | undefined;
+  conflicts?: { projectId: string; path: string; reason: string }[] | undefined;
+}): string[] => {
+  const notes: string[] = [];
+  if (outcome.unavailable && outcome.unavailable.length > 0)
+    notes.push(
+      `${outcome.unavailable.length} project(s) not available on this machine (${outcome.unavailable
+        .map((p) => p.name)
+        .join(', ')})`,
+    );
+  if (outcome.conflicts && outcome.conflicts.length > 0)
+    notes.push(`${outcome.conflicts.length} native conflict(s) need \`stak add .\` to resolve`);
+  return notes;
+};
+
 const canonicalPullLine = (canonical: PullCanonicalOutcome): string | null => {
   if (canonical.status === 'not-attempted') return null;
   if (canonical.status === 'failed')
     return `  Project Memory sync FAILED: ${canonical.error}`;
   const outcome = canonical.outcome;
-  if (outcome.status === 'up-to-date') return null;
   if (outcome.status === 'conflict')
     return `  Project Memory has ${outcome.conflicts?.length ?? 0} unresolved conflict(s) — run \`stak memory resolve\`.`;
-  return '  Project Memory synced.';
+  if (outcome.status === 'protected-locked')
+    return '  Project Memory sync needs this device unlocked (`stak memory protect`).';
+  const notes = canonicalExtraNotes(outcome);
+  if (outcome.status === 'up-to-date' && notes.length === 0) return null;
+  const head = outcome.status === 'up-to-date' ? 'Project Memory up to date' : 'Project Memory synced';
+  return notes.length > 0 ? `  ${head}; ${notes.join('; ')}.` : `  ${head}.`;
 };
 
 export const renderCombinedPullResult = (

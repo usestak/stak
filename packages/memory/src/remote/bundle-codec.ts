@@ -128,9 +128,29 @@ const referencedHashes = (
   return [...hashes];
 };
 
+/** Byte-exact on-disk serialization of a canonical main manifest — MUST match
+ * `canonical/store.ts`'s `writeCanonicalMain` exactly, so a bundle built from an
+ * in-memory override hashes identically to the SAME content once it's actually
+ * persisted to disk after a successful publish (see `canonicalMainOverride`). */
+const canonicalMainBytes = (main: CanonicalMainManifest): Buffer =>
+  Buffer.from(`${JSON.stringify(canonicalMainManifestSchema.parse(main), null, 2)}\n`, 'utf8');
+
 /** Read the current Phase 14A store into a canonical bundle (parsed + bytes). */
 export const bundleFromStore = async (
   stackHome: string,
+  options: {
+    /**
+     * Bundle THIS canonical Memory instead of reading `canonical/main.json`
+     * from disk (Task 13 Important-4 fix). A Cloud publish must upload exactly
+     * the content it's about to ask the server to commit — writing that content
+     * to disk FIRST (so this function would pick it up) breaks "local main and
+     * base move together, only after a successful publish": a failed or
+     * conflicting publish would otherwise leave disk holding never-confirmed
+     * content, with no generation to match it. Callers persist the override to
+     * disk themselves, only once the publish actually succeeds.
+     */
+    canonicalMainOverride?: CanonicalMainManifest;
+  } = {},
 ): Promise<{ bundle: MemoryBackupBundle; bytes: Buffer }> => {
   const manifest = await readMemoryManifest(stackHome);
   if (!manifest)
@@ -141,13 +161,15 @@ export const bundleFromStore = async (
   // Read `canonical/main.json` directly (not through `readCanonicalMain`'s
   // empty-default fallback) so a never-migrated store still produces a
   // byte-identical v1 bundle — only a store that genuinely HAS a canonical
-  // manifest on disk upgrades to v2.
-  const canonicalBytes = await readFile(canonicalStorePaths(stackHome).main).catch(
-    (error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return undefined;
-      throw error;
-    },
-  );
+  // manifest (on disk, or explicitly overridden) upgrades to v2.
+  const canonicalBytes = options.canonicalMainOverride
+    ? canonicalMainBytes(options.canonicalMainOverride)
+    : await readFile(canonicalStorePaths(stackHome).main).catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return undefined;
+          throw error;
+        },
+      );
   const canonicalMain = canonicalBytes
     ? canonicalMainManifestSchema.parse(JSON.parse(canonicalBytes.toString('utf8')))
     : undefined;

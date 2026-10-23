@@ -7,6 +7,8 @@
  * backups (payloads are ciphertext).
  */
 import {
+  BUNDLE_FORMAT,
+  BUNDLE_FORMAT_V2,
   RemoteMemoryError,
   type MemoryGenerationMeta,
   type MemoryProfile,
@@ -28,6 +30,7 @@ import type {
 import {
   CloudServiceError,
   memoryConflict,
+  memoryIncompatibleFormat,
   memoryIntegrity,
   memoryNoEnvelope,
   memoryNotConfigured,
@@ -67,6 +70,8 @@ const mapError = (error: unknown): never => {
         throw memorySessionExpired(error.message);
       case 'no-envelope':
         throw memoryNoEnvelope(error.message);
+      case 'incompatible-format':
+        throw memoryIncompatibleFormat(error.message);
       default:
         throw error;
     }
@@ -197,8 +202,22 @@ export const createMemoryMethods = (config: MemoryServiceConfig) => {
       request: MemoryCreateGenerationRequest,
     ) =>
       run(async () => {
+        // Spec §9.3/A.5: once an account's latest generation is v2, the server
+        // refuses an old-format (v1) create outright, with the exact `@beta`
+        // message — regardless of which storage backend is configured. Enforced
+        // HERE (backend-agnostic middle layer), not duplicated per backend,
+        // because production's real backend (Supabase, via `memoryBackendFor`)
+        // has no such check of its own; only the in-memory test fake did.
+        const backend = backendFor(user.userId);
+        const latest = await backend.getLatest();
+        if (
+          latest &&
+          latest.bundleFormatVersion === BUNDLE_FORMAT_V2 &&
+          request.bundleFormatVersion === BUNDLE_FORMAT
+        )
+          throw memoryIncompatibleFormat();
         const payload = Buffer.from(request.payloadB64, 'base64');
-        const meta = await backendFor(user.userId).createGeneration({
+        const meta = await backend.createGeneration({
           backupId: request.backupId,
           expectedParent: request.expectedParent,
           privacyMode: request.privacyMode,

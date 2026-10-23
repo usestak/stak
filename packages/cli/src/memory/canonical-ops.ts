@@ -37,7 +37,7 @@ import {
   type DiscoveredMemoryItem,
   type LocalRegistry,
   type ManifestItem,
-  type MergeConflict,
+  type PortableRegistrySnapshot,
   type ProjectIdentity,
   type ScanResult,
 } from '@stack/memory';
@@ -74,6 +74,12 @@ export type CanonicalDiscoveryOptions = {
   gitRemoteOf?: (dir: string) => Promise<string | undefined>;
   isDirectory?: (candidate: string) => Promise<boolean>;
   platform?: NodeJS.Platform;
+  /** The portable registry snapshot carried by the last-fetched Cloud generation
+   * (Task 13 Important-6) — a READ-ONLY, additional claim source for locating a
+   * canonical-only project's directory during materialize, for a project this
+   * machine's own local registry has never learned a git claim for. Never used
+   * to mint a Project ID or create a binding. */
+  remoteRegistrySnapshot?: PortableRegistrySnapshot | undefined;
 };
 
 /** The grouping/lookup key for one logical identity — git: its canonical remote
@@ -645,15 +651,40 @@ export const resolveProjectIdForClaudeItem = (
 /* Task 13: canonical Memory via `stak push` / `stak pull`                     */
 /* -------------------------------------------------------------------------- */
 
-export type CanonicalConflictEntry = MergeConflict;
+/** Widened to a plain `string` reason (not `MergeConflict`'s narrower union) so
+ * this same shape also carries a native-vs-canonical materialize conflict
+ * (`planProjectSync`'s wider conflict reasons, or a moved-folder
+ * `source-conflict`) alongside a Cloud three-way-merge conflict. */
+export type CanonicalConflictEntry = { projectId: string; path: string; reason: string };
 export type CanonicalPushOutcome = {
-  status: 'up-to-date' | 'pushed' | 'conflict' | 'retry-exhausted';
+  status:
+    | 'up-to-date'
+    | 'pushed'
+    | 'conflict'
+    | 'retry-exhausted'
+    /** Protected account, this device can't unlock it (Task 13 Important-7(b)) —
+     * a friendly, actionable status, never a generic thrown/FAILED error. */
+    | 'protected-locked'
+    /** Nothing has ever been staged on this machine AND Cloud has no Memory
+     * history either — a pure Skills-only account (Task 13 Important-7(a)). */
+    | 'nothing-staged'
+    /** Not signed in — Memory stays staged locally only (Task 13 Minor fix:
+     * this used to render as a bogus "already up to date (generation 0)"). */
+    | 'skipped';
   generation?: number;
+  /** Cloud merge conflicts (when `status: 'conflict'`) AND/OR native-vs-canonical
+   * materialize conflicts surfaced from the post-push materialize step — never
+   * silently dropped (Task 13 Important-5). */
   conflicts?: CanonicalConflictEntry[];
+  /** Canonical projects not locatable on this machine right now, named (spec
+   * §4.5) — Task 13 Important-5. Empty/absent when nothing was unavailable. */
+  unavailable?: UnlocatableProject[];
 };
 export type CanonicalPullOutcome = {
-  status: 'up-to-date' | 'merged' | 'conflict';
+  status: 'up-to-date' | 'merged' | 'conflict' | 'protected-locked';
   conflicts?: CanonicalConflictEntry[];
+  /** Same meaning as `CanonicalPushOutcome.unavailable`. */
+  unavailable?: UnlocatableProject[];
 };
 
 /**
@@ -674,7 +705,7 @@ export type CanonicalPullOutcome = {
 const locateMaterializeTargets = async (
   stackHome: string,
   options: CanonicalDiscoveryOptions,
-): Promise<{ targets: Map<string, string>; unavailable: number }> => {
+): Promise<{ targets: Map<string, string>; unavailable: string[] }> => {
   const registry = await readLocalRegistry(stackHome);
   const main = await readCanonicalMain(stackHome);
   const { resolved } = await enumerateSyncableProjects(stackHome, options, 'status');
@@ -687,9 +718,19 @@ const locateMaterializeTargets = async (
       targets.set(project.projectId, path.resolve(binding.dir));
       continue;
     }
-    const record = recordFor(registry, project.projectId);
-    const gitClaim = record ? gitClaimOf(record) : undefined;
-    if (!gitClaim) continue; // no binding, no git claim to match a candidate against
+    // Task 13 Important-6: the LOCAL registry's own git claim first; when this
+    // machine has never locally learned one, fall back — read-only — to the
+    // portable registry snapshot carried by the last-fetched Cloud generation
+    // (the same snapshot every OTHER machine's push already contributed to).
+    // Never mints, never binds from either source.
+    const localRecord = recordFor(registry, project.projectId);
+    const localClaim = localRecord ? gitClaimOf(localRecord) : undefined;
+    const remoteRecord = options.remoteRegistrySnapshot?.projects.find(
+      (p) => p.projectId === project.projectId,
+    );
+    const remoteClaim = remoteRecord ? gitClaimOf(remoteRecord) : undefined;
+    const gitClaim = localClaim ?? remoteClaim;
+    if (!gitClaim) continue; // no binding, no git claim (local or remote) to match a candidate against
     const claimCanonical = gitClaim.canonical.toLowerCase();
     for (const candidate of options.projects ?? []) {
       const remote =
@@ -702,8 +743,22 @@ const locateMaterializeTargets = async (
     }
   }
 
-  const unavailable = main.projects.filter((p) => !targets.has(p.projectId)).length;
+  const unavailable = main.projects.filter((p) => !targets.has(p.projectId)).map((p) => p.projectId);
   return { targets, unavailable };
+};
+
+export type MaterializeOutcome = {
+  materialized: number;
+  /** Projects in canonical Memory not locatable on this machine right now —
+   * named (spec §4.5: "reported as 'not available on this machine'"), never a
+   * silent/un-actionable gap (Task 13 Important-5). */
+  unavailable: UnlocatableProject[];
+  /** Native vs. canonical conflicts (`planProjectSync`'s `conflict` actions) and
+   * moved-folder source conflicts that blocked materialization for SOME of a
+   * project's documents — surfaced so a caller never reports a flat "synced"
+   * when some projects actually have unresolved native conflicts
+   * (Task 13 Important-5). */
+  conflicts: { projectId: string; path: string; reason: string }[];
 };
 
 /**
@@ -713,15 +768,19 @@ const locateMaterializeTargets = async (
  * goes through `planProjectSync` + `applyMaterializeActions`, so the N=P safety
  * rule and the mass-delete guard in `sync.ts` still apply; `writeClaudeProject`'s
  * own path fence still applies too. A project with no binding and no matching
- * candidate is skipped silently for writes — never written outside a located dir.
+ * candidate is skipped for writes and reported in `unavailable` — never written
+ * outside a located dir. A single project's materialize failure (e.g. a path-fence
+ * refusal, a permissions error) is caught and reported as a conflict-shaped entry
+ * rather than aborting every OTHER project's materialize in the same call.
  */
 export const materializeCanonicalProjects = async (
   stackHome: string,
   options: CanonicalDiscoveryOptions = {},
-): Promise<{ materialized: number; unavailable: number }> => {
+): Promise<MaterializeOutcome> => {
   const registry = await readLocalRegistry(stackHome);
   const { targets, unavailable } = await locateMaterializeTargets(stackHome, options);
   let materialized = 0;
+  const conflicts: { projectId: string; path: string; reason: string }[] = [];
   for (const [projectId, dir] of targets) {
     const scanOptions = {
       ...(options.claudeHome ? { claudeHome: options.claudeHome } : {}),
@@ -731,11 +790,33 @@ export const materializeCanonicalProjects = async (
       ...(options.isDirectory ? { isDirectory: options.isDirectory } : {}),
       resolveProjectId: (item: DiscoveredMemoryItem) => resolveProjectIdForClaudeItem(item, registry),
     };
-    const plan = await planProjectSync({ projectId, dir }, stackHome, scanOptions);
-    await applyMaterializeActions({ projectId, dir }, stackHome, plan.actions, options.claudeHome);
-    materialized += 1;
+    try {
+      const plan = await planProjectSync({ projectId, dir }, stackHome, scanOptions);
+      for (const action of plan.actions)
+        if (action.kind === 'conflict') conflicts.push({ projectId, path: action.path, reason: action.reason });
+      for (const sourceConflict of plan.sourceConflicts)
+        conflicts.push({ projectId, path: sourceConflict.canonicalPath, reason: 'source-conflict' });
+      await applyMaterializeActions({ projectId, dir }, stackHome, plan.actions, options.claudeHome);
+      materialized += 1;
+    } catch (error) {
+      // One unwritable project (a path-fence refusal, a permissions error, a
+      // case-collision) must never abort every other project's materialize in
+      // this same call.
+      conflicts.push({
+        projectId,
+        path: '',
+        reason: error instanceof Error ? error.message : 'materialize failed',
+      });
+    }
   }
-  return { materialized, unavailable };
+  return {
+    materialized,
+    unavailable: unavailable.map((projectId) => ({
+      projectId,
+      name: nameHintFor(registry, projectId) ?? shortProjectId(projectId),
+    })),
+    conflicts,
+  };
 };
 
 /**
@@ -752,17 +833,30 @@ export const materializeCanonicalProjects = async (
  * read). `writeMemoryObject` is content-addressed and idempotent, so re-writing
  * objects this machine already has is a harmless no-op.
  */
-const remoteOf = (deps: MemoryCloudDeps, mmk: Buffer | undefined) => async () => {
-  if (!deps.backend) return null;
-  const result = await fetchRemoteCanonical({
-    backend: deps.backend,
-    ...(mmk ? { mmk } : {}),
-    localRegistry: await readLocalRegistry(deps.stackHome),
-  });
-  if (!result) return null;
-  for (const object of result.objects)
-    await writeMemoryObject({ stackHome: deps.stackHome, contentHash: object.contentHash, bytes: object.bytes });
-  return { generation: result.generation, main: result.main };
+/**
+ * Wraps `fetchRemoteCanonical` for the push/pull merge engines, which only want
+ * the metadata-only `{generation, main}` shape — while also remembering the
+ * fetched generation's portable registry snapshot (Task 13 Important-6) so
+ * materialize can use it as a READ-ONLY, additional claim source for a project
+ * this machine has never locally learned a git claim for. Never mints, never
+ * binds, never writes the local registry from it.
+ */
+const remoteOf = (deps: MemoryCloudDeps, mmk: Buffer | undefined) => {
+  let lastRegistrySnapshot: PortableRegistrySnapshot | undefined;
+  const fetch = async () => {
+    if (!deps.backend) return null;
+    const result = await fetchRemoteCanonical({
+      backend: deps.backend,
+      ...(mmk ? { mmk } : {}),
+      localRegistry: await readLocalRegistry(deps.stackHome),
+    });
+    if (!result) return null;
+    for (const object of result.objects)
+      await writeMemoryObject({ stackHome: deps.stackHome, contentHash: object.contentHash, bytes: object.bytes });
+    lastRegistrySnapshot = result.registrySnapshot;
+    return { generation: result.generation, main: result.main };
+  };
+  return { fetch, lastRegistrySnapshot: () => lastRegistrySnapshot };
 };
 
 /**
@@ -783,15 +877,37 @@ export const pushMemoryViaCanonical = async (
   deps: MemoryCloudDeps,
   discovery: CanonicalDiscoveryOptions = {},
 ): Promise<CanonicalPushOutcome> => {
+  // Captured BEFORE migration runs: `migrateLocalStore`'s own `slimToGlobal`
+  // step unconditionally writes `manifests/current.json` (even with zero
+  // items) on every call where the completion marker doesn't exist yet — so
+  // checking "did a manifest ever exist" AFTER calling it would always see a
+  // manifest this SAME call just created, defeating the Important-7(a) guard
+  // below every single time.
+  const hadManifestBeforeMigration = (await readMemoryManifest(deps.stackHome)) !== null;
   await migrateLocalStore(deps.stackHome);
-  if (!deps.backend) return { status: 'up-to-date' };
+  // Not signed in: Memory stays staged locally only (Task 13 Minor fix — this
+  // used to fall through to `up-to-date`, rendering a nonsensical "already up
+  // to date (generation 0)" for an account that was never even authenticated).
+  if (!deps.backend) return { status: 'skipped' };
+  const profile = await deps.backend.getProfile();
+  if ((profile?.privacyMode ?? 'standard') === 'protected' && !(await deps.localKeyStore.loadMmk()))
+    return { status: 'protected-locked' };
   const mmk = (await deps.localKeyStore.loadMmk().catch(() => undefined)) ?? undefined;
+  const remote = remoteOf(deps, mmk);
+  // Task 13 Important-7(a): a pure Skills-only account (nothing EVER staged on
+  // this machine — no v1 manifest at all — and Cloud has no Memory history
+  // either) must not publish an empty Memory generation just because push ran.
+  const localMain = await readCanonicalMain(deps.stackHome);
+  if (localMain.projects.length === 0 && !hadManifestBeforeMigration) {
+    const probe = await remote.fetch();
+    if (!probe) return { status: 'nothing-staged' };
+  }
   const outcome = await pushCanonicalMemory({
     getLocalMain: () => readCanonicalMain(deps.stackHome),
     getBase: () => readCanonicalBase(deps.stackHome),
     setLocalMain: (main) => writeCanonicalMain(deps.stackHome, main),
     setBase: (base) => writeCanonicalBase(deps.stackHome, base),
-    fetchRemote: remoteOf(deps, mmk),
+    fetchRemote: remote.fetch,
     publish: async (main) => {
       const result = await publishCanonicalGeneration(deps, main);
       return { generation: result.generation };
@@ -799,10 +915,23 @@ export const pushMemoryViaCanonical = async (
     savePendingMerge: (pending) => writePendingMerge(deps.stackHome, pending),
     clearPendingMerge: () => clearPendingMerge(deps.stackHome),
   });
-  if (outcome.status !== 'conflict') await materializeCanonicalProjects(deps.stackHome, discovery);
   if (outcome.status === 'conflict') return { status: 'conflict', conflicts: outcome.conflicts };
-  if (outcome.status === 'retry-exhausted') return { status: 'retry-exhausted' };
-  return { status: outcome.status, generation: outcome.generation };
+  // Materializes on any non-conflict outcome, including `retry-exhausted` —
+  // Cloud may have moved during the retries, and whatever is now locally
+  // canonical should still reach native files.
+  const materialize = await materializeCanonicalProjects(deps.stackHome, {
+    ...discovery,
+    remoteRegistrySnapshot: remote.lastRegistrySnapshot(),
+  });
+  // Task 13 Important-5: never silently drop unlocatable projects or native
+  // materialize conflicts — surface them alongside a successful/no-op Cloud
+  // outcome rather than reporting a flat "synced".
+  const extras = {
+    ...(materialize.unavailable.length > 0 ? { unavailable: materialize.unavailable } : {}),
+    ...(materialize.conflicts.length > 0 ? { conflicts: materialize.conflicts } : {}),
+  };
+  if (outcome.status === 'retry-exhausted') return { status: 'retry-exhausted', ...extras };
+  return { status: outcome.status, generation: outcome.generation, ...extras };
 };
 
 /**
@@ -822,20 +951,30 @@ export const pullMemoryViaCanonical = async (
 ): Promise<CanonicalPullOutcome> => {
   await migrateLocalStore(deps.stackHome);
   if (!deps.backend) return { status: 'up-to-date' };
+  const profile = await deps.backend.getProfile();
+  if ((profile?.privacyMode ?? 'standard') === 'protected' && !(await deps.localKeyStore.loadMmk()))
+    return { status: 'protected-locked' };
   const mmk = (await deps.localKeyStore.loadMmk().catch(() => undefined)) ?? undefined;
+  const remote = remoteOf(deps, mmk);
   const outcome = await pullCanonicalMemory({
     getLocalMain: () => readCanonicalMain(deps.stackHome),
     getBase: () => readCanonicalBase(deps.stackHome),
     setLocalMain: (main) => writeCanonicalMain(deps.stackHome, main),
     setBase: (base) => writeCanonicalBase(deps.stackHome, base),
-    fetchRemote: remoteOf(deps, mmk),
+    fetchRemote: remote.fetch,
     savePendingMerge: (pending) => writePendingMerge(deps.stackHome, pending),
     clearPendingMerge: () => clearPendingMerge(deps.stackHome),
   });
-  if (outcome.status !== 'conflict') await materializeCanonicalProjects(deps.stackHome, discovery);
+  if (outcome.status === 'conflict') return { status: 'conflict', conflicts: outcome.conflicts };
+  const materialize = await materializeCanonicalProjects(deps.stackHome, {
+    ...discovery,
+    remoteRegistrySnapshot: remote.lastRegistrySnapshot(),
+  });
+  const extras = {
+    ...(materialize.unavailable.length > 0 ? { unavailable: materialize.unavailable } : {}),
+    ...(materialize.conflicts.length > 0 ? { conflicts: materialize.conflicts } : {}),
+  };
   return outcome.status === 'merged-local'
-    ? { status: 'merged' }
-    : outcome.status === 'conflict'
-      ? { status: 'conflict', conflicts: outcome.conflicts }
-      : { status: 'up-to-date' };
+    ? { status: 'merged', ...extras }
+    : { status: 'up-to-date', ...extras };
 };

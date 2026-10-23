@@ -97,6 +97,26 @@ export const renderMemoryCloudBackup = (
       'Cloud backup skipped.',
       'Run `stak login` to protect this backup from machine loss.',
     ]);
+  if (cloud.status === 'nothing-staged')
+    return block([
+      ...head,
+      'Nothing to back up to STAK Cloud yet.',
+      'Run `stak add .` to stage Memory, then back up again.',
+    ]);
+  if (cloud.status === 'up-to-date')
+    return block([
+      ...head,
+      `Already up to date with STAK Cloud (generation ${cloud.generation}).`,
+    ]);
+  if (cloud.status === 'conflict')
+    return block([
+      ...head,
+      `Memory has ${cloud.conflicts.length} unresolved conflict(s) with STAK Cloud.`,
+      '',
+      'Run:',
+      '  stak memory resolve <project> <path> --keep local|cloud|both',
+      '  stak memory backup',
+    ]);
   if (cloud.status === 'protected-locked')
     return block([
       ...head,

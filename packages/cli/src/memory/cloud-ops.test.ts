@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  CANONICAL_MAIN_SCHEMA_VERSION,
   InMemoryRemoteMemoryStore,
   emptyRegistry,
   fileLocalMemoryKeyStore,
@@ -15,11 +16,13 @@ import {
   memoryStorePaths,
   mintProjectId,
   readCanonicalMain,
+  readLocalRegistry,
   readMemoryManifest,
   readMemoryObject,
   resolveOrMintProject,
   runMemoryBackup,
   setBinding,
+  writeCanonicalMain,
   writeLocalRegistry,
   writeMemoryManifest,
   writeMemoryObject,
@@ -134,6 +137,25 @@ describe('memory cloud operations', () => {
     });
     expect(outcome.local.files).toBe(3);
     expect(outcome.cloud.status).toBe('skipped');
+  });
+
+  it('a pure Skills-only account (no v1 manifest ever, Cloud has no Memory history) does not publish an empty generation (Task 13 Important-7(a))', async () => {
+    const stackHome = await temp('stack-skills-only-');
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-skills-only-keys-'));
+    const fakeBackupNoManifest = (): Promise<BackupResult> =>
+      // The local backup itself touches nothing Memory-related — e.g. a plain
+      // Skills-only `stak memory backup` with zero discovered items.
+      Promise.resolve({ provider: 'claude', files: 0, projects: 0, createdAt: '2026-10-23T00:00:00.000Z' });
+    const outcome = await runMemoryCloudBackup({
+      stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackupNoManifest,
+    });
+    expect(outcome.cloud.status).toBe('nothing-staged');
+    expect(await backend.listGenerations()).toHaveLength(0);
   });
 
   it('Standard backup then recover byte-exactly', async () => {
@@ -257,7 +279,44 @@ describe('memory cloud operations', () => {
     expect(await keys.hasKey()).toBe(true);
     expect((await backend.getProfile())?.privacyMode).toBe('protected');
 
-    // A subsequent everyday backup is Protected without any prompt.
+    // Task 13 Critical-3 fix (review round): backup now merges like push, so a
+    // subsequent backup with NOTHING changed since protect (protect only
+    // re-encrypts existing generations; it never touches canonical content) is
+    // correctly a no-op — never a second, identical Protected generation.
+    const noop = await runMemoryCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    });
+    expect(noop.cloud.status).toBe('up-to-date');
+
+    // A subsequent backup with a GENUINE change stays Protected without any prompt.
+    const mainBefore = await readCanonicalMain(source.stackHome);
+    const projectId = mainBefore.projects[0]?.projectId as string;
+    const newBody = Buffer.from('a new protected note', 'utf8');
+    const newHash = hashBytes(newBody);
+    await writeMemoryObject({ stackHome: source.stackHome, contentHash: newHash, bytes: newBody });
+    await writeCanonicalMain(source.stackHome, {
+      ...mainBefore,
+      projects: mainBefore.projects.map((p) =>
+        p.projectId === projectId
+          ? {
+              ...p,
+              documents: [
+                ...p.documents,
+                {
+                  path: 'notes/new.md',
+                  state: 'present' as const,
+                  contentHash: newHash,
+                  importedFrom: 'claude' as const,
+                  importedAt: '2026-10-23T00:00:00.000Z',
+                },
+              ],
+            }
+          : p,
+      ),
+    });
     const out = await runMemoryCloudBackup({
       stackHome: source.stackHome,
       backend,
@@ -923,16 +982,112 @@ describe('runMemoryCloudBackup migrates to canonical Memory and always publishes
       ),
     ).toBe(true);
 
-    // `stak memory backup` ALWAYS creates a generation, even with nothing
-    // changed since the last one — unlike `stak push`'s canonical no-op check.
-    // This one behavioral difference is deliberate (spec section 9.3).
+    // Task 13 Critical-3 fix (review round): the spec (§9.3) says `stak memory
+    // backup` "stays as a deprecated alias for the memory part of `stak push`" —
+    // it must MERGE against Cloud like push does, never blindly overwrite it.
+    // A second backup with nothing changed since the first is therefore a
+    // genuine no-op: no second generation is created.
     const second = await runMemoryCloudBackup({
       stackHome,
       backend,
       localKeyStore: keys,
       runLocalBackup: fakeBackup,
     });
-    expect(second.cloud.status).toBe('standard');
-    if (second.cloud.status === 'standard') expect(second.cloud.generation).toBe(1);
+    expect(second.cloud.status).toBe('up-to-date');
+    expect(await backend.listGenerations()).toHaveLength(1);
+  });
+
+  it('merges instead of overwriting: another machine pushes a doc, then this machine backs up — the other machine\'s doc survives in Cloud', async () => {
+    // Machine B: push doc Z for some project.
+    const stackHomeB = await temp('stack-backup-merge-b-');
+    let registryB = await readLocalRegistry(stackHomeB);
+    const minted = resolveOrMintProject(registryB, {
+      kind: 'git',
+      canonical: 'github.com/acme/shared',
+      host: 'github.com',
+      owner: 'acme',
+      repo: 'shared',
+    });
+    registryB = minted.registry;
+    await writeLocalRegistry(stackHomeB, registryB);
+    const bodyZ = Buffer.from('doc Z from machine B', 'utf8');
+    const hashZ = hashBytes(bodyZ);
+    await writeMemoryObject({ stackHome: stackHomeB, contentHash: hashZ, bytes: bodyZ });
+    await writeCanonicalMain(stackHomeB, {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [
+        {
+          projectId: minted.projectId,
+          documents: [
+            {
+              path: 'notes/z.md',
+              state: 'present',
+              contentHash: hashZ,
+              importedFrom: 'claude',
+              importedAt: '2026-10-23T00:00:00.000Z',
+            },
+          ],
+        },
+      ],
+    });
+
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, 'backup-merge-user');
+    const keysB = secureKeys(await temp('stack-backup-merge-b-keys-'));
+    const pushedB = await runMemoryCloudBackup({
+      stackHome: stackHomeB,
+      backend,
+      localKeyStore: keysB,
+      runLocalBackup: fakeBackup,
+    });
+    expect(pushedB.cloud.status).toBe('standard');
+
+    // Machine A: the SAME logical project (registry already agrees on the
+    // Project ID), a DIFFERENT doc of its own, never having synced with B's
+    // push. Running `stak memory backup` here must MERGE — never overwrite —
+    // so Z survives.
+    const stackHomeA = await temp('stack-backup-merge-a-');
+    let registryA = await readLocalRegistry(stackHomeA);
+    registryA = resolveOrMintProject(
+      registryA,
+      { kind: 'git', canonical: 'github.com/acme/shared', host: 'github.com', owner: 'acme', repo: 'shared' },
+      () => minted.projectId,
+    ).registry;
+    await writeLocalRegistry(stackHomeA, registryA);
+    const bodyY = Buffer.from('doc Y from machine A', 'utf8');
+    const hashY = hashBytes(bodyY);
+    await writeMemoryObject({ stackHome: stackHomeA, contentHash: hashY, bytes: bodyY });
+    await writeCanonicalMain(stackHomeA, {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [
+        {
+          projectId: minted.projectId,
+          documents: [
+            {
+              path: 'notes/y.md',
+              state: 'present',
+              contentHash: hashY,
+              importedFrom: 'claude',
+              importedAt: '2026-10-23T00:00:00.000Z',
+            },
+          ],
+        },
+      ],
+    });
+    const keysA = secureKeys(await temp('stack-backup-merge-a-keys-'));
+    const backedUpA = await runMemoryCloudBackup({
+      stackHome: stackHomeA,
+      backend,
+      localKeyStore: keysA,
+      runLocalBackup: fakeBackup,
+    });
+    expect(backedUpA.cloud.status).toBe('standard');
+
+    // Z (from B) must survive in Cloud alongside Y (from A) — a merge, not an
+    // overwrite.
+    const latestMain = await readCanonicalMain(stackHomeA);
+    const docs = latestMain.projects.find((p) => p.projectId === minted.projectId)?.documents ?? [];
+    expect(docs.some((d) => d.state === 'present' && d.contentHash === hashZ)).toBe(true);
+    expect(docs.some((d) => d.state === 'present' && d.contentHash === hashY)).toBe(true);
   });
 });

@@ -122,8 +122,24 @@ export const registerPullCommand = (
             };
           }
 
+        // Task 13 Important-8: a fresh machine whose full recover attempt was
+        // ATTEMPTED but did NOT succeed (Protected locked, no backup, a network
+        // error, …) must not run the canonical pull's `migrateLocalStore` here —
+        // that call writes `manifests/current.json` (even with zero items, via
+        // its "slim to global" step) and the completion marker, which would make
+        // `memoryPullPreflight`'s "no local manifest yet" fresh-machine check
+        // read this machine as already established on the VERY NEXT `stak pull`,
+        // permanently disabling auto-recovery after a single transient failure.
+        // An established machine (not eligible for fresh recover at all) is
+        // unaffected — canonical pull still runs for it every time, as normal.
+        const freshRecoverAttemptedButDidNotSucceed =
+          memoryPreflight.eligible &&
+          !!dependencies.applyMemoryPull &&
+          !(memory.status === 'applied' && memory.outcome.status === 'recovered');
+
         let canonicalMemory: PullCanonicalOutcome;
-        if (!dependencies.applyCanonicalPull) canonicalMemory = { status: 'not-attempted' };
+        if (!dependencies.applyCanonicalPull || freshRecoverAttemptedButDidNotSucceed)
+          canonicalMemory = { status: 'not-attempted' };
         else
           try {
             canonicalMemory = { status: 'applied', outcome: await dependencies.applyCanonicalPull() };

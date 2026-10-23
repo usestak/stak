@@ -200,7 +200,26 @@ export const migrateLocalStore = async (stackHome: string): Promise<MigrationSum
     ? await buildCanonicalMain(stackHome, manifest.items)
     : { main: existingMain, keptBothDuplicates: 0 };
   if (needsBuild) await writeCanonicalMain(stackHome, main);
-  await seedClaudeProjection(stackHome, main);
+  // Seed the projection ONLY from documents this machine's OWN v1 manifest would
+  // build — never from `main` wholesale. `main` can already be non-empty for a
+  // reason that has nothing to do with this machine's local v1 data: a fresh
+  // machine's `stak pull` restores `canonical/main.json` from Cloud (via the
+  // legacy recover path) before migration ever runs, so `needsBuild` is false
+  // and `existingMain` already holds documents nobody on THIS machine ever
+  // wrote natively. Seeding the projection (P = C) for those would make the N/P/C
+  // engine read "native file absent, but last synced" as "the native file was
+  // deleted" — `import-delete` for every recovered document (CLAUDE.local.md,
+  // agent memory, …), which materialize silently skips and a later `add`/`push`
+  // would tombstone in Cloud. Recomputing the local build deterministically from
+  // the write-once premigration backup (pure, idempotent — the registry already
+  // holds any claims a prior attempt minted) still seeds correctly on a genuine
+  // crash-resume (`needsBuild` false because THIS machine's own earlier,
+  // interrupted attempt already wrote `main.json`), while seeding nothing for a
+  // fresh machine's Cloud-only `main` (whose premigration backup has zero
+  // project-scope items, since the source machine's push already slimmed the v1
+  // manifest to global-only).
+  const builtFromLocalV1 = needsBuild ? main : (await buildCanonicalMain(stackHome, manifest.items)).main;
+  await seedClaudeProjection(stackHome, builtFromLocalV1);
   await slimToGlobal(stackHome, manifest.items);
   await writeFile(markerFile, new Date().toISOString(), { mode: 0o600 });
 

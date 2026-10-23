@@ -366,6 +366,9 @@ export const cloudErrorCodeSchema = z.enum([
   'memory-session-expired',
   'memory-no-envelope',
   'memory-not-configured',
+  // Task 13 fix round: the server refuses an old-format (`stack-mem-bundle-v1`)
+  // generation once the account's latest is v2 (spec §9.3/A.5).
+  'memory-incompatible-format',
   // P10B named Stacks.
   'user-stack-not-found',
   'user-stack-conflict',

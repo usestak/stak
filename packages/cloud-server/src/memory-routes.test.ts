@@ -163,6 +163,63 @@ describe('remote Memory routes', () => {
     );
   });
 
+  it('refuses an old-format (v1) generation once the account has pushed a v2 generation, with the @beta message', async () => {
+    const { call, signIn } = setup();
+    const token = await signIn(USER_A);
+    const v2 = await call('POST', 'memory/generations', {
+      token,
+      body: {
+        backupId: 'v2-0',
+        expectedParent: null,
+        privacyMode: 'standard',
+        payloadB64: b64('v2-bundle'),
+        bundleFormatVersion: 'stack-mem-bundle-v2',
+      },
+    });
+    expect(v2.status).toBe(200);
+
+    const rejected = await call('POST', 'memory/generations', {
+      token,
+      body: {
+        backupId: 'v1-1',
+        expectedParent: 0,
+        privacyMode: 'standard',
+        payloadB64: b64('v1-bundle'),
+        bundleFormatVersion: 'stack-mem-bundle-v1',
+      },
+    });
+    expect(rejected.status).toBe(409);
+    expect(
+      (rejected.jsonBody as { error: { code: string; message: string } })
+        .error.code,
+    ).toBe('memory-incompatible-format');
+    expect(
+      (rejected.jsonBody as { error: { code: string; message: string } })
+        .error.message,
+    ).toContain('npm i -g @memstk/cli@beta');
+
+    // The rejection creates nothing — the account's latest is still the v2
+    // generation, not a second (rejected) attempt.
+    const latest = await call('GET', 'memory/latest', { token });
+    expect(
+      (latest.jsonBody as { generation: { backupId: string } }).generation
+        .backupId,
+    ).toBe('v2-0');
+
+    // A v2 generation is still accepted after an account has v2 history.
+    const v2Again = await call('POST', 'memory/generations', {
+      token,
+      body: {
+        backupId: 'v2-1',
+        expectedParent: 0,
+        privacyMode: 'standard',
+        payloadB64: b64('v2-bundle-2'),
+        bundleFormatVersion: 'stack-mem-bundle-v2',
+      },
+    });
+    expect(v2Again.status).toBe(200);
+  });
+
   it('does not leak another user’s payload', async () => {
     const { call, signIn } = setup();
     const tokenA = await signIn(USER_A);

@@ -982,9 +982,18 @@ const defaultDependencies: ProgramDependencies = {
         'memory-push-retry-exhausted',
         'STAK Cloud kept moving while pushing Memory. Try again.',
       );
+    if (outcome.status === 'protected-locked') return { status: 'protected-locked' };
+    if (outcome.status === 'nothing-staged') return { status: 'nothing-staged' };
+    if (outcome.status === 'skipped') return { status: 'skipped' };
+    // Task 13 Important-5: never silently drop unlocatable projects or native
+    // materialize conflicts the canonical engine already surfaced.
+    const extras = {
+      ...(outcome.unavailable ? { unavailable: outcome.unavailable } : {}),
+      ...(outcome.conflicts ? { materializeConflicts: outcome.conflicts } : {}),
+    };
     return outcome.status === 'up-to-date'
-      ? { status: 'up-to-date', generation: outcome.generation ?? 0 }
-      : { status: 'standard', generation: outcome.generation ?? 0 };
+      ? { status: 'up-to-date', generation: outcome.generation ?? 0, ...extras }
+      : { status: 'standard', generation: outcome.generation ?? 0, ...extras };
   },
   // Unified pull (P3): Memory only auto-recovers on a genuinely fresh machine (no local
   // manifest yet) — an established machine's Memory is never silently overwritten here;
