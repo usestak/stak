@@ -7,6 +7,7 @@ import { hashBytes } from '../store.js';
 import { portableRegistrySnapshotSchema, type LocalRegistry, type PortableRegistrySnapshot } from '../project/registry.js';
 import { convertV1Bundle } from './convert-v1.js';
 import { canonicalMainManifestSchema, emptyCanonicalMain, type CanonicalMainManifest } from './domain.js';
+import type { CanonicalBase } from './store.js';
 
 const splitPayload = (payload: Uint8Array) => {
   const buf = Buffer.from(payload);
@@ -68,6 +69,34 @@ const replicaOfRetiredGeneration = async (
  * when latest is a Protected replica but the account is still Standard (an
  * interrupted `stak memory protect`).
  */
+/**
+ * Task 13 fix round 7 — stale merge bases. The merge base this machine
+ * recorded is only trustworthy while Cloud still holds that generation's
+ * content. Returns `base` unchanged when:
+ *  - its generation is still committed (one `getGeneration` call — the common
+ *    case);
+ *  - its generation equals the account's commit counter: nothing was committed
+ *    since this machine's base, so its local Memory is still the legitimate
+ *    continuation (fix round 5's fast-forward after the latest is retired);
+ *  - its generation was retired by `stak memory protect` and has a committed
+ *    Protected replica (`replicaOf`) holding the same plaintext.
+ * Otherwise (e.g. Delete Cloud Memory retired it and another machine has since
+ * re-uploaded older content) the base is treated as EMPTY for the merge, so
+ * every difference becomes an ordinary conflict and a document only one side
+ * has is kept — nothing is silently overwritten or deleted on the strength of
+ * a base Cloud no longer has.
+ */
+export const effectiveCanonicalBase = async (
+  backend: RemoteMemoryBackend | null,
+  base: CanonicalBase | null,
+): Promise<CanonicalBase | null> => {
+  if (!base || !backend) return base;
+  if ((await backend.getGeneration(base.generation)) !== null) return base;
+  if ((await backend.getProfile())?.latestGeneration === base.generation) return base;
+  if ((await replicaOfRetiredGeneration(backend, base.generation)) !== null) return base;
+  return null;
+};
+
 export const fetchRemoteCanonical = async (options: {
   backend: RemoteMemoryBackend;
   mmk?: Buffer;

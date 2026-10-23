@@ -9,6 +9,7 @@ import {
   claudeNativeTargetOf,
   clearPendingMerge,
   discoverClaudeMemory,
+  effectiveCanonicalBase,
   encodeClaudeProjectKey,
   fetchRemoteCanonical,
   gitClaimOf,
@@ -1096,7 +1097,8 @@ export const pushMemoryViaCanonical = async (
   if (await hasNothingToPush(deps)) return { status: 'nothing-staged' };
   const outcome = await pushCanonicalMemory({
     getLocalMain: () => readCanonicalMain(deps.stackHome),
-    getBase: () => readCanonicalBase(deps.stackHome),
+    // Task 13 fix round 7: a base Cloud no longer holds merges as empty.
+    getBase: async () => effectiveCanonicalBase(deps.backend, await readCanonicalBase(deps.stackHome)),
     setLocalMain: (main) => writeCanonicalMain(deps.stackHome, main),
     setBase: (base) => writeCanonicalBase(deps.stackHome, base),
     fetchRemote: remote.fetch,
@@ -1154,7 +1156,8 @@ export const pullMemoryViaCanonical = async (
   await seedBaseFromLastKnownV1Generation(deps, mmk);
   const outcome = await pullCanonicalMemory({
     getLocalMain: () => readCanonicalMain(deps.stackHome),
-    getBase: () => readCanonicalBase(deps.stackHome),
+    // Task 13 fix round 7: a base Cloud no longer holds merges as empty.
+    getBase: async () => effectiveCanonicalBase(deps.backend, await readCanonicalBase(deps.stackHome)),
     setLocalMain: (main) => writeCanonicalMain(deps.stackHome, main),
     setBase: (base) => writeCanonicalBase(deps.stackHome, base),
     fetchRemote: remote.fetch,

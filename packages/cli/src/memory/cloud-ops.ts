@@ -24,6 +24,7 @@ import {
   clearPendingMerge,
   cloudRecover,
   createRecoverySession,
+  effectiveCanonicalBase,
   LocalKeyStoreError,
   fetchRemoteCanonical,
   generateMmk,
@@ -574,7 +575,8 @@ export const runMemoryCloudBackup = async (
     // publish entirely), never blindly overwrite it (Task 13 Critical-3).
     const outcome = await pushCanonicalMemory({
       getLocalMain: () => readCanonicalMain(deps.stackHome),
-      getBase: () => readCanonicalBase(deps.stackHome),
+      // Task 13 fix round 7: a base Cloud no longer holds merges as empty.
+      getBase: async () => effectiveCanonicalBase(deps.backend, await readCanonicalBase(deps.stackHome)),
       setLocalMain: (nextMain) => writeCanonicalMain(deps.stackHome, nextMain),
       setBase: (base) => writeCanonicalBase(deps.stackHome, base),
       fetchRemote,

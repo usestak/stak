@@ -1898,4 +1898,52 @@ describe('Task 13 fix round 5', () => {
     expect(cloud?.main).toEqual(await readCanonicalMain(homeY));
     expect(cloud?.main.projects[0]?.documents.every((d) => d.state === 'present')).toBe(true);
   });
+
+  it('stale base after Delete Cloud Memory: when another machine re-uploads older content, X keeps its edit and its X-only doc (no native overwrite or delete) (fix round 7)', async () => {
+    const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'r7-stale-base');
+    const homeX = path.join(root, 'x7-stack');
+    const claudeX = path.join(root, 'x7-claude');
+    const dirX = path.join(root, 'x7-proj');
+    const homeY = path.join(root, 'y7-stack');
+    const claudeY = path.join(root, 'y7-claude');
+    const dirY = path.join(root, 'y7-proj');
+    await mkdir(dirX, { recursive: true });
+    await mkdir(dirY, { recursive: true });
+    const projectId = await bindAt(homeX, dirX);
+    await bindAt(homeY, dirY, projectId);
+    const keysX = path.join(root, 'x7-keys');
+    const keysY = path.join(root, 'y7-keys');
+    const xOnly = path.join(path.dirname(memoryFileOf(claudeX, dirX)), 'x-only.md');
+
+    // 1. X pushes v1, Y pulls, X pushes v2 plus a doc only X has.
+    await writeMemoryFile(memoryFileOf(claudeX, dirX), 'v1');
+    await stageCanonicalMemory(homeX, { claudeHome: claudeX });
+    expect((await pushMemoryViaCanonical(deps(homeX, backend, keysX), { claudeHome: claudeX })).status).toBe('pushed');
+    await pullMemoryViaCanonical(deps(homeY, backend, keysY), { claudeHome: claudeY });
+    await writeMemoryFile(memoryFileOf(claudeX, dirX), 'v2');
+    await writeMemoryFile(xOnly, 'only on X');
+    await stageCanonicalMemory(homeX, { claudeHome: claudeX });
+    expect((await pushMemoryViaCanonical(deps(homeX, backend, keysX), { claudeHome: claudeX })).status).toBe('pushed');
+
+    // 2. Everything is retired; Y re-uploads its stale v1 as generation 2.
+    for (const backupId of await backend.listAllBackupIds()) await backend.retireGeneration(backupId);
+    expect(await pushMemoryViaCanonical(deps(homeY, backend, keysY), { claudeHome: claudeY })).toMatchObject({
+      status: 'pushed',
+      generation: 2,
+    });
+
+    // 3. X pulls. Its recorded base (gen 1) is gone from Cloud, so it merges
+    // against an empty base: MEMORY.md is a conflict, x-only.md is kept.
+    const xMainBefore = await readFile(path.join(homeX, 'memory', 'canonical', 'main.json'), 'utf8');
+    const pulled = await pullMemoryViaCanonical(deps(homeX, backend, keysX), { claudeHome: claudeX });
+    expect(pulled.status).toBe('conflict');
+    expect(pulled.conflicts?.map((c) => c.path)).toEqual(['notes/MEMORY.md']);
+    expect(await readFile(memoryFileOf(claudeX, dirX), 'utf8')).toBe('v2');
+    expect(await readFile(xOnly, 'utf8')).toBe('only on X');
+    expect(await readFile(path.join(homeX, 'memory', 'canonical', 'main.json'), 'utf8')).toBe(xMainBefore);
+    // X's push is blocked by the same conflict — Cloud is never overwritten blindly either.
+    const pushed = await pushMemoryViaCanonical(deps(homeX, backend, keysX), { claudeHome: claudeX });
+    expect(pushed.status).toBe('conflict');
+    expect((await backend.getLatest())?.generation).toBe(2);
+  });
 });
