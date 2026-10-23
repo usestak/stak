@@ -80,16 +80,32 @@ export const standardCloudBackup = async (options: {
   /** Bundle this canonical Memory instead of whatever's on disk (Task 13
    * Important-4 fix) — see `bundleFromStore`'s identical option. */
   canonicalMainOverride?: CanonicalMainManifest;
+  /**
+   * The EXACT `expectedParent` to publish against (Task 13 fix round 2,
+   * Critical-1: lost update). When provided (including explicitly `null`, for
+   * a first-ever generation), this is used VERBATIM — `getLatest()` is never
+   * re-read here. The canonical push engine (`pushCanonicalMemory`) already
+   * fetched remote and decided what it was merging/fast-forwarding against;
+   * re-reading `getLatest()` at publish time could silently pick up a DIFFERENT,
+   * newer generation that arrived in between, making `createGeneration`'s own
+   * optimistic-concurrency check compare against the wrong parent and let a
+   * lost update through instead of correctly conflicting. Omitted only by the
+   * legacy `pushStagedMemory` path, which has no prior fetch to honor.
+   */
+  expectedParent?: number | null;
 }): Promise<CloudBackupResult> => {
   await options.backend.ensureProfile(REMOTE_FORMAT_VERSION);
   const { bundle, bytes } = await bundleFromStore(
     options.stackHome,
     options.canonicalMainOverride ? { canonicalMainOverride: options.canonicalMainOverride } : {},
   );
-  const latest = await options.backend.getLatest();
+  const expectedParent =
+    options.expectedParent !== undefined
+      ? options.expectedParent
+      : ((await options.backend.getLatest())?.generation ?? null);
   const meta = await options.backend.createGeneration({
     backupId: randomUUID(),
-    expectedParent: latest?.generation ?? null,
+    expectedParent,
     privacyMode: 'standard',
     payload: bytes,
     // The bundle's OWN format, never hard-coded — a store with canonical Memory
@@ -111,6 +127,10 @@ export const protectedCloudBackup = async (options: {
   /** Bundle this canonical Memory instead of whatever's on disk (Task 13
    * Important-4 fix) — see `bundleFromStore`'s identical option. */
   canonicalMainOverride?: CanonicalMainManifest;
+  /** The EXACT `expectedParent` to publish against — see
+   * `standardCloudBackup`'s identical option for why `getLatest()` must never
+   * be re-read here once the canonical push engine already fetched remote. */
+  expectedParent?: number | null;
 }): Promise<CloudBackupResult> => {
   const { bundle, bytes: bundleBytes } = await bundleFromStore(
     options.stackHome,
@@ -121,10 +141,13 @@ export const protectedCloudBackup = async (options: {
   const sealed = seal(bundleBytes, dek, protectedBundleAad(backupId));
   const payload = Buffer.concat([sealed.nonce, sealed.ciphertext, sealed.tag]);
   const wrappedDek = wrapDekWithMmk(dek, options.mmk, backupId);
-  const latest = await options.backend.getLatest();
+  const expectedParent =
+    options.expectedParent !== undefined
+      ? options.expectedParent
+      : ((await options.backend.getLatest())?.generation ?? null);
   const meta = await options.backend.createGeneration({
     backupId,
-    expectedParent: latest?.generation ?? null,
+    expectedParent,
     privacyMode: 'protected',
     payload,
     // The bundle's OWN format (see `standardCloudBackup`'s identical comment) —
@@ -210,9 +233,19 @@ export const migrateStandardToProtected = async (options: {
   now?: () => Date;
 }): Promise<MigrationResult> => {
   const generations = await options.backend.listGenerations();
-  const standards = generations.filter(
-    (generation) => generation.privacyMode === 'standard',
-  );
+  // Oldest first (Task 13 fix round 2, Important-3): `listGenerations` returns
+  // newest-first (both the in-memory store and the Supabase backend sort
+  // `generation DESC`). Copying newest-first broke a v1→v2 account in two
+  // ways: (a) a v2 Standard generation got copied BEFORE its earlier v1
+  // siblings, and the server's v1-after-v2 gate (Critical-2) then rejected the
+  // v1 copy that followed; (b) `createGeneration`'s own incrementing numbering
+  // meant the LAST copy created — the oldest original — ended up with the
+  // HIGHEST new generation number, silently making the oldest generation the
+  // new "latest". Copying oldest-first preserves both the original format
+  // order and which copy ends up actually being latest.
+  const standards = generations
+    .filter((generation) => generation.privacyMode === 'standard')
+    .sort((a, b) => a.generation - b.generation);
 
   const retired: string[] = [];
   const replacements: MemoryGenerationMeta[] = [];
@@ -241,6 +274,12 @@ export const migrateStandardToProtected = async (options: {
       bundleFormatVersion: standard.bundleFormatVersion,
       cryptoVersion: CIPHER_VERSION,
       wrappedDek,
+      // See `CreateGenerationInput.isMigrationReplica`'s doc comment: no copy
+      // order or retirement timing can satisfy the ordinary v1-after-v2 gate
+      // once an account's history contains a higher-numbered v2 generation —
+      // this verified, format-preserving replica of an EXISTING generation is
+      // exempted from that gate (never from the expectedParent/conflict check).
+      isMigrationReplica: true,
       ...(options.now ? { now: options.now } : {}),
     });
     // Verify the replacement decrypts back to the ORIGINAL bytes before trusting it.

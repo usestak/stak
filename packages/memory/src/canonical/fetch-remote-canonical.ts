@@ -38,18 +38,28 @@ export type RemoteCanonicalObject = { contentHash: string; bytes: Uint8Array };
  * snapshot that traveled with this generation to locate that project's
  * directory during materialize (never to mint a Project ID or create a
  * binding — only the local registry does that).
+ *
+ * `generation`, when given, fetches that EXACT generation instead of Cloud's
+ * current latest (Task 13 fix round 2, finding 7 / spec Appendix A.4: seeding
+ * `canonical/base.json` from the specific Cloud generation this machine last
+ * pushed or recovered in v1 — never assuming Cloud's current latest is this
+ * machine's base).
  */
 export const fetchRemoteCanonical = async (options: {
   backend: RemoteMemoryBackend;
   mmk?: Buffer;
   localRegistry: LocalRegistry;
+  generation?: number;
 }): Promise<{
   generation: number;
   main: CanonicalMainManifest;
   objects: RemoteCanonicalObject[];
   registrySnapshot: PortableRegistrySnapshot | undefined;
 } | null> => {
-  const meta = await options.backend.getLatest();
+  const meta =
+    options.generation !== undefined
+      ? await options.backend.getGeneration(options.generation)
+      : await options.backend.getLatest();
   if (!meta) return null;
   const payload = await options.backend.getPayload(meta.backupId);
   if (hashBytes(payload) !== meta.payloadSha256)

@@ -2,10 +2,10 @@ import { link, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { memoryManifestSchema, type ManifestItem } from '../domain.js';
-import { memoryStorePaths, readMemoryManifest, readMemoryObject, writeMemoryManifest } from '../store.js';
+import { hashBytes, memoryStorePaths, readMemoryManifest, readMemoryObject, writeMemoryManifest } from '../store.js';
 import { readLocalRegistry, writeLocalRegistry } from '../project/registry-store.js';
 import { resolveOrMintProject } from '../project/registry.js';
-import { claudeCanonicalPathOf } from './claude-project-adapter.js';
+import { claudeCanonicalPathOf, claudeNativeTargetOf } from './claude-project-adapter.js';
 import { groupLegacyItems } from './group-legacy-items.js';
 import type { CanonicalMainManifest } from './domain.js';
 import { readCanonicalMain, writeCanonicalMain, writeProjection } from './store.js';
@@ -139,12 +139,66 @@ const buildCanonicalMain = async (
 /** Step C: seed the claude projection so every migrated document reads as
  * already synced (P = C), turning later native edits into ordinary edits rather
  * than a wall of first-sighting conflicts. */
-const seedClaudeProjection = async (stackHome: string, main: CanonicalMainManifest) => {
+/** Does the native Claude file for this exact (project, path, expected hash)
+ * currently exist on disk with EXACTLY that content? Any failure to read
+ * (missing file, no native mapping for this path, permission error) is
+ * treated as "no" — never seed a path we can't positively confirm. */
+const nativeFileMatches = async (
+  projectDir: string,
+  projectId: string,
+  canonicalPath: string,
+  expectedHash: string,
+  claudeHome: string | undefined,
+): Promise<boolean> => {
+  try {
+    const target = claudeNativeTargetOf({ projectId, dir: projectDir }, canonicalPath, claudeHome);
+    const bytes = await readFile(target);
+    return hashBytes(bytes) === expectedHash;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Seed the claude projection so a migrated document that's ALREADY correctly
+ * reflected on THIS machine's native files reads as already-synced — never a
+ * wall of first-sighting conflicts (spec §9.1 step 4). Task 13 fix round 2,
+ * finding 5 (the "C1 residual"): seeding P = C for a path the native file does
+ * NOT currently hold is the exact mechanism that made a fresh machine's
+ * `instructions/private.md` and `agents/*` read as "deleted since sync" (the
+ * original Critical-1 bug) — this applies regardless of whether `main` came
+ * from a genuinely local v1 build, a Cloud v2 recover, or (this finding) a
+ * Cloud v1 recover that migration then built `main` from, since a FRESH
+ * machine's own v1 manifest/content-store items don't imply its NATIVE Claude
+ * files exist yet either. The robust rule: seed a path ONLY when the native
+ * file demonstrably exists on disk with that exact content, right now. Never
+ * seed for an absent (or unresolvable, or mismatched) file — `planSync`'s own
+ * first-sighting rules then correctly materialize it instead.
+ *
+ * `locateProjectDir` resolves a project's CURRENT directory (binding,
+ * discovery, whatever the CLI layer already uses) — read-only; migration
+ * itself never mints or binds anything from this. A project this cannot
+ * locate gets nothing seeded for it (the same safe "can't confirm" default as
+ * a resolvable project's individual absent files).
+ */
+const seedClaudeProjection = async (
+  stackHome: string,
+  main: CanonicalMainManifest,
+  options: {
+    locateProjectDir?: (projectId: string) => Promise<string | undefined>;
+    claudeHome?: string;
+  } = {},
+) => {
   const projects: Record<string, Record<string, string>> = {};
   for (const project of main.projects) {
+    const dir = options.locateProjectDir ? await options.locateProjectDir(project.projectId) : undefined;
+    if (!dir) continue; // can't resolve a directory -> can't confirm native presence -> seed nothing
     const byPath: Record<string, string> = {};
-    for (const doc of project.documents)
-      if (doc.state === 'present') byPath[doc.path] = doc.contentHash;
+    for (const doc of project.documents) {
+      if (doc.state !== 'present') continue;
+      if (await nativeFileMatches(dir, project.projectId, doc.path, doc.contentHash, options.claudeHome))
+        byPath[doc.path] = doc.contentHash;
+    }
     if (Object.keys(byPath).length > 0) projects[project.projectId] = byPath;
   }
   await writeProjection(stackHome, 'claude', { schemaVersion: 1, projects });
@@ -171,7 +225,19 @@ const slimToGlobal = async (stackHome: string, items: ManifestItem[]) => {
  * else has already succeeded) is what tells "still resuming" apart from "already
  * done, nothing more to do here, ever again".
  */
-export const migrateLocalStore = async (stackHome: string): Promise<MigrationSummary> => {
+export const migrateLocalStore = async (
+  stackHome: string,
+  options: {
+    /** Resolve a project's CURRENT directory (binding, discovery — whatever
+     * the CLI layer already uses), for `seedClaudeProjection`'s native-file
+     * existence check (Task 13 fix round 2, finding 5). Read-only; migration
+     * itself never mints or binds anything from this. Omitted entirely means
+     * "can't resolve any project's directory" — safe: nothing gets seeded,
+     * and `planSync`'s own first-sighting rules take over on the next sync. */
+    locateProjectDir?: (projectId: string) => Promise<string | undefined>;
+    claudeHome?: string;
+  } = {},
+): Promise<MigrationSummary> => {
   const markerFile = migrationCompleteMarkerPath(stackHome);
   if (await markerExists(markerFile)) {
     const main = await readCanonicalMain(stackHome);
@@ -200,26 +266,19 @@ export const migrateLocalStore = async (stackHome: string): Promise<MigrationSum
     ? await buildCanonicalMain(stackHome, manifest.items)
     : { main: existingMain, keptBothDuplicates: 0 };
   if (needsBuild) await writeCanonicalMain(stackHome, main);
-  // Seed the projection ONLY from documents this machine's OWN v1 manifest would
-  // build — never from `main` wholesale. `main` can already be non-empty for a
-  // reason that has nothing to do with this machine's local v1 data: a fresh
-  // machine's `stak pull` restores `canonical/main.json` from Cloud (via the
-  // legacy recover path) before migration ever runs, so `needsBuild` is false
-  // and `existingMain` already holds documents nobody on THIS machine ever
-  // wrote natively. Seeding the projection (P = C) for those would make the N/P/C
-  // engine read "native file absent, but last synced" as "the native file was
-  // deleted" — `import-delete` for every recovered document (CLAUDE.local.md,
-  // agent memory, …), which materialize silently skips and a later `add`/`push`
-  // would tombstone in Cloud. Recomputing the local build deterministically from
-  // the write-once premigration backup (pure, idempotent — the registry already
-  // holds any claims a prior attempt minted) still seeds correctly on a genuine
-  // crash-resume (`needsBuild` false because THIS machine's own earlier,
-  // interrupted attempt already wrote `main.json`), while seeding nothing for a
-  // fresh machine's Cloud-only `main` (whose premigration backup has zero
-  // project-scope items, since the source machine's push already slimmed the v1
-  // manifest to global-only).
-  const builtFromLocalV1 = needsBuild ? main : (await buildCanonicalMain(stackHome, manifest.items)).main;
-  await seedClaudeProjection(stackHome, builtFromLocalV1);
+  // Seed the projection from `main` using the native-file-existence rule (see
+  // `seedClaudeProjection`'s own doc comment) — robust regardless of whether
+  // `main` came from a genuinely local v1 build, a Cloud v2 recover, or (Task
+  // 13 fix round 2, finding 5) a Cloud v1 recover that migration just built
+  // `main` from: a path is seeded ONLY when the native file demonstrably
+  // exists on disk with that exact content right now, never merely because it
+  // appears in `main`. This superseded an earlier, narrower fix (round 1) that
+  // only handled the v2-recover case by recomputing a "local-only" build —
+  // that fix never covered a still-v1 Cloud latest, where `needsBuild` is TRUE
+  // (the recovered v1 manifest genuinely has project items) and the build
+  // itself seeds every document, even ones this fresh machine's native files
+  // have never held.
+  await seedClaudeProjection(stackHome, main, options);
   await slimToGlobal(stackHome, manifest.items);
   await writeFile(markerFile, new Date().toISOString(), { mode: 0o600 });
 

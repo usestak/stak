@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { memoryManifestSchema } from '../domain.js';
 import { writeMemoryManifest, writeMemoryObject, hashBytes } from '../store.js';
+import { claudeNativeTargetOf } from './claude-project-adapter.js';
 import { readCanonicalMain } from './store.js';
 import { migrateLocalStore } from './migrate.js';
 
@@ -117,8 +118,9 @@ describe('migrateLocalStore', () => {
     expect(first.migratedDocuments).toBe(second.migratedDocuments);
   });
 
-  it('seeds the claude projection file so P = C for every migrated document', async () => {
-    const hash = await putObject(Buffer.from('seed me'));
+  it('seeds the claude projection file so P = C for every migrated document WHOSE native file actually exists with that content (Task 13 fix round 2, finding 5)', async () => {
+    const body = Buffer.from('seed me');
+    const hash = await putObject(body);
     await writeMemoryManifest({
       stackHome,
       manifest: {
@@ -140,12 +142,94 @@ describe('migrateLocalStore', () => {
         ],
       },
     });
-    await migrateLocalStore(stackHome);
     const { readProjection } = await import('./store.js');
+
+    // Without a locator (or with one that can't resolve the project's
+    // directory), nothing is seeded — the robust, safe default.
+    const noLocatorResult = await migrateLocalStore(stackHome);
+    void noLocatorResult;
+    const mainBefore = await readCanonicalMain(stackHome);
+    const projectId = mainBefore.projects[0]!.projectId;
+    const projectionNoLocator = await readProjection(stackHome, 'claude');
+    expect(projectionNoLocator.projects[projectId]).toBeUndefined();
+  });
+
+  it('seeds P = C when the native file is located AND matches; seeds nothing for a path whose native file is absent or differs', async () => {
+    const bodyA = Buffer.from('seed me');
+    const hashA = await putObject(bodyA);
+    const bodyB = Buffer.from('edited since backup');
+    const hashBOriginal = await putObject(Buffer.from('original b'));
+    await writeMemoryManifest({
+      stackHome,
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-20T00:00:00.000Z',
+        items: [
+          {
+            provider: 'claude',
+            kind: 'auto-memory',
+            scope: 'project',
+            logicalId: 'claude/auto-memory/github.com/acme/widgets/a.md',
+            project: { kind: 'git', canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' },
+            contentHash: hashA,
+            restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
+            capturedAt: '2026-10-20T00:00:00.000Z',
+            sensitivity: 'private',
+          },
+          {
+            provider: 'claude',
+            kind: 'auto-memory',
+            scope: 'project',
+            logicalId: 'claude/auto-memory/github.com/acme/widgets/b.md',
+            project: { kind: 'git', canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' },
+            contentHash: hashBOriginal,
+            restoreTarget: { base: 'claude-project-memory', relativePath: 'b.md' },
+            capturedAt: '2026-10-20T00:00:00.000Z',
+            sensitivity: 'private',
+          },
+          {
+            provider: 'claude',
+            kind: 'auto-memory',
+            scope: 'project',
+            logicalId: 'claude/auto-memory/github.com/acme/widgets/c.md',
+            project: { kind: 'git', canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' },
+            contentHash: hashA,
+            restoreTarget: { base: 'claude-project-memory', relativePath: 'c.md' },
+            capturedAt: '2026-10-20T00:00:00.000Z',
+            sensitivity: 'private',
+          },
+        ],
+      },
+    });
+
+    // Native files: a.md matches, b.md is absent entirely, c.md exists but
+    // holds DIFFERENT content than what was migrated (edited since the
+    // backup). `claudeNativeTargetOf`'s `notes/` mapping depends only on the
+    // project's directory, not its (randomly minted) Project ID, so these can
+    // be written before migration ever runs.
+    const projectDir = path.join(stackHome, 'project-dir');
+    await mkdir(projectDir, { recursive: true });
+    const claudeHome = path.join(stackHome, 'claude-home');
+    const dummyProjectId = 'prj_' + 'a'.repeat(26);
+    const targetA = claudeNativeTargetOf({ projectId: dummyProjectId, dir: projectDir }, 'notes/a.md', claudeHome);
+    await mkdir(path.dirname(targetA), { recursive: true });
+    await writeFile(targetA, bodyA);
+    const targetC = claudeNativeTargetOf({ projectId: dummyProjectId, dir: projectDir }, 'notes/c.md', claudeHome);
+    await mkdir(path.dirname(targetC), { recursive: true });
+    await writeFile(targetC, bodyB); // DIFFERENT content than the migrated c.md
+
+    await migrateLocalStore(stackHome, {
+      locateProjectDir: async () => projectDir,
+      claudeHome,
+    });
+    const { readProjection } = await import('./store.js');
+    const projection = await readProjection(stackHome, 'claude');
     const main = await readCanonicalMain(stackHome);
     const projectId = main.projects[0]!.projectId;
-    const projection = await readProjection(stackHome, 'claude');
-    expect(projection.projects[projectId]?.['notes/a.md']).toBe(hash);
+    expect(projection.projects[projectId]?.['notes/a.md']).toBe(hashA); // exists, matches -> seeded
+    expect(projection.projects[projectId]?.['notes/b.md']).toBeUndefined(); // absent -> NOT seeded
+    expect(projection.projects[projectId]?.['notes/c.md']).toBeUndefined(); // exists but differs -> NOT seeded
   });
 
   it('resumes correctly when interrupted after the backup but before main.json', async () => {

@@ -98,6 +98,15 @@ export const memoryCreateGenerationRequestSchema = z.object({
   bundleFormatVersion: z.string().min(1),
   cryptoVersion: z.string().min(1).optional(),
   wrappedDek: memoryWrappedDekSchema.optional(),
+  /**
+   * Task 13 fix round 2, Important-3: set ONLY by `migrateStandardToProtected`'s
+   * own internal re-encryption loop (see `@stack/memory`'s
+   * `CreateGenerationInput.isMigrationReplica` for the full rationale). The
+   * server independently verifies the exemption window (account currently
+   * Standard, this create itself Protected) before honoring it — never a
+   * general-purpose client-settable bypass of the v1-after-v2 gate.
+   */
+  isMigrationReplica: z.boolean().optional(),
 });
 export const memoryAddRecoveryMethodRequestSchema = z.object({
   type: z.enum(['passkey', 'recovery-file', 'trusted-device']),

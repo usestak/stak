@@ -210,7 +210,23 @@ export const createMemoryMethods = (config: MemoryServiceConfig) => {
         // has no such check of its own; only the in-memory test fake did.
         const backend = backendFor(user.userId);
         const latest = await backend.getLatest();
+        // Task 13 fix round 2, Important-3: `migrateStandardToProtected`'s own
+        // internal re-encryption loop creates format-preserving Protected
+        // REPLICAS of a Standard account's existing generations — a v1
+        // original must stay a v1 replica. Once an account's history has ANY
+        // v2 generation, no copy order or retirement timing can satisfy this
+        // gate for an earlier v1 one (see `CreateGenerationInput.isMigrationReplica`'s
+        // doc comment in `@stack/memory`). The exemption is narrowed to the
+        // EXACT, independently-verifiable window that function runs in: the
+        // account's CURRENT profile is still 'standard' and this create is
+        // itself 'protected' — never a general-purpose bypass.
+        const profile = await backend.getProfile();
+        const isVerifiedMigrationWindow =
+          request.isMigrationReplica === true &&
+          (profile?.privacyMode ?? 'standard') === 'standard' &&
+          request.privacyMode === 'protected';
         if (
+          !isVerifiedMigrationWindow &&
           latest &&
           latest.bundleFormatVersion === BUNDLE_FORMAT_V2 &&
           request.bundleFormatVersion === BUNDLE_FORMAT
@@ -223,6 +239,7 @@ export const createMemoryMethods = (config: MemoryServiceConfig) => {
           privacyMode: request.privacyMode,
           payload,
           bundleFormatVersion: request.bundleFormatVersion,
+          ...(request.isMigrationReplica ? { isMigrationReplica: true } : {}),
           ...(request.cryptoVersion
             ? { cryptoVersion: request.cryptoVersion }
             : {}),

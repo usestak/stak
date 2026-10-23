@@ -111,6 +111,35 @@ export type CreateGenerationInput = {
   cryptoVersion?: string;
   wrappedDek?: WrappedDek;
   now?: () => Date;
+  /**
+   * Task 13 fix round 2, Important-3: set ONLY by `migrateStandardToProtected`'s
+   * own internal re-encryption loop. Exempts this one create from the
+   * v1-after-v2 incompatible-format gate (never from the ordinary
+   * expectedParent/conflict check, which still applies normally).
+   *
+   * Why this is needed: the gate (spec §9.3/A.5) correctly refuses an OLD CLI
+   * pushing a stale v1 bundle once an account has moved to v2. But
+   * `migrateStandardToProtected` legitimately needs to create a Protected
+   * REPLICA of each EXISTING Standard generation, byte-identical in content and
+   * preserving that ORIGINAL generation's own format (a v1 original must stay a
+   * v1 replica — relabeling it v2 would misrepresent content that never had a
+   * canonical manifest). Once an account's history contains ANY v2-format
+   * generation, it necessarily has a HIGHER generation number than an earlier
+   * v1 one (generation numbers only increase) — so there is NO copy order, and
+   * no retirement timing, under which the gate's plain "does the account's
+   * current latest already have a higher format than this input" check can
+   * ever allow a v1-format replica to be created again, even though this is
+   * the CURRENT, up-to-date CLI faithfully reproducing OLD content under
+   * verified, controlled conditions (not a stale client introducing new data).
+   * Confirmed by trial: reordering the copy loop alone (oldest-first) still
+   * fails, because the not-yet-retired, originally-pushed v2 Standard
+   * generation (or, in the opposite order, the freshly-created v2 Protected
+   * replica) is unconditionally "latest" by generation number the entire time
+   * retirement is deferred to the end (required for the existing
+   * verify-before-delete safety contract). This flag is the narrowest fix that
+   * preserves both that safety contract and per-generation format fidelity.
+   */
+  isMigrationReplica?: boolean;
 };
 
 export type AddRecoveryMethodInput = {
@@ -300,7 +329,21 @@ class InMemoryRemoteMemoryBackend implements RemoteMemoryBackend {
           input.expectedParent,
         )}. Refresh and retry.`,
       );
+    // The `isMigrationReplica` exemption is narrowed to the EXACT, server-
+    // verifiable window `migrateStandardToProtected` actually runs in: the
+    // account's CURRENT privacy mode is still 'standard' (migration hasn't
+    // finalized yet) and this specific create is itself 'protected'. Outside
+    // that window the flag has no effect — an ordinary v1 push after an
+    // account has already finished moving to Protected (or Standard v2) is
+    // still refused exactly as before. This keeps the exemption from becoming
+    // a general-purpose bypass of the gate.
+    const currentPrivacyMode = this.store.profiles.get(this.userId)?.privacyMode ?? 'standard';
+    const isVerifiedMigrationWindow =
+      input.isMigrationReplica === true &&
+      currentPrivacyMode === 'standard' &&
+      input.privacyMode === 'protected';
     if (
+      !isVerifiedMigrationWindow &&
       latest &&
       latest.bundleFormatVersion !== input.bundleFormatVersion &&
       latest.bundleFormatVersion === BUNDLE_FORMAT_V2 &&
@@ -308,7 +351,7 @@ class InMemoryRemoteMemoryBackend implements RemoteMemoryBackend {
     )
       throw new RemoteMemoryError(
         'incompatible-format',
-        'This account’s Memory was upgraded by a newer STAK CLI. Update with `npm i -g @memstk/cli@beta`.',
+        "This account's Memory was upgraded by a newer STAK CLI. Update with `npm i -g @memstk/cli@beta`.",
       );
     if (
       this.myGenerations().some((record) => record.backupId === input.backupId)

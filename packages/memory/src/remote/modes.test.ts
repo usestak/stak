@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { memoryStorePaths } from '../store.js';
 import { readMemoryObject } from '../store.js';
+import { CANONICAL_MAIN_SCHEMA_VERSION } from '../canonical/domain.js';
+import { writeCanonicalMain } from '../canonical/store.js';
 import {
   InMemoryRemoteMemoryStore,
   RemoteMemoryError,
@@ -332,5 +334,47 @@ describe('Standard → Protected migration', () => {
       'standard',
     );
     expect(store.hasPayload(`mem/user-a/${std.backupId}`)).toBe(true);
+  });
+
+  it('copies oldest-first: a v1 Standard generation followed by a v2 one protects successfully, and latest afterwards is the v2 copy (Task 13 fix round 2, Important-3)', async () => {
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
+    roots.push(source.stackHome);
+    const { backend } = backendFor('user-a');
+
+    // Generation 0: v1 (no canonical Memory yet).
+    const v1 = await standardCloudBackup({ stackHome: source.stackHome, backend });
+    expect(v1.generation).toBe(0);
+
+    // Generation 1: v2 (canonical Memory now exists on disk).
+    await writeCanonicalMain(source.stackHome, {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [],
+    });
+    const v2 = await standardCloudBackup({ stackHome: source.stackHome, backend });
+    expect(v2.generation).toBe(1);
+
+    const mmk = generateMmk();
+    // Pre-fix, this copied newest-first (v2 then v1) — the v1 copy that
+    // followed was rejected by the server's own v1-after-v2 gate
+    // (Critical-2), and the oldest original ended up as the new "latest".
+    const result = await migrateStandardToProtected({ backend, mmk });
+    expect(result.finalized).toBe(true);
+    expect(result.migrated).toBe(2);
+
+    const latest = await backend.getLatest();
+    expect(latest?.privacyMode).toBe('protected');
+    expect(latest?.bundleFormatVersion).toBe('stack-mem-bundle-v2');
+    // The v2 copy must be the highest generation number — oldest-first
+    // copying means it was created LAST.
+    const generations = await backend.listGenerations();
+    const protectedOnly = generations.filter((g) => g.privacyMode === 'protected');
+    expect(protectedOnly).toHaveLength(2);
+    const v2Copy = protectedOnly.find((g) => g.bundleFormatVersion === 'stack-mem-bundle-v2');
+    const v1Copy = protectedOnly.find((g) => g.bundleFormatVersion === 'stack-mem-bundle-v1');
+    expect(v2Copy?.generation).toBeGreaterThan(v1Copy?.generation ?? -1);
+    expect(latest?.generation).toBe(v2Copy?.generation);
   });
 });

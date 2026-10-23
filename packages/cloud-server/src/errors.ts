@@ -73,5 +73,5 @@ export const memoryNoEnvelope = (
   message = 'No recovery envelope submitted yet.',
 ) => new CloudServiceError('memory-no-envelope', 409, message);
 export const memoryIncompatibleFormat = (
-  message = 'This account’s Memory was upgraded by a newer STAK CLI. Update with `npm i -g @memstk/cli@beta`.',
+  message = "This account's Memory was upgraded by a newer STAK CLI. Update with `npm i -g @memstk/cli@beta`.",
 ) => new CloudServiceError('memory-incompatible-format', 409, message);

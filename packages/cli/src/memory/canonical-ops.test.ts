@@ -9,12 +9,16 @@ import {
   canonicalGitIdentity,
   emptyRegistry,
   encodeClaudeProjectKey,
+  fetchRemoteCanonical,
   fileLocalMemoryKeyStore,
+  gitClaimOf,
+  recordFor,
   hashBytes,
   InMemoryRemoteMemoryStore,
   inMemoryRemoteMemoryBackend,
   legacyCompatKey,
   mintProjectId,
+  pushCanonicalMemory,
   readCanonicalBase,
   readCanonicalMain,
   readLocalRegistry,
@@ -22,10 +26,13 @@ import {
   RemoteMemoryError,
   setBinding,
   shortProjectId,
+  standardCloudBackup,
+  writeCanonicalBase,
   writeCanonicalMain,
   toPortableSnapshot,
   writeLocalRegistry,
   writeMemoryManifest,
+  writeMemoryObject,
   writePortableSnapshot,
   type BackupResult,
   type RemoteMemoryBackend,
@@ -38,7 +45,7 @@ import {
   pushMemoryViaCanonical,
   stageCanonicalMemory,
 } from './canonical-ops.js';
-import { runMemoryCloudRecover } from './cloud-ops.js';
+import { publishCanonicalGeneration, pushStagedMemory, runMemoryCloudRecover } from './cloud-ops.js';
 
 let root: string;
 let stackHome: string;
@@ -692,6 +699,25 @@ describe('pushMemoryViaCanonical / pullMemoryViaCanonical (Task 13)', () => {
       'MEMORY.md',
     );
     expect(await readFile(materializedPath, 'utf8')).toBe('hello from A');
+
+    // Task 13 fix round 2 (Important-4 residual): machine B located and
+    // materialized this project purely via the snapshot claim — its local
+    // registry must now have LEARNED that git claim too, so a later
+    // `stak add .` resolves to the SAME Project ID instead of minting a
+    // second, duplicate one for the same repo.
+    const registryBAfter = await readLocalRegistry(stackHomeB);
+    const recordB = recordFor(registryBAfter, minted.projectId);
+    expect(recordB).toBeDefined();
+    expect(gitClaimOf(recordB!)?.canonical.toLowerCase()).toBe(identity.canonical.toLowerCase());
+
+    const staged = await stageCanonicalMemory(stackHomeB, {
+      claudeHome: claudeHomeB,
+      projects: [{ dir: projectDirB, gitRemote }],
+    });
+    expect(staged.projects).toHaveLength(1);
+    expect(staged.projects[0]?.projectId).toBe(minted.projectId);
+    const registryBFinal = await readLocalRegistry(stackHomeB);
+    expect(registryBFinal.projects.filter((p) => gitClaimOf(p)?.canonical.toLowerCase() === identity.canonical.toLowerCase())).toHaveLength(1);
   });
 
   it('pushing again with no changes creates no new generation (no-op)', async () => {
@@ -756,6 +782,269 @@ describe('pushMemoryViaCanonical / pullMemoryViaCanonical (Task 13)', () => {
     // after a successful publish (`pushCanonicalMemory`'s own contract).
     expect(await readCanonicalMain(stackHome)).toEqual(mainBefore);
     expect(await readCanonicalBase(stackHome)).toBeNull();
+  });
+
+  it('lost update: B commits between A\'s fetch and A\'s publish — A must conflict and retry/merge, never silently overwrite B (Task 13 fix round 2, Critical-1)', async () => {
+    const identity = canonicalGitIdentity('https://github.com/acme/race.git');
+    if (!identity) throw new Error('test setup: expected a resolvable git identity');
+
+    // Machine A: push doc a.md as generation 0.
+    const stackHomeA = path.join(root, 'race-a');
+    let registryA = await readLocalRegistry(stackHomeA);
+    const minted = resolveOrMintProject(registryA, identity);
+    registryA = minted.registry;
+    await writeLocalRegistry(stackHomeA, registryA);
+    const projectId = minted.projectId;
+    const bodyA1 = Buffer.from('A1', 'utf8');
+    const hashA1 = hashBytes(bodyA1);
+    await writeCanonicalMain(stackHomeA, {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [
+        {
+          projectId,
+          documents: [
+            { path: 'notes/a.md', state: 'present', contentHash: hashA1, importedFrom: 'claude', importedAt: '2026-10-23T00:00:00.000Z' },
+          ],
+        },
+      ],
+    });
+    await writeMemoryObject({ stackHome: stackHomeA, contentHash: hashA1, bytes: bodyA1 });
+
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, 'canonical-race');
+    const keysDirA = path.join(root, 'race-a-keys');
+    const genA0 = await pushMemoryViaCanonical(deps(stackHomeA, backend, keysDirA), {});
+    expect(genA0.status).toBe('pushed');
+    expect(genA0.generation).toBe(0);
+
+    // Machine B: the SAME project (pre-reconciled id), pulls A's generation 0,
+    // then pushes its OWN doc b.md for real — generation 1, containing both
+    // a.md and b.md.
+    const stackHomeB = path.join(root, 'race-b');
+    let registryB = await readLocalRegistry(stackHomeB);
+    registryB = resolveOrMintProject(registryB, identity, () => projectId).registry;
+    await writeLocalRegistry(stackHomeB, registryB);
+    const keysDirB = path.join(root, 'race-b-keys');
+    await pullMemoryViaCanonical(deps(stackHomeB, backend, keysDirB), {});
+    const mainB = await readCanonicalMain(stackHomeB);
+    const bodyB1 = Buffer.from('B1', 'utf8');
+    const hashB1 = hashBytes(bodyB1);
+    await writeMemoryObject({ stackHome: stackHomeB, contentHash: hashB1, bytes: bodyB1 });
+    await writeCanonicalMain(stackHomeB, {
+      ...mainB,
+      projects: mainB.projects.map((p) =>
+        p.projectId === projectId
+          ? {
+              ...p,
+              documents: [
+                ...p.documents,
+                { path: 'notes/b.md', state: 'present' as const, contentHash: hashB1, importedFrom: 'claude' as const, importedAt: '2026-10-23T00:00:00.000Z' },
+              ],
+            }
+          : p,
+      ),
+    });
+    const genB1 = await pushMemoryViaCanonical(deps(stackHomeB, backend, keysDirB), {});
+    expect(genB1.status).toBe('pushed');
+    expect(genB1.generation).toBe(1);
+
+    // Machine A: locally adds its OWN new doc a2.md on top of its stale base
+    // (generation 0 — A never learned about B's push). Its OWN `fetchRemote`
+    // is forced to report the STALE generation-0 state (simulating "B's push
+    // landed on Cloud after A's own fetch already happened, but before A's
+    // publish call") — the exact race window Critical-1 is about. Later retry
+    // attempts see the real, current remote.
+    const bodyA2 = Buffer.from('A2', 'utf8');
+    const hashA2 = hashBytes(bodyA2);
+    await writeMemoryObject({ stackHome: stackHomeA, contentHash: hashA2, bytes: bodyA2 });
+    const mainABeforeA2 = await readCanonicalMain(stackHomeA);
+    await writeCanonicalMain(stackHomeA, {
+      ...mainABeforeA2,
+      projects: mainABeforeA2.projects.map((p) =>
+        p.projectId === projectId
+          ? {
+              ...p,
+              documents: [
+                ...p.documents,
+                { path: 'notes/a2.md', state: 'present' as const, contentHash: hashA2, importedFrom: 'claude' as const, importedAt: '2026-10-23T00:00:00.000Z' },
+              ],
+            }
+          : p,
+      ),
+    });
+
+    const staleRemote = { generation: 0, main: { schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION, projects: [{ projectId, documents: [{ path: 'notes/a.md', state: 'present' as const, contentHash: hashA1, importedFrom: 'claude' as const, importedAt: '2026-10-23T00:00:00.000Z' }] }] } };
+    let fetchCount = 0;
+    const depsA = deps(stackHomeA, backend, keysDirA);
+    const outcome = await pushCanonicalMemory({
+      getLocalMain: () => readCanonicalMain(stackHomeA),
+      getBase: () => readCanonicalBase(stackHomeA),
+      setLocalMain: (main) => writeCanonicalMain(stackHomeA, main),
+      setBase: (base) => writeCanonicalBase(stackHomeA, base),
+      fetchRemote: async () => {
+        fetchCount += 1;
+        if (fetchCount === 1) return staleRemote; // the race: stale by the time publish() runs
+        const result = await fetchRemoteCanonical({ backend, localRegistry: await readLocalRegistry(stackHomeA) });
+        if (!result) return null;
+        // Mirrors `canonical-ops.ts`'s `remoteOf`: persist fetched objects
+        // locally so a later merge/materialize can actually read B's content.
+        for (const object of result.objects)
+          await writeMemoryObject({ stackHome: stackHomeA, contentHash: object.contentHash, bytes: object.bytes });
+        return { generation: result.generation, main: result.main };
+      },
+      publish: async (main, expectedParent) => {
+        const result = await publishCanonicalGeneration(depsA, main, expectedParent);
+        return { generation: result.generation };
+      },
+      savePendingMerge: async () => undefined,
+      clearPendingMerge: async () => undefined,
+    });
+
+    expect(outcome.status).toBe('pushed');
+    // B's doc must survive — never silently overwritten by A's stale-based publish.
+    const finalMain = await readCanonicalMain(stackHomeA);
+    const docs = finalMain.projects.find((p) => p.projectId === projectId)?.documents ?? [];
+    expect(docs.some((d) => d.state === 'present' && d.contentHash === hashA1)).toBe(true);
+    expect(docs.some((d) => d.state === 'present' && d.contentHash === hashA2)).toBe(true);
+    expect(docs.some((d) => d.state === 'present' && d.contentHash === hashB1)).toBe(true);
+    // And the actually-published generation on Cloud carries all three, too.
+    const remoteAfter = await fetchRemoteCanonical({ backend, localRegistry: await readLocalRegistry(stackHomeA) });
+    const remoteDocs = remoteAfter?.main.projects.find((p) => p.projectId === projectId)?.documents ?? [];
+    expect(remoteDocs.some((d) => d.state === 'present' && d.contentHash === hashB1)).toBe(true);
+  });
+
+  it('spec Appendix A.4 / Task 13 fix round 2, finding 7: a v1 user with unpushed edits whose Cloud latest is their OWN last push gets a clean push with no false conflicts; another machine\'s later change still merges correctly', async () => {
+    const identity = canonicalGitIdentity('https://github.com/acme/v1-conflict.git');
+    if (!identity) throw new Error('test setup: expected a resolvable git identity');
+
+    // Machine A: a genuine v1 account. Push via the OLD v1 path (`pushStagedMemory`,
+    // which also records provenance — `recoveredGeneration` — exactly like a
+    // real pre-canonical CLI would).
+    const stackHomeA = path.join(root, 'v1gen-a-stack');
+    const bodyOriginal = Buffer.from('original note', 'utf8');
+    const hashOriginal = hashBytes(bodyOriginal);
+    await writeMemoryObject({ stackHome: stackHomeA, contentHash: hashOriginal, bytes: bodyOriginal });
+    await writeMemoryManifest({
+      stackHome: stackHomeA,
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-23T00:00:00.000Z',
+        items: [
+          {
+            provider: 'claude',
+            kind: 'auto-memory',
+            scope: 'project',
+            logicalId: 'claude/auto-memory/github.com/acme/v1-conflict/a.md',
+            project: {
+              kind: 'git',
+              canonical: 'github.com/acme/v1-conflict',
+              host: 'github.com',
+              owner: 'acme',
+              repo: 'v1-conflict',
+            },
+            contentHash: hashOriginal,
+            restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
+            capturedAt: '2026-10-23T00:00:00.000Z',
+            sensitivity: 'private',
+          },
+        ],
+      },
+    });
+
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, 'canonical-v1-gen7');
+    const keysDirA = path.join(root, 'v1gen-a-keys');
+    const v1Push = await pushStagedMemory({
+      stackHome: stackHomeA,
+      backend,
+      localKeyStore: fileLocalMemoryKeyStore(keysDirA, { harden: () => Promise.resolve(true), verify: () => Promise.resolve(true) }),
+      runLocalBackup: () => Promise.resolve({ provider: 'claude', files: 1, projects: 1, createdAt: '2026-10-23T00:00:00.000Z' }),
+    });
+    expect(v1Push.status).toBe('standard');
+    const latestAfterV1Push = await backend.getLatest();
+    expect(latestAfterV1Push?.bundleFormatVersion).toBe('stack-mem-bundle-v1');
+
+    // Machine A now makes an UNPUSHED edit locally (e.g. via `stak add .` after
+    // editing the native file) — the v1 manifest's own content changes, but
+    // nothing has been pushed again yet.
+    const bodyEdited = Buffer.from('edited note, never pushed', 'utf8');
+    const hashEdited = hashBytes(bodyEdited);
+    await writeMemoryObject({ stackHome: stackHomeA, contentHash: hashEdited, bytes: bodyEdited });
+    await writeMemoryManifest({
+      stackHome: stackHomeA,
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-23T00:00:01.000Z',
+        items: [
+          {
+            provider: 'claude',
+            kind: 'auto-memory',
+            scope: 'project',
+            logicalId: 'claude/auto-memory/github.com/acme/v1-conflict/a.md',
+            project: {
+              kind: 'git',
+              canonical: 'github.com/acme/v1-conflict',
+              host: 'github.com',
+              owner: 'acme',
+              repo: 'v1-conflict',
+            },
+            contentHash: hashEdited,
+            restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
+            capturedAt: '2026-10-23T00:00:01.000Z',
+            sensitivity: 'private',
+          },
+        ],
+      },
+    });
+
+    // The canonical-aware push: migrates locally (building `main` from the
+    // EDITED v1 manifest), and must seed `base` from generation 0 (this
+    // machine's own last v1 push) before merging — a clean fast-forward, not
+    // a false `edit-edit` conflict against an empty base.
+    const pushOutcome = await pushMemoryViaCanonical(deps(stackHomeA, backend, keysDirA), {});
+    expect(pushOutcome.status).toBe('pushed');
+    expect(pushOutcome.generation).toBe(1);
+    const mainAfter = await readCanonicalMain(stackHomeA);
+    const projectIdFromA = mainAfter.projects[0]!.projectId;
+    expect(
+      mainAfter.projects[0]?.documents.some((d) => d.state === 'present' && d.contentHash === hashEdited),
+    ).toBe(true);
+
+    // Another machine, pushing AFTER that generation, still merges correctly.
+    const stackHomeB = path.join(root, 'v1gen-b-stack');
+    let registryB = await readLocalRegistry(stackHomeB);
+    registryB = resolveOrMintProject(registryB, identity, () => projectIdFromA).registry;
+    await writeLocalRegistry(stackHomeB, registryB);
+    const keysDirB = path.join(root, 'v1gen-b-keys');
+    const pulledB = await pullMemoryViaCanonical(deps(stackHomeB, backend, keysDirB), {});
+    expect(pulledB.status).toBe('merged');
+    const mainB = await readCanonicalMain(stackHomeB);
+    const bodyFromB = Buffer.from('a brand new doc from B', 'utf8');
+    const hashFromB = hashBytes(bodyFromB);
+    await writeMemoryObject({ stackHome: stackHomeB, contentHash: hashFromB, bytes: bodyFromB });
+    await writeCanonicalMain(stackHomeB, {
+      ...mainB,
+      projects: mainB.projects.map((p) =>
+        p.projectId === projectIdFromA
+          ? {
+              ...p,
+              documents: [
+                ...p.documents,
+                { path: 'notes/b.md', state: 'present' as const, contentHash: hashFromB, importedFrom: 'claude' as const, importedAt: '2026-10-23T00:00:02.000Z' },
+              ],
+            }
+          : p,
+      ),
+    });
+    const pushedB = await pushMemoryViaCanonical(deps(stackHomeB, backend, keysDirB), {});
+    expect(pushedB.status).toBe('pushed');
+    expect(pushedB.generation).toBe(2);
+    const finalRemote = await fetchRemoteCanonical({ backend, localRegistry: await readLocalRegistry(stackHomeB) });
+    const finalDocs = finalRemote?.main.projects.find((p) => p.projectId === projectIdFromA)?.documents ?? [];
+    expect(finalDocs.some((d) => d.state === 'present' && d.contentHash === hashEdited)).toBe(true);
+    expect(finalDocs.some((d) => d.state === 'present' && d.contentHash === hashFromB)).toBe(true);
   });
 
   it('a Protected account this device cannot unlock reports a friendly `protected-locked` status for both push and pull, never a thrown/FAILED error (Task 13 Important-7(b))', async () => {
@@ -877,6 +1166,143 @@ describe('pushMemoryViaCanonical / pullMemoryViaCanonical (Task 13)', () => {
     // The actual Critical-1 assertion: materialize must WRITE these files, not
     // silently plan them as `import-delete` because the projection was wrongly
     // seeded P = C for documents this machine never natively had.
+    expect(
+      await readFile(path.join(projectDirF, 'CLAUDE.local.md'), 'utf8'),
+    ).toBe('private instructions');
+    expect(
+      await readFile(
+        path.join(projectDirF, '.claude', 'agent-memory', 'claude', 'notes.md'),
+        'utf8',
+      ),
+    ).toBe('agent-specific memory');
+    expect(
+      await readFile(
+        path.join(claudeHomeF, 'projects', encodeClaudeProjectKey(path.resolve(projectDirF)), 'memory', 'MEMORY.md'),
+        'utf8',
+      ),
+    ).toBe('source content');
+  });
+
+  it('a fresh machine whose Cloud latest is STILL v1 (never canonically pushed): recover, then pull — CLAUDE.local.md and .claude/agent-memory/* are still written to disk (Task 13 fix round 2, finding 5 — "C1 residual")', async () => {
+    // Source machine: a GENUINE v1 manifest with project-scope items (auto-
+    // memory, private instructions, agent memory), pushed via the OLD v1
+    // Standard path directly — `canonical/main.json` never gets built or
+    // published on the source machine at all. This is a pure Skills+v1-Memory
+    // account that has never run a canonical-aware `stak push`.
+    const identity = canonicalGitIdentity('https://github.com/acme/v1-only.git');
+    if (!identity) throw new Error('test setup: expected a resolvable git identity');
+    const stackHomeS = path.join(root, 'v1only-s-stack');
+    const bodyNotes = Buffer.from('source content', 'utf8');
+    const bodyPrivate = Buffer.from('private instructions', 'utf8');
+    const bodyAgent = Buffer.from('agent-specific memory', 'utf8');
+    const hashNotes = hashBytes(bodyNotes);
+    const hashPrivate = hashBytes(bodyPrivate);
+    const hashAgent = hashBytes(bodyAgent);
+    await writeMemoryObject({ stackHome: stackHomeS, contentHash: hashNotes, bytes: bodyNotes });
+    await writeMemoryObject({ stackHome: stackHomeS, contentHash: hashPrivate, bytes: bodyPrivate });
+    await writeMemoryObject({ stackHome: stackHomeS, contentHash: hashAgent, bytes: bodyAgent });
+    await writeMemoryManifest({
+      stackHome: stackHomeS,
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-23T00:00:00.000Z',
+        items: [
+          {
+            provider: 'claude',
+            kind: 'auto-memory',
+            scope: 'project',
+            logicalId: 'claude/auto-memory/github.com/acme/v1-only/MEMORY.md',
+            project: {
+              kind: 'git',
+              canonical: 'github.com/acme/v1-only',
+              host: 'github.com',
+              owner: 'acme',
+              repo: 'v1-only',
+            },
+            contentHash: hashNotes,
+            restoreTarget: { base: 'claude-project-memory', relativePath: 'MEMORY.md' },
+            capturedAt: '2026-10-23T00:00:00.000Z',
+            sensitivity: 'private',
+          },
+          {
+            provider: 'claude',
+            kind: 'project-private-instructions',
+            scope: 'project',
+            logicalId: 'claude/project-private-instructions/github.com/acme/v1-only',
+            project: {
+              kind: 'git',
+              canonical: 'github.com/acme/v1-only',
+              host: 'github.com',
+              owner: 'acme',
+              repo: 'v1-only',
+            },
+            contentHash: hashPrivate,
+            restoreTarget: { base: 'claude-project-memory', relativePath: 'CLAUDE.local.md' },
+            capturedAt: '2026-10-23T00:00:00.000Z',
+            sensitivity: 'private',
+          },
+          {
+            provider: 'claude',
+            kind: 'agent-memory',
+            scope: 'project',
+            logicalId: 'claude/agent-memory/github.com/acme/v1-only/.claude/agent-memory/claude/notes.md',
+            project: {
+              kind: 'git',
+              canonical: 'github.com/acme/v1-only',
+              host: 'github.com',
+              owner: 'acme',
+              repo: 'v1-only',
+            },
+            contentHash: hashAgent,
+            restoreTarget: {
+              base: 'claude-project-memory',
+              relativePath: '.claude/agent-memory/claude/notes.md',
+            },
+            capturedAt: '2026-10-23T00:00:00.000Z',
+            sensitivity: 'private',
+          },
+        ],
+      },
+    });
+
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, 'canonical-v1-only-fresh-machine');
+    // A genuine v1 push — NOT through the canonical engine at all.
+    const pushed = await standardCloudBackup({ stackHome: stackHomeS, backend });
+    const latest = await backend.getLatest();
+    expect(latest?.bundleFormatVersion).toBe('stack-mem-bundle-v1');
+    void pushed;
+
+    // Fresh machine: the pre-existing, unchanged full v1-style recover path —
+    // restores the v1 manifest (project items included; it was never slimmed,
+    // since this account never migrated).
+    const stackHomeF = path.join(root, 'v1only-f-stack');
+    const keysF = path.join(root, 'v1only-f-keys');
+    const recovered = await runMemoryCloudRecover(deps(stackHomeF, backend, keysF));
+    expect(recovered.status).toBe('recovered');
+
+    // F has the project's directory but has NEVER written any Claude files
+    // for it yet.
+    const claudeHomeF = path.join(root, 'v1only-f-claude');
+    const projectDirF = path.join(root, 'v1only-f-proj');
+    await mkdir(projectDirF, { recursive: true });
+    let registryF = await readLocalRegistry(stackHomeF);
+    registryF = resolveOrMintProject(registryF, identity).registry;
+    await writeLocalRegistry(stackHomeF, registryF);
+
+    const pullOutcome = await pullMemoryViaCanonical(deps(stackHomeF, backend, keysF), {
+      claudeHome: claudeHomeF,
+      projects: [{ dir: projectDirF, gitRemote: 'https://github.com/acme/v1-only.git' }],
+    });
+    expect(pullOutcome.status === 'up-to-date' || pullOutcome.status === 'merged').toBe(true);
+
+    // The actual finding-5 assertion: migration built `main` from the
+    // RECOVERED v1 manifest (since `needsBuild` is true — this account's v1
+    // manifest genuinely has project items) — the projection must NOT have
+    // been seeded P = C for documents this fresh machine's native files never
+    // held, or materialize would have silently planned them as `import-delete`
+    // instead of writing them out.
     expect(
       await readFile(path.join(projectDirF, 'CLAUDE.local.md'), 'utf8'),
     ).toBe('private instructions');

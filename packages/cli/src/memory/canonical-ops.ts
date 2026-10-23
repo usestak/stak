@@ -11,6 +11,7 @@ import {
   fetchRemoteCanonical,
   gitClaimOf,
   isLocalStoreMigrated,
+  mergePortableSnapshot,
   migrateLocalStore,
   nameHintFor,
   normalizeVendorKey,
@@ -19,6 +20,7 @@ import {
   pushCanonicalMemory,
   readCanonicalBase,
   readCanonicalMain,
+  readLocalRecoveryState,
   readLocalRegistry,
   readMemoryManifest,
   reconstructProjectDir,
@@ -37,6 +39,7 @@ import {
   type DiscoveredMemoryItem,
   type LocalRegistry,
   type ManifestItem,
+  type PortableProjectRecord,
   type PortableRegistrySnapshot,
   type ProjectIdentity,
   type ScanResult,
@@ -611,6 +614,32 @@ export type CanonicalMemoryStageResult = {
   untrackedFolders: number;
 };
 
+/**
+ * Run `migrateLocalStore` wired with a discovery-based project-directory
+ * locator (Task 13 fix round 2, finding 5 — the "C1 residual"), so its
+ * projection-seeding step can confirm a migrated document's native file
+ * ACTUALLY exists on this machine before ever treating it as "last synced" —
+ * never seeding for a path that's only in `main` because it arrived via a
+ * recovered v1 Cloud bundle this machine's native files never held. Read-only
+ * (`'status'` mode — never mints, never writes the registry); a fresh machine
+ * that just ran `runMemoryCloudRecover` already has the recovered bundle's
+ * portable registry snapshot merged into its LOCAL registry (via
+ * `reconcileRegistryAfterRecover`, inside `cloudRecover`), so this ordinary
+ * discovery-based locator is sufficient without needing migration itself to
+ * know about remote snapshots.
+ */
+const migrateWithProjectionSeed = async (
+  stackHome: string,
+  options: CanonicalDiscoveryOptions,
+): Promise<void> => {
+  const { resolved } = await enumerateSyncableProjects(stackHome, options, 'status');
+  const dirByProjectId = new Map(resolved.map((r) => [r.projectId, r.dir]));
+  await migrateLocalStore(stackHome, {
+    locateProjectDir: async (projectId) => dirByProjectId.get(projectId),
+    ...(options.claudeHome ? { claudeHome: options.claudeHome } : {}),
+  });
+};
+
 /** `stak add .`'s canonical-Memory half: migrate once, then mint/resolve a Project ID
  * for and import every LOCATABLE project's native edits into canonical Memory — not
  * only machine-bound ones (see `enumerateSyncableProjects`). */
@@ -618,7 +647,7 @@ export const stageCanonicalMemory = async (
   stackHome: string,
   options: CanonicalDiscoveryOptions = {},
 ): Promise<CanonicalMemoryStageResult> => {
-  await migrateLocalStore(stackHome);
+  await migrateWithProjectionSeed(stackHome, options);
   const { resolved, conflictedCount, unlocatableProjects, untrackedFolderCount, groupProjectIds } =
     await enumerateSyncableProjects(stackHome, options, 'stage');
   const entries = await planResolvedProjects(stackHome, resolved, groupProjectIds, options);
@@ -705,11 +734,20 @@ export type CanonicalPullOutcome = {
 const locateMaterializeTargets = async (
   stackHome: string,
   options: CanonicalDiscoveryOptions,
-): Promise<{ targets: Map<string, string>; unavailable: string[] }> => {
+): Promise<{
+  targets: Map<string, string>;
+  unavailable: string[];
+  /** Projects located ONLY via the remote snapshot's claim (Task 13 fix round
+   * 2, Important-4-residual: duplicate Project ID after a snapshot-only
+   * locate) — this machine's own local registry never learned this claim.
+   * Keyed by projectId, value is the exact portable record to import. */
+  locatedViaRemoteClaim: Map<string, PortableProjectRecord>;
+}> => {
   const registry = await readLocalRegistry(stackHome);
   const main = await readCanonicalMain(stackHome);
   const { resolved } = await enumerateSyncableProjects(stackHome, options, 'status');
   const targets = new Map<string, string>(resolved.map((r) => [r.projectId, r.dir]));
+  const locatedViaRemoteClaim = new Map<string, PortableProjectRecord>();
 
   for (const project of main.projects) {
     if (targets.has(project.projectId)) continue;
@@ -722,7 +760,8 @@ const locateMaterializeTargets = async (
     // machine has never locally learned one, fall back — read-only — to the
     // portable registry snapshot carried by the last-fetched Cloud generation
     // (the same snapshot every OTHER machine's push already contributed to).
-    // Never mints, never binds from either source.
+    // Never mints, never binds from either source HERE — see
+    // `locatedViaRemoteClaim`'s own import step in `materializeCanonicalProjects`.
     const localRecord = recordFor(registry, project.projectId);
     const localClaim = localRecord ? gitClaimOf(localRecord) : undefined;
     const remoteRecord = options.remoteRegistrySnapshot?.projects.find(
@@ -738,13 +777,14 @@ const locateMaterializeTargets = async (
       const identity = canonicalGitIdentity(remote);
       if (identity && identity.canonical.toLowerCase() === claimCanonical) {
         targets.set(project.projectId, path.resolve(candidate.dir));
+        if (!localClaim && remoteRecord) locatedViaRemoteClaim.set(project.projectId, remoteRecord);
         break;
       }
     }
   }
 
   const unavailable = main.projects.filter((p) => !targets.has(p.projectId)).map((p) => p.projectId);
-  return { targets, unavailable };
+  return { targets, unavailable, locatedViaRemoteClaim };
 };
 
 export type MaterializeOutcome = {
@@ -777,10 +817,26 @@ export const materializeCanonicalProjects = async (
   stackHome: string,
   options: CanonicalDiscoveryOptions = {},
 ): Promise<MaterializeOutcome> => {
-  const registry = await readLocalRegistry(stackHome);
-  const { targets, unavailable } = await locateMaterializeTargets(stackHome, options);
+  let registry = await readLocalRegistry(stackHome);
   let materialized = 0;
   const conflicts: { projectId: string; path: string; reason: string }[] = [];
+  let targets: Map<string, string>;
+  let unavailable: string[];
+  let locatedViaRemoteClaim: Map<string, PortableProjectRecord>;
+  try {
+    ({ targets, unavailable, locatedViaRemoteClaim } = await locateMaterializeTargets(stackHome, options));
+  } catch (error) {
+    // Task 13 fix round 2 (Minor): a failure here must never propagate past
+    // this function — a Cloud publish/merge that already succeeded must be
+    // reported as such, with this as a warning, never as the whole operation
+    // having FAILED. `path: ''` marks this as a literal error message, not an
+    // ordinary sync conflict (see `canonicalExtraNotes` in `ui/cloud.ts`).
+    return {
+      materialized: 0,
+      unavailable: [],
+      conflicts: [{ projectId: '', path: '', reason: error instanceof Error ? error.message : 'materialize failed' }],
+    };
+  }
   for (const [projectId, dir] of targets) {
     const scanOptions = {
       ...(options.claudeHome ? { claudeHome: options.claudeHome } : {}),
@@ -798,6 +854,20 @@ export const materializeCanonicalProjects = async (
         conflicts.push({ projectId, path: sourceConflict.canonicalPath, reason: 'source-conflict' });
       await applyMaterializeActions({ projectId, dir }, stackHome, plan.actions, options.claudeHome);
       materialized += 1;
+      // Task 13 fix round 2 (Important-4 residual, I6 follow-up): a project
+      // located ONLY via the remote snapshot's claim, once actually
+      // materialized, must have that claim imported into THIS machine's local
+      // registry — exactly like `reconcileRegistryAfterRecover` does (git
+      // identity only, never a binding, never a machine path) — or the next
+      // `stak add .` would mint a brand-new Project ID for the same repo,
+      // since staging's own identity resolution only ever consults the local
+      // registry.
+      const remoteRecord = locatedViaRemoteClaim.get(projectId);
+      if (remoteRecord) {
+        const merged = mergePortableSnapshot(registry, { snapshotVersion: 1, projects: [remoteRecord] });
+        registry = merged.registry;
+        await writeLocalRegistry(stackHome, registry);
+      }
     } catch (error) {
       // One unwritable project (a path-fence refusal, a permissions error, a
       // case-collision) must never abort every other project's materialize in
@@ -860,6 +930,61 @@ const remoteOf = (deps: MemoryCloudDeps, mmk: Buffer | undefined) => {
 };
 
 /**
+ * Spec Appendix A.4, "Base after the v1 → v2 upgrade" (clarification
+ * 2026-10-23) / Task 13 fix round 2, finding 7 (the user's decision on 7(c)):
+ * seed `canonical/base.json` from the Cloud generation THIS MACHINE last
+ * pushed or recovered in v1, converted with `convertV1Bundle` (via
+ * `fetchRemoteCanonical`'s `generation` option) — when that generation is
+ * KNOWN locally. Without this, a v1→v2 migrated account's first canonical
+ * push/pull merges against an EMPTY base even though this machine's local v1
+ * content is really just the unedited continuation of a real, specific Cloud
+ * generation — every unpushed edit since then reads as "changed on both
+ * sides relative to nothing" (an `edit-edit` conflict) instead of an ordinary
+ * one-sided change.
+ *
+ * The "last pushed or recovered" generation is recorded in
+ * `local-recovery-state.json`'s `recoveredGeneration` field — written by BOTH
+ * `stak memory recover` and any prior successful publish (`recordRecoveryProvenance`
+ * runs after `cloudRecover` AND after `publishCanonicalGeneration`/`pushStagedMemory`,
+ * despite the "recovery" name). The Cloud *latest* is NEVER substituted for
+ * this — only a generation THIS machine is independently known to have
+ * actually synced with.
+ *
+ * Migration itself (`migrateLocalStore`) has no network access, so this seeds
+ * LAZILY, right before the very first canonical push/pull's own merge — never
+ * overwrites an existing base (idempotent: a no-op on every later call once
+ * seeded, or once a real sync has run). If the generation isn't known, or
+ * can't be fetched/decoded, base stays empty — the documented safe fallback
+ * (differing documents become ordinary conflicts, never a silently-preferred
+ * side).
+ */
+const seedBaseFromLastKnownV1Generation = async (
+  deps: MemoryCloudDeps,
+  mmk: Buffer | undefined,
+): Promise<void> => {
+  if (!deps.backend) return;
+  if ((await readCanonicalBase(deps.stackHome)) !== null) return; // already seeded, or already synced for real
+  const localMain = await readCanonicalMain(deps.stackHome);
+  if (localMain.projects.length === 0) return; // nothing to merge yet; an empty base is fine
+  const provenance = await readLocalRecoveryState(deps.stackHome);
+  const knownGeneration = provenance?.recoveredGeneration;
+  if (knownGeneration === null || knownGeneration === undefined) return; // not known -> leave base empty (safe fallback)
+  try {
+    const result = await fetchRemoteCanonical({
+      backend: deps.backend,
+      ...(mmk ? { mmk } : {}),
+      localRegistry: await readLocalRegistry(deps.stackHome),
+      generation: knownGeneration,
+    });
+    if (!result) return; // that generation is gone/unreadable -> leave base empty
+    await writeCanonicalBase(deps.stackHome, { generation: result.generation, main: result.main });
+  } catch {
+    // Any failure (network, integrity, missing MMK, …) -> leave base empty —
+    // the documented safe fallback, never a guessed source.
+  }
+};
+
+/**
  * `stak push`'s canonical-Memory half — REPLACES `pushStagedMemory`'s call site
  * in `program.ts`'s `applyMemoryPush` (Task 13); `pushStagedMemory` itself is left
  * in place, unused by push, for `stak memory backup`'s own independent wiring.
@@ -884,16 +1009,19 @@ export const pushMemoryViaCanonical = async (
   // manifest this SAME call just created, defeating the Important-7(a) guard
   // below every single time.
   const hadManifestBeforeMigration = (await readMemoryManifest(deps.stackHome)) !== null;
-  await migrateLocalStore(deps.stackHome);
+  await migrateWithProjectionSeed(deps.stackHome, discovery);
   // Not signed in: Memory stays staged locally only (Task 13 Minor fix — this
   // used to fall through to `up-to-date`, rendering a nonsensical "already up
   // to date (generation 0)" for an account that was never even authenticated).
   if (!deps.backend) return { status: 'skipped' };
   const profile = await deps.backend.getProfile();
-  if ((profile?.privacyMode ?? 'standard') === 'protected' && !(await deps.localKeyStore.loadMmk()))
+  if ((profile?.privacyMode ?? 'standard') === 'protected' && !(await deps.localKeyStore.loadMmk().catch(() => null)))
     return { status: 'protected-locked' };
   const mmk = (await deps.localKeyStore.loadMmk().catch(() => undefined)) ?? undefined;
   const remote = remoteOf(deps, mmk);
+  // Spec Appendix A.4 / Task 13 finding 7: lazily seed base from this
+  // machine's own last-known v1 generation, before the first canonical merge.
+  await seedBaseFromLastKnownV1Generation(deps, mmk);
   // Task 13 Important-7(a): a pure Skills-only account (nothing EVER staged on
   // this machine — no v1 manifest at all — and Cloud has no Memory history
   // either) must not publish an empty Memory generation just because push ran.
@@ -908,8 +1036,8 @@ export const pushMemoryViaCanonical = async (
     setLocalMain: (main) => writeCanonicalMain(deps.stackHome, main),
     setBase: (base) => writeCanonicalBase(deps.stackHome, base),
     fetchRemote: remote.fetch,
-    publish: async (main) => {
-      const result = await publishCanonicalGeneration(deps, main);
+    publish: async (main, expectedParent) => {
+      const result = await publishCanonicalGeneration(deps, main, expectedParent);
       return { generation: result.generation };
     },
     savePendingMerge: (pending) => writePendingMerge(deps.stackHome, pending),
@@ -949,13 +1077,16 @@ export const pullMemoryViaCanonical = async (
   deps: MemoryCloudDeps,
   discovery: CanonicalDiscoveryOptions = {},
 ): Promise<CanonicalPullOutcome> => {
-  await migrateLocalStore(deps.stackHome);
+  await migrateWithProjectionSeed(deps.stackHome, discovery);
   if (!deps.backend) return { status: 'up-to-date' };
   const profile = await deps.backend.getProfile();
-  if ((profile?.privacyMode ?? 'standard') === 'protected' && !(await deps.localKeyStore.loadMmk()))
+  if ((profile?.privacyMode ?? 'standard') === 'protected' && !(await deps.localKeyStore.loadMmk().catch(() => null)))
     return { status: 'protected-locked' };
   const mmk = (await deps.localKeyStore.loadMmk().catch(() => undefined)) ?? undefined;
   const remote = remoteOf(deps, mmk);
+  // Spec Appendix A.4 / Task 13 finding 7: lazily seed base from this
+  // machine's own last-known v1 generation, before the first canonical merge.
+  await seedBaseFromLastKnownV1Generation(deps, mmk);
   const outcome = await pullCanonicalMemory({
     getLocalMain: () => readCanonicalMain(deps.stackHome),
     getBase: () => readCanonicalBase(deps.stackHome),

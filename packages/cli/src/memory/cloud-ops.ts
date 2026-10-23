@@ -313,6 +313,17 @@ export const pushStagedMemory = async (
 export const publishCanonicalGeneration = async (
   deps: MemoryCloudDeps,
   main: CanonicalMainManifest,
+  /**
+   * The EXACT `expectedParent` `pushCanonicalMemory`/`pullCanonicalMemory`
+   * decided to publish against (Task 13 fix round 2, Critical-1: lost update).
+   * Threaded straight through to `standardCloudBackup`/`protectedCloudBackup`,
+   * which must NEVER re-read `getLatest()` for this path — doing so could
+   * silently adopt a DIFFERENT, newer generation that another machine pushed
+   * in between the canonical engine's own fetch and this publish call, letting
+   * `createGeneration`'s optimistic-concurrency check compare against the
+   * wrong parent and overwrite that machine's change instead of conflicting.
+   */
+  expectedParent: number | null,
 ): Promise<{ generation: number; privacyMode: 'standard' | 'protected' }> => {
   if (!deps.backend) throw new Error('No Cloud backend configured.');
   const semanticDigest = await computeSemanticDigest(deps.stackHome, main);
@@ -326,6 +337,7 @@ export const publishCanonicalGeneration = async (
       backend: deps.backend,
       mmk,
       canonicalMainOverride: main,
+      expectedParent,
       ...(deps.now ? { now: deps.now } : {}),
     });
     await recordRecoveryProvenance(deps, {
@@ -340,6 +352,7 @@ export const publishCanonicalGeneration = async (
     stackHome: deps.stackHome,
     backend: deps.backend,
     canonicalMainOverride: main,
+    expectedParent,
     ...(deps.now ? { now: deps.now } : {}),
   });
   await recordRecoveryProvenance(deps, {
@@ -411,6 +424,41 @@ export const resolveMemoryPushState = async (
  * `pullMemoryViaCanonical` for the same caveat) — a cross-process lock is a
  * known, deferred design gap.
  */
+/**
+ * Spec Appendix A.4 / Task 13 fix round 2, finding 7 — same fix as
+ * `canonical-ops.ts`'s identically-named helper (duplicated rather than
+ * imported, for the same circular-module reason as this file's own
+ * `fetchRemote` closure in `runMemoryCloudBackup` below): seed
+ * `canonical/base.json` from the Cloud generation THIS MACHINE last pushed or
+ * recovered in v1, when known — never Cloud's current latest. Lazy,
+ * idempotent (never overwrites an existing base), safe no-op when the
+ * generation isn't known or can't be fetched.
+ */
+const seedBaseFromLastKnownV1Generation = async (
+  deps: MemoryCloudDeps,
+  mmk: Buffer | undefined,
+): Promise<void> => {
+  if (!deps.backend) return;
+  if ((await readCanonicalBase(deps.stackHome)) !== null) return;
+  const localMain = await readCanonicalMain(deps.stackHome);
+  if (localMain.projects.length === 0) return;
+  const provenance = await readLocalRecoveryState(deps.stackHome);
+  const knownGeneration = provenance?.recoveredGeneration;
+  if (knownGeneration === null || knownGeneration === undefined) return;
+  try {
+    const result = await fetchRemoteCanonical({
+      backend: deps.backend,
+      ...(mmk ? { mmk } : {}),
+      localRegistry: await readLocalRegistry(deps.stackHome),
+      generation: knownGeneration,
+    });
+    if (!result) return;
+    await writeCanonicalBase(deps.stackHome, { generation: result.generation, main: result.main });
+  } catch {
+    // Leave base empty — the documented safe fallback.
+  }
+};
+
 export const runMemoryCloudBackup = async (
   deps: MemoryCloudDeps,
 ): Promise<MemoryBackupOutcome> => {
@@ -429,13 +477,17 @@ export const runMemoryCloudBackup = async (
   // known, deferred design gap.
   await migrateLocalStore(deps.stackHome);
   if (!deps.backend) return { local, cloud: { status: 'skipped' } };
-  const profile = await deps.backend.getProfile();
-  if (
-    (profile?.privacyMode ?? 'standard') === 'protected' &&
-    !(await deps.localKeyStore.loadMmk())
-  )
-    return { local, cloud: { status: 'protected-locked' } };
+  // Task 13 fix round 2 (Minor): `getProfile`/`loadMmk` moved INSIDE the try —
+  // a network error reading the profile (or anything else below) now returns
+  // `{status:'failed'}` alongside the already-safe local backup, instead of
+  // propagating past this function entirely.
   try {
+    const profile = await deps.backend.getProfile();
+    if (
+      (profile?.privacyMode ?? 'standard') === 'protected' &&
+      !(await deps.localKeyStore.loadMmk().catch(() => null))
+    )
+      return { local, cloud: { status: 'protected-locked' } };
     const mmk = (await deps.localKeyStore.loadMmk().catch(() => undefined)) ?? undefined;
     // Also persists every object the fetched generation carries into this
     // machine's local content store (same fix as `canonical-ops.ts`'s
@@ -453,6 +505,10 @@ export const runMemoryCloudBackup = async (
         await writeMemoryObject({ stackHome: deps.stackHome, contentHash: object.contentHash, bytes: object.bytes });
       return { generation: result.generation, main: result.main };
     };
+
+    // Spec Appendix A.4 / Task 13 finding 7: lazily seed base from this
+    // machine's own last-known v1 generation, before the first canonical merge.
+    await seedBaseFromLastKnownV1Generation(deps, mmk);
 
     const main = await readCanonicalMain(deps.stackHome);
     // Task 13 Important-7(a): a pure Skills-only account (nothing EVER staged
@@ -476,8 +532,8 @@ export const runMemoryCloudBackup = async (
       setLocalMain: (nextMain) => writeCanonicalMain(deps.stackHome, nextMain),
       setBase: (base) => writeCanonicalBase(deps.stackHome, base),
       fetchRemote,
-      publish: async (nextMain) => {
-        const result = await publishCanonicalGeneration(deps, nextMain);
+      publish: async (nextMain, expectedParent) => {
+        const result = await publishCanonicalGeneration(deps, nextMain, expectedParent);
         return { generation: result.generation };
       },
       savePendingMerge: (pending) => writePendingMerge(deps.stackHome, pending),

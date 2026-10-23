@@ -523,8 +523,17 @@ const canonicalExtraNotes = (outcome: {
         .map((p) => p.name)
         .join(', ')})`,
     );
-  if (outcome.conflicts && outcome.conflicts.length > 0)
-    notes.push(`${outcome.conflicts.length} native conflict(s) need \`stak add .\` to resolve`);
+  if (outcome.conflicts && outcome.conflicts.length > 0) {
+    // Task 13 fix round 2 (Minor): a materialize EXCEPTION (marked by the
+    // empty `path` `materializeCanonicalProjects` uses for it — see its own
+    // doc comment) is a warning with its own message, never folded into the
+    // generic "N native conflict(s)" count meant for ordinary sync conflicts.
+    const materializeErrors = outcome.conflicts.filter((c) => c.path === '');
+    const syncConflicts = outcome.conflicts.filter((c) => c.path !== '');
+    for (const error of materializeErrors) notes.push(`materialize warning: ${error.reason}`);
+    if (syncConflicts.length > 0)
+      notes.push(`${syncConflicts.length} native conflict(s) need \`stak add .\` to resolve`);
+  }
   return notes;
 };
 

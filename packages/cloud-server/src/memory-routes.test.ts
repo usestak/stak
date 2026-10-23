@@ -193,10 +193,14 @@ describe('remote Memory routes', () => {
       (rejected.jsonBody as { error: { code: string; message: string } })
         .error.code,
     ).toBe('memory-incompatible-format');
+    // Task 13 fix round 2 (Minor): assert the FULL message, ASCII apostrophe,
+    // matching the spec's exact wording (§9.3).
     expect(
       (rejected.jsonBody as { error: { code: string; message: string } })
         .error.message,
-    ).toContain('npm i -g @memstk/cli@beta');
+    ).toBe(
+      "This account's Memory was upgraded by a newer STAK CLI. Update with `npm i -g @memstk/cli@beta`.",
+    );
 
     // The rejection creates nothing — the account's latest is still the v2
     // generation, not a second (rejected) attempt.
@@ -218,6 +222,102 @@ describe('remote Memory routes', () => {
       },
     });
     expect(v2Again.status).toBe(200);
+  });
+
+  it('isMigrationReplica exempts a v1-format create from the gate ONLY while the account is currently Standard and the create is itself Protected (Task 13 fix round 2, Important-3)', async () => {
+    const { call, signIn } = setup();
+    const token = await signIn(USER_A);
+    // Account history: v1 then v2, both Standard — exactly what `migrateStandardToProtected` processes.
+    await call('POST', 'memory/generations', {
+      token,
+      body: {
+        backupId: 'v1-0',
+        expectedParent: null,
+        privacyMode: 'standard',
+        payloadB64: b64('v1-bundle'),
+        bundleFormatVersion: 'stack-mem-bundle-v1',
+      },
+    });
+    await call('POST', 'memory/generations', {
+      token,
+      body: {
+        backupId: 'v2-0',
+        expectedParent: 0,
+        privacyMode: 'standard',
+        payloadB64: b64('v2-bundle'),
+        bundleFormatVersion: 'stack-mem-bundle-v2',
+      },
+    });
+
+    // Without the flag, a v1 Protected replica is still refused (control case).
+    const withoutFlag = await call('POST', 'memory/generations', {
+      token,
+      body: {
+        backupId: 'v1-protected-rejected',
+        expectedParent: 1,
+        privacyMode: 'protected',
+        payloadB64: b64('v1-bundle'),
+        bundleFormatVersion: 'stack-mem-bundle-v1',
+        cryptoVersion: 'stack-mem-cipher-v1',
+        wrappedDek: { nonceB64: 'AA==', ciphertextB64: 'AA==', tagB64: 'AA==' },
+      },
+    });
+    expect(withoutFlag.status).toBe(409);
+
+    // With the flag, while the account is still Standard: allowed.
+    const withFlag = await call('POST', 'memory/generations', {
+      token,
+      body: {
+        backupId: 'v1-protected-replica',
+        expectedParent: 1,
+        privacyMode: 'protected',
+        payloadB64: b64('v1-bundle'),
+        bundleFormatVersion: 'stack-mem-bundle-v1',
+        cryptoVersion: 'stack-mem-cipher-v1',
+        wrappedDek: { nonceB64: 'AA==', ciphertextB64: 'AA==', tagB64: 'AA==' },
+        isMigrationReplica: true,
+      },
+    });
+    expect(withFlag.status).toBe(200);
+
+    // Complete the migration: also replicate the v2 Standard generation (so
+    // the account's actual latest ends up v2-format, exactly like a real
+    // `migrateStandardToProtected` run processing every Standard generation).
+    const v2Replica = await call('POST', 'memory/generations', {
+      token,
+      body: {
+        backupId: 'v2-protected-replica',
+        expectedParent: 2,
+        privacyMode: 'protected',
+        payloadB64: b64('v2-bundle'),
+        bundleFormatVersion: 'stack-mem-bundle-v2',
+        cryptoVersion: 'stack-mem-cipher-v1',
+        wrappedDek: { nonceB64: 'AA==', ciphertextB64: 'AA==', tagB64: 'AA==' },
+        isMigrationReplica: true,
+      },
+    });
+    expect(v2Replica.status).toBe(200);
+
+    // Finalize the account as Protected (what `migrateStandardToProtected` does
+    // at the very end).
+    await call('POST', 'memory/privacy', { token, body: { privacyMode: 'protected' } });
+
+    // Once the account is NO LONGER Standard, the flag has no effect — an
+    // ordinary v1 create (migration-replica-claimed or not) is still refused.
+    const afterFinalized = await call('POST', 'memory/generations', {
+      token,
+      body: {
+        backupId: 'v1-after-finalized',
+        expectedParent: 3,
+        privacyMode: 'protected',
+        payloadB64: b64('v1-bundle'),
+        bundleFormatVersion: 'stack-mem-bundle-v1',
+        cryptoVersion: 'stack-mem-cipher-v1',
+        wrappedDek: { nonceB64: 'AA==', ciphertextB64: 'AA==', tagB64: 'AA==' },
+        isMigrationReplica: true,
+      },
+    });
+    expect(afterFinalized.status).toBe(409);
   });
 
   it('does not leak another user’s payload', async () => {
