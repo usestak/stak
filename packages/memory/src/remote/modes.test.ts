@@ -492,12 +492,8 @@ describe('protect replicas and the sticky v1-after-v2 gate (Task 13 fix round 3,
     expect(await isProtectInProgress(backend)).toBe(true);
     expect((await backend.getLatest())?.replicaOf).toBe(v1.backupId);
 
-    // A different key can't finalize over the existing replica.
-    await expect(migrateStandardToProtected({ backend, mmk: generateMmk() })).rejects.toMatchObject({ code: 'integrity' });
-    expect((await backend.getProfile())?.privacyMode).toBe('standard');
-
     const resumed = await migrateStandardToProtected({ backend, mmk });
-    expect(resumed).toMatchObject({ finalized: true, migrated: 1, resumed: 1, retiredStandard: 2 });
+    expect(resumed).toMatchObject({ finalized: true, migrated: 1, resumed: 1, retiredReplicas: 0, retiredStandard: 2 });
     expect(await isProtectInProgress(backend)).toBe(false);
     expect((await backend.getLatest())?.replicaOf).toBe(v2.backupId);
     expect((await backend.listGenerations()).filter((g) => g.replicaOf === v1.backupId)).toHaveLength(1);
@@ -532,5 +528,72 @@ describe('protect replicas and the sticky v1-after-v2 gate (Task 13 fix round 3,
     expect((await backend.getLatest())?.backupId).toBe(concurrentBackupId);
     expect((await backend.listGenerations()).filter((g) => g.privacyMode === 'standard')).toHaveLength(3);
     void source;
+  });
+});
+
+describe('protect resume from a device WITHOUT the interrupted run\'s key (Task 13 fix round 4)', () => {
+  it('retires the orphaned replicas, re-replicates with the new key, and finalizes with the newest original\'s replica as latest', async () => {
+    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 1 });
+    roots.push(source.stackHome);
+    const { store, backend } = backendFor('user-a');
+    const v1 = await standardCloudBackup({ stackHome: source.stackHome, backend });
+    await writeCanonicalMain(source.stackHome, { schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION, projects: [] });
+    const v2 = await standardCloudBackup({ stackHome: source.stackHome, backend });
+
+    // Device 1 replicates the v1 original, then is interrupted.
+    const oldKey = generateMmk();
+    let creates = 0;
+    const flaky: RemoteMemoryBackend = Object.create(backend);
+    flaky.createGeneration = async (input) => {
+      creates += 1;
+      if (creates === 2) throw new Error('laptop closed');
+      return backend.createGeneration(input);
+    };
+    await expect(migrateStandardToProtected({ backend: flaky, mmk: oldKey })).rejects.toThrow('laptop closed');
+    const orphan = (await backend.listGenerations()).find((g) => g.replicaOf === v1.backupId)!;
+    expect(orphan).toBeDefined();
+
+    // Device 2 never had that key.
+    const newKey = generateMmk();
+    const result = await migrateStandardToProtected({ backend, mmk: newKey });
+    expect(result).toMatchObject({ finalized: true, migrated: 2, resumed: 0, retiredReplicas: 1, retiredStandard: 2 });
+    expect((await backend.getProfile())?.privacyMode).toBe('protected');
+    expect(store.hasPayload(`mem/user-a/${orphan.backupId}`)).toBe(false); // orphan retired + purged
+    const committed = await backend.listGenerations();
+    expect(committed.every((g) => g.privacyMode === 'protected')).toBe(true);
+    expect(committed.map((g) => g.replicaOf).sort()).toEqual([v1.backupId, v2.backupId].sort());
+    const latest = (await backend.getLatest())!;
+    expect(latest.replicaOf).toBe(v2.backupId);
+    // Numbers are never reused after a retire (profile-based numbering, like production).
+    expect(new Set((store.generations.get('user-a') ?? []).map((g) => g.generation)).size).toBe(
+      (store.generations.get('user-a') ?? []).length,
+    );
+    // Everything opens with the NEW key.
+    const dest = await freshStore();
+    await cloudRecover({ stackHome: dest, backend, mmk: newKey });
+    await assertByteExact(source.stackHome, dest, source.hashes);
+  });
+
+  it('uniqueness counts only COMMITTED replicas (matches the SQL partial index `where replica_of is not null and state = \'committed\'`)', async () => {
+    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 1 });
+    roots.push(source.stackHome);
+    const { backend } = backendFor('user-a');
+    const std = await standardCloudBackup({ stackHome: source.stackHome, backend });
+    const original = (await backend.getGenerationById(std.backupId))!;
+    const replica = async () =>
+      backend.createGeneration({
+        backupId: randomUUID(),
+        expectedParent: (await backend.getProfile())?.latestGeneration ?? null,
+        privacyMode: 'protected',
+        payload: Buffer.alloc(original.payloadBytes + 28, 1),
+        bundleFormatVersion: original.bundleFormatVersion,
+        replicaOf: original.backupId,
+      });
+    const first = await replica();
+    await expect(replica()).rejects.toMatchObject({ code: 'invalid-replica' }); // a committed one exists
+    await backend.retireGeneration(first.backupId);
+    const second = await replica(); // retired replicas don't count
+    expect(second.replicaOf).toBe(original.backupId);
+    expect(second.generation).toBeGreaterThan(first.generation);
   });
 });

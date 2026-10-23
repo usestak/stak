@@ -436,6 +436,7 @@ export const renderCombinedPushResult = (
       const notes = canonicalExtraNotes({
         unavailable: outcome.unavailable,
         conflicts: outcome.materializeConflicts,
+        restoredFromStak: outcome.restoredFromStak,
       });
       lines.push(
         notes.length > 0
@@ -460,6 +461,7 @@ export const renderCombinedPushResult = (
       const notes = canonicalExtraNotes({
         unavailable: outcome.unavailable,
         conflicts: outcome.materializeConflicts,
+        restoredFromStak: outcome.restoredFromStak,
       });
       lines.push(
         notes.length > 0
@@ -515,8 +517,13 @@ export type PullCanonicalOutcome =
 const canonicalExtraNotes = (outcome: {
   unavailable?: { projectId: string; name: string }[] | undefined;
   conflicts?: { projectId: string; path: string; reason: string }[] | undefined;
+  restoredFromStak?: number | undefined;
 }): string[] => {
   const notes: string[] = [];
+  // Task 13 fix round 4: files the upgrade found missing natively and wrote
+  // back from STAK (never silently recorded as deletions).
+  if (outcome.restoredFromStak && outcome.restoredFromStak > 0)
+    notes.push(`${outcome.restoredFromStak} Memory file(s) restored from STAK`);
   if (outcome.unavailable && outcome.unavailable.length > 0)
     notes.push(
       `${outcome.unavailable.length} project(s) not available on this machine (${outcome.unavailable

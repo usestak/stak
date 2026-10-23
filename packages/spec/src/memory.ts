@@ -109,7 +109,7 @@ export const memoryCreateGenerationRequestSchema = z.object({
    * 28, account still Standard, create Protected) before it exempts the create
    * from the sticky v1-after-v2 gate; an invalid claim is refused outright.
    */
-  replicaOf: z.string().min(1).optional(),
+  replicaOf: z.uuid().optional(),
 });
 export const memoryAddRecoveryMethodRequestSchema = z.object({
   type: z.enum(['passkey', 'recovery-file', 'trusted-device']),

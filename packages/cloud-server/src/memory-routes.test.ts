@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -228,6 +229,12 @@ describe('remote Memory routes', () => {
     const { call, signIn } = setup();
     const token = await signIn(USER_A);
     const V1 = 'stack-mem-bundle-v1';
+    // Real backups use UUID ids (the Supabase column is uuid) — and the DTO now
+    // requires `replicaOf` to be one (Task 13 fix round 4).
+    const ID = {
+      v10: randomUUID(), v20: randomUUID(), v1r: randomUUID(), v2r: randomUUID(),
+      old: randomUUID(), after: randomUUID(), missing: randomUUID(),
+    };
     const V2 = 'stack-mem-bundle-v2';
     const protectedFields = {
       privacyMode: 'protected',
@@ -239,19 +246,19 @@ describe('remote Memory routes', () => {
     // Account history: v1 then v2, both Standard (original payloads 9 bytes each).
     await call('POST', 'memory/generations', {
       token,
-      body: { backupId: 'v1-0', expectedParent: null, privacyMode: 'standard', payloadB64: b64('v1-bundle'), bundleFormatVersion: V1 },
+      body: { backupId: ID.v10, expectedParent: null, privacyMode: 'standard', payloadB64: b64('v1-bundle'), bundleFormatVersion: V1 },
     });
     await call('POST', 'memory/generations', {
       token,
-      body: { backupId: 'v2-0', expectedParent: 0, privacyMode: 'standard', payloadB64: b64('v2-bundle'), bundleFormatVersion: V2 },
+      body: { backupId: ID.v20, expectedParent: 0, privacyMode: 'standard', payloadB64: b64('v2-bundle'), bundleFormatVersion: V2 },
     });
     const replicaBody = (overrides: Record<string, unknown>) => ({
-      backupId: `try-${Math.random()}`,
+      backupId: randomUUID(),
       expectedParent: 1,
       ...protectedFields,
       payloadB64: b64('r'.repeat(9 + 28)),
       bundleFormatVersion: V1,
-      replicaOf: 'v1-0',
+      replicaOf: ID.v10,
       ...overrides,
     });
 
@@ -262,34 +269,39 @@ describe('remote Memory routes', () => {
 
     // Forged claims: unknown original, wrong format, wrong length, Standard replica.
     for (const overrides of [
-      { replicaOf: 'no-such-backup' },
+      { replicaOf: ID.missing },
       { bundleFormatVersion: V2 },
       { payloadB64: b64('r'.repeat(9 + 27)) },
       { privacyMode: 'standard' },
     ]) {
       const forged = await call('POST', 'memory/generations', { token, body: replicaBody(overrides) });
       expect(forged.status).toBe(400);
-      expect(errorOf(forged).code).toBe('invalid-request');
+      expect(errorOf(forged).code).toBe('memory-invalid-replica');
     }
+    // A malformed replicaOf is a 400 refused replica, never a 500 from a uuid cast.
+    const malformed = await call('POST', 'memory/generations', { token, body: replicaBody({ replicaOf: 'not-a-uuid' }) });
+    expect(malformed.status).toBe(400);
+    expect(errorOf(malformed).code).toBe('memory-invalid-replica');
 
     // The genuine replica of v1-0 is accepted and carries `replicaOf`.
-    const replica = await call('POST', 'memory/generations', { token, body: replicaBody({ backupId: 'v1-replica' }) });
+    const replica = await call('POST', 'memory/generations', { token, body: replicaBody({ backupId: ID.v1r }) });
     expect(replica.status).toBe(200);
     const latest = await call('GET', 'memory/latest', { token });
     expect((latest.jsonBody as { generation: { backupId: string; replicaOf?: string } }).generation).toMatchObject({
-      backupId: 'v1-replica',
-      replicaOf: 'v1-0',
+      backupId: ID.v1r,
+      replicaOf: ID.v10,
     });
 
     // A second replica of the same original is refused.
     const second = await call('POST', 'memory/generations', { token, body: replicaBody({ expectedParent: 2 }) });
     expect(second.status).toBe(400);
+    expect(errorOf(second).code).toBe('memory-invalid-replica');
 
     // Latest is now a v1-format replica, but an old CLI's v1 Standard push is
     // STILL refused: the gate is sticky (a v2 generation was ever committed).
     const oldCli = await call('POST', 'memory/generations', {
       token,
-      body: { backupId: 'old-cli', expectedParent: 2, privacyMode: 'standard', payloadB64: b64('v1-bundle-2'), bundleFormatVersion: V1 },
+      body: { backupId: ID.old, expectedParent: 2, privacyMode: 'standard', payloadB64: b64('v1-bundle-2'), bundleFormatVersion: V1 },
     });
     expect(oldCli.status).toBe(409);
     expect(errorOf(oldCli).message).toBe(
@@ -299,13 +311,13 @@ describe('remote Memory routes', () => {
     // Replicate v2-0 too, finalize, and no replica exemption exists any more.
     const v2Replica = await call('POST', 'memory/generations', {
       token,
-      body: replicaBody({ backupId: 'v2-replica', expectedParent: 2, bundleFormatVersion: V2, replicaOf: 'v2-0' }),
+      body: replicaBody({ backupId: ID.v2r, expectedParent: 2, bundleFormatVersion: V2, replicaOf: ID.v20 }),
     });
     expect(v2Replica.status).toBe(200);
     await call('POST', 'memory/privacy', { token, body: { privacyMode: 'protected' } });
     const afterFinalized = await call('POST', 'memory/generations', {
       token,
-      body: { backupId: 'v1-after', expectedParent: 3, ...protectedFields, payloadB64: b64('v1-bundle'), bundleFormatVersion: V1 },
+      body: { backupId: ID.after, expectedParent: 3, ...protectedFields, payloadB64: b64('v1-bundle'), bundleFormatVersion: V1 },
     });
     expect(afterFinalized.status).toBe(409);
     expect(errorOf(afterFinalized).code).toBe('memory-incompatible-format');

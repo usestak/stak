@@ -380,8 +380,12 @@ class InMemoryRemoteMemoryBackend implements RemoteMemoryBackend {
         'too-large',
         'Payload exceeds the maximum size.',
       );
-    const latest = await this.getLatest();
-    const currentParent = latest?.generation ?? null;
+    // Task 13 fix round 4: parent and numbering come from the profile's
+    // `latestGeneration`, exactly like production's `commit_memory_generation`
+    // RPC (supabase/migrations/0003 + 0018). Retiring a generation never lowers
+    // it, so a retired number is never reused and both backends demand the
+    // same `expectedParent` after a retire (e.g. protect retiring orphans).
+    const currentParent = this.store.profiles.get(this.userId)?.latestGeneration ?? null;
     if (input.expectedParent !== currentParent)
       throw new RemoteMemoryError(
         'conflict',

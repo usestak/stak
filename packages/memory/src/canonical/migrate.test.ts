@@ -181,48 +181,51 @@ describe('migrateLocalStore', () => {
     return projection.projects[main.projects[0]!.projectId];
   };
 
-  it('a LOCALLY produced manifest seeds P = C for every migrated document, native file present or not (spec §9.1 step 4; Task 13 fix round 3, C)', async () => {
-    const { hashA, hashBOriginal } = await writeAbcManifest();
-    // No locator needed: the manifest was scanned from this machine's own files.
-    await migrateLocalStore(stackHome);
+  it('a LOCALLY produced manifest seeds P = C for every native file that EXISTS (edited or not); an ABSENT one is not seeded and is counted as restored (Task 13 fix round 4)', async () => {
+    const { hashA, projectDir, claudeHome } = await writeAbcManifest();
+    const summary = await migrateLocalStore(stackHome, { locateProjectDir: async () => projectDir, claudeHome });
     const seeded = await projectionFor();
-    expect(seeded?.['notes/a.md']).toBe(hashA);
-    expect(seeded?.['notes/b.md']).toBe(hashBOriginal); // deleted since -> later an import-delete
-    expect(seeded?.['notes/c.md']).toBe(hashA); // edited since -> later an import-edit
+    expect(seeded?.['notes/a.md']).toBe(hashA); // exists, unchanged
+    expect(seeded?.['notes/c.md']).toBe(hashA); // exists, edited since -> later an import-edit
+    expect(seeded?.['notes/b.md']).toBeUndefined(); // absent -> materialized back, never import-deleted
+    expect(summary.restoredFromStak).toBe(1);
+    // A second run is a no-op and restores nothing more.
+    expect((await migrateLocalStore(stackHome)).restoredFromStak).toBe(0);
   });
 
-  it('a manifest last touched by a PUSH (provenance without a recover fingerprint) is local: seeds P = C for all', async () => {
-    const { hashBOriginal } = await writeAbcManifest();
+  it('a manifest last touched by a PUSH (provenance without a recover fingerprint) is local: an edited native file is seeded', async () => {
+    const { hashA, projectDir, claudeHome } = await writeAbcManifest();
     await recordRecover({ withFingerprint: false });
-    await migrateLocalStore(stackHome);
-    expect((await projectionFor())?.['notes/b.md']).toBe(hashBOriginal);
+    await migrateLocalStore(stackHome, { locateProjectDir: async () => projectDir, claudeHome });
+    expect((await projectionFor())?.['notes/c.md']).toBe(hashA);
+    expect((await projectionFor())?.['notes/b.md']).toBeUndefined();
   });
 
   it('a manifest restored by a Cloud recover seeds ONLY native files that exist with matching content (fresh machine; Task 13 fix round 2, finding 5)', async () => {
     const { hashA, projectDir, claudeHome } = await writeAbcManifest();
     await recordRecover({ withFingerprint: true });
-    await migrateLocalStore(stackHome, { locateProjectDir: async () => projectDir, claudeHome });
+    const summary = await migrateLocalStore(stackHome, { locateProjectDir: async () => projectDir, claudeHome });
     const seeded = await projectionFor();
     expect(seeded?.['notes/a.md']).toBe(hashA); // exists, matches -> seeded
     expect(seeded?.['notes/b.md']).toBeUndefined(); // absent -> NOT seeded (materialized later)
-    expect(seeded?.['notes/c.md']).toBeUndefined(); // differs -> NOT seeded
+    expect(seeded?.['notes/c.md']).toBeUndefined(); // differs -> NOT seeded (first-sighting conflict)
+    expect(summary.restoredFromStak).toBe(1);
   });
 
-  it('a recovered manifest with no locatable directory seeds nothing', async () => {
+  it('with no locatable directory nothing is seeded, whatever the origin', async () => {
     await writeAbcManifest();
-    await recordRecover({ withFingerprint: true });
     await migrateLocalStore(stackHome);
     expect(await projectionFor()).toBeUndefined();
   });
 
-  it('a recover fingerprint that no longer matches the manifest (staged locally since) is local: seeds P = C for all', async () => {
-    const { hashBOriginal } = await writeAbcManifest();
+  it('a recover fingerprint that no longer matches the manifest (staged locally since) is local: an edited native file is seeded', async () => {
+    const { hashA, projectDir, claudeHome } = await writeAbcManifest();
     await recordRecover({ withFingerprint: true });
     // A local v1 `stak add` since the recover rewrote the manifest.
     const manifest = await readMemoryManifest(stackHome);
     await writeMemoryManifest({ stackHome, manifest: { ...manifest!, createdAt: '2026-10-22T00:00:00.000Z' } });
-    await migrateLocalStore(stackHome);
-    expect((await projectionFor())?.['notes/b.md']).toBe(hashBOriginal);
+    await migrateLocalStore(stackHome, { locateProjectDir: async () => projectDir, claudeHome });
+    expect((await projectionFor())?.['notes/c.md']).toBe(hashA);
   });
 
   it('calls the directory locator only AFTER the build step, so a Project ID minted during migration is located', async () => {

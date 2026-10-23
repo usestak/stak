@@ -10,13 +10,33 @@
 --
 -- Additive only: existing rows get replica_of = null. The function body of
 -- commit_memory_generation is unchanged apart from storing the new column.
+--
+-- Deploy safety (Task 13 fix round 4): this migration may be applied BEFORE
+-- the web code that passes p_replica_of ships. The already-deployed code calls
+-- commit_memory_generation with 11 NAMED arguments (PostgREST RPC); the new
+-- p_replica_of is the LAST parameter with DEFAULT NULL, so that exact call
+-- still resolves (named notation + default) to the one function below.
+--
+-- Why DROP + CREATE rather than CREATE OR REPLACE: Postgres identifies a
+-- function by its argument types, so CREATE OR REPLACE with a 12th parameter
+-- does not replace the 11-argument function — it adds a second overload, and
+-- an 11-named-argument call would then match BOTH (one exactly, one via the
+-- default) and fail with "function ... is not unique". The drop and the create
+-- below are in this one migration; Postgres DDL is transactional and the
+-- Supabase migration runner applies each migration file in a single
+-- transaction, so no other session ever observes the moment between them.
 
 alter table public.memory_backups
   add column if not exists replica_of uuid references public.memory_backups (backup_id);
 
+-- One COMMITTED replica per original — the same rule as the in-memory backend
+-- and `assertCreateGenerationAllowed` (which only consider committed
+-- generations). A replica retired by `stak memory protect`'s recovery path
+-- (an orphan another device's key can't open) leaves the index, so the
+-- original can be replicated again with the current key.
 create unique index if not exists memory_backups_user_replica_of_key
   on public.memory_backups (user_id, replica_of)
-  where replica_of is not null;
+  where replica_of is not null and state = 'committed';
 
 -- Append-only guard: replica_of is part of a committed generation's immutable
 -- content, exactly like the other identity columns.
@@ -39,8 +59,8 @@ end;
 $$;
 revoke all on function public.forbid_memory_backup_mutation() from public, anon, authenticated;
 
--- Replace the 11-argument commit with a 12-argument one (adds p_replica_of).
--- Dropped first so PostgREST never sees two overloads of the same RPC name.
+-- Replace the 11-argument commit with ONE function whose new p_replica_of is
+-- the last parameter, defaulting to null (see the deploy-safety note above).
 drop function if exists public.commit_memory_generation(
   uuid, uuid, integer, text, text, text, bigint, text, text, jsonb, timestamptz
 );
@@ -56,8 +76,8 @@ create or replace function public.commit_memory_generation(
   p_bundle_format_version text,
   p_crypto_version text,
   p_wrapped_dek jsonb,
-  p_replica_of uuid,
-  p_now timestamptz
+  p_now timestamptz,
+  p_replica_of uuid default null
 ) returns jsonb
 language plpgsql
 security definer
@@ -119,8 +139,8 @@ $$;
 
 -- Same privilege posture as 0007: service role only.
 revoke all on function public.commit_memory_generation(
-  uuid, uuid, integer, text, text, text, bigint, text, text, jsonb, uuid, timestamptz
+  uuid, uuid, integer, text, text, text, bigint, text, text, jsonb, timestamptz, uuid
 ) from public, anon, authenticated;
 grant execute on function public.commit_memory_generation(
-  uuid, uuid, integer, text, text, text, bigint, text, text, jsonb, uuid, timestamptz
+  uuid, uuid, integer, text, text, text, bigint, text, text, jsonb, timestamptz, uuid
 ) to service_role;

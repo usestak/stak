@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
@@ -5,11 +6,13 @@ import {
   applyMaterializeActions,
   bindingFor,
   canonicalGitIdentity,
+  claudeNativeTargetOf,
   clearPendingMerge,
   discoverClaudeMemory,
   encodeClaudeProjectKey,
   fetchRemoteCanonical,
   gitClaimOf,
+  hashBytes,
   isLocalStoreMigrated,
   mergePortableSnapshot,
   migrateLocalStore,
@@ -634,10 +637,10 @@ export type CanonicalMemoryStageResult = {
 export const migrateWithProjectionSeed = async (
   stackHome: string,
   options: CanonicalDiscoveryOptions,
-): Promise<void> => {
-  if (await isLocalStoreMigrated(stackHome)) return;
+): Promise<{ restoredFromStak: number }> => {
+  if (await isLocalStoreMigrated(stackHome)) return { restoredFromStak: 0 };
   let dirByProjectId: Map<string, string> | undefined;
-  await migrateLocalStore(stackHome, {
+  const summary = await migrateLocalStore(stackHome, {
     locateProjectDir: async (projectId) => {
       if (!dirByProjectId) {
         const { resolved } = await enumerateSyncableProjects(stackHome, options, 'status');
@@ -651,6 +654,7 @@ export const migrateWithProjectionSeed = async (
     },
     ...(options.claudeHome ? { claudeHome: options.claudeHome } : {}),
   });
+  return { restoredFromStak: summary.restoredFromStak };
 };
 
 /** `stak add .`'s canonical-Memory half: migrate once, then mint/resolve a Project ID
@@ -721,12 +725,17 @@ export type CanonicalPushOutcome = {
   /** Canonical projects not locatable on this machine right now, named (spec
    * §4.5) — Task 13 Important-5. Empty/absent when nothing was unavailable. */
   unavailable?: UnlocatableProject[];
+  /** Files this command's migration found absent natively and materialized
+   * back from STAK (Task 13 fix round 4). Absent when 0. */
+  restoredFromStak?: number;
 };
 export type CanonicalPullOutcome = {
   status: 'up-to-date' | 'merged' | 'conflict' | 'protected-locked';
   conflicts?: CanonicalConflictEntry[];
   /** Same meaning as `CanonicalPushOutcome.unavailable`. */
   unavailable?: UnlocatableProject[];
+  /** Same meaning as `CanonicalPushOutcome.restoredFromStak`. */
+  restoredFromStak?: number;
 };
 
 /**
@@ -834,6 +843,28 @@ export type MaterializeOutcome = {
  * refusal, a permissions error) is caught and reported as a conflict-shaped entry
  * rather than aborting every OTHER project's materialize in the same call.
  */
+/** Hash of the native file a canonical path maps to, or undefined when it is
+ * absent (or has no native mapping). Any other read error propagates. */
+const nativeHashAt = async (
+  projectId: string,
+  dir: string,
+  canonicalPath: string,
+  claudeHome: string | undefined,
+): Promise<string | undefined> => {
+  let target: string;
+  try {
+    target = claudeNativeTargetOf({ projectId, dir }, canonicalPath, claudeHome);
+  } catch {
+    return undefined;
+  }
+  try {
+    return hashBytes(await readFile(target));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+};
+
 export const materializeCanonicalProjects = async (
   stackHome: string,
   options: CanonicalDiscoveryOptions = {},
@@ -859,9 +890,12 @@ export const materializeCanonicalProjects = async (
     };
   }
   for (const [projectId, dir] of targets) {
+    // Task 13 fix round 4: scan with the candidate's own git remote (exactly as
+    // enumeration does), so native items resolve to the same identity.
+    const candidate = (options.projects ?? []).find((c) => path.resolve(c.dir) === path.resolve(dir));
     const scanOptions = {
       ...(options.claudeHome ? { claudeHome: options.claudeHome } : {}),
-      projects: [{ dir }],
+      projects: [{ dir, ...(candidate?.gitRemote ? { gitRemote: candidate.gitRemote } : {}) }],
       platform: options.platform ?? process.platform,
       ...(options.gitRemoteOf ? { gitRemoteOf: options.gitRemoteOf } : {}),
       ...(options.isDirectory ? { isDirectory: options.isDirectory } : {}),
@@ -873,7 +907,22 @@ export const materializeCanonicalProjects = async (
         if (action.kind === 'conflict') conflicts.push({ projectId, path: action.path, reason: action.reason });
       for (const sourceConflict of plan.sourceConflicts)
         conflicts.push({ projectId, path: sourceConflict.canonicalPath, reason: 'source-conflict' });
-      await applyMaterializeActions({ projectId, dir }, stackHome, plan.actions, options.claudeHome);
+      // Task 13 fix round 4 — spec §6 safety rule 1 enforced at WRITE time: a
+      // `materialize-write` whose native target already exists with different
+      // content means the scan did not account for that file (e.g. it could
+      // not attribute it to this project); never overwrite it — report it.
+      const actions = [];
+      for (const action of plan.actions) {
+        if (action.kind === 'materialize-write') {
+          const existing = await nativeHashAt(projectId, dir, action.path, options.claudeHome);
+          if (existing !== undefined && existing !== action.contentHash) {
+            conflicts.push({ projectId, path: action.path, reason: 'adopt-mismatch' });
+            continue;
+          }
+        }
+        actions.push(action);
+      }
+      await applyMaterializeActions({ projectId, dir }, stackHome, actions, options.claudeHome);
       materialized += 1;
       // Task 13 fix round 2 (Important-4 residual, I6 follow-up): a project
       // located ONLY via the remote snapshot's claim, once actually
@@ -1023,7 +1072,7 @@ export const pushMemoryViaCanonical = async (
   deps: MemoryCloudDeps,
   discovery: CanonicalDiscoveryOptions = {},
 ): Promise<CanonicalPushOutcome> => {
-  await migrateWithProjectionSeed(deps.stackHome, discovery);
+  const { restoredFromStak } = await migrateWithProjectionSeed(deps.stackHome, discovery);
   // Not signed in: Memory stays staged locally only (Task 13 Minor fix — this
   // used to fall through to `up-to-date`, rendering a nonsensical "already up
   // to date (generation 0)" for an account that was never even authenticated).
@@ -1069,6 +1118,7 @@ export const pushMemoryViaCanonical = async (
   const extras = {
     ...(materialize.unavailable.length > 0 ? { unavailable: materialize.unavailable } : {}),
     ...(materialize.conflicts.length > 0 ? { conflicts: materialize.conflicts } : {}),
+    ...(restoredFromStak > 0 ? { restoredFromStak } : {}),
   };
   if (outcome.status === 'retry-exhausted') return { status: 'retry-exhausted', ...extras };
   return { status: outcome.status, generation: outcome.generation, ...extras };
@@ -1089,7 +1139,7 @@ export const pullMemoryViaCanonical = async (
   deps: MemoryCloudDeps,
   discovery: CanonicalDiscoveryOptions = {},
 ): Promise<CanonicalPullOutcome> => {
-  await migrateWithProjectionSeed(deps.stackHome, discovery);
+  const { restoredFromStak } = await migrateWithProjectionSeed(deps.stackHome, discovery);
   if (!deps.backend) return { status: 'up-to-date' };
   const profile = await deps.backend.getProfile();
   if ((profile?.privacyMode ?? 'standard') === 'protected' && !(await deps.localKeyStore.loadMmk().catch(() => null)))
@@ -1116,6 +1166,7 @@ export const pullMemoryViaCanonical = async (
   const extras = {
     ...(materialize.unavailable.length > 0 ? { unavailable: materialize.unavailable } : {}),
     ...(materialize.conflicts.length > 0 ? { conflicts: materialize.conflicts } : {}),
+    ...(restoredFromStak > 0 ? { restoredFromStak } : {}),
   };
   return outcome.status === 'merged-local'
     ? { status: 'merged', ...extras }

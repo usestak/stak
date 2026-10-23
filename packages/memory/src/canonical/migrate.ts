@@ -22,6 +22,10 @@ export type MigrationSummary = {
   migratedDocuments: number;
   keptBothDuplicates: number;
   alreadyMigrated: boolean;
+  /** Present documents whose native file was absent on this machine at
+   * migration time — materialized back from STAK, never import-deleted
+   * (Task 13 fix round 4). `0` when migration had already completed. */
+  restoredFromStak: number;
 };
 
 const premigrationBackupPath = (stackHome: string) =>
@@ -137,26 +141,26 @@ const buildCanonicalMain = async (
   return { main, keptBothDuplicates };
 };
 
-/** Step C: seed the claude projection so every migrated document reads as
- * already synced (P = C), turning later native edits into ordinary edits rather
- * than a wall of first-sighting conflicts. */
-/** Does the native Claude file for this exact (project, path, expected hash)
- * currently exist on disk with EXACTLY that content? Any failure to read
- * (missing file, no native mapping for this path, permission error) is
- * treated as "no" — never seed a path we can't positively confirm. */
-const nativeFileMatches = async (
+/** The native Claude file for (project, path) right now: `absent` (ENOENT),
+ * `matches` / `differs` from `expectedHash`, or `unknown` (no native mapping,
+ * a permission error, anything else) — `unknown` is never seeded nor counted. */
+const nativeFileState = async (
   projectDir: string,
   projectId: string,
   canonicalPath: string,
   expectedHash: string,
   claudeHome: string | undefined,
-): Promise<boolean> => {
+): Promise<'absent' | 'matches' | 'differs' | 'unknown'> => {
+  let target: string;
   try {
-    const target = claudeNativeTargetOf({ projectId, dir: projectDir }, canonicalPath, claudeHome);
-    const bytes = await readFile(target);
-    return hashBytes(bytes) === expectedHash;
+    target = claudeNativeTargetOf({ projectId, dir: projectDir }, canonicalPath, claudeHome);
   } catch {
-    return false;
+    return 'unknown';
+  }
+  try {
+    return hashBytes(await readFile(target)) === expectedHash ? 'matches' : 'differs';
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : 'unknown';
   }
 };
 
@@ -185,19 +189,21 @@ const v1ManifestOrigin = async (
 /**
  * Step C: seed the claude projection (spec §9.1 step 4: "mark everything as
  * last synced, so edits you made since your last `stak add` show up as normal
- * changes, not as a wall of conflicts").
+ * changes, not as a wall of conflicts"). Only ever for a project whose CURRENT
+ * directory `locateProjectDir` resolves (called AFTER the build step, so IDs
+ * minted during migration resolve too); an unlocatable project seeds nothing.
  *
- *  - `origin: 'local'` — the manifest was scanned from THIS machine's native
- *    files, so P = C for every present document. A native file edited since
- *    then is an ordinary import-edit; a native file deleted since then is an
- *    ordinary import-delete (never re-materialized).
- *  - `origin: 'cloud-recover'` — seed a path ONLY when its native file exists
- *    on disk right now with exactly that content (Task 13 fix round 2,
- *    finding 5). Seeding P = C for a document this fresh machine never held
- *    would read as "deleted since sync" (`import-delete`) instead of being
- *    materialized. `locateProjectDir` resolves a project's CURRENT directory
- *    and is called AFTER the build step, so projects whose IDs were minted
- *    during migration are covered; an unlocatable project seeds nothing.
+ *  - `origin: 'local'` — P = C when the native file EXISTS, whatever its
+ *    content: an edit since the last `stak add` is an ordinary import-edit.
+ *    An ABSENT native file is NOT seeded (Task 13 fix round 4): it is
+ *    materialized back from STAK instead of becoming an import-delete. Undoing
+ *    a pre-migration deletion is recoverable; silently deleting Memory is not.
+ *  - `origin: 'cloud-recover'` — P = C only when the native file exists with
+ *    EXACTLY that content (fix round 2, finding 5); a differing file is a
+ *    first-sighting conflict, an absent one is materialized.
+ *
+ * Returns `restored`: present documents whose native file is absent in a
+ * located project — the files the next materialize writes back from STAK.
  */
 const seedClaudeProjection = async (
   stackHome: string,
@@ -207,24 +213,23 @@ const seedClaudeProjection = async (
     locateProjectDir?: (projectId: string) => Promise<string | undefined>;
     claudeHome?: string;
   } = {},
-) => {
+): Promise<{ restored: number }> => {
   const projects: Record<string, Record<string, string>> = {};
+  let restored = 0;
   for (const project of main.projects) {
+    const dir = options.locateProjectDir ? await options.locateProjectDir(project.projectId) : undefined;
+    if (!dir) continue; // can't resolve a directory -> can't confirm native presence -> seed nothing
     const byPath: Record<string, string> = {};
-    if (origin === 'local') {
-      for (const doc of project.documents) if (doc.state === 'present') byPath[doc.path] = doc.contentHash;
-    } else {
-      const dir = options.locateProjectDir ? await options.locateProjectDir(project.projectId) : undefined;
-      if (!dir) continue; // can't resolve a directory -> can't confirm native presence -> seed nothing
-      for (const doc of project.documents) {
-        if (doc.state !== 'present') continue;
-        if (await nativeFileMatches(dir, project.projectId, doc.path, doc.contentHash, options.claudeHome))
-          byPath[doc.path] = doc.contentHash;
-      }
+    for (const doc of project.documents) {
+      if (doc.state !== 'present') continue;
+      const state = await nativeFileState(dir, project.projectId, doc.path, doc.contentHash, options.claudeHome);
+      if (state === 'absent') restored += 1;
+      else if (state === 'matches' || (state === 'differs' && origin === 'local')) byPath[doc.path] = doc.contentHash;
     }
     if (Object.keys(byPath).length > 0) projects[project.projectId] = byPath;
   }
   await writeProjection(stackHome, 'claude', { schemaVersion: 1, projects });
+  return { restored };
 };
 
 /** Step D: slim the v1 manifest down to global-only items. */
@@ -253,11 +258,10 @@ export const migrateLocalStore = async (
   options: {
     /** Resolve a project's CURRENT directory (binding, discovery — whatever
      * the CLI layer already uses), for `seedClaudeProjection`'s native-file
-     * existence check — used only when the migrated manifest came from a
-     * Cloud recover. Called after the build step (so freshly minted Project
-     * IDs resolve) and only when migration actually runs. Read-only. Omitted
-     * means "can't resolve any directory": nothing is seeded for a recovered
-     * manifest, and `planSync`'s first-sighting rules take over. */
+     * checks. Called after the build step (so freshly minted Project IDs
+     * resolve) and only when migration actually runs. Read-only. Omitted
+     * means "can't resolve any directory": nothing is seeded, and `planSync`'s
+     * first-sighting rules take over (safe: nothing is ever import-deleted). */
     locateProjectDir?: (projectId: string) => Promise<string | undefined>;
     claudeHome?: string;
   } = {},
@@ -269,6 +273,7 @@ export const migrateLocalStore = async (
       migratedDocuments: main.projects.reduce((n, p) => n + p.documents.length, 0),
       keptBothDuplicates: 0,
       alreadyMigrated: true,
+      restoredFromStak: 0,
     };
   }
 
@@ -290,14 +295,12 @@ export const migrateLocalStore = async (
     ? await buildCanonicalMain(stackHome, manifest.items)
     : { main: existingMain, keptBothDuplicates: 0 };
   if (needsBuild) await writeCanonicalMain(stackHome, main);
-  // Seed by where the migrated v1 manifest came from (see `v1ManifestOrigin`
-  // and `seedClaudeProjection`): a locally produced manifest marks everything
-  // as last synced (spec §9.1 step 4); one restored by a Cloud recover seeds
-  // only what this machine's native files demonstrably hold.
-  await seedClaudeProjection(stackHome, main, await v1ManifestOrigin(stackHome, manifest), options);
+  // Seed by where the migrated v1 manifest came from and what this machine's
+  // native files hold right now (see `v1ManifestOrigin`/`seedClaudeProjection`).
+  const { restored } = await seedClaudeProjection(stackHome, main, await v1ManifestOrigin(stackHome, manifest), options);
   await slimToGlobal(stackHome, manifest.items);
   await writeFile(markerFile, new Date().toISOString(), { mode: 0o600 });
 
   const migratedDocuments = main.projects.reduce((n, p) => n + p.documents.length, 0);
-  return { migratedDocuments, keptBothDuplicates, alreadyMigrated };
+  return { migratedDocuments, keptBothDuplicates, alreadyMigrated, restoredFromStak: restored };
 };

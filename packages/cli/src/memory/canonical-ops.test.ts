@@ -19,6 +19,7 @@ import {
   inMemoryRemoteMemoryBackend,
   legacyCompatKey,
   mintProjectId,
+  planProjectSync,
   pushCanonicalMemory,
   readCanonicalBase,
   readCanonicalMain,
@@ -42,6 +43,7 @@ import {
   type RemoteMemoryBackend,
 } from '@stack/memory';
 
+import { renderCombinedPullResult } from '../ui/cloud.js';
 import {
   canonicalMemoryStatus,
   materializeCanonicalProjects,
@@ -1453,29 +1455,51 @@ describe('Task 13 fix round 3', () => {
     };
 
     const assertNormalChanges = async (nativeDir: string, discovery: { claudeHome: string; projects: { dir: string; gitRemote: string }[] }) => {
-      // The edit is NOT overwritten and the deletion is NOT re-materialized…
+      // The edit is NOT overwritten; the file deleted before the upgrade is
+      // RESTORED from STAK (fix round 4: never silently recorded as a deletion).
       expect(await readFile(path.join(nativeDir, 'a.md'), 'utf8')).toBe('edited since add');
-      expect(await exists(path.join(nativeDir, 'b.md'))).toBe(false);
-      // …and both show up as ordinary pending changes, never as conflicts.
+      expect(await readFile(path.join(nativeDir, 'b.md'), 'utf8')).toBe('captured b.md');
+      // The edit is an ordinary pending import, never a conflict.
       const status = await canonicalMemoryStatus(stackHome, discovery);
       expect(status.projects).toHaveLength(1);
       expect(status.projects[0]?.conflicts).toEqual([]);
-      expect(status.projects[0]?.pending).toBe(2);
-      // `stak add .` imports the edit and records the deletion.
+      expect(status.projects[0]?.pending).toBe(1);
       const staged = await stageCanonicalMemory(stackHome, discovery);
-      expect(staged.projects[0]?.imported.sort()).toEqual(['notes/a.md', 'notes/b.md']);
-      const main = await readCanonicalMain(stackHome);
-      const docs = main.projects[0]?.documents ?? [];
+      expect(staged.projects[0]?.imported).toEqual(['notes/a.md']);
+      const docs = (await readCanonicalMain(stackHome)).projects[0]?.documents ?? [];
       expect(docs.find((d) => d.path === 'notes/a.md')).toMatchObject({ state: 'present', contentHash: hashBytes(Buffer.from('edited since add')) });
-      expect(docs.find((d) => d.path === 'notes/b.md')?.state).toBe('deleted');
+      expect(docs.find((d) => d.path === 'notes/b.md')).toMatchObject({ state: 'present', contentHash: hashBytes(Buffer.from('captured b.md')) });
     };
 
-    it('first migration via `stak pull`: an edited file is an import-edit (not a conflict); a deleted file is an import-delete (not re-materialized)', async () => {
+    it('first migration via `stak pull`: an edited file is an import-edit (not a conflict); a file absent natively is planned as a materialize-write (not an import-delete) and restored, with a count', async () => {
       const { nativeDir, discovery } = await establishedV1Machine();
-      const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'r3-established-pull');
+      const projectId = (await (async () => {
+        await migrateWithProjectionSeed(stackHome, discovery);
+        return (await readCanonicalMain(stackHome)).projects[0]!.projectId;
+      })());
+      // The plan right after migration: b.md -> materialize write, a.md -> import-edit.
+      const plan = await planProjectSync({ projectId, dir: projectDir }, stackHome, {
+        claudeHome,
+        projects: [{ dir: projectDir, gitRemote }],
+        resolveProjectId: () => projectId,
+      });
+      const kindOf = (p: string) => plan.actions.find((x) => 'path' in x && x.path === p)?.kind;
+      expect(kindOf('notes/a.md')).toBe('import-edit');
+      expect(kindOf('notes/b.md')).toMatch(/^materialize/);
+      expect(plan.actions.some((x) => x.kind === 'import-delete')).toBe(false);
+      void nativeDir;
+    });
+
+    it('`stak pull` as the first migrating command restores the absent file and reports "restored from STAK"', async () => {
+      const { nativeDir, discovery } = await establishedV1Machine();
+      const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'r4-established-pull');
       const pulled = await pullMemoryViaCanonical(deps(stackHome, backend, path.join(root, 'keys')), discovery);
       expect(pulled.status).toBe('up-to-date');
       expect(pulled.conflicts ?? []).toEqual([]);
+      expect(pulled.restoredFromStak).toBe(1);
+      expect(renderCombinedPullResult({ status: 'noop' }, { status: 'not-attempted' }, { status: 'applied', outcome: pulled })).toContain(
+        '1 Memory file(s) restored from STAK',
+      );
       await assertNormalChanges(nativeDir, discovery);
     });
 
@@ -1487,18 +1511,20 @@ describe('Task 13 fix round 3', () => {
         migrate: (home) => migrateWithProjectionSeed(home, discovery),
       });
       expect(backedUp.cloud.status).toBe('standard');
-      // A later pull materializes nothing over the user's native state.
       await pullMemoryViaCanonical(deps(stackHome, backend, keys), discovery);
       await assertNormalChanges(nativeDir, discovery);
     });
 
-    it('first migration via the default `stak memory backup` migrate (no locator) seeds a local manifest too', async () => {
+    it('the default `stak memory backup` migrate (no locator) seeds nothing: safe — nothing is deleted or overwritten', async () => {
       const { nativeDir, discovery } = await establishedV1Machine();
       const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'r3-established-backup-default');
       const keys = path.join(root, 'keys');
       await runMemoryCloudBackup(deps(stackHome, backend, keys));
       await pullMemoryViaCanonical(deps(stackHome, backend, keys), discovery);
-      await assertNormalChanges(nativeDir, discovery);
+      expect(await readFile(path.join(nativeDir, 'a.md'), 'utf8')).toBe('edited since add'); // first-sighting conflict, never overwritten
+      expect(await readFile(path.join(nativeDir, 'b.md'), 'utf8')).toBe('captured b.md'); // restored
+      const status = await canonicalMemoryStatus(stackHome, discovery);
+      expect(status.projects[0]?.conflicts.map((c) => c.path)).toEqual(['notes/a.md']);
     });
 
     it('a Cloud recover on this CLI records the manifest fingerprint that marks it as Cloud-origin', async () => {
@@ -1514,6 +1540,48 @@ describe('Task 13 fix round 3', () => {
   });
 
   describe('A: an interrupted `stak memory protect` fails closed, and re-running it completes', () => {
+    it('resume from a DIFFERENT device (no key from the interrupted run): orphaned replicas are retired, every original re-replicated, latest is the newest original\'s replica (fix round 4)', async () => {
+      await bindProject(projectDir);
+      const memoryKey = encodeClaudeProjectKey(path.resolve(projectDir));
+      await writeAutoMemory(memoryKey, 'MEMORY.md', 'first');
+      await stageCanonicalMemory(stackHome, { claudeHome });
+      const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'r4-protect-other-device');
+      const keys = path.join(root, 'keys');
+      expect((await pushMemoryViaCanonical(deps(stackHome, backend, keys), { claudeHome })).status).toBe('pushed');
+      await writeAutoMemory(memoryKey, 'MEMORY.md', 'second');
+      await stageCanonicalMemory(stackHome, { claudeHome });
+      expect((await pushMemoryViaCanonical(deps(stackHome, backend, keys), { claudeHome })).status).toBe('pushed');
+      const [newest] = await backend.listGenerations();
+
+      // Device 1 replicates the oldest original, then drops off.
+      let creates = 0;
+      const flaky: RemoteMemoryBackend = Object.create(backend);
+      flaky.createGeneration = async (input) => {
+        creates += 1;
+        if (creates === 2) throw new Error('wifi lost');
+        return backend.createGeneration(input);
+      };
+      await expect(
+        runMemoryCloudProtect({ ...deps(stackHome, flaky, keys), backend: flaky }, { recoveryKey: generateRecoveryKey() }),
+      ).rejects.toThrow('wifi lost');
+      const orphan = (await backend.listGenerations()).find((g) => g.replicaOf)!;
+      expect(orphan).toBeDefined();
+
+      // Device 2: different stack home and key store, never had device 1's key.
+      const home2 = path.join(root, 'device-2');
+      const keys2 = path.join(root, 'keys-2');
+      const result = await runMemoryCloudProtect({ ...deps(home2, backend, keys2), backend }, { recoveryKey: generateRecoveryKey() });
+      expect(result).toMatchObject({ status: 'protected', migrated: 2 });
+      expect((await backend.getProfile())?.privacyMode).toBe('protected');
+      const committed = await backend.listGenerations();
+      expect(committed.some((g) => g.backupId === orphan.backupId)).toBe(false);
+      expect(committed.every((g) => g.privacyMode === 'protected')).toBe(true);
+      expect((await backend.getLatest())?.replicaOf).toBe(newest!.backupId);
+      // Device 2's key opens the latest Memory.
+      const recovered = await runMemoryCloudRecover(deps(path.join(root, 'device-2-restore'), backend, keys2));
+      expect(recovered.status).toBe('recovered');
+    });
+
     it('pull and push fail closed (no merge, no native writes or deletes, no generation); re-running protect resumes and finalizes', async () => {
       await bindProject(projectDir);
       await writeFile(path.join(projectDir, 'CLAUDE.local.md'), 'private', 'utf8');
@@ -1532,6 +1600,8 @@ describe('Task 13 fix round 3', () => {
       ).rejects.toThrow('connection reset');
       expect((await backend.getProfile())?.privacyMode).toBe('standard');
       expect((await backend.getLatest())?.replicaOf).toBeTruthy();
+      // The failed run's recovery wrapper (its file was never written) is revoked.
+      expect(await backend.listRecoveryMethods()).toHaveLength(0);
       const generationsBefore = (await backend.listGenerations()).length;
 
       // The user deletes a native file meanwhile; a fail-closed pull must
@@ -1552,11 +1622,26 @@ describe('Task 13 fix round 3', () => {
       expect(await readFile(memoryFile, 'utf8')).toBe('notes body');
       expect(await readFile(canonicalMainPath(), 'utf8')).toBe(mainBefore);
       expect(await backend.listGenerations()).toHaveLength(generationsBefore);
+      // Recover is gated too (fix round 4).
+      await expect(runMemoryCloudRecover(deps(path.join(root, 'other-machine'), backend, keys))).rejects.toMatchObject({
+        code: 'protect-in-progress',
+      });
+
+      // The originals are already retired, so ANOTHER device (no key) can't
+      // finish: refused up front with the accurate message, nothing enrolled,
+      // no wrapper added.
+      const otherKeys = path.join(root, 'other-keys');
+      await expect(
+        runMemoryCloudProtect({ ...deps(stackHome, backend, otherKeys), backend }, { recoveryKey: generateRecoveryKey() }),
+      ).rejects.toMatchObject({ code: 'protect-in-progress', message: expect.stringContaining('machine that started it') });
+      expect(await secureKeys(otherKeys).hasKey()).toBe(false);
+      expect(await backend.listRecoveryMethods()).toHaveLength(0);
 
       // Re-run protect: resumes with this device's key and finalizes.
       const resumed = await runMemoryCloudProtect({ ...deps(stackHome, backend, keys), backend }, { recoveryKey: generateRecoveryKey() });
       expect(resumed).toMatchObject({ status: 'protected', migrated: 0 });
       expect((await backend.getProfile())?.privacyMode).toBe('protected');
+      expect(await backend.listRecoveryMethods()).toHaveLength(1);
       const pulled = await pullMemoryViaCanonical(deps(stackHome, backend, keys), { claudeHome });
       expect(pulled.status).toBe('up-to-date');
       expect(await readFile(memoryFile, 'utf8')).toBe('notes body');
@@ -1651,5 +1736,40 @@ describe('Task 13 fix round 3 (Minors)', () => {
     expect(pushed.generation).toBe(2);
     const docs = (await readCanonicalMain(homeA)).projects[0]?.documents ?? [];
     expect(docs.some((d) => d.state === 'present' && d.contentHash === hashBytes(edited))).toBe(true);
+  });
+});
+
+describe('materialize never overwrites a native file it did not account for (Task 13 fix round 4)', () => {
+  it('an existing native file the scan could not attribute is reported as a conflict, never overwritten', async () => {
+    // Located ONLY via the remote snapshot's claim: this machine's local
+    // registry has no claim, so the scan can't attribute the native file to
+    // the project and plans a write over it — which must be refused.
+    const gitRemote = 'https://github.com/acme/unattributed.git';
+    const identity = canonicalGitIdentity(gitRemote)!;
+    const projectId = mintProjectId();
+    const snapshot = toPortableSnapshot(resolveOrMintProject(emptyRegistry(), identity, () => projectId).registry);
+    const vendorKey = encodeClaudeProjectKey(path.resolve(projectDir));
+    await writeAutoMemory(vendorKey, 'MEMORY.md', 'native edit, never added');
+    const stakCopy = Buffer.from('the STAK copy', 'utf8');
+    await writeMemoryObject({ stackHome, contentHash: hashBytes(stakCopy), bytes: stakCopy });
+    await writeCanonicalMain(stackHome, {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [
+        {
+          projectId,
+          documents: [
+            { path: 'notes/MEMORY.md', state: 'present', contentHash: hashBytes(stakCopy), importedFrom: 'claude', importedAt: '2026-10-23T00:00:00.000Z' },
+          ],
+        },
+      ],
+    });
+    const outcome = await materializeCanonicalProjects(stackHome, {
+      claudeHome,
+      projects: [{ dir: projectDir, gitRemote }],
+      remoteRegistrySnapshot: snapshot,
+    });
+    const native = path.join(claudeHome, 'projects', vendorKey, 'memory', 'MEMORY.md');
+    expect(await readFile(native, 'utf8')).toBe('native edit, never added');
+    expect(outcome.conflicts).toContainEqual({ projectId, path: 'notes/MEMORY.md', reason: 'adopt-mismatch' });
   });
 });

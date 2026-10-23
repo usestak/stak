@@ -2,7 +2,7 @@ import { CIPHER_VERSION, open } from '../remote/cipher.js';
 import { unwrapDekWithMmk } from '../remote/mmk.js';
 import { parseBundle } from '../remote/bundle-codec.js';
 import { RemoteMemoryError, type MemoryGenerationMeta, type RemoteMemoryBackend } from '../remote/backend.js';
-import { PROTECT_IN_PROGRESS_MESSAGE } from '../remote/modes.js';
+import { protectInProgressMessage } from '../remote/modes.js';
 import { hashBytes } from '../store.js';
 import { portableRegistrySnapshotSchema, type LocalRegistry, type PortableRegistrySnapshot } from '../project/registry.js';
 import { convertV1Bundle } from './convert-v1.js';
@@ -92,7 +92,7 @@ export const fetchRemoteCanonical = async (options: {
   if (options.generation === undefined && meta.privacyMode === 'protected' && typeof meta.replicaOf === 'string') {
     const profile = await options.backend.getProfile();
     if ((profile?.privacyMode ?? 'standard') === 'standard')
-      throw new RemoteMemoryError('protect-in-progress', PROTECT_IN_PROGRESS_MESSAGE);
+      throw new RemoteMemoryError('protect-in-progress', await protectInProgressMessage(options.backend));
   }
   const payload = await options.backend.getPayload(meta.backupId);
   if (hashBytes(payload) !== meta.payloadSha256)

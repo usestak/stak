@@ -220,6 +220,9 @@ export type MigrationResult = {
   /** Originals that already had a verified replica from an earlier,
    * interrupted run and were therefore not copied again (resume). */
   resumed: number;
+  /** Replicas from an earlier interrupted run that this key could not open,
+   * retired before re-replicating (Task 13 fix round 4). */
+  retiredReplicas: number;
   retiredStandard: number;
   finalized: boolean;
 };
@@ -242,7 +245,34 @@ export const isProtectInProgress = async (
 };
 
 export const PROTECT_IN_PROGRESS_MESSAGE =
-  'Protecting your Cloud Memory was interrupted before it finished. Nothing was changed on this machine. Run `stak memory protect` again to complete it.';
+  "Protecting your Cloud Memory was interrupted before it finished, so STAK won't sync Memory until it does. Nothing was changed on this machine. Run `stak memory protect` again on any signed-in machine to finish it — if that machine doesn't hold the key from the interrupted run, protect safely redoes the copy with a new key.";
+
+export const PROTECT_NEEDS_ORIGINAL_KEY_MESSAGE =
+  "Protecting your Cloud Memory was interrupted while it was finishing, so STAK won't sync Memory until it does. Nothing was changed on this machine. Run `stak memory protect` again on the machine that started it — only that machine holds the key for the protected copies already made.";
+
+/**
+ * Committed Protected replicas whose original is no longer a committed
+ * Standard generation — i.e. protect was interrupted AFTER it began retiring
+ * originals (the finalize step). These can't be re-replicated, so only the key
+ * that made them can finish the migration (Task 13 fix round 4).
+ */
+export const replicasNeedingOriginalKey = async (
+  backend: RemoteMemoryBackend,
+): Promise<MemoryGenerationMeta[]> => {
+  const out: MemoryGenerationMeta[] = [];
+  for (const generation of await backend.listGenerations()) {
+    if (generation.privacyMode !== 'protected' || typeof generation.replicaOf !== 'string') continue;
+    const original = await backend.getGenerationById(generation.replicaOf);
+    if (!original || original.state !== 'committed' || original.privacyMode !== 'standard') out.push(generation);
+  }
+  return out;
+};
+
+/** The accurate fail-closed message for an interrupted protect. */
+export const protectInProgressMessage = async (backend: RemoteMemoryBackend): Promise<string> =>
+  (await replicasNeedingOriginalKey(backend)).length > 0
+    ? PROTECT_NEEDS_ORIGINAL_KEY_MESSAGE
+    : PROTECT_IN_PROGRESS_MESSAGE;
 
 /** Decrypt a Protected replica and confirm it holds EXACTLY the original
  * Standard payload's bytes. */
@@ -285,16 +315,22 @@ const verifyReplica = (
  *  - Each replica names its original via `replicaOf`, which the server verifies
  *    (see `assertCreateGenerationAllowed`) — the only way a v1-format replica
  *    passes the sticky v1-after-v2 gate.
- *  - `expectedParent` is CHAINED from this run's own previous create (starting
- *    from the latest seen once, up front), never re-read from `getLatest()`
- *    per copy: a concurrent push landing mid-migration makes the next create
- *    conflict, aborting the migration, instead of being silently stranded as
- *    Standard plaintext behind a later replica.
- *  - Resumable: an original that already has a replica (an earlier interrupted
- *    run) is not copied again; its replica is downloaded and verified against
- *    the original with THIS MMK before anything is retired.
+ *  - `expectedParent` is CHAINED from this run's own previous create, never
+ *    re-read per copy: a concurrent push landing mid-migration makes the next
+ *    create conflict, aborting the migration, instead of being silently
+ *    stranded as Standard plaintext behind a later replica.
+ *  - Resumable: an original that already has a replica this MMK verifies (an
+ *    earlier interrupted run on this device) is not copied again.
  *  - Oldest-first, so the newest original's replica is created last and is the
  *    account's latest after finalize.
+ *
+ * Task 13 fix round 4 (no lockout): when an existing replica can NOT be
+ * verified with this MMK (an interrupted run on another device, or a lost
+ * key), and the account is still Standard with EVERY original re-confirmed as
+ * a committed Standard generation whose payload verifies, ALL existing
+ * replicas are retired (keeping verifiable ones beside fresh copies could
+ * leave an older original's replica as latest) and every original is
+ * replicated again with this MMK. Originals are never touched until finalize.
  */
 export const migrateStandardToProtected = async (options: {
   backend: RemoteMemoryBackend;
@@ -311,24 +347,86 @@ export const migrateStandardToProtected = async (options: {
     if (generation.privacyMode === 'protected' && typeof generation.replicaOf === 'string')
       replicaByOriginal.set(generation.replicaOf, generation);
 
-  // Read ONCE; every later create chains from the previous create's own result.
-  let expectedParent = (await options.backend.getLatest())?.generation ?? null;
-  let migrated = 0;
-  let resumed = 0;
+  // Phase 0: replicas whose original is already retired (protect was
+  // interrupted while finalizing) can't be redone — they must open with THIS
+  // key, or only the machine that made them can finish (fail closed, nothing
+  // changed).
+  const standardIds = new Set(standards.map((g) => g.backupId));
+  for (const generation of generations) {
+    if (generation.privacyMode !== 'protected' || typeof generation.replicaOf !== 'string') continue;
+    if (standardIds.has(generation.replicaOf)) continue;
+    try {
+      const payload = await options.backend.getPayload(generation.backupId);
+      verifyPayload(payload, generation.payloadSha256);
+      if (!generation.wrappedDek) throw new Error('missing wrapped key');
+      const dek = unwrapDekWithMmk(generation.wrappedDek, options.mmk, generation.backupId);
+      open(splitPayload(payload), dek, protectedBundleAad(generation.backupId));
+    } catch {
+      throw new RemoteMemoryError('protect-in-progress', PROTECT_NEEDS_ORIGINAL_KEY_MESSAGE);
+    }
+  }
+
+  // Phase 1: read + verify every original; verify any existing replica with THIS key.
+  const originalBytes = new Map<string, Uint8Array>();
+  const verified = new Set<string>();
+  let orphaned = false;
   for (const standard of standards) {
     const bundleBytes = await options.backend.getPayload(standard.backupId);
     verifyPayload(bundleBytes, standard.payloadSha256);
-
+    originalBytes.set(standard.backupId, bundleBytes);
     const existing = replicaByOriginal.get(standard.backupId);
-    if (existing) {
-      // Resume: verify the earlier run's replica with THIS key before trusting it.
+    if (!existing) continue;
+    try {
       const replicaPayload = await options.backend.getPayload(existing.backupId);
       verifyPayload(replicaPayload, existing.payloadSha256);
       verifyReplica(replicaPayload, existing.backupId, existing.wrappedDek, options.mmk, standard.payloadSha256);
+      verified.add(standard.backupId);
+    } catch {
+      orphaned = true;
+    }
+  }
+
+  // Phase 1b (escape): retire unverifiable replicas, after re-confirming the originals.
+  let retiredReplicas = 0;
+  if (orphaned) {
+    const profile = await options.backend.getProfile();
+    if ((profile?.privacyMode ?? 'standard') !== 'standard')
+      throw new RemoteMemoryError(
+        'integrity',
+        'Existing Protected copies cannot be opened with this key, and the account is no longer Standard; nothing was changed.',
+      );
+    for (const standard of standards) {
+      const current = await options.backend.getGenerationById(standard.backupId);
+      if (!current || current.state !== 'committed' || current.privacyMode !== 'standard')
+        throw new RemoteMemoryError(
+          'integrity',
+          'An original Standard backup changed during protect; nothing was retired. Run `stak memory protect` again.',
+        );
+    }
+    for (const standard of standards) {
+      const existing = replicaByOriginal.get(standard.backupId);
+      if (!existing) continue;
+      await options.backend.retireGeneration(existing.backupId, options.now);
+      retiredReplicas += 1;
+    }
+    verified.clear();
+  }
+
+  // Read ONCE (after any retirement); every later create chains from the
+  // previous create's own result. The profile's `latestGeneration` is what the
+  // commit checks against (it never drops when a generation is retired).
+  let expectedParent =
+    (await options.backend.getProfile())?.latestGeneration ??
+    (await options.backend.getLatest())?.generation ??
+    null;
+  let migrated = 0;
+  let resumed = 0;
+  for (const standard of standards) {
+    if (verified.has(standard.backupId)) {
       resumed += 1;
       continue;
     }
-
+    const bundleBytes = originalBytes.get(standard.backupId) as Uint8Array;
     const backupId = randomUUID();
     const dek = randomKey();
     const aad = protectedBundleAad(backupId);
@@ -368,6 +466,7 @@ export const migrateStandardToProtected = async (options: {
   return {
     migrated,
     resumed,
+    retiredReplicas,
     retiredStandard,
     finalized: true,
   };

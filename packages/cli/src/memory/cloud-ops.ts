@@ -30,6 +30,10 @@ import {
   hashBytes,
   isProtectInProgress,
   migrateLocalStore,
+  PROTECT_NEEDS_ORIGINAL_KEY_MESSAGE,
+  protectInProgressMessage,
+  replicasNeedingOriginalKey,
+  RemoteMemoryError,
   migrateStandardToProtected,
   newKeyring,
   openMmkFromEnvelope,
@@ -121,6 +125,9 @@ export type CloudBackupOutcome =
 export type CanonicalMaterializeExtras = {
   unavailable?: UnavailableCanonicalProject[];
   materializeConflicts?: CanonicalMaterializeConflict[];
+  /** Files materialized back from STAK because migration found them absent
+   * natively (Task 13 fix round 4). */
+  restoredFromStak?: number;
 };
 
 export type MemoryBackupOutcome = {
@@ -504,7 +511,7 @@ export const runMemoryCloudBackup = async (
      * finding C) — injected rather than imported to avoid a circular import
      * between this module and `canonical-ops.ts`. Defaults to a plain
      * `migrateLocalStore` with no directory locator. */
-    migrate?: (stackHome: string) => Promise<void>;
+    migrate?: (stackHome: string) => Promise<unknown>;
   } = {},
 ): Promise<MemoryBackupOutcome> => {
   const local = await deps.runLocalBackup();
@@ -640,6 +647,10 @@ export const runMemoryCloudRecover = async (
   options: { generation?: number; recoveryKey?: Buffer } = {},
 ): Promise<CloudRecoverOutcome> => {
   if (!deps.backend) return { status: 'not-authenticated' };
+  // Task 13 fix round 4: never restore from an account whose protect was
+  // interrupted (latest may be a replica of an unfinished migration).
+  if (await isProtectInProgress(deps.backend))
+    throw new RemoteMemoryError('protect-in-progress', await protectInProgressMessage(deps.backend));
   const meta =
     options.generation !== undefined
       ? await deps.backend.getGeneration(options.generation)
@@ -743,15 +754,19 @@ export const runMemoryCloudProtect = async (
   deps: MemoryCloudDeps & { backend: RemoteMemoryBackend },
   options: { recoveryKey: RecoveryKeyArtifacts },
 ): Promise<ProtectOutcome> => {
-  // Task 13 fix round 3: RESUME an interrupted protect with the SAME Memory
-  // key this device already enrolled for it — the replicas already in Cloud
-  // are encrypted under it, and a fresh key would make them unreadable (the
-  // migration refuses to finalize in that case: it verifies every existing
-  // replica with the key it is given). A fresh recovery file is still issued
-  // below, because the interrupted run never wrote one.
-  const resumeMmk = (await isProtectInProgress(deps.backend))
-    ? await deps.localKeyStore.loadMmk().catch(() => null)
-    : null;
+  // Task 13 fix rounds 3-4: RESUME an interrupted protect with the Memory key
+  // this device already enrolled for it, so the replicas already in Cloud are
+  // reused. A device WITHOUT that key generates a fresh one: the migration
+  // then retires the replicas it can't open and re-replicates with the new
+  // key (originals intact) — never a lockout. A fresh recovery file is issued
+  // either way, because an interrupted run never wrote one.
+  const inProgress = await isProtectInProgress(deps.backend);
+  const resumeMmk = inProgress ? await deps.localKeyStore.loadMmk().catch(() => null) : null;
+  // Fix round 4 (d): if finishing needs the interrupted run's key (originals
+  // already retired) and this device doesn't have one, stop BEFORE generating
+  // or enrolling a key or adding a recovery wrapper.
+  if (inProgress && !resumeMmk && (await replicasNeedingOriginalKey(deps.backend)).length > 0)
+    throw new RemoteMemoryError('protect-in-progress', PROTECT_NEEDS_ORIGINAL_KEY_MESSAGE);
   const mmk = resumeMmk ?? generateMmk();
   // Enroll this device FIRST and fail closed: if local key storage can't be
   // secured, persist nothing and finalize nothing in Cloud.
@@ -764,17 +779,26 @@ export const runMemoryCloudProtect = async (
     recoveryKey: options.recoveryKey.keyBytes,
   });
   const stored: StoredWrapper = { mmkId: keyring.mmkId, wrapper };
-  await deps.backend.addRecoveryMethod({
+  const method = await deps.backend.addRecoveryMethod({
     type: 'recovery-file',
     label: 'Recovery file',
     mmkWrapper: stored,
     cryptoVersion: CIPHER_VERSION,
   });
-  const migration = await migrateStandardToProtected({
-    backend: deps.backend,
-    mmk,
-    ...(deps.now ? { now: deps.now } : {}),
-  });
+  let migration: Awaited<ReturnType<typeof migrateStandardToProtected>>;
+  try {
+    migration = await migrateStandardToProtected({
+      backend: deps.backend,
+      mmk,
+      ...(deps.now ? { now: deps.now } : {}),
+    });
+  } catch (error) {
+    // Task 13 fix round 4: the recovery file for this wrapper is only written
+    // after success, so on failure the wrapper is unusable — never leave it
+    // behind. (The device key stays enrolled: a re-run resumes with it.)
+    await deps.backend.revokeRecoveryMethod(method.methodId).catch(() => undefined);
+    throw error;
+  }
   return {
     status: 'protected',
     migrated: migration.migrated,
@@ -1045,6 +1069,9 @@ export const runPasskeyProtect = async (
       const resumed = await migrateStandardToProtected({ backend: deps.backend, mmk: resumeMmk, now });
       return { status: 'protected', migrated: resumed.migrated };
     }
+    // Fix round 4 (d): never open a passkey ceremony for a key that can't finish.
+    if ((await replicasNeedingOriginalKey(deps.backend)).length > 0)
+      throw new RemoteMemoryError('protect-in-progress', PROTECT_NEEDS_ORIGINAL_KEY_MESSAGE);
   }
   const { session, initiatorPrivateKey } = await createRecoverySession({
     userId: 'stack-memory',
@@ -1108,6 +1135,8 @@ export const runPasskeyRecover = async (
   options: { generation?: number } = {},
 ): Promise<PasskeyRecoverResult> => {
   if (!deps.backend) return { status: 'not-authenticated' };
+  if (await isProtectInProgress(deps.backend))
+    throw new RemoteMemoryError('protect-in-progress', await protectInProgressMessage(deps.backend));
   const now = deps.now ?? (() => new Date());
   const sleep = deps.sleep ?? defaultSleep;
   // The CLI authoritatively selects the generation and fetches/decrypts its payload;

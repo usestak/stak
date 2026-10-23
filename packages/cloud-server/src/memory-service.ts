@@ -28,10 +28,10 @@ import type {
 
 import {
   CloudServiceError,
-  invalidRequest,
   memoryConflict,
   memoryIncompatibleFormat,
   memoryIntegrity,
+  memoryInvalidReplica,
   memoryNoEnvelope,
   memoryNotConfigured,
   memoryNotFound,
@@ -73,7 +73,7 @@ const mapError = (error: unknown): never => {
       case 'incompatible-format':
         throw memoryIncompatibleFormat(error.message);
       case 'invalid-replica':
-        throw invalidRequest(error.message);
+        throw memoryInvalidReplica(error.message);
       default:
         throw error;
     }

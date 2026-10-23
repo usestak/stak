@@ -991,6 +991,7 @@ const defaultDependencies: ProgramDependencies = {
     const extras = {
       ...(outcome.unavailable ? { unavailable: outcome.unavailable } : {}),
       ...(outcome.conflicts ? { materializeConflicts: outcome.conflicts } : {}),
+      ...(outcome.restoredFromStak ? { restoredFromStak: outcome.restoredFromStak } : {}),
     };
     return outcome.status === 'up-to-date'
       ? { status: 'up-to-date', generation: outcome.generation ?? 0, ...extras }
