@@ -206,3 +206,34 @@ describe('pushCanonicalMemory', () => {
     expect(deps.publish).toHaveBeenCalledTimes(1); // never retried — this isn't a race, retrying would misreport the real failure
   });
 });
+
+describe('pushCanonicalMemory: pending merge bookkeeping (Task 14 fix round 1)', () => {
+  it('a conflict records the generation the merged content came from, not the commit counter', async () => {
+    const deps = baseDeps({
+      getLocalMain: vi.fn(async () => manifest([present('notes/a.md', 2)])),
+      getBase: vi.fn(async () => ({ generation: 1, main: manifest([present('notes/a.md', 1)]) })),
+      fetchRemote: vi.fn(async () => ({ generation: 7, contentGeneration: 5, main: manifest([present('notes/a.md', 3)]) })),
+    });
+    expect((await pushCanonicalMemory(deps)).status).toBe('conflict');
+    expect(deps.savePendingMerge).toHaveBeenCalledWith(expect.objectContaining({ basedOnGeneration: 5 }));
+  });
+
+  it('clears a leftover merge.json on the up-to-date and fast-forward branches', async () => {
+    const same = manifest([present('notes/a.md', 1)]);
+    const upToDate = baseDeps({
+      getLocalMain: vi.fn(async () => same),
+      fetchRemote: vi.fn(async () => ({ generation: 2, main: same })),
+    });
+    expect((await pushCanonicalMemory(upToDate)).status).toBe('up-to-date');
+    expect(upToDate.clearPendingMerge).toHaveBeenCalled();
+
+    const fastForward = baseDeps({
+      getLocalMain: vi.fn(async () => manifest([present('notes/a.md', 2)])),
+      getBase: vi.fn(async () => ({ generation: 2, main: same })),
+      fetchRemote: vi.fn(async () => ({ generation: 2, main: same })),
+      publish: vi.fn(async () => ({ generation: 3 })),
+    });
+    expect((await pushCanonicalMemory(fastForward)).status).toBe('pushed');
+    expect(fastForward.clearPendingMerge).toHaveBeenCalled();
+  });
+});

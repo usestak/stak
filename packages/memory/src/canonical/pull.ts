@@ -1,6 +1,6 @@
 import { canonicalDigest, emptyCanonicalMain, type CanonicalMainManifest } from './domain.js';
 import { mergeCanonical, type MergeConflict } from './merge.js';
-import type { RemoteCanonical } from './push.js';
+import { pendingMergeGenerationOf, type RemoteCanonical } from './push.js';
 
 export type PullDeps = {
   getLocalMain(): Promise<CanonicalMainManifest>;
@@ -57,18 +57,23 @@ export const pullCanonicalMemory = async (deps: PullDeps): Promise<PullOutcome> 
     // against a base that no longer reflects reality.
     if (base === null || base.generation !== remote.generation)
       await deps.setBase({ generation: remote.generation, main: remote.main });
+    // Task 14 fix round 1: local equals Cloud — a leftover merge.json is a phantom.
+    await deps.clearPendingMerge();
     return { status: 'up-to-date', generation: remote.generation };
   }
 
-  if (base !== null && base.generation === remote.generation)
+  if (base !== null && base.generation === remote.generation) {
     // Cloud has not moved since our base; any difference from remote is purely
-    // local, unpushed work — nothing new to pull.
+    // local, unpushed work — nothing new to pull. A leftover merge.json was
+    // made against an older base and no longer applies (Task 14 fix round 1).
+    await deps.clearPendingMerge();
     return { status: 'up-to-date', generation: remote.generation };
+  }
 
   const baseMain = base?.main ?? emptyCanonicalMain();
   const { merged, conflicts } = mergeCanonical(baseMain, local, remote.main);
   if (conflicts.length > 0) {
-    await deps.savePendingMerge({ basedOnGeneration: remote.generation, merged, conflicts });
+    await deps.savePendingMerge({ basedOnGeneration: pendingMergeGenerationOf(remote), merged, conflicts });
     return { status: 'conflict', conflicts };
   }
   await deps.setLocalMain(merged);

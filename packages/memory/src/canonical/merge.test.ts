@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CANONICAL_MAIN_SCHEMA_VERSION, type CanonicalDoc, type CanonicalMainManifest } from './domain.js';
-import { keepBothPath, mergeCanonical } from './merge.js';
+import { keepBothPath, mergeCanonical, resolveConflictDocs } from './merge.js';
 
 const h = (n: number) => `sha256:${n.toString().padStart(64, '0')}`;
 const present = (path: string, n: number): CanonicalDoc => ({
@@ -144,5 +144,67 @@ describe('keepBothPath', () => {
     expect(keepBothPath('notes/README', hash, () => false)).toBe(
       'notes/README.conflict-dddddddddddd',
     );
+  });
+});
+
+describe('resolveConflictDocs (Task 14)', () => {
+  const at = '2026-10-23T00:00:00.000Z';
+  const P = 'notes/a.md';
+  const never = () => false;
+  const alt = (n: number) => `notes/a.conflict-${h(n).slice('sha256:'.length, 'sha256:'.length + 12)}.md`;
+  const tomb = (n: number): CanonicalDoc => ({ path: P, state: 'deleted', lastContentHash: h(n), deletedAt: at });
+
+  it('edit-edit: each side, and both = Cloud at the path + local at the keep-both path', () => {
+    expect(resolveConflictDocs('local', P, present(P, 2), present(P, 3), at, never)).toEqual({ primary: present(P, 2) });
+    expect(resolveConflictDocs('cloud', P, present(P, 2), present(P, 3), at, never)).toEqual({ primary: present(P, 3) });
+    expect(resolveConflictDocs('both', P, present(P, 2), present(P, 3), at, never)).toEqual({
+      primary: present(P, 3),
+      alt: present(alt(2), 2),
+    });
+  });
+
+  it('local present, Cloud tombstone: both keeps the tombstone at the path and local at the keep-both path', () => {
+    expect(resolveConflictDocs('local', P, present(P, 2), deleted(P, 1), at, never)).toEqual({ primary: present(P, 2) });
+    expect(resolveConflictDocs('cloud', P, present(P, 2), deleted(P, 1), at, never)).toEqual({ primary: deleted(P, 1) });
+    expect(resolveConflictDocs('both', P, present(P, 2), deleted(P, 1), at, never)).toEqual({
+      primary: deleted(P, 1),
+      alt: present(alt(2), 2),
+    });
+  });
+
+  it("local present, Cloud absent: cloud/both = a tombstone of local's content at the path; both also keeps local aside", () => {
+    expect(resolveConflictDocs('local', P, present(P, 2), undefined, at, never)).toEqual({ primary: present(P, 2) });
+    expect(resolveConflictDocs('cloud', P, present(P, 2), undefined, at, never)).toEqual({ primary: tomb(2) });
+    expect(resolveConflictDocs('both', P, present(P, 2), undefined, at, never)).toEqual({
+      primary: tomb(2),
+      alt: present(alt(2), 2),
+    });
+  });
+
+  it("local tombstone or absent, Cloud present: local = the deletion (a tombstone of Cloud's content when absent); both = Cloud only", () => {
+    expect(resolveConflictDocs('local', P, deleted(P, 1), present(P, 3), at, never)).toEqual({ primary: deleted(P, 1) });
+    expect(resolveConflictDocs('local', P, undefined, present(P, 3), at, never)).toEqual({ primary: tomb(3) });
+    for (const local of [deleted(P, 1), undefined]) {
+      expect(resolveConflictDocs('cloud', P, local, present(P, 3), at, never)).toEqual({ primary: present(P, 3) });
+      expect(resolveConflictDocs('both', P, local, present(P, 3), at, never)).toEqual({ primary: present(P, 3) });
+    }
+  });
+
+  it("delete-delete: each side keeps its own tombstone; both = Cloud's deletion", () => {
+    expect(resolveConflictDocs('local', P, deleted(P, 2), deleted(P, 3), at, never)).toEqual({ primary: deleted(P, 2) });
+    expect(resolveConflictDocs('cloud', P, deleted(P, 2), deleted(P, 3), at, never)).toEqual({ primary: deleted(P, 3) });
+    expect(resolveConflictDocs('both', P, deleted(P, 2), deleted(P, 3), at, never)).toEqual({ primary: deleted(P, 3) });
+    expect(resolveConflictDocs('cloud', P, deleted(P, 2), undefined, at, never)).toEqual({ primary: deleted(P, 2) });
+    expect(resolveConflictDocs('local', P, undefined, deleted(P, 3), at, never)).toEqual({ primary: deleted(P, 3) });
+  });
+
+  it('keep-both extends the name on collision', () => {
+    const short = alt(2);
+    const result = resolveConflictDocs('both', P, present(P, 2), present(P, 3), at, (c) => c === short);
+    expect(result.alt?.path).toBe(`notes/a.conflict-${h(2).slice('sha256:'.length, 'sha256:'.length + 16)}.md`);
+  });
+
+  it('neither side present at all is an error, never a guess', () => {
+    expect(() => resolveConflictDocs('local', P, undefined, undefined, at, never)).toThrow(/nothing to resolve/);
   });
 });

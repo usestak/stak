@@ -1,7 +1,18 @@
 import { canonicalDigest, emptyCanonicalMain, type CanonicalMainManifest } from './domain.js';
 import { mergeCanonical, type MergeConflict } from './merge.js';
 
-export type RemoteCanonical = { generation: number; main: CanonicalMainManifest };
+export type RemoteCanonical = {
+  generation: number;
+  main: CanonicalMainManifest;
+  /** Generation the content was read from, when it differs from `generation`
+   * (see `fetchRemoteCanonical`). A pending merge records this one. */
+  contentGeneration?: number;
+};
+
+/** The generation a pending merge is "based on": the one whose content was
+ * merged — fetchable again by `stak memory resolve`/`diff` (Task 14). */
+export const pendingMergeGenerationOf = (remote: RemoteCanonical): number =>
+  remote.contentGeneration ?? remote.generation;
 
 /** The shape `publish` rejects with on a concurrent-write race (duck-typed so this
  * module never imports `RemoteMemoryError` directly — matches its `code: 'conflict'`). */
@@ -71,6 +82,10 @@ export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> 
 
     if (remote && canonicalDigest(remote.main) === canonicalDigest(local)) {
       await deps.setBase({ generation: remote.generation, main: local });
+      // Task 14 fix round 1: local and Cloud agree, so any leftover
+      // `merge.json` (e.g. a crash after a final resolve wrote main/base but
+      // before it cleared the merge) describes nothing real any more.
+      await deps.clearPendingMerge();
       return { status: 'up-to-date', generation: remote.generation };
     }
 
@@ -88,6 +103,7 @@ export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> 
       try {
         const result = await deps.publish(local, expectedParent);
         await deps.setBase({ generation: result.generation, main: local });
+        await deps.clearPendingMerge(); // Task 14 fix round 1: no phantom merge.json
         return { status: 'pushed', generation: result.generation, main: local };
       } catch (error) {
         if (!isConflictError(error)) throw error; // not a race we can retry: propagate immediately
@@ -101,7 +117,7 @@ export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> 
     const remoteGeneration = remote!.generation; // non-null: isFastForward handles the null/null case
     const { merged, conflicts } = mergeCanonical(baseMain, local, remote!.main);
     if (conflicts.length > 0) {
-      await deps.savePendingMerge({ basedOnGeneration: remoteGeneration, merged, conflicts });
+      await deps.savePendingMerge({ basedOnGeneration: pendingMergeGenerationOf(remote!), merged, conflicts });
       return { status: 'conflict', conflicts };
     }
     if (canonicalDigest(merged) === canonicalDigest(remote!.main)) {
@@ -112,6 +128,7 @@ export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> 
       // local storage and the base together and stop.
       await deps.setLocalMain(merged);
       await deps.setBase({ generation: remoteGeneration, main: merged });
+      await deps.clearPendingMerge(); // Task 14 fix round 1: no phantom merge.json
       return { status: 'up-to-date', generation: remoteGeneration };
     }
     // Do NOT adopt `merged` into local storage yet — it is not yet Cloud's

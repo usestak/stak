@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import {
   CANONICAL_MAIN_SCHEMA_VERSION,
+  canonicalDocSchema,
   canonicalMainManifestSchema,
   type CanonicalDoc,
   type CanonicalMainManifest,
@@ -28,6 +29,10 @@ export const pendingMergeResolutionSchema = z.object({
   path: z.string(),
   keep: z.enum(['local', 'cloud', 'both']),
   altPath: z.string().optional(),
+  /** Local canonical state of `path` when this resolution was made (`null` =
+   * absent). A later resolve refuses (`merge-stale`) if it has changed since —
+   * otherwise finalizing would write the recorded choice over a newer edit. */
+  local: canonicalDocSchema.nullable().optional(),
 });
 export type PendingMergeResolution = z.infer<typeof pendingMergeResolutionSchema>;
 
@@ -173,4 +178,45 @@ export const keepBothPath = (
     if (!isTaken(candidate)) return candidate;
   }
   return `${dir}${stem}.conflict-${hex}${ext}`;
+};
+
+export type KeepSide = 'local' | 'cloud' | 'both';
+
+/**
+ * Spec §8.3 / Appendix A.4: the document state(s) that resolving one conflict
+ * produces. Each side is a document STATE, deletions included:
+ *  - `local` / `cloud`: that side's document. A side that is ABSENT means the
+ *    deletion, as a tombstone of the other side's present content (so the
+ *    deletion propagates and the other copy is never resurrected or left
+ *    silently in place).
+ *  - `both`: Cloud ALWAYS keeps the original path (its document, or — when it
+ *    is absent — a tombstone of local's content, exactly as `cloud` gives);
+ *    when local is present, local's content is additionally kept at the
+ *    deterministic `keepBothPath`. Local gone -> just Cloud's state.
+ * Pure: `deletedAt` is supplied, collisions are checked through `isTaken`.
+ */
+export const resolveConflictDocs = (
+  keep: KeepSide,
+  path: string,
+  local: CanonicalDoc | undefined,
+  cloud: CanonicalDoc | undefined,
+  deletedAt: string,
+  isTaken: (candidate: string) => boolean,
+): { primary: CanonicalDoc; alt?: CanonicalDoc } => {
+  const tombstone = (lastContentHash: string): CanonicalDoc => ({
+    path,
+    state: 'deleted',
+    lastContentHash,
+    deletedAt,
+  });
+  const take = (chosen: CanonicalDoc | undefined, other: CanonicalDoc | undefined): CanonicalDoc => {
+    if (chosen) return chosen;
+    if (other?.state === 'present') return tombstone(other.contentHash);
+    if (other) return other;
+    throw new Error(`Neither side has ${path}; there is nothing to resolve.`);
+  };
+  if (keep === 'local') return { primary: take(local, cloud) };
+  const primary = take(cloud, local);
+  if (keep === 'cloud' || local?.state !== 'present') return { primary };
+  return { primary, alt: { ...local, path: keepBothPath(path, local.contentHash, isTaken) } };
 };

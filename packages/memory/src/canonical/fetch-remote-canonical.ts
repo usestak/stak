@@ -104,6 +104,12 @@ export const fetchRemoteCanonical = async (options: {
   generation?: number;
 }): Promise<{
   generation: number;
+  /** The committed generation the returned content actually came from (Task
+   * 14 fix round 1). Differs from `generation` only when `generation` is the
+   * account's commit counter (highest generation retired) or a protect replica
+   * was read for an explicit `generation`. A pending merge records THIS, so
+   * `stak memory resolve`/`diff` can fetch exactly that content again. */
+  contentGeneration: number;
   main: CanonicalMainManifest;
   objects: RemoteCanonicalObject[];
   registrySnapshot: PortableRegistrySnapshot | undefined;
@@ -169,6 +175,7 @@ export const fetchRemoteCanonical = async (options: {
   }
   return {
     generation: head !== null && head > meta.generation ? head : meta.generation,
+    contentGeneration: meta.generation,
     main: main ?? emptyCanonicalMain(),
     objects,
     registrySnapshot,

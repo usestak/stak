@@ -133,3 +133,29 @@ describe('pullCanonicalMemory', () => {
     expect(deps.setBase).not.toHaveBeenCalled();
   });
 });
+
+describe('pullCanonicalMemory: pending merge bookkeeping (Task 14 fix round 1)', () => {
+  it('a conflict records the generation the merged content came from, not the commit counter', async () => {
+    const deps = baseDeps({
+      getLocalMain: vi.fn(async () => manifest([present('notes/a.md', 2)])),
+      getBase: vi.fn(async () => ({ generation: 1, main: manifest([present('notes/a.md', 1)]) })),
+      fetchRemote: vi.fn(async () => ({ generation: 7, contentGeneration: 5, main: manifest([present('notes/a.md', 3)]) })),
+    });
+    expect((await pullCanonicalMemory(deps)).status).toBe('conflict');
+    expect(deps.savePendingMerge).toHaveBeenCalledWith(expect.objectContaining({ basedOnGeneration: 5 }));
+  });
+
+  it('clears a leftover merge.json on both up-to-date branches', async () => {
+    const same = manifest([present('notes/a.md', 1)]);
+    const equal = baseDeps({ getLocalMain: vi.fn(async () => same), fetchRemote: vi.fn(async () => ({ generation: 2, main: same })) });
+    expect((await pullCanonicalMemory(equal)).status).toBe('up-to-date');
+    expect(equal.clearPendingMerge).toHaveBeenCalled();
+    const notMoved = baseDeps({
+      getLocalMain: vi.fn(async () => manifest([present('notes/a.md', 2)])),
+      getBase: vi.fn(async () => ({ generation: 2, main: same })),
+      fetchRemote: vi.fn(async () => ({ generation: 2, main: same })),
+    });
+    expect((await pullCanonicalMemory(notMoved)).status).toBe('up-to-date');
+    expect(notMoved.clearPendingMerge).toHaveBeenCalled();
+  });
+});
