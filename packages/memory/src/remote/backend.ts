@@ -100,7 +100,8 @@ export class RemoteMemoryError extends Error {
       | 'no-envelope'
       | 'incompatible-format'
       | 'invalid-replica'
-      | 'protect-in-progress',
+      | 'protect-in-progress'
+      | 'retire-refused',
     message: string,
   ) {
     super(message);
@@ -202,6 +203,44 @@ export const assertCreateGenerationAllowed = (
     throw new RemoteMemoryError('incompatible-format', INCOMPATIBLE_FORMAT_MESSAGE);
 };
 
+/**
+ * The guarded-retire rule (Task 13 fix round 5), shared by the in-memory
+ * backend and mirrored atomically by production's
+ * `retire_memory_generation_guarded` SQL function (migration 0018): a retire
+ * may never remove the last committed copy of a Standard original's content.
+ *  - A committed STANDARD generation can be retired only while a committed
+ *    Protected replica of it (`replicaOf`) exists.
+ *  - A committed REPLICA can be retired only while its original is still
+ *    committed.
+ * Anything else (already retired, unknown, an ordinary Protected generation)
+ * is allowed. Without this, two devices running `stak memory protect` at once
+ * (one finalizing, one retiring the other's replicas it can't open) could
+ * leave the account with zero committed generations.
+ */
+export const assertRetireAllowed = (
+  target: MemoryGenerationMeta | null,
+  all: MemoryGenerationMeta[],
+): void => {
+  if (!target || target.state !== 'committed') return;
+  const committed = all.filter((g) => g.state === 'committed');
+  if (
+    target.privacyMode === 'standard' &&
+    !committed.some((g) => g.privacyMode === 'protected' && g.replicaOf === target.backupId)
+  )
+    throw new RemoteMemoryError(
+      'retire-refused',
+      'Refused to retire a Standard backup that has no committed Protected copy.',
+    );
+  if (
+    typeof target.replicaOf === 'string' &&
+    !committed.some((g) => g.backupId === target.replicaOf)
+  )
+    throw new RemoteMemoryError(
+      'retire-refused',
+      'Refused to retire a Protected copy whose original is already retired.',
+    );
+};
+
 export type AddRecoveryMethodInput = {
   type: 'passkey' | 'recovery-file' | 'trusted-device';
   label: string;
@@ -238,7 +277,18 @@ export interface RemoteMemoryBackend {
   /** Transactional: prepare → store payload → commit → advance latest. */
   createGeneration(input: CreateGenerationInput): Promise<MemoryGenerationMeta>;
   getPayload(backupId: string): Promise<Uint8Array>;
-  retireGeneration(backupId: string, now?: () => Date): Promise<void>;
+  /**
+   * Retire a generation and drop its payload (idempotent). `guarded: true`
+   * (Task 13 fix round 5) applies `assertRetireAllowed` atomically — every
+   * retire `stak memory protect` performs is guarded, and the Cloud server
+   * guards every retire that arrives over its HTTP route. Delete Cloud Memory
+   * (server-side, unguarded) is the only path that may remove a last copy.
+   */
+  retireGeneration(
+    backupId: string,
+    now?: () => Date,
+    options?: { guarded?: boolean },
+  ): Promise<void>;
   /**
    * Every backup id for this user, INCLUDING already-retired ones (P3). Delete Cloud Memory
    * uses this so a retry can re-remove a payload orphaned by an earlier partial failure —
@@ -459,9 +509,20 @@ class InMemoryRemoteMemoryBackend implements RemoteMemoryBackend {
     return Promise.resolve(payload.bytes);
   }
 
-  retireGeneration(backupId: string, now?: () => Date): Promise<void> {
+  retireGeneration(
+    backupId: string,
+    now?: () => Date,
+    options?: { guarded?: boolean },
+  ): Promise<void> {
     const all = this.myGenerations();
     const record = all.find((generation) => generation.backupId === backupId);
+    if (options?.guarded) {
+      try {
+        assertRetireAllowed(record ?? null, all);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    }
     if (record) {
       record.state = 'retired';
       record.softDeletedAt = iso(now);

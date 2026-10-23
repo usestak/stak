@@ -249,14 +249,33 @@ export const supabaseRemoteMemoryBackend = (
       return new Uint8Array(await data.arrayBuffer());
     },
 
-    retireGeneration: async (backupId, now) => {
+    retireGeneration: async (backupId, now, options) => {
       const nowIso = (now ?? (() => new Date()))().toISOString();
-      const { error } = await db()
-        .from('memory_backups')
-        .update({ state: 'retired', soft_deleted_at: nowIso })
-        .eq('user_id', userId)
-        .eq('backup_id', backupId);
-      if (error) throw new Error(`Memory retire failed: ${error.message}`);
+      if (options?.guarded) {
+        // Task 13 fix round 5: atomic guarded retire (migration 0018's
+        // `retire_memory_generation_guarded`, the SQL twin of
+        // `assertRetireAllowed`) — never removes the last committed copy.
+        const { error } = await db().rpc('retire_memory_generation_guarded', {
+          p_user_id: userId,
+          p_backup_id: backupId,
+          p_now: nowIso,
+        });
+        if (error) {
+          if (error.message.includes('STACK_RETIRE_REFUSED'))
+            throw new RemoteMemoryError(
+              'retire-refused',
+              'Refused to retire the last committed copy of this Memory backup.',
+            );
+          throw new Error(`Memory retire failed: ${error.message}`);
+        }
+      } else {
+        const { error } = await db()
+          .from('memory_backups')
+          .update({ state: 'retired', soft_deleted_at: nowIso })
+          .eq('user_id', userId)
+          .eq('backup_id', backupId);
+        if (error) throw new Error(`Memory retire failed: ${error.message}`);
+      }
       // The payload object MUST be removed; a silent storage failure would orphan recoverable
       // ciphertext and let Delete Cloud Memory falsely claim success. Propagate it so the
       // destructive action reports failure and a retry (idempotent) can clean the object.

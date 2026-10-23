@@ -74,6 +74,8 @@ const mapError = (error: unknown): never => {
         throw memoryIncompatibleFormat(error.message);
       case 'invalid-replica':
         throw memoryInvalidReplica(error.message);
+      case 'retire-refused':
+        throw memoryConflict(error.message);
       default:
         throw error;
     }
@@ -258,7 +260,12 @@ export const createMemoryMethods = (config: MemoryServiceConfig) => {
 
     memoryRetireGeneration: (user: MemoryAuthenticatedUser, backupId: string) =>
       run(async () => {
-        await backendFor(user.userId).retireGeneration(backupId, now);
+        // Task 13 fix round 5: every retire over this route (the CLI's only
+        // retire path — `stak memory protect`) is GUARDED: it may never remove
+        // the last committed copy of a Standard original's content (see
+        // `assertRetireAllowed`). Delete Cloud Memory retires server-side via
+        // the product service, unguarded, and is unaffected.
+        await backendFor(user.userId).retireGeneration(backupId, now, { guarded: true });
         return { ok: true as const };
       }),
 

@@ -144,3 +144,64 @@ revoke all on function public.commit_memory_generation(
 grant execute on function public.commit_memory_generation(
   uuid, uuid, integer, text, text, text, bigint, text, text, jsonb, timestamptz, uuid
 ) to service_role;
+
+-- Guarded retire (Task 13 fix round 5) -----------------------------------------
+-- The SQL twin of `assertRetireAllowed` (@stack/memory): every retire that
+-- reaches the Cloud server's Memory route (`stak memory protect`) goes through
+-- here and may never remove the last committed copy of a Standard original's
+-- content:
+--   * a committed Standard generation only while a committed Protected replica
+--     of it exists;
+--   * a committed replica only while its original is still committed.
+-- It takes the same per-account profile row lock as commit_memory_generation,
+-- so two devices' concurrent protect runs are serialized and cannot together
+-- retire every generation. Delete Cloud Memory keeps its own unguarded path.
+create or replace function public.retire_memory_generation_guarded(
+  p_user_id uuid,
+  p_backup_id uuid,
+  p_now timestamptz
+) returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_target public.memory_backups;
+begin
+  perform 1 from public.memory_profiles where user_id = p_user_id for update;
+
+  select * into v_target from public.memory_backups
+    where user_id = p_user_id and backup_id = p_backup_id for update;
+  if not found or v_target.state <> 'committed' then
+    return; -- unknown or already retired: idempotent no-op
+  end if;
+
+  if v_target.privacy_mode = 'standard' and not exists (
+    select 1 from public.memory_backups r
+     where r.user_id = p_user_id
+       and r.replica_of = p_backup_id
+       and r.privacy_mode = 'protected'
+       and r.state = 'committed'
+  ) then
+    raise exception 'STACK_RETIRE_REFUSED';
+  end if;
+
+  if v_target.replica_of is not null and not exists (
+    select 1 from public.memory_backups o
+     where o.user_id = p_user_id
+       and o.backup_id = v_target.replica_of
+       and o.state = 'committed'
+  ) then
+    raise exception 'STACK_RETIRE_REFUSED';
+  end if;
+
+  update public.memory_backups
+     set state = 'retired', soft_deleted_at = p_now
+   where user_id = p_user_id and backup_id = p_backup_id;
+end;
+$$;
+
+revoke all on function public.retire_memory_generation_guarded(uuid, uuid, timestamptz)
+  from public, anon, authenticated;
+grant execute on function public.retire_memory_generation_guarded(uuid, uuid, timestamptz)
+  to service_role;

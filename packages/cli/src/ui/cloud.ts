@@ -523,7 +523,7 @@ const canonicalExtraNotes = (outcome: {
   // Task 13 fix round 4: files the upgrade found missing natively and wrote
   // back from STAK (never silently recorded as deletions).
   if (outcome.restoredFromStak && outcome.restoredFromStak > 0)
-    notes.push(`${outcome.restoredFromStak} Memory file(s) restored from STAK`);
+    notes.push(`${outcome.restoredFromStak} Memory file(s) will be restored from STAK`);
   if (outcome.unavailable && outcome.unavailable.length > 0)
     notes.push(
       `${outcome.unavailable.length} project(s) not available on this machine (${outcome.unavailable

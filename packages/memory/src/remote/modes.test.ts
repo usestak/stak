@@ -597,3 +597,72 @@ describe('protect resume from a device WITHOUT the interrupted run\'s key (Task 
     expect(second.generation).toBeGreaterThan(first.generation);
   });
 });
+
+describe('guarded retire: two devices running protect at once (Task 13 fix round 5)', () => {
+  /** Two Standard originals, both already replicated by device 1 (key1), whose
+   * first run was interrupted at finalize before retiring anything. */
+  const replicatedByDevice1 = async () => {
+    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 1 });
+    roots.push(source.stackHome);
+    const { backend } = backendFor('user-a');
+    const a = await standardCloudBackup({ stackHome: source.stackHome, backend });
+    await writeCanonicalMain(source.stackHome, { schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION, projects: [] });
+    const b = await standardCloudBackup({ stackHome: source.stackHome, backend });
+    const key1 = generateMmk();
+    const stopAtFinalize: RemoteMemoryBackend = Object.create(backend);
+    stopAtFinalize.retireGeneration = () => Promise.reject(new Error('device 1 went to sleep'));
+    await expect(migrateStandardToProtected({ backend: stopAtFinalize, mmk: key1 })).rejects.toThrow('device 1 went to sleep');
+    expect((await backend.listGenerations()).filter((g) => g.replicaOf)).toHaveLength(2);
+    return { backend, key1, a, b };
+  };
+
+  it('device 2 retiring device 1\'s replicas during device 1\'s finalize never empties the account and never finalizes to Protected', async () => {
+    const { backend, key1, a, b } = await replicatedByDevice1();
+    const key2 = generateMmk();
+    // Device 2: runs Phase 1b (retires the replicas it can't open), then dies
+    // before re-creating anything.
+    const device2: RemoteMemoryBackend = Object.create(backend);
+    device2.createGeneration = () => Promise.reject(new Error('device 2 crashed'));
+    // Device 1 resumes; its finalize is interleaved with device 2's Phase 1b
+    // right after device 1's own re-check of the first original's replica.
+    let interleaved = false;
+    const device1: RemoteMemoryBackend = Object.create(backend);
+    device1.retireGeneration = async (backupId, now, options) => {
+      if (!interleaved) {
+        interleaved = true;
+        await expect(migrateStandardToProtected({ backend: device2, mmk: key2 })).rejects.toThrow('device 2 crashed');
+      }
+      return backend.retireGeneration(backupId, now, options);
+    };
+    await expect(migrateStandardToProtected({ backend: device1, mmk: key1 })).rejects.toMatchObject({ code: 'retire-refused' });
+
+    expect((await backend.getProfile())?.privacyMode ?? 'standard').toBe('standard');
+    const committed = await backend.listGenerations();
+    expect(committed.length).toBeGreaterThanOrEqual(1);
+    // Both originals are still committed: no content was lost.
+    expect(committed.map((g) => g.backupId).sort()).toEqual(expect.arrayContaining([a.backupId, b.backupId]));
+  });
+
+  it('the reverse interleaving: once device 1 retired an original, device 2 can\'t retire that original\'s replica', async () => {
+    const { backend, a } = await replicatedByDevice1();
+    const replicaOfA = (await backend.listGenerations()).find((g) => g.replicaOf === a.backupId)!;
+    await backend.retireGeneration(a.backupId, undefined, { guarded: true }); // allowed: replica committed
+    await expect(backend.retireGeneration(replicaOfA.backupId, undefined, { guarded: true })).rejects.toMatchObject({
+      code: 'retire-refused',
+    });
+    expect((await backend.getGenerationById(replicaOfA.backupId))?.state).toBe('committed');
+  });
+
+  it('guarded retire refuses a Standard original with no committed replica; the unguarded (Delete Cloud Memory) path is unchanged', async () => {
+    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 1 });
+    roots.push(source.stackHome);
+    const { backend } = backendFor('user-a');
+    const std = await standardCloudBackup({ stackHome: source.stackHome, backend });
+    await expect(backend.retireGeneration(std.backupId, undefined, { guarded: true })).rejects.toMatchObject({
+      code: 'retire-refused',
+    });
+    expect(await backend.getLatest()).not.toBeNull();
+    await backend.retireGeneration(std.backupId); // unguarded: allowed
+    expect(await backend.getLatest()).toBeNull();
+  });
+});

@@ -406,7 +406,7 @@ export const migrateStandardToProtected = async (options: {
     for (const standard of standards) {
       const existing = replicaByOriginal.get(standard.backupId);
       if (!existing) continue;
-      await options.backend.retireGeneration(existing.backupId, options.now);
+      await options.backend.retireGeneration(existing.backupId, options.now, { guarded: true });
       retiredReplicas += 1;
     }
     verified.clear();
@@ -421,8 +421,11 @@ export const migrateStandardToProtected = async (options: {
     null;
   let migrated = 0;
   let resumed = 0;
+  // original backupId -> the replica this run verified or created for it.
+  const replicaFor = new Map<string, string>();
   for (const standard of standards) {
     if (verified.has(standard.backupId)) {
+      replicaFor.set(standard.backupId, replicaByOriginal.get(standard.backupId)!.backupId);
       resumed += 1;
       continue;
     }
@@ -453,13 +456,25 @@ export const migrateStandardToProtected = async (options: {
       ...(options.now ? { now: options.now } : {}),
     });
     expectedParent = meta.generation;
+    replicaFor.set(standard.backupId, meta.backupId);
     migrated += 1;
   }
 
-  // All verified: retire Standard payloads and finalize.
+  // All verified: retire Standard payloads and finalize. Task 13 fix round 5:
+  // right before each original is retired, re-check BY backupId that its
+  // replica is still committed (another device's protect may have retired it
+  // as an orphan meanwhile) and abort otherwise; the retire itself is guarded
+  // so the backend refuses it atomically if that changes in between.
   let retiredStandard = 0;
   for (const standard of standards) {
-    await options.backend.retireGeneration(standard.backupId, options.now);
+    const replicaId = replicaFor.get(standard.backupId);
+    const replica = replicaId ? await options.backend.getGenerationById(replicaId) : null;
+    if (!replica || replica.state !== 'committed')
+      throw new RemoteMemoryError(
+        'protect-in-progress',
+        'Another device changed the protected copies while protect was finishing; nothing more was retired. Run `stak memory protect` again.',
+      );
+    await options.backend.retireGeneration(standard.backupId, options.now, { guarded: true });
     retiredStandard += 1;
   }
   await options.backend.setPrivacyMode('protected');

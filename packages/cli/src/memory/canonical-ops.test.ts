@@ -1498,7 +1498,7 @@ describe('Task 13 fix round 3', () => {
       expect(pulled.conflicts ?? []).toEqual([]);
       expect(pulled.restoredFromStak).toBe(1);
       expect(renderCombinedPullResult({ status: 'noop' }, { status: 'not-attempted' }, { status: 'applied', outcome: pulled })).toContain(
-        '1 Memory file(s) restored from STAK',
+        '1 Memory file(s) will be restored from STAK',
       );
       await assertNormalChanges(nativeDir, discovery);
     });
@@ -1771,5 +1771,87 @@ describe('materialize never overwrites a native file it did not account for (Tas
     const native = path.join(claudeHome, 'projects', vendorKey, 'memory', 'MEMORY.md');
     expect(await readFile(native, 'utf8')).toBe('native edit, never added');
     expect(outcome.conflicts).toContainEqual({ projectId, path: 'notes/MEMORY.md', reason: 'adopt-mismatch' });
+  });
+});
+
+describe('Task 13 fix round 5', () => {
+  const secureKeys = (dir: string) =>
+    fileLocalMemoryKeyStore(dir, {
+      harden: () => Promise.resolve(true),
+      verify: () => Promise.resolve(true),
+    });
+  const fakeBackup = (): Promise<BackupResult> =>
+    Promise.resolve({ provider: 'claude', files: 0, projects: 0, createdAt: '2026-10-23T00:00:00.000Z' });
+  const deps = (home: string, backend: RemoteMemoryBackend | null, keysDir: string) => ({
+    stackHome: home,
+    backend,
+    localKeyStore: secureKeys(keysDir),
+    runLocalBackup: fakeBackup,
+  });
+  const bindAt = async (home: string, dir: string, fixedProjectId?: string) => {
+    let registry = await readLocalRegistry(home);
+    const minted = resolveOrMintProject(
+      registry,
+      { kind: 'local', vendorKey: `v-${path.basename(home)}-${path.basename(dir)}` },
+      fixedProjectId ? () => fixedProjectId : mintProjectId,
+    );
+    registry = setBinding(minted.registry, { projectId: minted.projectId, dir, boundAt: '2026-10-23T00:00:00.000Z', provenance: 'user-map' });
+    await writeLocalRegistry(home, registry);
+    return minted.projectId;
+  };
+  const memoryFileOf = (claudeHomeDir: string, dir: string) =>
+    path.join(claudeHomeDir, 'projects', encodeClaudeProjectKey(path.resolve(dir)), 'memory', 'MEMORY.md');
+  const writeMemoryFile = async (file: string, body: string) => {
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, body, 'utf8');
+  };
+
+  it('a remote edit to an existing file reaches the other machine (X v1 -> Y pull -> X v2 -> Y pull): Y gets v2, no conflict', async () => {
+    const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'r5-two-machine-update');
+    const homeX = path.join(root, 'x-stack');
+    const claudeX = path.join(root, 'x-claude');
+    const dirX = path.join(root, 'x-proj');
+    const homeY = path.join(root, 'y-stack');
+    const claudeY = path.join(root, 'y-claude');
+    const dirY = path.join(root, 'y-proj');
+    await mkdir(dirX, { recursive: true });
+    await mkdir(dirY, { recursive: true });
+    const projectId = await bindAt(homeX, dirX);
+    await bindAt(homeY, dirY, projectId);
+
+    await writeMemoryFile(memoryFileOf(claudeX, dirX), 'v1');
+    await stageCanonicalMemory(homeX, { claudeHome: claudeX });
+    expect((await pushMemoryViaCanonical(deps(homeX, backend, path.join(root, 'x-keys')), { claudeHome: claudeX })).status).toBe('pushed');
+    await pullMemoryViaCanonical(deps(homeY, backend, path.join(root, 'y-keys')), { claudeHome: claudeY });
+    expect(await readFile(memoryFileOf(claudeY, dirY), 'utf8')).toBe('v1');
+
+    await writeMemoryFile(memoryFileOf(claudeX, dirX), 'v2');
+    await stageCanonicalMemory(homeX, { claudeHome: claudeX });
+    expect((await pushMemoryViaCanonical(deps(homeX, backend, path.join(root, 'x-keys')), { claudeHome: claudeX })).status).toBe('pushed');
+    const pulled = await pullMemoryViaCanonical(deps(homeY, backend, path.join(root, 'y-keys')), { claudeHome: claudeY });
+    expect(pulled.conflicts ?? []).toEqual([]);
+    expect(await readFile(memoryFileOf(claudeY, dirY), 'utf8')).toBe('v2');
+  });
+
+  it('after the latest generation is retired, the next push still succeeds (expectedParent comes from the commit counter)', async () => {
+    const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'r5-retired-latest');
+    await bindProject(projectDir);
+    const keys = path.join(root, 'keys');
+    await writeAutoMemory(encodeClaudeProjectKey(path.resolve(projectDir)), 'MEMORY.md', 'one');
+    await stageCanonicalMemory(stackHome, { claudeHome });
+    expect((await pushMemoryViaCanonical(deps(stackHome, backend, keys), { claudeHome })).status).toBe('pushed');
+    await writeAutoMemory(encodeClaudeProjectKey(path.resolve(projectDir)), 'MEMORY.md', 'two');
+    await stageCanonicalMemory(stackHome, { claudeHome });
+    expect((await pushMemoryViaCanonical(deps(stackHome, backend, keys), { claudeHome })).status).toBe('pushed');
+    // The highest generation is retired (e.g. protect's escape crash window).
+    const latest = (await backend.getLatest())!;
+    await backend.retireGeneration(latest.backupId);
+    expect((await backend.getProfile())?.latestGeneration).toBe(latest.generation);
+
+    await writeAutoMemory(encodeClaudeProjectKey(path.resolve(projectDir)), 'MEMORY.md', 'three');
+    await stageCanonicalMemory(stackHome, { claudeHome });
+    const pushed = await pushMemoryViaCanonical(deps(stackHome, backend, keys), { claudeHome });
+    expect(pushed.status).toBe('pushed');
+    expect(pushed.generation).toBe(latest.generation + 1);
   });
 });

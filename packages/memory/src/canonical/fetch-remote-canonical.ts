@@ -84,7 +84,20 @@ export const fetchRemoteCanonical = async (options: {
       ? ((await options.backend.getGeneration(options.generation)) ??
         (await replicaOfRetiredGeneration(options.backend, options.generation)))
       : await options.backend.getLatest();
-  if (!meta) return null;
+  // Task 13 fix round 5: when fetching LATEST, the returned `generation` is the
+  // account's commit counter (`profile.latestGeneration`) — exactly what
+  // `createGeneration` checks `expectedParent` against in both backends — not
+  // the number of the latest COMMITTED generation. They differ once the
+  // highest generation has been retired (protect's escape crash window, Delete
+  // Cloud Memory); using the committed number made every later push conflict
+  // until retry-exhausted. The content still comes from the latest committed
+  // generation (or is empty when none is left).
+  const head =
+    options.generation === undefined ? ((await options.backend.getProfile())?.latestGeneration ?? null) : null;
+  if (!meta)
+    return head === null
+      ? null
+      : { generation: head, main: emptyCanonicalMain(), objects: [], registrySnapshot: undefined };
   // Task 13 fix round 3: Cloud latest is a Protected replica while the account
   // is still Standard -> `stak memory protect` was interrupted mid-migration.
   // Fail closed (no merge, no materialize, no native deletes) until protect is
@@ -125,5 +138,10 @@ export const fetchRemoteCanonical = async (options: {
       throw new RemoteMemoryError('integrity', 'The bundled project registry does not match its hash.');
     registrySnapshot = portableRegistrySnapshotSchema.parse(JSON.parse(registryBytes.toString('utf8')));
   }
-  return { generation: meta.generation, main: main ?? emptyCanonicalMain(), objects, registrySnapshot };
+  return {
+    generation: head !== null && head > meta.generation ? head : meta.generation,
+    main: main ?? emptyCanonicalMain(),
+    objects,
+    registrySnapshot,
+  };
 };

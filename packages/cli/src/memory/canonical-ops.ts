@@ -26,6 +26,7 @@ import {
   readLocalRecoveryState,
   readLocalRegistry,
   readMemoryManifest,
+  readProjection,
   reconstructProjectDir,
   recordFor,
   resolveOrMintProject,
@@ -907,15 +908,17 @@ export const materializeCanonicalProjects = async (
         if (action.kind === 'conflict') conflicts.push({ projectId, path: action.path, reason: action.reason });
       for (const sourceConflict of plan.sourceConflicts)
         conflicts.push({ projectId, path: sourceConflict.canonicalPath, reason: 'source-conflict' });
-      // Task 13 fix round 4 — spec §6 safety rule 1 enforced at WRITE time: a
-      // `materialize-write` whose native target already exists with different
-      // content means the scan did not account for that file (e.g. it could
-      // not attribute it to this project); never overwrite it — report it.
+      // Task 13 fix rounds 4-5 — spec §6 safety rule 1 enforced at WRITE time:
+      // overwrite a native file only when it still holds what STAK last synced
+      // there (P — a normal remote edit, N = P != C) or already holds C. A file
+      // that exists with any OTHER content was not accounted for by the scan
+      // (e.g. it could not be attributed to this project) — never overwrite it.
+      const synced = (await readProjection(stackHome, 'claude')).projects[projectId] ?? {};
       const actions = [];
       for (const action of plan.actions) {
         if (action.kind === 'materialize-write') {
           const existing = await nativeHashAt(projectId, dir, action.path, options.claudeHome);
-          if (existing !== undefined && existing !== action.contentHash) {
+          if (existing !== undefined && existing !== action.contentHash && existing !== synced[action.path]) {
             conflicts.push({ projectId, path: action.path, reason: 'adopt-mismatch' });
             continue;
           }

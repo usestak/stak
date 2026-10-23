@@ -323,6 +323,24 @@ describe('remote Memory routes', () => {
     expect(errorOf(afterFinalized).code).toBe('memory-incompatible-format');
   });
 
+  it('retire over the HTTP route is GUARDED: a Standard original with no committed Protected copy is refused (Task 13 fix round 5)', async () => {
+    const { call, signIn } = setup();
+    const token = await signIn(USER_A);
+    const id = randomUUID();
+    await call('POST', 'memory/generations', {
+      token,
+      body: { backupId: id, expectedParent: null, privacyMode: 'standard', payloadB64: b64('only-copy'), bundleFormatVersion: 'stack-mem-bundle-v2' },
+    });
+    const refused = await call('POST', `memory/generations/${id}/retire`, { token });
+    expect(refused.status).toBe(409);
+    expect((refused.jsonBody as { error: { code: string } }).error.code).toBe('memory-conflict');
+    const latest = await call('GET', 'memory/latest', { token });
+    expect((latest.jsonBody as { generation: { backupId: string; state: string } }).generation).toMatchObject({
+      backupId: id,
+      state: 'committed',
+    });
+  });
+
   it('does not leak another user’s payload', async () => {
     const { call, signIn } = setup();
     const tokenA = await signIn(USER_A);
