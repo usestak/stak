@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -67,6 +67,31 @@ describe('reconstructProjectDir', () => {
     });
     expect(resolved).not.toBeNull();
     expect(path.resolve(resolved as string)).toBe(path.resolve(dottedDir));
+  });
+
+  it('traverses a directory junction/symlink (e.g. a C:\\dev -> D:\\dev-style mapping) to locate a project reached through it', async () => {
+    // `claude-project-adapter.ts` never rejects a project's own `dir` for being a
+    // symlink/junction (only the `~/.claude/projects/<key>` folder itself is
+    // guarded) — a real, locatable project reached through one must stay
+    // locatable here too, not silently vanish because readdir reports the link
+    // entry itself as "not a directory".
+    const target = await tempDir('junction-target-');
+    const projectDir = path.join(target, 'myproject');
+    await mkdir(projectDir, { recursive: true });
+
+    const linkParent = await tempDir('junction-link-');
+    const link = path.join(linkParent, 'devlink');
+    await symlink(target, link, 'junction');
+
+    const linkedProjectDir = path.join(link, 'myproject');
+    const vendorKey = encodeClaudeProjectKey(linkedProjectDir);
+    const resolved = await reconstructProjectDir({
+      vendorKey,
+      isDirectory,
+      platform: process.platform,
+    });
+    expect(resolved).not.toBeNull();
+    expect(path.resolve(resolved as string)).toBe(path.resolve(linkedProjectDir));
   });
 
   it('returns null when the path cannot be reconstructed', async () => {
@@ -256,13 +281,11 @@ describe('reconstructProjectDir ambiguity (15B.4 closure)', () => {
     ).toBe(win.join('C:\\', 'Users', 'NT', 'project'));
   });
 
-  it('8. matching is delegated to listDirs (no case folding of its own)', async () => {
-    // The reconstructor never case-folds; case behavior is whatever the injected
-    // child-name lister's own real names are (the real filesystem is
-    // case-insensitive on win32 for OPENING a path, but each child's own `name` as
-    // readdir reports it is still an exact string compared verbatim here). A
-    // directory tree that only knows the lowercase names does not match a
-    // differently-cased key.
+  it('8. on win32, matching is case-INSENSITIVE — NTFS is, and Claude/PowerShell can record either casing for the same real folder', async () => {
+    // A directory tree that only has the lowercase real names still matches a
+    // differently-cased key — restoring the case-insensitivity the old
+    // stat-based walk had for free (via NTFS itself opening any casing), lost by
+    // the first exact-walk rewrite and caught on a real `~/.claude/projects` key.
     const listDirs = fakeListDirs([
       win.join('C:\\', 'repos'),
       win.join('C:\\', 'repos', 'atlas'),
@@ -273,7 +296,43 @@ describe('reconstructProjectDir ambiguity (15B.4 closure)', () => {
         listDirs,
         platform: 'win32',
       }),
+    ).toBe(win.join('C:\\', 'repos', 'atlas'));
+  });
+
+  it('9. on POSIX, matching stays case-SENSITIVE — a differently-cased key does not match', async () => {
+    const listDirs = fakeListDirs([
+      path.posix.join('/', 'repos'),
+      path.posix.join('/', 'repos', 'atlas'),
+    ]);
+    expect(
+      await reconstructProjectDir({
+        vendorKey: '-Repos-Atlas',
+        listDirs,
+        platform: 'linux',
+      }),
     ).toBeNull();
+  });
+
+  it('10. a differently-cased real-machine key (`c--users-nt-desktop-stack`, as PowerShell can record it) decodes to the real, naturally-cased directory on win32', async () => {
+    const base = await tempDir('case-');
+    const projectDir = path.join(base, 'Stack');
+    await mkdir(projectDir, { recursive: true });
+    const naturalKey = encodeClaudeProjectKey(projectDir);
+    const differentlyCasedKey = naturalKey.toLowerCase();
+    expect(differentlyCasedKey).not.toBe(naturalKey); // sanity: the key actually differs
+    const resolved = await reconstructProjectDir({
+      vendorKey: differentlyCasedKey,
+      isDirectory,
+      platform: 'win32',
+    });
+    expect(resolved).not.toBeNull();
+    // Case-INSENSITIVE comparison is the whole point here: `differentlyCasedKey`
+    // lowercased the DRIVE LETTER too, so the walk's own root string is `c:\`, not
+    // `C:\` — a different STRING, but the identical real directory on NTFS. The
+    // walk's job is proving it's the same directory, never canonicalizing casing.
+    expect(path.resolve(resolved as string).toLowerCase()).toBe(
+      path.resolve(projectDir).toLowerCase(),
+    );
   });
 });
 

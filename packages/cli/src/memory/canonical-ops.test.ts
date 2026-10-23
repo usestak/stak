@@ -13,6 +13,7 @@ import {
   readLocalRegistry,
   resolveOrMintProject,
   setBinding,
+  shortProjectId,
   writeLocalRegistry,
   writeMemoryManifest,
 } from '@stack/memory';
@@ -244,7 +245,7 @@ describe('stageCanonicalMemory', () => {
     expect(registryAfter.projects).toHaveLength(1); // ONE Project, not two
   });
 
-  it('a project whose folder cannot be located: no actions, no error, canonical Memory untouched, and NO Project ID is minted for it', async () => {
+  it('a project whose folder cannot be located and has NO Project ID at all: reported as an untracked folder (quiet, un-actionable), no error, canonical Memory untouched, nothing minted', async () => {
     const goneDir = path.join(root, 'gone-project'); // never created on disk
     const vendorKey = encodeClaudeProjectKey(path.resolve(goneDir));
     await writeAutoMemory(vendorKey, 'MEMORY.md', 'orphaned notes');
@@ -254,7 +255,8 @@ describe('stageCanonicalMemory', () => {
       isDirectory: async () => false, // nothing is locatable
     });
     expect(result.projects).toHaveLength(0);
-    expect(result.unlocatableProjects).toBe(1); // reported, not a silent gap
+    expect(result.unlocatableProjects).toEqual([]); // never claimed — nothing to name
+    expect(result.untrackedFolders).toBe(1); // reported, not a silent gap
     expect(await exists(canonicalMainPath())).toBe(false);
 
     // Important: minting only happens AFTER a write-target directory is located —
@@ -269,8 +271,32 @@ describe('stageCanonicalMemory', () => {
       isDirectory: async () => false,
     });
     expect(second.projects).toHaveLength(0);
-    expect(second.unlocatableProjects).toBe(1);
+    expect(second.untrackedFolders).toBe(1);
     expect(await exists(canonicalMainPath())).toBe(false);
+  });
+
+  it('a REGISTERED project (already claimed) whose folder cannot currently be located: reported by name as unlocatable, never re-minted, never staged', async () => {
+    const goneDir = path.join(root, 'gone-known-project');
+    const vendorKey = encodeClaudeProjectKey(path.resolve(goneDir));
+    await writeAutoMemory(vendorKey, 'MEMORY.md', 'orphaned notes');
+
+    let registry = await readLocalRegistry(stackHome);
+    const minted = resolveOrMintProject(registry, { kind: 'local', vendorKey });
+    registry = minted.registry;
+    await writeLocalRegistry(stackHome, registry);
+
+    const result = await stageCanonicalMemory(stackHome, {
+      claudeHome,
+      isDirectory: async () => false, // the directory genuinely isn't there anymore
+    });
+    expect(result.projects).toHaveLength(0);
+    expect(result.untrackedFolders).toBe(0); // it HAS a Project ID — not "untracked"
+    expect(result.unlocatableProjects).toHaveLength(1);
+    expect(result.unlocatableProjects[0]?.projectId).toBe(minted.projectId);
+    expect(result.unlocatableProjects[0]?.name).toBe(shortProjectId(minted.projectId)); // no name hint set
+
+    const registryAfter = await readLocalRegistry(stackHome);
+    expect(registryAfter.projects).toHaveLength(1); // unchanged — no second Project minted
   });
 
   it('a project-local v1 claim under the OLD (pre-fix) encoding resolves to that same Project after the encoder fix, with no new Project minted', async () => {
@@ -302,6 +328,41 @@ describe('stageCanonicalMemory', () => {
 
     const registryAfter = await readLocalRegistry(stackHome);
     expect(registryAfter.projects).toHaveLength(1); // the SAME Project — no duplicate minted
+  });
+
+  it('the OLD-encoding alias is a FALLBACK only: a dir with BOTH a new-key claim (P_auto, via its auto-memory folder) and an old-key claim (P_old, a pre-fix v1 CLAUDE.local.md) resolves to P_auto, not a conflict — everything syncs under it', async () => {
+    const dottedDir = path.join(root, '.legacy-claude-mem-both');
+    await mkdir(dottedDir, { recursive: true });
+    const newKey = encodeClaudeProjectKey(path.resolve(dottedDir));
+    const oldKey = path.resolve(dottedDir).replace(/[:\\/]/g, '-');
+    expect(oldKey).not.toBe(newKey); // sanity: the fix actually changes this key
+
+    await writeAutoMemory(newKey, 'MEMORY.md', 'auto memory notes');
+
+    let registry = await readLocalRegistry(stackHome);
+    const mintedAuto = resolveOrMintProject(registry, { kind: 'local', vendorKey: newKey });
+    registry = mintedAuto.registry;
+    const mintedOld = resolveOrMintProject(registry, { kind: 'local', vendorKey: oldKey });
+    registry = mintedOld.registry;
+    await writeLocalRegistry(stackHome, registry);
+    expect(mintedAuto.projectId).not.toBe(mintedOld.projectId); // sanity: genuinely two Projects
+
+    await writeFile(path.join(dottedDir, 'CLAUDE.local.md'), 'private memory');
+
+    const result = await stageCanonicalMemory(stackHome, {
+      claudeHome,
+      projects: [{ dir: dottedDir }],
+    });
+
+    expect(result.conflictedProjects).toBe(0);
+    expect(result.projects).toHaveLength(1);
+    const mine = result.projects.find((s) => s.projectId === mintedAuto.projectId);
+    expect(mine?.imported).toEqual(
+      expect.arrayContaining(['notes/MEMORY.md', 'instructions/private.md']),
+    );
+
+    const registryAfter = await readLocalRegistry(stackHome);
+    expect(registryAfter.projects).toHaveLength(2); // still exactly P_auto, P_old — no third minted
   });
 
   it('two Project IDs with a conflicting claim on the same identity: never staged, never a third phantom Project, reported as conflicted', async () => {
@@ -421,7 +482,7 @@ describe('canonicalMemoryStatus', () => {
     expect(result.projects).toHaveLength(0);
   });
 
-  it('reports an unlocatable project identity as a separate count, excluded from newProjects', async () => {
+  it('reports an untracked, un-claimed folder as a separate quiet count, excluded from newProjects and unlocatableProjects', async () => {
     const goneDir = path.join(root, 'gone-project'); // never created on disk
     const vendorKey = encodeClaudeProjectKey(path.resolve(goneDir));
     await writeAutoMemory(vendorKey, 'MEMORY.md', 'orphaned notes');
@@ -430,10 +491,35 @@ describe('canonicalMemoryStatus', () => {
       claudeHome,
       isDirectory: async () => false,
     });
-    expect(result.unlocatableProjects).toBe(1);
+    expect(result.untrackedFolders).toBe(1);
+    expect(result.unlocatableProjects).toEqual([]);
     expect(result.newProjects).toBe(0);
     expect(result.projects).toHaveLength(0);
     expect(await exists(registryPath())).toBe(false); // still read-only, nothing written
+  });
+
+  it('reports a REGISTERED project whose folder cannot be located by name, read-only', async () => {
+    const goneDir = path.join(root, 'gone-known-project');
+    const vendorKey = encodeClaudeProjectKey(path.resolve(goneDir));
+    await writeAutoMemory(vendorKey, 'MEMORY.md', 'orphaned notes');
+
+    let registry = await readLocalRegistry(stackHome);
+    const minted = resolveOrMintProject(registry, { kind: 'local', vendorKey });
+    registry = minted.registry;
+    await writeLocalRegistry(stackHome, registry);
+    const registryBefore = await readFile(registryPath(), 'utf8');
+
+    const result = await canonicalMemoryStatus(stackHome, {
+      claudeHome,
+      isDirectory: async () => false,
+    });
+    expect(result.untrackedFolders).toBe(0);
+    expect(result.unlocatableProjects).toHaveLength(1);
+    expect(result.unlocatableProjects[0]?.projectId).toBe(minted.projectId);
+    expect(result.unlocatableProjects[0]?.name).toBe(shortProjectId(minted.projectId));
+
+    // Still read-only: the registry is exactly as it was.
+    expect(await readFile(registryPath(), 'utf8')).toBe(registryBefore);
   });
 
   it("does NOT report per-project pending before migration has run when the v1 manifest has project items — reports upgradePending instead, stays read-only", async () => {
@@ -464,7 +550,8 @@ describe('canonicalMemoryStatus', () => {
     expect(result.projects).toEqual([]);
     expect(result.newProjects).toBe(0);
     expect(result.conflictedProjects).toBe(0);
-    expect(result.unlocatableProjects).toBe(0);
+    expect(result.unlocatableProjects).toEqual([]);
+    expect(result.untrackedFolders).toBe(0);
 
     // Strictly read-only: migration never actually ran because of this check.
     expect(await exists(migrationMarkerPath())).toBe(false);

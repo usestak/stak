@@ -28,10 +28,14 @@ export type StagedMemorySummary = {
    * `stak project` subcommand can merge/remove a claim, so this is reported as a
    * standing conflict, never as something the user can resolve today. */
   conflictedProjects?: number;
-  /** Project identities discovered on this machine whose directory could not be
-   * located at all — never staged. `stak project map <project> <dir>` is the
-   * escape hatch. */
-  unlocatableProjects?: number;
+  /** REGISTERED project identities (a claim or a binding already exists) whose
+   * directory could not be located at all — never staged. Named and actionable:
+   * `stak project map <project> <dir>` is the escape hatch. */
+  unlocatableProjects?: Array<{ projectId: string; name: string }>;
+  /** Stale Claude memory folders with no Project ID at all AND no locatable
+   * directory — a quieter, un-actionable count distinct from `unlocatableProjects`
+   * (there is no project here to name or map). */
+  untrackedFolders?: number;
 };
 
 export const renderSkillAdd = (
@@ -73,9 +77,15 @@ export const renderSkillAdd = (
       lines.push(
         `  Memory: ${options.memory.conflictedProjects} project(s) have conflicting identities — STAK won't guess which is correct; left unchanged`,
       );
-    if (options.memory.unlocatableProjects)
+    if (options.memory.unlocatableProjects?.length)
       lines.push(
-        `  Memory: ${options.memory.unlocatableProjects} project(s) couldn't be located on this machine — run \`stak project map <project> <dir>\``,
+        `  Memory: ${options.memory.unlocatableProjects.length} project(s) couldn't be located on this machine` +
+          ` (${options.memory.unlocatableProjects.map((p) => p.name).join(', ')})` +
+          ' — run `stak project map <project> <dir>`',
+      );
+    if (options.memory.untrackedFolders)
+      lines.push(
+        `  Memory: ${options.memory.untrackedFolders} Claude memory folder(s) have no project folder on this machine and aren't tracked`,
       );
   }
   if (proposal.targets.length > 0 || options.memory)

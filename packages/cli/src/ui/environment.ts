@@ -11,6 +11,7 @@ import type {
 import type {
   CanonicalMemoryProjectStatus,
   MemoryWorkingTreeStatus,
+  UnlocatableProject,
 } from '../memory/working-tree-status.js';
 
 /** `stak status`'s Memory section, widened (additively) to also carry canonical
@@ -28,9 +29,12 @@ export type MemoryStatusDisplay = MemoryWorkingTreeStatus & {
    * `newProjects`. No existing `stak project` subcommand can merge/remove a claim,
    * so this is a standing conflict STAK won't guess at, not something to "resolve". */
   conflictedProjects?: number;
-  /** Project identities discovered on this machine whose directory could not be
-   * located at all — `stak project map <project> <dir>` is the escape hatch. */
-  unlocatableProjects?: number;
+  /** REGISTERED project identities whose directory could not be located at all —
+   * named and actionable: `stak project map <project> <dir>` is the escape hatch. */
+  unlocatableProjects?: UnlocatableProject[];
+  /** Stale Claude memory folders with no Project ID at all AND no locatable
+   * directory — quieter and un-actionable, distinct from `unlocatableProjects`. */
+  untrackedFolders?: number;
   /** The v1 -> canonical migration hasn't run yet, so no per-project pending count
    * is meaningful — see `canonicalMemoryStatus`'s `upgradePending` doc comment. */
   upgradePending?: boolean;
@@ -168,9 +172,15 @@ const renderMemorySection = (memory?: MemoryStatusDisplay): string[] => {
     lines.push(
       `  ${memory.conflictedProjects} project${memory.conflictedProjects === 1 ? '' : 's'} have conflicting identities — STAK won't guess which is correct; left unchanged`,
     );
-  if (memory.unlocatableProjects)
+  if (memory.unlocatableProjects?.length)
     lines.push(
-      `  ${memory.unlocatableProjects} project${memory.unlocatableProjects === 1 ? '' : 's'} couldn't be located on this machine — run \`stak project map <project> <dir>\``,
+      `  ${memory.unlocatableProjects.length} project${memory.unlocatableProjects.length === 1 ? '' : 's'} couldn't be located on this machine` +
+        ` (${memory.unlocatableProjects.map((p) => p.name).join(', ')})` +
+        ' — run `stak project map <project> <dir>`',
+    );
+  if (memory.untrackedFolders)
+    lines.push(
+      `  ${memory.untrackedFolders} Claude memory folder${memory.untrackedFolders === 1 ? '' : 's'} have no project folder on this machine and aren't tracked`,
     );
   return ['', 'Memory', ...lines];
 };

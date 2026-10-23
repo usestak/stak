@@ -111,6 +111,7 @@ import {
   canonicalMemoryStatus,
   stageCanonicalMemory,
   type CanonicalProjectSummary,
+  type UnlocatableProject,
 } from './memory/canonical-ops.js';
 import { stageMemoryWithProjectDedup } from './memory/stage-memory.js';
 import {
@@ -711,7 +712,8 @@ const defaultDependencies: ProgramDependencies = {
       canonicalProjects: CanonicalProjectSummary[];
       newProjects: number;
       conflictedProjects: number;
-      unlocatableProjects: number;
+      unlocatableProjects: UnlocatableProject[];
+      untrackedFolders: number;
       upgradePending: boolean;
     }
   > => {
@@ -735,7 +737,8 @@ const defaultDependencies: ProgramDependencies = {
       projects: [] as CanonicalProjectSummary[],
       newProjects: 0,
       conflictedProjects: 0,
-      unlocatableProjects: 0,
+      unlocatableProjects: [] as UnlocatableProject[],
+      untrackedFolders: 0,
       upgradePending: false,
     }));
     return {
@@ -744,6 +747,7 @@ const defaultDependencies: ProgramDependencies = {
       newProjects: canonicalStatus.newProjects,
       conflictedProjects: canonicalStatus.conflictedProjects,
       unlocatableProjects: canonicalStatus.unlocatableProjects,
+      untrackedFolders: canonicalStatus.untrackedFolders,
       upgradePending: canonicalStatus.upgradePending,
     };
   },
@@ -789,6 +793,7 @@ const defaultDependencies: ProgramDependencies = {
       })),
       conflictedProjects: canonical.conflictedProjects,
       unlocatableProjects: canonical.unlocatableProjects,
+      untrackedFolders: canonical.untrackedFolders,
     };
   },
   prepareUse: async (input, options) => {

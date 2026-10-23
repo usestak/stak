@@ -2,7 +2,7 @@ import { emptyRegistry, readMemoryManifest } from '@stack/memory';
 import type { DiscoveredMemoryItem, LocalRegistry } from '@stack/memory';
 
 import { canonicalMemoryKey } from './canonical-identity.js';
-import type { CanonicalProjectSummary } from './canonical-ops.js';
+import type { CanonicalProjectSummary, UnlocatableProject } from './canonical-ops.js';
 
 /**
  * MACHINE (native Memory) vs MAIN (the staged local manifest) — read-only, no Cloud call.
@@ -22,20 +22,23 @@ export type MemoryWorkingTreeStatus =
   | { state: 'changes-not-added'; changed: number };
 
 export type { CanonicalProjectSummary as CanonicalMemoryProjectStatus } from './canonical-ops.js';
+export type { UnlocatableProject } from './canonical-ops.js';
 
 /** Canonical (Project Memory) status, additive to `MemoryWorkingTreeStatus` above —
  * consumed by `ui/environment.ts`'s `renderStatus`. `newProjects` counts locatable
  * project-scope identities discovered on this machine with no registered Project ID
  * yet; `conflictedProjects` counts identities with genuinely ambiguous resolution;
- * `unlocatableProjects` counts non-conflicted identities whose directory couldn't be
- * located at all; `upgradePending` is `true` when the v1 -> canonical migration
- * hasn't run yet (see `canonical-ops.ts`'s `CanonicalMemoryStatusResult`, which this
- * mirrors). */
+ * `unlocatableProjects` are REGISTERED, named identities whose directory couldn't be
+ * located; `untrackedFolders` counts un-registered, un-named stale Claude folders
+ * with no locatable directory either; `upgradePending` is `true` when the v1 ->
+ * canonical migration hasn't run yet (see `canonical-ops.ts`'s
+ * `CanonicalMemoryStatusResult`, which this mirrors). */
 export type CanonicalMemoryWorkingTreeStatus = {
   projects: CanonicalProjectSummary[];
   newProjects: number;
   conflictedProjects: number;
-  unlocatableProjects: number;
+  unlocatableProjects: UnlocatableProject[];
+  untrackedFolders: number;
   upgradePending: boolean;
 };
 

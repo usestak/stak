@@ -35,7 +35,10 @@ export type ClaudeMemoryDiscoveryOptions = {
    * auto-memory project that is not matched by a passed candidate is resolved from
    * its OWN checkout directory (reconstructed from the vendor key), so Git identity
    * is recovered independent of the current working directory — keeping `scan` and
-   * `backup` consistent. `isDirectory` validates the reconstructed path.
+   * `backup` consistent. Reconstruction itself reads the REAL filesystem (an
+   * injectable `listDirs` drives it in tests); `isDirectory` here only gates
+   * whether reconstruction is attempted at all, and covers its one degenerate
+   * zero-token (vendor key IS the root) case — see `reconstructProjectDirs`.
    */
   gitRemoteOf?: (dir: string) => Promise<string | undefined>;
   isDirectory?: (candidate: string) => Promise<boolean>;
