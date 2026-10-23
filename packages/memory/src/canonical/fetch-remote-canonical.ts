@@ -15,15 +15,28 @@ const splitPayload = (payload: Uint8Array) => {
 const protectedAad = (backupId: string): Buffer =>
   Buffer.from(JSON.stringify({ v: CIPHER_VERSION, mode: 'protected', backupId }), 'utf8');
 
-/** Fetch Cloud's latest generation and decode it into canonical Memory — reading
+export type RemoteCanonicalObject = { contentHash: string; bytes: Uint8Array };
+
+/**
+ * Fetch Cloud's latest generation and decode it into canonical Memory — reading
  * `canonicalB64` directly for a v2 generation, or deterministically converting a
  * v1 generation via `convertV1Bundle`. `localRegistry` is used ONLY as the v1
- * fallback's identity source (spec section 9.2). */
+ * fallback's identity source (spec section 9.2).
+ *
+ * Also returns every content object the bundle itself carries, hash-verified.
+ * Task 13 found this necessary: canonical push/pull exchange only the small
+ * `main.json` metadata (never touching the content store directly), but a
+ * materialize on a SECOND machine that never had this content locally still
+ * needs the actual bytes — and the only place those bytes exist in a pull is
+ * this same already-fetched, already-decrypted bundle. Without this, a
+ * cross-machine pull would restore a canonical manifest whose documents point
+ * at content that was never written anywhere on the pulling machine.
+ */
 export const fetchRemoteCanonical = async (options: {
   backend: RemoteMemoryBackend;
   mmk?: Buffer;
   localRegistry: LocalRegistry;
-}): Promise<{ generation: number; main: CanonicalMainManifest } | null> => {
+}): Promise<{ generation: number; main: CanonicalMainManifest; objects: RemoteCanonicalObject[] } | null> => {
   const meta = await options.backend.getLatest();
   if (!meta) return null;
   const payload = await options.backend.getPayload(meta.backupId);
@@ -44,5 +57,11 @@ export const fetchRemoteCanonical = async (options: {
   const main = bundle.canonicalB64
     ? canonicalMainManifestSchema.parse(JSON.parse(Buffer.from(bundle.canonicalB64, 'base64').toString('utf8')))
     : convertV1Bundle(bundle, { localRegistry: options.localRegistry });
-  return { generation: meta.generation, main: main ?? emptyCanonicalMain() };
+  const objects: RemoteCanonicalObject[] = bundle.objects.map((object) => {
+    const bytes = Buffer.from(object.bytesB64, 'base64');
+    if (hashBytes(bytes) !== object.contentHash)
+      throw new RemoteMemoryError('integrity', 'A bundled object does not match its content hash.');
+    return { contentHash: object.contentHash, bytes };
+  });
+  return { generation: meta.generation, main: main ?? emptyCanonicalMain(), objects };
 };

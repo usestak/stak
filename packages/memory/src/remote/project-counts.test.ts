@@ -129,6 +129,15 @@ describe('standardProjectCountsFromBundle (P3 §2)', () => {
         items: [],
       },
     });
+    // `bundleFromStore` (Task 13 fix) now requires a real stored object for every
+    // `present` canonical document it bundles, not only for v1 manifest items — a
+    // present document's content must actually travel in the bundle, or a
+    // recovering machine would restore a canonical manifest pointing at content
+    // that was never uploaded. The old fake, unresolvable `sha256:111...1` hash
+    // below relied on that gap and would now fail with `store-object-missing`.
+    const presentBytes = Buffer.from('present doc body', 'utf8');
+    const presentContentHash = hashBytes(presentBytes);
+    await writeMemoryObject({ stackHome, contentHash: presentContentHash, bytes: presentBytes });
     await writeCanonicalMain(stackHome, {
       schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
       projects: [
@@ -138,7 +147,7 @@ describe('standardProjectCountsFromBundle (P3 §2)', () => {
             {
               path: 'notes/a.md',
               state: 'present',
-              contentHash: `sha256:${'1'.repeat(64)}`,
+              contentHash: presentContentHash,
               importedFrom: 'claude',
               importedAt: '2026-10-22T00:00:00.000Z',
             },

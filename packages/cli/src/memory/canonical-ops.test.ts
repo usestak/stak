@@ -5,20 +5,37 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  CANONICAL_MAIN_SCHEMA_VERSION,
+  canonicalGitIdentity,
   emptyRegistry,
   encodeClaudeProjectKey,
+  fileLocalMemoryKeyStore,
   hashBytes,
+  InMemoryRemoteMemoryStore,
+  inMemoryRemoteMemoryBackend,
   legacyCompatKey,
   mintProjectId,
+  readCanonicalBase,
+  readCanonicalMain,
   readLocalRegistry,
   resolveOrMintProject,
   setBinding,
   shortProjectId,
+  writeCanonicalMain,
   writeLocalRegistry,
   writeMemoryManifest,
+  type BackupResult,
+  type RemoteMemoryBackend,
 } from '@stack/memory';
 
-import { canonicalMemoryStatus, stageCanonicalMemory } from './canonical-ops.js';
+import {
+  canonicalMemoryStatus,
+  materializeCanonicalProjects,
+  pullMemoryViaCanonical,
+  pushMemoryViaCanonical,
+  stageCanonicalMemory,
+} from './canonical-ops.js';
+import { runMemoryCloudRecover } from './cloud-ops.js';
 
 let root: string;
 let stackHome: string;
@@ -556,5 +573,253 @@ describe('canonicalMemoryStatus', () => {
     // Strictly read-only: migration never actually ran because of this check.
     expect(await exists(migrationMarkerPath())).toBe(false);
     expect(await exists(canonicalMainPath())).toBe(false);
+  });
+});
+
+describe('pushMemoryViaCanonical / pullMemoryViaCanonical (Task 13)', () => {
+  const secureKeys = (dir: string) =>
+    fileLocalMemoryKeyStore(dir, {
+      harden: () => Promise.resolve(true),
+      verify: () => Promise.resolve(true),
+    });
+  const fakeBackup = (): Promise<BackupResult> =>
+    Promise.resolve({
+      provider: 'claude',
+      files: 0,
+      projects: 0,
+      createdAt: '2026-10-23T00:00:00.000Z',
+    });
+  const deps = (home: string, backend: RemoteMemoryBackend | null, keysDir: string) => ({
+    stackHome: home,
+    backend,
+    localKeyStore: secureKeys(keysDir),
+    runLocalBackup: fakeBackup,
+  });
+
+  /** Like the top-level `bindProject`, but against an explicit `home` (for
+   * multi-"machine" tests that need more than one stackHome under `root`), and
+   * able to force a specific Project ID (simulating two machines that already
+   * agree on a project's identity — e.g. via the separate Cloud project-identity
+   * reconciliation this task does not touch). */
+  const bindProjectAt = async (home: string, dir: string, fixedProjectId?: string) => {
+    let registry = await readLocalRegistry(home);
+    const minted = resolveOrMintProject(
+      registry,
+      { kind: 'local', vendorKey: `v-${path.basename(home)}-${path.basename(dir)}` },
+      fixedProjectId ? () => fixedProjectId : mintProjectId,
+    );
+    registry = minted.registry;
+    registry = setBinding(registry, {
+      projectId: minted.projectId,
+      dir,
+      boundAt: '2026-10-23T00:00:00.000Z',
+      provenance: 'user-map',
+    });
+    await writeLocalRegistry(home, registry);
+    return minted.projectId;
+  };
+
+  const writeAutoMemoryAt = async (claudeHomeDir: string, vendorKey: string, name: string, body: string) => {
+    const dir = path.join(claudeHomeDir, 'projects', vendorKey, 'memory');
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, name), body, 'utf8');
+  };
+
+  it('pushes a native edit on machine A; machine B (a candidate dir whose git remote matches, no Claude files yet) pulls and materializes it', async () => {
+    const gitRemote = 'https://github.com/acme/demo.git';
+    const identity = canonicalGitIdentity(gitRemote);
+    if (!identity) throw new Error('test setup: expected a resolvable git identity');
+
+    const stackHomeA = path.join(root, 'a-stack');
+    const claudeHomeA = path.join(root, 'a-claude');
+    const projectDirA = path.join(root, 'a-proj');
+    await mkdir(projectDirA, { recursive: true });
+
+    let registryA = await readLocalRegistry(stackHomeA);
+    const minted = resolveOrMintProject(registryA, identity);
+    registryA = minted.registry;
+    const projectId = minted.projectId;
+    await writeLocalRegistry(stackHomeA, registryA);
+    await writeAutoMemoryAt(
+      claudeHomeA,
+      encodeClaudeProjectKey(path.resolve(projectDirA)),
+      'MEMORY.md',
+      'hello from A',
+    );
+    await stageCanonicalMemory(stackHomeA, {
+      claudeHome: claudeHomeA,
+      projects: [{ dir: projectDirA, gitRemote }],
+    });
+
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, 'canonical-two-machine');
+
+    const pushOutcome = await pushMemoryViaCanonical(deps(stackHomeA, backend, path.join(root, 'a-keys')), {
+      claudeHome: claudeHomeA,
+      projects: [{ dir: projectDirA, gitRemote }],
+    });
+    expect(pushOutcome.status).toBe('pushed');
+
+    // Machine B: the SAME logical project (its registry already agrees on the
+    // Project ID — identity reconciliation across machines is a separate, Cloud-
+    // side mechanism this task does not touch), a real folder, but NO Claude
+    // files materialized there yet — the only way `materializeCanonicalProjects`
+    // can locate it is the git-remote candidate match (Task 13 correction 2(b)).
+    const stackHomeB = path.join(root, 'b-stack');
+    const claudeHomeB = path.join(root, 'b-claude');
+    const projectDirB = path.join(root, 'b-proj');
+    await mkdir(projectDirB, { recursive: true });
+    let registryB = await readLocalRegistry(stackHomeB);
+    registryB = resolveOrMintProject(registryB, identity, () => projectId).registry;
+    await writeLocalRegistry(stackHomeB, registryB);
+
+    const pullOutcome = await pullMemoryViaCanonical(deps(stackHomeB, backend, path.join(root, 'b-keys')), {
+      claudeHome: claudeHomeB,
+      projects: [{ dir: projectDirB, gitRemote }],
+    });
+    expect(pullOutcome.status).toBe('merged');
+
+    const materializedPath = path.join(
+      claudeHomeB,
+      'projects',
+      encodeClaudeProjectKey(path.resolve(projectDirB)),
+      'memory',
+      'MEMORY.md',
+    );
+    expect(await readFile(materializedPath, 'utf8')).toBe('hello from A');
+  });
+
+  it('pushing again with no changes creates no new generation (no-op)', async () => {
+    const projectId = await bindProjectAt(stackHome, projectDir);
+    void projectId;
+    await mkdir(path.dirname(path.join(projectDir, 'CLAUDE.local.md')), { recursive: true });
+    await writeFile(path.join(projectDir, 'CLAUDE.local.md'), 'private memory', 'utf8');
+    await stageCanonicalMemory(stackHome, { claudeHome });
+
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, 'canonical-noop');
+    const keysDir = path.join(root, 'keys');
+
+    const first = await pushMemoryViaCanonical(deps(stackHome, backend, keysDir), { claudeHome });
+    expect(first.status).toBe('pushed');
+    expect(await backend.listGenerations()).toHaveLength(1);
+
+    const second = await pushMemoryViaCanonical(deps(stackHome, backend, keysDir), { claudeHome });
+    expect(second.status).toBe('up-to-date');
+    expect(await backend.listGenerations()).toHaveLength(1);
+  });
+
+  it('conflicting edits on two machines: the second push reports a conflict and creates no generation (Skills push is a wholly separate call path, unaffected)', async () => {
+    const stackHomeX = path.join(root, 'x-stack');
+    const claudeHomeX = path.join(root, 'x-claude');
+    const projectDirX = path.join(root, 'x-proj');
+    await mkdir(projectDirX, { recursive: true });
+    const projectId = await bindProjectAt(stackHomeX, projectDirX);
+    await writeAutoMemoryAt(claudeHomeX, encodeClaudeProjectKey(path.resolve(projectDirX)), 'MEMORY.md', 'content A');
+    await stageCanonicalMemory(stackHomeX, { claudeHome: claudeHomeX });
+
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, 'canonical-conflict');
+    const pushX = await pushMemoryViaCanonical(deps(stackHomeX, backend, path.join(root, 'x-keys')), {
+      claudeHome: claudeHomeX,
+    });
+    expect(pushX.status).toBe('pushed');
+
+    // Machine Y: the same Project ID (already reconciled), a different edit of
+    // the SAME canonical path, made WITHOUT ever pulling X's generation first —
+    // Y's base stays null, so pushing goes straight to the merge path against an
+    // empty base and collides with X's already-published content.
+    const stackHomeY = path.join(root, 'y-stack');
+    const claudeHomeY = path.join(root, 'y-claude');
+    const projectDirY = path.join(root, 'y-proj');
+    await mkdir(projectDirY, { recursive: true });
+    await bindProjectAt(stackHomeY, projectDirY, projectId);
+    await writeAutoMemoryAt(claudeHomeY, encodeClaudeProjectKey(path.resolve(projectDirY)), 'MEMORY.md', 'content B');
+    await stageCanonicalMemory(stackHomeY, { claudeHome: claudeHomeY });
+
+    const pushY = await pushMemoryViaCanonical(deps(stackHomeY, backend, path.join(root, 'y-keys')), {
+      claudeHome: claudeHomeY,
+    });
+    expect(pushY.status).toBe('conflict');
+    expect(pushY.conflicts?.[0]?.path).toBe('notes/MEMORY.md');
+    // Still only X's one generation — the conflicting push created nothing.
+    expect(await backend.listGenerations()).toHaveLength(1);
+    // `pushMemoryViaCanonical` takes no Skills dependency at all and never calls
+    // anything Skills-related (that remains `cloudApplyPush`, a wholly separate
+    // call path wired at `stak push`'s command layer) — a Memory conflict here
+    // can only ever block Skills via that outer command's own preflight check,
+    // never from inside this function.
+  });
+
+  it('a fresh machine\'s full recover restores canonical main but not base; the next canonical pull repairs the base via its no-op merge branch', async () => {
+    const stackHomeS = path.join(root, 's-stack');
+    const claudeHomeS = path.join(root, 's-claude');
+    const projectDirS = path.join(root, 's-proj');
+    await mkdir(projectDirS, { recursive: true });
+    await bindProjectAt(stackHomeS, projectDirS);
+    await writeAutoMemoryAt(claudeHomeS, encodeClaudeProjectKey(path.resolve(projectDirS)), 'MEMORY.md', 'source content');
+    await stageCanonicalMemory(stackHomeS, { claudeHome: claudeHomeS });
+
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, 'canonical-fresh-machine');
+    const pushOutcome = await pushMemoryViaCanonical(deps(stackHomeS, backend, path.join(root, 's-keys')), {
+      claudeHome: claudeHomeS,
+    });
+    expect(pushOutcome.status).toBe('pushed');
+
+    // Fresh machine: the pre-existing, unchanged full v1-style recover path.
+    const stackHomeF = path.join(root, 'f-stack');
+    const keysF = path.join(root, 'f-keys');
+    const recovered = await runMemoryCloudRecover(deps(stackHomeF, backend, keysF));
+    expect(recovered.status).toBe('recovered');
+    // The v2 bundle restores `canonical/main.json` but never `base.json` (see
+    // `bundle-codec.ts` / `modes.ts`'s `cloudRecover` — confirmed directly here).
+    expect(await readCanonicalBase(stackHomeF)).toBeNull();
+
+    const claudeHomeF = path.join(root, 'f-claude');
+    const pullOutcome = await pullMemoryViaCanonical(deps(stackHomeF, backend, keysF), { claudeHome: claudeHomeF });
+    // Local (just restored) already equals remote exactly — nothing to merge.
+    expect(pullOutcome.status).toBe('up-to-date');
+
+    const base = await readCanonicalBase(stackHomeF);
+    expect(base?.generation).toBe(pushOutcome.generation);
+    expect(base?.main).toEqual(await readCanonicalMain(stackHomeF));
+  });
+
+  it('a canonical project with no binding and no matching candidate is skipped during materialize and reported as unavailable; nothing is written', async () => {
+    let registry = await readLocalRegistry(stackHome);
+    const minted = resolveOrMintProject(registry, {
+      kind: 'git',
+      canonical: 'github.com/acme/ghost',
+      host: 'github.com',
+      owner: 'acme',
+      repo: 'ghost',
+    });
+    registry = minted.registry;
+    await writeLocalRegistry(stackHome, registry);
+    await writeCanonicalMain(stackHome, {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [
+        {
+          projectId: minted.projectId,
+          documents: [
+            {
+              path: 'notes/MEMORY.md',
+              state: 'present',
+              contentHash: hashBytes(Buffer.from('ghost content')),
+              importedFrom: 'claude',
+              importedAt: '2026-10-23T00:00:00.000Z',
+            },
+          ],
+        },
+      ],
+    });
+
+    // No binding for this project, and no `projects` candidate shares its git remote.
+    const result = await materializeCanonicalProjects(stackHome, { claudeHome });
+    expect(result.materialized).toBe(0);
+    expect(result.unavailable).toBe(1);
+    // Nothing was written anywhere under `claudeHome` — never guess a directory.
+    await expect(stat(path.join(claudeHome, 'projects'))).rejects.toThrow();
   });
 });

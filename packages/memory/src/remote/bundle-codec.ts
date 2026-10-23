@@ -20,6 +20,7 @@ import {
   readMemoryObject,
   writeMemoryObject,
 } from '../store.js';
+import { canonicalMainManifestSchema, type CanonicalMainManifest } from '../canonical/domain.js';
 import { canonicalStorePaths } from '../canonical/store.js';
 import { atomicWriteFile } from './secure-file.js';
 
@@ -103,9 +104,29 @@ const serialize = (bundle: MemoryBackupBundle): Buffer => {
   return Buffer.from(JSON.stringify(canonical), 'utf8');
 };
 
-const referencedHashes = (manifest: MemoryManifest): string[] => [
-  ...new Set(manifest.items.map((item) => item.contentHash)),
-];
+/**
+ * Every content hash this bundle must carry an object for: the v1 manifest's own
+ * items, PLUS (v2 only) every `present` canonical document's `contentHash`. Task
+ * 13 found this the hard way: once `stak memory backup`/`stak push` migrate the
+ * local store before bundling, project-scope content moves OUT of the v1
+ * manifest (see `migrate.ts`'s `slimToGlobal`) and lives only as canonical
+ * documents — a bundle that scanned only `manifest.items` would silently stop
+ * carrying those objects at all, so a recovering machine would restore a
+ * `canonical/main.json` whose documents point at content that was never
+ * uploaded. Deleted canonical documents (`state: 'deleted'`) reference no live
+ * content and are correctly excluded.
+ */
+const referencedHashes = (
+  manifest: MemoryManifest,
+  canonicalMain?: CanonicalMainManifest,
+): string[] => {
+  const hashes = new Set(manifest.items.map((item) => item.contentHash));
+  if (canonicalMain)
+    for (const project of canonicalMain.projects)
+      for (const doc of project.documents)
+        if (doc.state === 'present') hashes.add(doc.contentHash);
+  return [...hashes];
+};
 
 /** Read the current Phase 14A store into a canonical bundle (parsed + bytes). */
 export const bundleFromStore = async (
@@ -117,8 +138,21 @@ export const bundleFromStore = async (
   const manifestBytes = await readFile(
     memoryStorePaths(stackHome).currentManifest,
   );
+  // Read `canonical/main.json` directly (not through `readCanonicalMain`'s
+  // empty-default fallback) so a never-migrated store still produces a
+  // byte-identical v1 bundle — only a store that genuinely HAS a canonical
+  // manifest on disk upgrades to v2.
+  const canonicalBytes = await readFile(canonicalStorePaths(stackHome).main).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined;
+      throw error;
+    },
+  );
+  const canonicalMain = canonicalBytes
+    ? canonicalMainManifestSchema.parse(JSON.parse(canonicalBytes.toString('utf8')))
+    : undefined;
   const objects = [];
-  for (const contentHash of referencedHashes(manifest)) {
+  for (const contentHash of referencedHashes(manifest, canonicalMain)) {
     const bytes = await readMemoryObject({ stackHome, contentHash });
     objects.push({
       contentHash,
@@ -132,16 +166,6 @@ export const bundleFromStore = async (
     if (error.code === 'ENOENT') return undefined;
     throw error;
   });
-  // Read `canonical/main.json` directly (not through `readCanonicalMain`'s
-  // empty-default fallback) so a never-migrated store still produces a
-  // byte-identical v1 bundle — only a store that genuinely HAS a canonical
-  // manifest on disk upgrades to v2.
-  const canonicalBytes = await readFile(canonicalStorePaths(stackHome).main).catch(
-    (error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return undefined;
-      throw error;
-    },
-  );
   const bundle: MemoryBackupBundle = {
     bundleFormat: canonicalBytes ? BUNDLE_FORMAT_V2 : BUNDLE_FORMAT,
     provider: 'claude',

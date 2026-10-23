@@ -86,6 +86,7 @@ import {
 } from '@stack/memory';
 import {
   CloudResponseInvalidError,
+  LocalEnvironmentConflictError,
   createCloudClient,
   NotAuthenticatedError,
 } from '@stack/cloud-client';
@@ -109,17 +110,18 @@ import { registerOpenCommand } from './commands/open.js';
 import { stackCloudRemoteMemoryBackend } from './memory/cloud-backend.js';
 import {
   canonicalMemoryStatus,
+  pullMemoryViaCanonical,
+  pushMemoryViaCanonical,
   stageCanonicalMemory,
   type CanonicalProjectSummary,
+  type CanonicalPullOutcome,
   type UnlocatableProject,
 } from './memory/canonical-ops.js';
 import { stageMemoryWithProjectDedup } from './memory/stage-memory.js';
 import {
   freshRegistryRisksDuplication,
-  pushStagedMemory,
   readBackupSupersession,
   readMemoryCloudStatus,
-  resolveMemoryPushState,
   runMemoryCloudBackup,
   runMemoryCloudProtect,
   runMemoryCloudRecover,
@@ -333,6 +335,7 @@ export type ProgramDependencies = {
   cloudApplyPull(plan: PullPlan): Promise<ApplyPullResult>;
   memoryPullPreflight?(): Promise<MemoryPullPreflight>;
   applyMemoryPull?(): Promise<CloudRecoverOutcome>;
+  applyCanonicalPull?(): Promise<CanonicalPullOutcome>;
   cloudPreparePublish(options: {
     input: string;
     slug?: string;
@@ -963,13 +966,25 @@ const defaultDependencies: ProgramDependencies = {
   // latest Cloud generation, this must be a no-op: it never creates another immutable
   // generation containing identical state (unlike the explicit `stak memory backup`,
   // which intentionally always creates one — see `memoryCloudBackup` below, unchanged).
+  // Task 13: this REPLACES the old `resolveMemoryPushState`/`pushStagedMemory` call
+  // site with the canonical-Memory engine (`pushMemoryViaCanonical`) — there is
+  // exactly one `createGeneration` call per `stak push` now, carrying both the global
+  // v1 manifest and canonical Project Memory together in a single v2 bundle.
   applyMemoryPush: async () => {
     const deps = await buildMemoryCloudDeps();
-    const state = await resolveMemoryPushState(deps);
-    if (state.status === 'nothing-staged') return { status: 'nothing-staged' };
-    if (state.status === 'already-up-to-date')
-      return { status: 'up-to-date', generation: state.generation };
-    return pushStagedMemory(deps);
+    const outcome = await pushMemoryViaCanonical(deps, await memoryDiscoveryOptions());
+    if (outcome.status === 'conflict')
+      throw new LocalEnvironmentConflictError(
+        `Memory has ${outcome.conflicts?.length ?? 0} unresolved conflict(s). Resolve with \`stak memory resolve\`, then push again.`,
+      );
+    if (outcome.status === 'retry-exhausted')
+      throw new StackCompositionError(
+        'memory-push-retry-exhausted',
+        'STAK Cloud kept moving while pushing Memory. Try again.',
+      );
+    return outcome.status === 'up-to-date'
+      ? { status: 'up-to-date', generation: outcome.generation ?? 0 }
+      : { status: 'standard', generation: outcome.generation ?? 0 };
   },
   // Unified pull (P3): Memory only auto-recovers on a genuinely fresh machine (no local
   // manifest yet) — an established machine's Memory is never silently overwritten here;
@@ -982,6 +997,11 @@ const defaultDependencies: ProgramDependencies = {
         }
       : { eligible: true },
   applyMemoryPull: async () => runMemoryCloudRecover(await buildMemoryCloudDeps()),
+  // Task 13: canonical (Project) Memory's own pull — additive, runs on every `stak
+  // pull` regardless of `memoryPullPreflight` (which only gates the legacy
+  // fresh-machine full-recover path above). Never publishes.
+  applyCanonicalPull: async () =>
+    pullMemoryViaCanonical(await buildMemoryCloudDeps(), await memoryDiscoveryOptions()),
   cloudPreparePublish: (options) => cloudPreparePublish(cloudDeps, options),
   cloudApplyPublish: (plan) => cloudApplyPublish(cloudDeps, plan),
   memoryScan: async () => (await memoryAdapter()).discover(),

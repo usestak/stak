@@ -26,18 +26,22 @@ import {
   LocalKeyStoreError,
   generateMmk,
   hashBytes,
+  migrateLocalStore,
   migrateStandardToProtected,
   newKeyring,
   openMmkFromEnvelope,
   protectedCloudBackup,
+  readCanonicalMain,
   resolveProjectForIdentity,
   standardCloudBackup,
   unwrapWithRecoveryKey,
   isHistoricalRecovery,
   readLocalRecoveryState,
   readMemoryManifest,
+  writeCanonicalMain,
   writeLocalRecoveryState,
   type BackupResult,
+  type CanonicalMainManifest,
   type DiscoveredMemoryItem,
   type LocalRegistry,
   type BridgeEnvelope,
@@ -238,6 +242,60 @@ export const pushStagedMemory = async (
   }
 };
 
+/**
+ * Upload exactly one new Cloud generation built from `main` (written to
+ * `canonical/main.json` by this function before bundling — `bundleFromStore`
+ * reads it straight off disk). Unlike `pushStagedMemory`, this lets any thrown
+ * error (including `RemoteMemoryError('conflict', ...)`) propagate —
+ * `pushCanonicalMemory`'s retry loop (`@stack/memory`'s `canonical/push.ts`)
+ * depends on seeing that error, not a swallowed `{status:'failed'}` result.
+ *
+ * Deviates from the Task 13 brief's literal `Promise<{ generation: number }>`
+ * return type by also returning `privacyMode`: `runMemoryCloudBackup`'s Cloud
+ * branch (below) needs it to populate `CloudBackupOutcome`'s existing
+ * `'standard' | 'protected'` status discriminant, and nothing else in this file
+ * computes that independently of the backup call actually made.
+ */
+export const publishCanonicalGeneration = async (
+  deps: MemoryCloudDeps,
+  main: CanonicalMainManifest,
+): Promise<{ generation: number; privacyMode: 'standard' | 'protected' }> => {
+  await writeCanonicalMain(deps.stackHome, main);
+  if (!deps.backend) throw new Error('No Cloud backend configured.');
+  const semanticDigest = await computeSemanticDigest(deps.stackHome);
+  const profile = await deps.backend.getProfile();
+  const mode = profile?.privacyMode ?? 'standard';
+  if (mode === 'protected') {
+    const mmk = await deps.localKeyStore.loadMmk();
+    if (!mmk) throw new Error('Protected Memory is locked on this machine.');
+    const result = await protectedCloudBackup({
+      stackHome: deps.stackHome,
+      backend: deps.backend,
+      mmk,
+      ...(deps.now ? { now: deps.now } : {}),
+    });
+    await recordRecoveryProvenance(deps, {
+      generation: result.generation,
+      privacyMode: 'protected',
+      cloudLatest: result.generation,
+      ...(semanticDigest ? { semanticDigest } : {}),
+    });
+    return { generation: result.generation, privacyMode: 'protected' };
+  }
+  const result = await standardCloudBackup({
+    stackHome: deps.stackHome,
+    backend: deps.backend,
+    ...(deps.now ? { now: deps.now } : {}),
+  });
+  await recordRecoveryProvenance(deps, {
+    generation: result.generation,
+    privacyMode: 'standard',
+    cloudLatest: result.generation,
+    ...(semanticDigest ? { semanticDigest } : {}),
+  });
+  return { generation: result.generation, privacyMode: 'standard' };
+};
+
 export type MemoryPushState =
   | { status: 'nothing-staged' }
   | { status: 'no-remote-backup' }
@@ -283,12 +341,43 @@ export const resolveMemoryPushState = async (
     : { status: 'needs-push' };
 };
 
-/** backup: local first, then Cloud (never fails the local commit). */
+/**
+ * backup: local first, then Cloud (never fails the local commit). Migrates the
+ * local store to canonical Memory first (idempotent, short-circuits after its
+ * first run — see `migrateLocalStore`), then ALWAYS publishes a new generation
+ * built from canonical Memory (unlike `stak push`'s `pushMemoryViaCanonical`,
+ * which is a no-op when nothing changed) — this is `stak memory backup`'s own,
+ * intentionally unchanged "always create a generation" behavior (spec §9.3:
+ * `memory backup` stays as a deprecated alias for the Memory part of `stak
+ * push`, with that one behavioral difference preserved).
+ *
+ * NOTE: concurrent STAK commands against the same `stackHome` are not
+ * serialized across processes (see `canonical-ops.ts`'s `pushMemoryViaCanonical`/
+ * `pullMemoryViaCanonical` for the same caveat) — a cross-process lock is a
+ * known, deferred design gap.
+ */
 export const runMemoryCloudBackup = async (
   deps: MemoryCloudDeps,
 ): Promise<MemoryBackupOutcome> => {
   const local = await deps.runLocalBackup();
-  return { local, cloud: await pushStagedMemory(deps) };
+  await migrateLocalStore(deps.stackHome);
+  if (!deps.backend) return { local, cloud: { status: 'skipped' } };
+  try {
+    const profile = await deps.backend.getProfile();
+    if (
+      (profile?.privacyMode ?? 'standard') === 'protected' &&
+      !(await deps.localKeyStore.loadMmk())
+    )
+      return { local, cloud: { status: 'protected-locked' } };
+    const main = await readCanonicalMain(deps.stackHome);
+    const result = await publishCanonicalGeneration(deps, main);
+    return {
+      local,
+      cloud: { status: result.privacyMode, generation: result.generation },
+    };
+  } catch (error) {
+    return { local, cloud: { status: 'failed', message: errorMessage(error) } };
+  }
 };
 
 export type CloudRecoverOutcome =
@@ -314,10 +403,23 @@ export type CloudRecoverOutcome =
   | { status: 'not-authenticated' }
   | { status: 'no-backup' };
 
-/** The restored manifest's logical item count, or 0 if unreadable (never thrown). */
+/**
+ * The restored store's logical file count: the v1 manifest's own items PLUS
+ * every `present` canonical document (Task 13 fix — once a store migrates,
+ * project-scope files move OUT of the v1 manifest into canonical Memory
+ * (`migrate.ts`'s `slimToGlobal`); counting only `manifest.items.length` after a
+ * migrated recovery would silently undercount, reporting 0 recovered files for
+ * an account whose Memory is entirely project-scope). Never thrown — `0` for an
+ * unreadable/absent manifest.
+ */
 const recoveredFileCount = async (stackHome: string): Promise<number> => {
   const manifest = await readMemoryManifest(stackHome);
-  return manifest?.items.length ?? 0;
+  const main = await readCanonicalMain(stackHome);
+  const canonicalCount = main.projects.reduce(
+    (n, project) => n + project.documents.filter((doc) => doc.state === 'present').length,
+    0,
+  );
+  return (manifest?.items.length ?? 0) + canonicalCount;
 };
 
 /** Recover the private store from Cloud. Does not touch native agent files. */

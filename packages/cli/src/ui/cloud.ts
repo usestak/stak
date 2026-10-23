@@ -12,6 +12,7 @@ import type {
   CloudBackupOutcome,
   CloudRecoverOutcome,
 } from '../memory/cloud-ops.js';
+import type { CanonicalPullOutcome } from '../memory/canonical-ops.js';
 
 import { block, renamedNote, skills } from './format.js';
 
@@ -476,9 +477,33 @@ export const pullFailed = (
   memory.status === 'failed' ||
   (memory.status === 'applied' && memory.outcome.status !== 'recovered');
 
+/** `stak pull`'s canonical (Project) Memory half (Task 13) — an ADDITIVE operation
+ * alongside the legacy fresh-machine `PullMemoryOutcome` above; it runs on every
+ * pull, not only a fresh machine, and never publishes. Deliberately excluded from
+ * `pullFailed`: a canonical sync failure is reported on its own line but does not
+ * (by itself) make the whole `stak pull` command report failure. */
+export type PullCanonicalOutcome =
+  | { status: 'not-attempted' }
+  | { status: 'applied'; outcome: CanonicalPullOutcome }
+  | { status: 'failed'; error: string };
+
+/** A short, terse line for a non-`up-to-date` canonical outcome — `null` when
+ * there is nothing worth saying (not attempted, or already up to date). */
+const canonicalPullLine = (canonical: PullCanonicalOutcome): string | null => {
+  if (canonical.status === 'not-attempted') return null;
+  if (canonical.status === 'failed')
+    return `  Project Memory sync FAILED: ${canonical.error}`;
+  const outcome = canonical.outcome;
+  if (outcome.status === 'up-to-date') return null;
+  if (outcome.status === 'conflict')
+    return `  Project Memory has ${outcome.conflicts?.length ?? 0} unresolved conflict(s) — run \`stak memory resolve\`.`;
+  return '  Project Memory synced.';
+};
+
 export const renderCombinedPullResult = (
   skill: PullSkillOutcome,
   memory: PullMemoryOutcome,
+  canonical?: PullCanonicalOutcome,
 ): string => {
   const lines: string[] = ['Skills'];
   if (skill.status === 'noop') lines.push('  already up to date with main.');
@@ -509,6 +534,10 @@ export const renderCombinedPullResult = (
       lines.push(
         '  this device needs a recovery method to unlock Protected Memory (`stak memory recover`).',
       );
+  }
+  if (canonical) {
+    const line = canonicalPullLine(canonical);
+    if (line) lines.push(line);
   }
   lines.push(
     '',

@@ -14,6 +14,7 @@ import {
   inMemoryRemoteMemoryBackend,
   memoryStorePaths,
   mintProjectId,
+  readCanonicalMain,
   readMemoryManifest,
   readMemoryObject,
   resolveOrMintProject,
@@ -861,5 +862,77 @@ describe('freshRegistryRisksDuplication (fresh/reset-registry safeguard)', () =>
         registry: emptyRegistry(),
       }),
     ).toBe(false);
+  });
+});
+
+describe('runMemoryCloudBackup migrates to canonical Memory and always publishes a v2 generation (Task 13)', () => {
+  it('migrates a project-scope v1 item into canonical Memory and publishes exactly one v2 generation per call, even with nothing changed', async () => {
+    const stackHome = await temp('stack-backup-v2-');
+    // A project-scope (git identity) item — exactly what `migrateLocalStore`
+    // moves out of the v1 manifest and into canonical Memory.
+    const body = Buffer.from('project note', 'utf8');
+    const contentHash = hashBytes(body);
+    await writeMemoryObject({ stackHome, contentHash, bytes: body });
+    await writeMemoryManifest({
+      stackHome,
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-23T00:00:00.000Z',
+        items: [
+          {
+            provider: 'claude',
+            kind: 'auto-memory',
+            scope: 'project',
+            logicalId: 'claude/auto-memory/github.com/acme/demo/MEMORY.md',
+            project: {
+              kind: 'git',
+              canonical: 'github.com/acme/demo',
+              host: 'github.com',
+              owner: 'acme',
+              repo: 'demo',
+            },
+            contentHash,
+            restoreTarget: { base: 'claude-project-memory', relativePath: 'MEMORY.md' },
+            capturedAt: '2026-10-23T00:00:00.000Z',
+            sensitivity: 'private',
+          },
+        ],
+      },
+    });
+
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-backup-v2-keys-'));
+
+    const first = await runMemoryCloudBackup({
+      stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    });
+    expect(first.cloud.status).toBe('standard');
+    if (first.cloud.status === 'standard') expect(first.cloud.generation).toBe(0);
+    // Migration ran: the project-scope item left the v1 manifest...
+    expect((await readMemoryManifest(stackHome))?.items).toHaveLength(0);
+    // ...and landed in canonical Memory.
+    const main = await readCanonicalMain(stackHome);
+    expect(
+      main.projects[0]?.documents.some(
+        (doc) => doc.state === 'present' && doc.contentHash === contentHash,
+      ),
+    ).toBe(true);
+
+    // `stak memory backup` ALWAYS creates a generation, even with nothing
+    // changed since the last one — unlike `stak push`'s canonical no-op check.
+    // This one behavioral difference is deliberate (spec section 9.3).
+    const second = await runMemoryCloudBackup({
+      stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    });
+    expect(second.cloud.status).toBe('standard');
+    if (second.cloud.status === 'standard') expect(second.cloud.generation).toBe(1);
   });
 });

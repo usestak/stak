@@ -2,32 +2,48 @@ import path from 'node:path';
 
 import {
   applyImportActions,
+  applyMaterializeActions,
   bindingFor,
+  canonicalGitIdentity,
+  clearPendingMerge,
   discoverClaudeMemory,
   encodeClaudeProjectKey,
+  fetchRemoteCanonical,
+  gitClaimOf,
   isLocalStoreMigrated,
   migrateLocalStore,
   nameHintFor,
   normalizeVendorKey,
   planProjectSync,
+  pullCanonicalMemory,
+  pushCanonicalMemory,
+  readCanonicalBase,
+  readCanonicalMain,
   readLocalRegistry,
   readMemoryManifest,
   reconstructProjectDir,
+  recordFor,
   resolveOrMintProject,
   resolveProjectForIdentity,
   scanClaudeProject,
   shortProjectId,
+  writeCanonicalBase,
+  writeCanonicalMain,
   writeLocalRegistry,
+  writeMemoryObject,
+  writePendingMerge,
   projectIdentityKey,
   type ClaudeProjectInput,
   type DiscoveredMemoryItem,
   type LocalRegistry,
   type ManifestItem,
+  type MergeConflict,
   type ProjectIdentity,
   type ScanResult,
 } from '@stack/memory';
 
 import { resolveCanonicalProjectId } from './canonical-identity.js';
+import { publishCanonicalGeneration, type MemoryCloudDeps } from './cloud-ops.js';
 
 export type CanonicalProjectSummary = {
   projectId: string;
@@ -624,3 +640,202 @@ export const resolveProjectIdForClaudeItem = (
   item: Pick<DiscoveredMemoryItem | ManifestItem, 'project' | 'kind' | 'logicalId' | 'restoreTarget'>,
   registry: LocalRegistry,
 ): string | undefined => resolveCanonicalProjectId(item, registry);
+
+/* -------------------------------------------------------------------------- */
+/* Task 13: canonical Memory via `stak push` / `stak pull`                     */
+/* -------------------------------------------------------------------------- */
+
+export type CanonicalConflictEntry = MergeConflict;
+export type CanonicalPushOutcome = {
+  status: 'up-to-date' | 'pushed' | 'conflict' | 'retry-exhausted';
+  generation?: number;
+  conflicts?: CanonicalConflictEntry[];
+};
+export type CanonicalPullOutcome = {
+  status: 'up-to-date' | 'merged' | 'conflict';
+  conflicts?: CanonicalConflictEntry[];
+};
+
+/**
+ * Every project this machine can currently WRITE canonical Memory into, as the
+ * union described in Task 13 correction 2:
+ *  (a) projects located by discovery-based enumeration (`enumerateSyncableProjects`,
+ *      reused here read-only/non-minting via `mode: 'status'` — materialization
+ *      never mints a Project ID);
+ *  (b) every `projectId` present in canonical `main.json` NOT already covered by
+ *      (a), located either by its registry binding dir, or by a `projects`
+ *      candidate (cwd + siblings, the same discovery input Task 12 uses) whose
+ *      canonical Git remote (`canonicalGitIdentity`) matches the project's own
+ *      git claim, case-insensitively.
+ * A project covered by neither is "not available on this machine" (spec §5):
+ * skipped entirely for writes, counted in `unavailable` for the caller to report.
+ * Never mints, never guesses — only an exact binding or git-identity match counts.
+ */
+const locateMaterializeTargets = async (
+  stackHome: string,
+  options: CanonicalDiscoveryOptions,
+): Promise<{ targets: Map<string, string>; unavailable: number }> => {
+  const registry = await readLocalRegistry(stackHome);
+  const main = await readCanonicalMain(stackHome);
+  const { resolved } = await enumerateSyncableProjects(stackHome, options, 'status');
+  const targets = new Map<string, string>(resolved.map((r) => [r.projectId, r.dir]));
+
+  for (const project of main.projects) {
+    if (targets.has(project.projectId)) continue;
+    const binding = bindingFor(registry, project.projectId);
+    if (binding) {
+      targets.set(project.projectId, path.resolve(binding.dir));
+      continue;
+    }
+    const record = recordFor(registry, project.projectId);
+    const gitClaim = record ? gitClaimOf(record) : undefined;
+    if (!gitClaim) continue; // no binding, no git claim to match a candidate against
+    const claimCanonical = gitClaim.canonical.toLowerCase();
+    for (const candidate of options.projects ?? []) {
+      const remote =
+        candidate.gitRemote ?? (options.gitRemoteOf ? await options.gitRemoteOf(candidate.dir) : undefined);
+      const identity = canonicalGitIdentity(remote);
+      if (identity && identity.canonical.toLowerCase() === claimCanonical) {
+        targets.set(project.projectId, path.resolve(candidate.dir));
+        break;
+      }
+    }
+  }
+
+  const unavailable = main.projects.filter((p) => !targets.has(p.projectId)).length;
+  return { targets, unavailable };
+};
+
+/**
+ * Materialize canonical Memory into every locatable project's native Claude files
+ * (see `locateMaterializeTargets`). Never uploads anything and never mints a
+ * Project ID — safe to call after push, pull, or on its own. Each located project
+ * goes through `planProjectSync` + `applyMaterializeActions`, so the N=P safety
+ * rule and the mass-delete guard in `sync.ts` still apply; `writeClaudeProject`'s
+ * own path fence still applies too. A project with no binding and no matching
+ * candidate is skipped silently for writes — never written outside a located dir.
+ */
+export const materializeCanonicalProjects = async (
+  stackHome: string,
+  options: CanonicalDiscoveryOptions = {},
+): Promise<{ materialized: number; unavailable: number }> => {
+  const registry = await readLocalRegistry(stackHome);
+  const { targets, unavailable } = await locateMaterializeTargets(stackHome, options);
+  let materialized = 0;
+  for (const [projectId, dir] of targets) {
+    const scanOptions = {
+      ...(options.claudeHome ? { claudeHome: options.claudeHome } : {}),
+      projects: [{ dir }],
+      platform: options.platform ?? process.platform,
+      ...(options.gitRemoteOf ? { gitRemoteOf: options.gitRemoteOf } : {}),
+      ...(options.isDirectory ? { isDirectory: options.isDirectory } : {}),
+      resolveProjectId: (item: DiscoveredMemoryItem) => resolveProjectIdForClaudeItem(item, registry),
+    };
+    const plan = await planProjectSync({ projectId, dir }, stackHome, scanOptions);
+    await applyMaterializeActions({ projectId, dir }, stackHome, plan.actions, options.claudeHome);
+    materialized += 1;
+  }
+  return { materialized, unavailable };
+};
+
+/**
+ * Fetch Cloud's current canonical Memory through this CLI's own local registry
+ * (the v1-fallback identity source `fetchRemoteCanonical` needs — spec §9.2).
+ *
+ * Also persists every content object the fetched generation carries into this
+ * machine's local content store BEFORE returning the metadata-only `{generation,
+ * main}` shape `pushCanonicalMemory`/`pullCanonicalMemory` expect. Without this,
+ * a project pulled onto a machine that never had its content locally would end
+ * up with a canonical manifest pointing at bytes nothing on that machine ever
+ * wrote — `applyMaterializeActions` would then fail outright (or, worse, a
+ * later push could re-publish a manifest for content this machine can't even
+ * read). `writeMemoryObject` is content-addressed and idempotent, so re-writing
+ * objects this machine already has is a harmless no-op.
+ */
+const remoteOf = (deps: MemoryCloudDeps, mmk: Buffer | undefined) => async () => {
+  if (!deps.backend) return null;
+  const result = await fetchRemoteCanonical({
+    backend: deps.backend,
+    ...(mmk ? { mmk } : {}),
+    localRegistry: await readLocalRegistry(deps.stackHome),
+  });
+  if (!result) return null;
+  for (const object of result.objects)
+    await writeMemoryObject({ stackHome: deps.stackHome, contentHash: object.contentHash, bytes: object.bytes });
+  return { generation: result.generation, main: result.main };
+};
+
+/**
+ * `stak push`'s canonical-Memory half — REPLACES `pushStagedMemory`'s call site
+ * in `program.ts`'s `applyMemoryPush` (Task 13); `pushStagedMemory` itself is left
+ * in place, unused by push, for `stak memory backup`'s own independent wiring.
+ * Migrates the local store first (idempotent — see `migrateLocalStore`), then runs
+ * `pushCanonicalMemory`'s fast-forward/merge/retry engine, publishing through
+ * `publishCanonicalGeneration` (which lets a `RemoteMemoryError('conflict', ...)`
+ * propagate so the retry loop can see it). Materializes on any non-conflict
+ * outcome (including `retry-exhausted` — Cloud may have moved during the retries,
+ * and whatever is now locally canonical should still reach native files).
+ *
+ * NOTE: concurrent STAK commands against the same `stackHome` are not serialized
+ * across processes — a cross-process lock is a known, deferred design gap.
+ */
+export const pushMemoryViaCanonical = async (
+  deps: MemoryCloudDeps,
+  discovery: CanonicalDiscoveryOptions = {},
+): Promise<CanonicalPushOutcome> => {
+  await migrateLocalStore(deps.stackHome);
+  if (!deps.backend) return { status: 'up-to-date' };
+  const mmk = (await deps.localKeyStore.loadMmk().catch(() => undefined)) ?? undefined;
+  const outcome = await pushCanonicalMemory({
+    getLocalMain: () => readCanonicalMain(deps.stackHome),
+    getBase: () => readCanonicalBase(deps.stackHome),
+    setLocalMain: (main) => writeCanonicalMain(deps.stackHome, main),
+    setBase: (base) => writeCanonicalBase(deps.stackHome, base),
+    fetchRemote: remoteOf(deps, mmk),
+    publish: async (main) => {
+      const result = await publishCanonicalGeneration(deps, main);
+      return { generation: result.generation };
+    },
+    savePendingMerge: (pending) => writePendingMerge(deps.stackHome, pending),
+    clearPendingMerge: () => clearPendingMerge(deps.stackHome),
+  });
+  if (outcome.status !== 'conflict') await materializeCanonicalProjects(deps.stackHome, discovery);
+  if (outcome.status === 'conflict') return { status: 'conflict', conflicts: outcome.conflicts };
+  if (outcome.status === 'retry-exhausted') return { status: 'retry-exhausted' };
+  return { status: outcome.status, generation: outcome.generation };
+};
+
+/**
+ * `stak pull`'s canonical-Memory half (Task 13) — an ADDITIVE operation alongside
+ * the existing fresh-machine `applyMemoryPull` (unchanged; that one remains gated
+ * by `memoryPullPreflight` and is the legacy full-store recover). This one runs
+ * unconditionally on every `stak pull`: migrates the local store first, merges in
+ * whatever Cloud has via `pullCanonicalMemory`, and NEVER publishes — a pull
+ * creates no Cloud generation, ever (spec: pull never publishes).
+ *
+ * NOTE: see `pushMemoryViaCanonical`'s cross-process-locking caveat; it applies
+ * here too.
+ */
+export const pullMemoryViaCanonical = async (
+  deps: MemoryCloudDeps,
+  discovery: CanonicalDiscoveryOptions = {},
+): Promise<CanonicalPullOutcome> => {
+  await migrateLocalStore(deps.stackHome);
+  if (!deps.backend) return { status: 'up-to-date' };
+  const mmk = (await deps.localKeyStore.loadMmk().catch(() => undefined)) ?? undefined;
+  const outcome = await pullCanonicalMemory({
+    getLocalMain: () => readCanonicalMain(deps.stackHome),
+    getBase: () => readCanonicalBase(deps.stackHome),
+    setLocalMain: (main) => writeCanonicalMain(deps.stackHome, main),
+    setBase: (base) => writeCanonicalBase(deps.stackHome, base),
+    fetchRemote: remoteOf(deps, mmk),
+    savePendingMerge: (pending) => writePendingMerge(deps.stackHome, pending),
+    clearPendingMerge: () => clearPendingMerge(deps.stackHome),
+  });
+  if (outcome.status !== 'conflict') await materializeCanonicalProjects(deps.stackHome, discovery);
+  return outcome.status === 'merged-local'
+    ? { status: 'merged' }
+    : outcome.status === 'conflict'
+      ? { status: 'conflict', conflicts: outcome.conflicts }
+      : { status: 'up-to-date' };
+};

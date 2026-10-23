@@ -4,11 +4,13 @@ import { LocalEnvironmentConflictError } from '@stack/cloud-client';
 import { StackCompositionError, type ApplyPullResult, type PullPlan } from '@stack/core';
 
 import type { CloudRecoverOutcome } from '../memory/cloud-ops.js';
+import type { CanonicalPullOutcome } from '../memory/canonical-ops.js';
 import {
   pullFailed,
   pullPlanJson,
   renderCombinedPullResult,
   renderPullPlan,
+  type PullCanonicalOutcome,
   type PullMemoryOutcome,
   type PullSkillOutcome,
 } from '../ui/cloud.js';
@@ -27,6 +29,15 @@ export type PullCommandDependencies = {
    */
   memoryPullPreflight?(): Promise<MemoryPullPreflight>;
   applyMemoryPull?(): Promise<CloudRecoverOutcome>;
+  /**
+   * Canonical (Project) Memory's own pull (Task 13) — runs UNCONDITIONALLY, never
+   * gated by `memoryPullPreflight` (which only guards the legacy fresh-machine
+   * full-recover path above). Merges in whatever Cloud has and materializes it into
+   * native files; never publishes. Optional so existing Skills-only pull tests keep
+   * working unchanged. Wrapped defensively below — a failure here never throws past
+   * this command.
+   */
+  applyCanonicalPull?(): Promise<CanonicalPullOutcome>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -111,7 +122,19 @@ export const registerPullCommand = (
             };
           }
 
-        dependencies.writeOut(renderCombinedPullResult(skill, memory));
+        let canonicalMemory: PullCanonicalOutcome;
+        if (!dependencies.applyCanonicalPull) canonicalMemory = { status: 'not-attempted' };
+        else
+          try {
+            canonicalMemory = { status: 'applied', outcome: await dependencies.applyCanonicalPull() };
+          } catch (error) {
+            canonicalMemory = {
+              status: 'failed',
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+
+        dependencies.writeOut(renderCombinedPullResult(skill, memory, canonicalMemory));
         if (pullFailed(skill, memory))
           throw new StackCompositionError(
             'pull-partial-failure',
