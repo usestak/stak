@@ -760,6 +760,61 @@ describe('pushMemoryViaCanonical / pullMemoryViaCanonical (Task 13)', () => {
     expect(await backend.listGenerations()).toHaveLength(1);
   });
 
+  it('final review I1: a GLOBAL-only Memory change publishes exactly one generation; an unchanged push (even re-staged with new timestamps) publishes none; `stak memory backup` behaves the same', async () => {
+    await bindProjectAt(stackHome, projectDir);
+    await writeFile(path.join(projectDir, 'CLAUDE.local.md'), 'private memory', 'utf8');
+    await stageCanonicalMemory(stackHome, { claudeHome });
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, 'canonical-global-only');
+    const keysDir = path.join(root, 'keys');
+    expect((await pushMemoryViaCanonical(deps(stackHome, backend, keysDir), { claudeHome })).status).toBe('pushed');
+    expect(await backend.listGenerations()).toHaveLength(1);
+
+    const writeGlobal = async (body: string, stamp: string) => {
+      const bytes = Buffer.from(body, 'utf8');
+      const contentHash = hashBytes(bytes);
+      await writeMemoryObject({ stackHome, contentHash, bytes });
+      await writeMemoryManifest({
+        stackHome,
+        manifest: {
+          schemaVersion: 1,
+          provider: 'claude',
+          createdAt: stamp,
+          items: [
+            {
+              provider: 'claude',
+              kind: 'user-instructions',
+              scope: 'global',
+              logicalId: 'claude/user-instructions/CLAUDE.md',
+              contentHash,
+              restoreTarget: { base: 'claude-home', relativePath: 'CLAUDE.md' },
+              capturedAt: stamp,
+              sensitivity: 'private',
+            },
+          ],
+        },
+      });
+    };
+    await writeGlobal('# my global instructions v1', '2026-10-24T01:00:00.000Z');
+    const pushed = await pushMemoryViaCanonical(deps(stackHome, backend, keysDir), { claudeHome });
+    expect(pushed.status).toBe('pushed');
+    expect(await backend.listGenerations()).toHaveLength(2);
+
+    // Same global content, re-staged later (new createdAt/capturedAt): nothing to publish.
+    await writeGlobal('# my global instructions v1', '2026-10-24T02:00:00.000Z');
+    expect((await pushMemoryViaCanonical(deps(stackHome, backend, keysDir), { claudeHome })).status).toBe('up-to-date');
+    expect(await backend.listGenerations()).toHaveLength(2);
+
+    // `stak memory backup` (the deprecated alias) also publishes a global-only change once.
+    await writeGlobal('# my global instructions v2', '2026-10-24T03:00:00.000Z');
+    const backup = await runMemoryCloudBackup(deps(stackHome, backend, keysDir));
+    expect(backup.cloud.status).toBe('standard');
+    expect(await backend.listGenerations()).toHaveLength(3);
+    const again = await runMemoryCloudBackup(deps(stackHome, backend, keysDir));
+    expect(again.cloud.status).toBe('up-to-date');
+    expect(await backend.listGenerations()).toHaveLength(3);
+  });
+
   it('a pure Skills-only account (nothing ever staged, Cloud has no Memory history) does not publish an empty generation (Task 13 Important-7(a))', async () => {
     // Deliberately no `stak add .` ever: no v1 manifest, no canonical content.
     const store = new InMemoryRemoteMemoryStore();

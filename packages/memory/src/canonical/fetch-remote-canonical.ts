@@ -4,6 +4,8 @@ import { parseBundle } from '../remote/bundle-codec.js';
 import { RemoteMemoryError, type MemoryGenerationMeta, type RemoteMemoryBackend } from '../remote/backend.js';
 import { protectInProgressMessage } from '../remote/modes.js';
 import { hashBytes } from '../store.js';
+import { memoryManifestSchema } from '../domain.js';
+import { globalManifestDigest } from './push.js';
 import { portableRegistrySnapshotSchema, type LocalRegistry, type PortableRegistrySnapshot } from '../project/registry.js';
 import { convertV1Bundle } from './convert-v1.js';
 import { canonicalMainManifestSchema, emptyCanonicalMain, type CanonicalMainManifest } from './domain.js';
@@ -111,6 +113,9 @@ export const fetchRemoteCanonical = async (options: {
    * `stak memory resolve`/`diff` can fetch exactly that content again. */
   contentGeneration: number;
   main: CanonicalMainManifest;
+  /** `globalManifestDigest` of the global Memory in this generation's v1
+   * manifest (final review I1). */
+  globalDigest: string;
   objects: RemoteCanonicalObject[];
   registrySnapshot: PortableRegistrySnapshot | undefined;
 } | null> => {
@@ -173,10 +178,15 @@ export const fetchRemoteCanonical = async (options: {
       throw new RemoteMemoryError('integrity', 'The bundled project registry does not match its hash.');
     registrySnapshot = portableRegistrySnapshotSchema.parse(JSON.parse(registryBytes.toString('utf8')));
   }
+  const manifestBytes = Buffer.from(bundle.manifestB64, 'base64');
+  if (hashBytes(manifestBytes) !== bundle.manifestSha256)
+    throw new RemoteMemoryError('integrity', 'The bundled manifest does not match its hash.');
+  const globalDigest = globalManifestDigest(memoryManifestSchema.parse(JSON.parse(manifestBytes.toString('utf8'))));
   return {
     generation: head !== null && head > meta.generation ? head : meta.generation,
     contentGeneration: meta.generation,
     main: main ?? emptyCanonicalMain(),
+    globalDigest,
     objects,
     registrySnapshot,
   };

@@ -237,3 +237,45 @@ describe('pushCanonicalMemory: pending merge bookkeeping (Task 14 fix round 1)',
     expect(fastForward.clearPendingMerge).toHaveBeenCalled();
   });
 });
+
+describe('pushCanonicalMemory: global Memory (final review I1)', () => {
+  const same = manifest([present('notes/a.md', 1)]);
+
+  it('publishes a global-only change on the fast-forward path', async () => {
+    const deps = baseDeps({
+      getLocalMain: vi.fn(async () => same),
+      getLocalGlobalDigest: vi.fn(async () => 'g-new'),
+      getBase: vi.fn(async () => ({ generation: 3, main: same })),
+      fetchRemote: vi.fn(async () => ({ generation: 3, main: same, globalDigest: 'g-old' })),
+      publish: vi.fn(async () => ({ generation: 4 })),
+    });
+    expect(await pushCanonicalMemory(deps)).toEqual({ status: 'pushed', generation: 4, main: same });
+    expect(deps.publish).toHaveBeenCalledTimes(1);
+    expect(deps.publish).toHaveBeenCalledWith(same, 3);
+  });
+
+  it('publishes a global-only change on the merge path (base behind Cloud, canonical identical)', async () => {
+    const deps = baseDeps({
+      getLocalMain: vi.fn(async () => same),
+      getLocalGlobalDigest: vi.fn(async () => 'g-new'),
+      getBase: vi.fn(async () => ({ generation: 2, main: same })),
+      fetchRemote: vi.fn(async () => ({ generation: 5, main: same, globalDigest: 'g-old' })),
+      publish: vi.fn(async () => ({ generation: 6 })),
+    });
+    expect((await pushCanonicalMemory(deps)).status).toBe('pushed');
+    expect(deps.publish).toHaveBeenCalledWith(same, 5);
+  });
+
+  it('is up to date (no generation) when canonical AND global both match — including after a crash', async () => {
+    const deps = baseDeps({
+      getLocalMain: vi.fn(async () => same),
+      getLocalGlobalDigest: vi.fn(async () => 'g'),
+      getBase: vi.fn(async () => ({ generation: 1, main: manifest([]) })), // stale base (crash after publish)
+      fetchRemote: vi.fn(async () => ({ generation: 4, main: same, globalDigest: 'g' })),
+      publish: vi.fn(),
+    });
+    expect(await pushCanonicalMemory(deps)).toEqual({ status: 'up-to-date', generation: 4 });
+    expect(deps.publish).not.toHaveBeenCalled();
+    expect(deps.setBase).toHaveBeenCalledWith({ generation: 4, main: same });
+  });
+});

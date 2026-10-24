@@ -1,5 +1,33 @@
+import { hashBytes } from '../store.js';
+import type { MemoryManifest } from '../domain.js';
 import { canonicalDigest, emptyCanonicalMain, type CanonicalMainManifest } from './domain.js';
 import { mergeCanonical, type MergeConflict } from './merge.js';
+
+/**
+ * Final review I1: a content digest of the GLOBAL Memory a v1 manifest holds
+ * (spec §1: global Memory keeps working as today, carried in the bundle's v1
+ * manifest). Only `scope: 'global'` items count — a pre-migration manifest's
+ * project items live in canonical Memory once migrated — and the per-capture
+ * timestamps (`createdAt`, `capturedAt`) are left out, so re-staging identical
+ * global files never looks like a change. A missing manifest is "no global
+ * Memory".
+ */
+export const globalManifestDigest = (manifest: MemoryManifest | null | undefined): string => {
+  const items = (manifest?.items ?? [])
+    .filter((item) => item.scope === 'global')
+    .map((item) => ({
+      provider: item.provider,
+      kind: item.kind,
+      scope: item.scope,
+      logicalId: item.logicalId,
+      project: item.project ?? null,
+      contentHash: item.contentHash,
+      restoreTarget: item.restoreTarget,
+      sensitivity: item.sensitivity,
+    }))
+    .sort((a, b) => (a.logicalId < b.logicalId ? -1 : a.logicalId > b.logicalId ? 1 : 0));
+  return hashBytes(Buffer.from(JSON.stringify(items), 'utf8'));
+};
 
 export type RemoteCanonical = {
   generation: number;
@@ -7,6 +35,9 @@ export type RemoteCanonical = {
   /** Generation the content was read from, when it differs from `generation`
    * (see `fetchRemoteCanonical`). A pending merge records this one. */
   contentGeneration?: number;
+  /** `globalManifestDigest` of the global Memory this generation carries
+   * (final review I1). */
+  globalDigest?: string;
 };
 
 /** The generation a pending merge is "based on": the one whose content was
@@ -20,6 +51,10 @@ export type PublishConflictError = { code: 'conflict' };
 
 export type PushDeps = {
   getLocalMain(): Promise<CanonicalMainManifest>;
+  /** `globalManifestDigest` of this machine's staged global Memory (final
+   * review I1). When provided, Cloud is only "up to date" when its
+   * `globalDigest` matches too, so a global-only change is published. */
+  getLocalGlobalDigest?(): Promise<string>;
   getBase(): Promise<{ generation: number; main: CanonicalMainManifest } | null>;
   /** Called whenever a clean merge's result differs from what `getLocalMain`
    * returned — regardless of whether that result also gets published. A merge
@@ -75,12 +110,17 @@ const isConflictError = (error: unknown): boolean =>
 export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> => {
   const maxAttempts = deps.maxAttempts ?? 3;
   const local = await deps.getLocalMain();
+  const localGlobal = deps.getLocalGlobalDigest ? await deps.getLocalGlobalDigest() : undefined;
+  // Final review I1: global Memory travels in the same generation, so Cloud
+  // only "already has" local when the global Memory matches as well.
+  const globalMatches = (remote: RemoteCanonical): boolean =>
+    localGlobal === undefined || remote.globalDigest === localGlobal;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const remote = await deps.fetchRemote();
     const base = await deps.getBase();
 
-    if (remote && canonicalDigest(remote.main) === canonicalDigest(local)) {
+    if (remote && canonicalDigest(remote.main) === canonicalDigest(local) && globalMatches(remote)) {
       await deps.setBase({ generation: remote.generation, main: local });
       // Task 14 fix round 1: local and Cloud agree, so any leftover
       // `merge.json` (e.g. a crash after a final resolve wrote main/base but
@@ -121,7 +161,7 @@ export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> 
       await deps.savePendingMerge({ basedOnGeneration: remote?.contentGeneration ?? remoteGeneration, merged, conflicts });
       return { status: 'conflict', conflicts };
     }
-    if (canonicalDigest(merged) === canonicalDigest(remote!.main)) {
+    if (canonicalDigest(merged) === canonicalDigest(remote!.main) && globalMatches(remote!)) {
       // The merge only ever picked up content remote already has; there is
       // nothing of ours to contribute. Publishing `merged` now would create a
       // generation identical to `remoteGeneration` — forbidden. This IS already

@@ -12,6 +12,7 @@ import {
   effectiveCanonicalBase,
   encodeClaudeProjectKey,
   fetchRemoteCanonical,
+  globalManifestDigest,
   gitClaimOf,
   hashBytes,
   isLocalStoreMigrated,
@@ -1033,7 +1034,12 @@ const remoteOf = (deps: MemoryCloudDeps, mmk: Buffer | undefined) => {
     for (const object of result.objects)
       await writeMemoryObject({ stackHome: deps.stackHome, contentHash: object.contentHash, bytes: object.bytes });
     lastRegistrySnapshot = result.registrySnapshot;
-    return { generation: result.generation, contentGeneration: result.contentGeneration, main: result.main };
+    return {
+      generation: result.generation,
+      contentGeneration: result.contentGeneration,
+      main: result.main,
+      globalDigest: result.globalDigest,
+    };
   };
   return { fetch, lastRegistrySnapshot: () => lastRegistrySnapshot };
 };
@@ -1136,6 +1142,8 @@ export const pushMemoryViaCanonical = async (
   if (await hasNothingToPush(deps)) return { status: 'nothing-staged' };
   const outcome = await pushCanonicalMemory({
     getLocalMain: () => readCanonicalMain(deps.stackHome),
+    // Final review I1: a global-only Memory change is published too.
+    getLocalGlobalDigest: async () => globalManifestDigest(await readMemoryManifest(deps.stackHome)),
     // Task 13 fix round 7: a base Cloud no longer holds merges as empty.
     getBase: async () => effectiveCanonicalBase(deps.backend, await readCanonicalBase(deps.stackHome)),
     setLocalMain: (main) => writeCanonicalMain(deps.stackHome, main),

@@ -30,6 +30,7 @@ import {
   LocalKeyStoreError,
   fetchRemoteCanonical,
   generateMmk,
+  globalManifestDigest,
   hashBytes,
   isProtectInProgress,
   migrateLocalStore,
@@ -569,7 +570,12 @@ export const runMemoryCloudBackup = async (
       if (!result) return null;
       for (const object of result.objects)
         await writeMemoryObject({ stackHome: deps.stackHome, contentHash: object.contentHash, bytes: object.bytes });
-      return { generation: result.generation, contentGeneration: result.contentGeneration, main: result.main };
+      return {
+        generation: result.generation,
+        contentGeneration: result.contentGeneration,
+        main: result.main,
+        globalDigest: result.globalDigest,
+      };
     };
 
     // Spec Appendix A.4 / Task 13 finding 7: lazily seed base from this
@@ -587,6 +593,8 @@ export const runMemoryCloudBackup = async (
     // publish entirely), never blindly overwrite it (Task 13 Critical-3).
     const outcome = await pushCanonicalMemory({
       getLocalMain: () => readCanonicalMain(deps.stackHome),
+      // Final review I1: a global-only Memory change is published too.
+      getLocalGlobalDigest: async () => globalManifestDigest(await readMemoryManifest(deps.stackHome)),
       // Task 13 fix round 7: a base Cloud no longer holds merges as empty.
       getBase: async () => effectiveCanonicalBase(deps.backend, await readCanonicalBase(deps.stackHome)),
       setLocalMain: (nextMain) => writeCanonicalMain(deps.stackHome, nextMain),
