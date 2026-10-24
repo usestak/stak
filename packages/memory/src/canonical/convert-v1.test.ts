@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { MemoryManifest } from '../domain.js';
 import { emptyRegistry, resolveOrMintProject, toPortableSnapshot } from '../project/registry.js';
 import type { MemoryBackupBundle } from '../remote/bundle-codec.js';
-import { convertV1Bundle } from './convert-v1.js';
+import { convertV1Bundle, convertV1BundleForRecover } from './convert-v1.js';
 
 const h = (n: number) => `sha256:${n.toString().padStart(64, '0')}`;
 
@@ -158,5 +158,41 @@ describe('convertV1Bundle', () => {
     const bundle = makeBundle(manifest, snapshot);
     const result = convertV1Bundle(bundle, { localRegistry: localSideRegistry.registry });
     expect(result.projects).toEqual([]); // dropped, not assigned to either A or B
+  });
+});
+
+describe('convertV1BundleForRecover (final review T15-1)', () => {
+  it('skips an item with no canonical path BEFORE minting: no phantom, document-less project', () => {
+    const identity = { kind: 'git' as const, canonical: 'github.com/acme/phantom', host: 'github.com', owner: 'acme', repo: 'phantom' };
+    const manifest: MemoryManifest = {
+      schemaVersion: 1,
+      provider: 'claude',
+      createdAt: '2026-10-20T00:00:00.000Z',
+      items: [
+        {
+          provider: 'claude',
+          kind: 'user-instructions', // maps to no canonical path when scope is 'project'
+          scope: 'project',
+          logicalId: 'claude/user-instructions/github.com/acme/phantom/CLAUDE.md',
+          project: identity,
+          contentHash: h(1),
+          restoreTarget: { base: 'claude-home', relativePath: 'CLAUDE.md' },
+          capturedAt: '2026-10-20T00:00:00.000Z',
+          sensitivity: 'private',
+        },
+      ],
+    };
+    const localRegistry = emptyRegistry();
+    let minted = 0;
+    const result = convertV1BundleForRecover(makeBundle(manifest), {
+      localRegistry,
+      mint: () => {
+        minted += 1;
+        return 'prj_0000000000000000000000000a';
+      },
+    });
+    expect(minted).toBe(0);
+    expect(result.registry.projects).toEqual(localRegistry.projects);
+    expect(result.main.projects).toEqual([]);
   });
 });

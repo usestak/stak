@@ -3,6 +3,7 @@ import { projectIdentityKey } from '../project-identity.js';
 import { resolveOrMintProject, resolveProjectForIdentity, type LocalRegistry } from '../project/registry.js';
 import { emptyRegistry, mergePortableSnapshot, portableRegistrySnapshotSchema } from '../project/registry.js';
 import type { MemoryBackupBundle } from '../remote/bundle-codec.js';
+import { claudeCanonicalPathOf } from './claude-project-adapter.js';
 import { groupLegacyItems } from './group-legacy-items.js';
 import { emptyCanonicalMain, type CanonicalMainManifest } from './domain.js';
 
@@ -88,6 +89,10 @@ export const convertV1BundleForRecover = (
   const conflicts = new Map<string, string[]>();
   for (const item of manifest.items) {
     if (item.scope !== 'project' || !item.project) continue;
+    // Final review T15-1: skip an item with no canonical path BEFORE resolving
+    // or minting, exactly like local migration (`migrate.ts`'s
+    // `buildCanonicalMain`) — never a phantom, document-less project.
+    if (!claudeCanonicalPathOf(item)) continue;
     const resolution = resolveProjectForIdentity(registry, item.project);
     if (resolution.status === 'conflict') {
       conflicts.set(projectIdentityKey(item.project), resolution.projectIds);
