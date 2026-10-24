@@ -447,7 +447,7 @@ export const renderCombinedPushResult = (
       lines.push('  staged locally (sign in to sync Memory to Cloud).');
     else if (outcome.status === 'protected-locked')
       lines.push(
-        '  staged locally; Cloud sync needs this device unlocked (`stak memory protect`).',
+        '  staged locally; Cloud sync needs this device unlocked (`stak memory recover --passkey` or `--recovery-file <path>`).',
       );
     else if (outcome.status === 'failed')
       lines.push(`  staged locally; Cloud sync FAILED: ${outcome.message}`);
@@ -552,7 +552,7 @@ const canonicalPullLine = (canonical: PullCanonicalOutcome): string | null => {
   if (outcome.status === 'conflict')
     return `  Project Memory has ${outcome.conflicts?.length ?? 0} unresolved conflict(s) — run \`stak memory resolve\`.`;
   if (outcome.status === 'protected-locked')
-    return '  Project Memory sync needs this device unlocked (`stak memory protect`).';
+    return '  Project Memory sync needs this device unlocked (`stak memory recover --passkey` or `--recovery-file <path>`).';
   const notes = canonicalExtraNotes(outcome);
   if (outcome.status === 'up-to-date' && notes.length === 0) return null;
   const head = outcome.status === 'up-to-date' ? 'Project Memory up to date' : 'Project Memory synced';

@@ -396,3 +396,52 @@ describe('passkey bridge failures are bounded (R6)', () => {
       expect(serialized).not.toContain(secret);
   });
 });
+
+describe('C1: passkey protect refuses an already-Protected account', () => {
+  it('opens no browser ceremony and keeps the device MMK', async () => {
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const device = secureKeys(await temp('stack-pk-c1-'));
+    await standardCloudBackup({ stackHome: source.stackHome, backend });
+    const prf = randomBytes(32);
+    const browser = async (url: string) => {
+      const record = await backend.getRecoverySession(sessionIdFrom(url));
+      const session = record?.session as RecoverySession;
+      const mmk = generateMmk();
+      const keyring = newKeyring();
+      const { wrapper } = addPasskeyWrapper({ keyring, mmk, prfOutput: prf });
+      await backend.addRecoveryMethod({
+        type: 'passkey',
+        label: 'Passkey',
+        publicIdentifier: 'cred-1',
+        mmkWrapper: { mmkId: keyring.mmkId, wrapper },
+        cryptoVersion: 'stack-mem-cipher-v1',
+      });
+      await backend.submitRecoveryEnvelope(session.sessionId, await sealMmkForPeer({ session, mmk }));
+    };
+    const deps = {
+      stackHome: source.stackHome,
+      backend,
+      localKeyStore: device,
+      webBaseUrl: 'http://localhost:3000',
+      openBrowser: browser,
+      sleep: immediateSleep,
+    };
+    expect((await runPasskeyProtect(deps)).status).toBe('protected');
+    const mmkBefore = await device.loadMmk();
+    let opened = 0;
+    await expect(
+      runPasskeyProtect({
+        ...deps,
+        openBrowser: async (url) => {
+          opened += 1;
+          await browser(url);
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'already-protected' });
+    expect(opened).toBe(0);
+    expect((await device.loadMmk())?.equals(mmkBefore as Buffer)).toBe(true);
+    expect(await backend.listRecoveryMethods()).toHaveLength(1);
+  });
+});

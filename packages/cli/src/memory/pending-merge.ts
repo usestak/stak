@@ -101,7 +101,7 @@ export const fetchCloudAtGeneration = async (
   if ((profile?.privacyMode ?? 'standard') === 'protected' && !mmk)
     throw new MemoryResolveError(
       'cloud-unavailable',
-      "Protected Memory is locked on this device, so Cloud's version can't be read (`stak memory protect`). Nothing was changed.",
+      "Protected Memory is locked on this device, so Cloud's version can't be read. Unlock it with `stak memory recover --passkey` or `stak memory recover --recovery-file <path>`. Nothing was changed.",
     );
   let result: Awaited<ReturnType<typeof fetchRemoteCanonical>>;
   try {

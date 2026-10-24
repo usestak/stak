@@ -286,6 +286,23 @@ export const PROTECT_IN_PROGRESS_MESSAGE =
 export const PROTECT_NEEDS_ORIGINAL_KEY_MESSAGE =
   "Protecting your Cloud Memory was interrupted while it was finishing, so STAK won't sync Memory until it does. Nothing was changed on this machine. Run `stak memory protect` again on the machine that started it — only that machine holds the key for the protected copies already made.";
 
+/** How to unlock Protected Memory on a device that doesn't hold the key. */
+export const UNLOCK_PROTECTED_HINT =
+  '`stak memory recover --passkey` or `stak memory recover --recovery-file <path>`';
+
+export const ALREADY_PROTECTED_MESSAGE = `Your Cloud Memory is already Protected, so nothing was changed. Running protect again would replace this account's Memory key. To unlock Protected Memory on this device, run ${UNLOCK_PROTECTED_HINT}.`;
+
+/**
+ * Final review C1: refuse `stak memory protect` once the account is
+ * Protected (and not mid-protect). Re-running it would generate and enroll a
+ * NEW Memory key over the device's real one, which the account's generations
+ * can't be opened with. Call before generating, enrolling or wrapping any key.
+ */
+export const assertNotAlreadyProtected = async (backend: RemoteMemoryBackend): Promise<void> => {
+  if ((await backend.getProfile())?.privacyMode === 'protected')
+    throw new RemoteMemoryError('already-protected', ALREADY_PROTECTED_MESSAGE);
+};
+
 /**
  * Committed Protected replicas whose original is no longer a committed
  * Standard generation — i.e. protect was interrupted AFTER it began retiring

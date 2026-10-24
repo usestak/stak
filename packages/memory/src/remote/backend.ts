@@ -101,6 +101,7 @@ export class RemoteMemoryError extends Error {
       | 'incompatible-format'
       | 'invalid-replica'
       | 'protect-in-progress'
+      | 'already-protected'
       | 'retire-refused',
     message: string,
   ) {

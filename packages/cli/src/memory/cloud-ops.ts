@@ -21,6 +21,7 @@ import {
   CIPHER_VERSION,
   addRecoveryFileWrapper,
   asBridgeFailure,
+  assertNotAlreadyProtected,
   bundleFromStore,
   clearPendingMerge,
   cloudRecover,
@@ -832,6 +833,8 @@ export const runMemoryCloudProtect = async (
   // then retires the replicas it can't open and re-replicates with the new
   // key (originals intact) — never a lockout. A fresh recovery file is issued
   // either way, because an interrupted run never wrote one.
+  // Final review C1: never on an account that is already Protected.
+  await assertNotAlreadyProtected(deps.backend);
   const inProgress = await isProtectInProgress(deps.backend);
   const resumeMmk = inProgress ? await deps.localKeyStore.loadMmk().catch(() => null) : null;
   // Fix round 4 (d): if finishing needs the interrupted run's key (originals
@@ -1135,6 +1138,8 @@ export const runPasskeyProtect = async (
   // Task 13 fix round 3: resume an interrupted protect with the key this
   // device already enrolled for it (the first run's passkey wrapper already
   // wraps that same key) — never a new key the existing replicas can't use.
+  // Final review C1: never on an account that is already Protected.
+  await assertNotAlreadyProtected(deps.backend);
   if (await isProtectInProgress(deps.backend)) {
     const resumeMmk = await deps.localKeyStore.loadMmk().catch(() => null);
     if (resumeMmk) {

@@ -1091,3 +1091,53 @@ describe('runMemoryCloudBackup migrates to canonical Memory and always publishes
     expect(docs.some((d) => d.state === 'present' && d.contentHash === hashY)).toBe(true);
   });
 });
+
+describe('C1: protect refuses an already-Protected account', () => {
+  it('never generates or enrolls a new key, adds no recovery method, and leaves the device MMK intact', async () => {
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-ops-c1-'));
+    const deps = {
+      stackHome: source.stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    };
+    await runMemoryCloudBackup(deps);
+    const first = await runMemoryCloudProtect(deps, { recoveryKey: generateRecoveryKey() });
+    expect(first.status).toBe('protected');
+    const mmkBefore = await keys.loadMmk();
+    const methodsBefore = await backend.listRecoveryMethods();
+    const generationsBefore = await backend.listGenerations();
+
+    await expect(
+      runMemoryCloudProtect(deps, { recoveryKey: generateRecoveryKey() }),
+    ).rejects.toMatchObject({ code: 'already-protected' });
+
+    expect((await keys.loadMmk())?.equals(mmkBefore as Buffer)).toBe(true);
+    expect(await backend.listRecoveryMethods()).toHaveLength(methodsBefore.length);
+    expect(await backend.listGenerations()).toHaveLength(generationsBefore.length);
+    expect((await backend.getProfile())?.privacyMode).toBe('protected');
+  });
+
+  it('a locked device (no MMK) is refused too, pointing at `stak memory recover`', async () => {
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const deviceA = secureKeys(await temp('stack-ops-c1a-'));
+    await runMemoryCloudProtect(
+      { stackHome: source.stackHome, backend, localKeyStore: deviceA, runLocalBackup: fakeBackup },
+      { recoveryKey: generateRecoveryKey() },
+    );
+    const deviceB = secureKeys(await temp('stack-ops-c1b-'));
+    const error = await runMemoryCloudProtect(
+      { stackHome: source.stackHome, backend, localKeyStore: deviceB, runLocalBackup: fakeBackup },
+      { recoveryKey: generateRecoveryKey() },
+    ).catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: 'already-protected' });
+    expect(String((error as Error).message)).toContain('stak memory recover');
+    expect(await deviceB.hasKey()).toBe(false);
+    expect(await backend.listRecoveryMethods()).toHaveLength(1);
+  });
+});

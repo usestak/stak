@@ -356,7 +356,10 @@ public):
 - `stak memory protect` — turn on Protected mode once. Creates your encryption key,
   sets up a recovery method (recovery file today; passkey via the browser), enrolls
   this device so future backups need no prompt, and safely migrates existing
-  Standard backups to Protected (verify-before-delete).
+  Standard backups to Protected (verify-before-delete). Once the account is
+  Protected, `protect` refuses to run again (it would replace your Memory key).
+  To unlock Protected Memory on another device, use
+  `stak memory recover --passkey` or `stak memory recover --recovery-file <path>`.
 - `stak memory history [--json]` — list your recoverable **backups** (newest first)
   with backup number, date, privacy mode, and size.
 - `stak memory recover [--backup <n>] [--recovery-file <path>]` — rebuild the
