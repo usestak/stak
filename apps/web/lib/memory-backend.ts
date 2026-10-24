@@ -269,11 +269,17 @@ export const supabaseRemoteMemoryBackend = (
           throw new Error(`Memory retire failed: ${error.message}`);
         }
       } else {
+        // Final review I2: only a COMMITTED row may be retired — migration
+        // 0018's trigger raises on any update of an already-retired row, and
+        // Delete Cloud Memory re-runs this over every backup id (retired ones
+        // included, to re-remove orphaned payloads). Filtering makes a retired
+        // row a no-op update, so the storage remove below still runs.
         const { error } = await db()
           .from('memory_backups')
           .update({ state: 'retired', soft_deleted_at: nowIso })
           .eq('user_id', userId)
-          .eq('backup_id', backupId);
+          .eq('backup_id', backupId)
+          .eq('state', 'committed');
         if (error) throw new Error(`Memory retire failed: ${error.message}`);
       }
       // The payload object MUST be removed; a silent storage failure would orphan recoverable
