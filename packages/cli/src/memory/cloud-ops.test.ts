@@ -31,6 +31,7 @@ import {
   type DiscoveredMemoryItem,
   type ManifestItem,
   type MemoryManifest,
+  unwrapWithRecoveryKey,
 } from '@stack/memory';
 
 import {
@@ -1171,5 +1172,69 @@ describe('recover --recovery-file reads the file (final review follow-up)', () =
     const junk = path.join(dir, 'junk.stackkey');
     await writeFile(junk, '{"format":"nope"}', 'utf8');
     await expect(readRecoveryKeyFile(junk)).rejects.toThrow(/isn't a STAK recovery file/);
+  });
+});
+
+describe('I8: protect writes the recovery file before anything changes in Cloud', () => {
+  const setup = async () => {
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-ops-i8-'));
+    const deps = { stackHome: source.stackHome, backend, localKeyStore: keys, runLocalBackup: fakeBackup };
+    await runMemoryCloudBackup(deps);
+    return { backend, keys, deps };
+  };
+
+  it('writes the file before the recovery wrapper is added; a migration failure keeps the wrapper, and the file unlocks the enrolled key', async () => {
+    const { backend, keys, deps } = await setup();
+    const order: string[] = [];
+    const addRecoveryMethod = backend.addRecoveryMethod.bind(backend);
+    const failing: typeof backend = Object.assign(Object.create(backend) as typeof backend, {
+      addRecoveryMethod: async (input: Parameters<typeof backend.addRecoveryMethod>[0]) => {
+        order.push('add-recovery-method');
+        return addRecoveryMethod(input);
+      },
+      createGeneration: async () => {
+        throw new Error('network died mid-protect');
+      },
+    });
+    const recoveryKey = generateRecoveryKey();
+    await expect(
+      runMemoryCloudProtect(
+        { ...deps, backend: failing },
+        {
+          recoveryKey,
+          writeRecoveryFile: async () => {
+            order.push('write-file');
+          },
+        },
+      ),
+    ).rejects.toThrow('network died mid-protect');
+    expect(order).toEqual(['write-file', 'add-recovery-method']);
+    const methods = await backend.listRecoveryMethods();
+    expect(methods).toHaveLength(1); // never revoked: the file on disk refers to it
+    const stored = methods[0]?.mmkWrapper as { mmkId: string; wrapper: Parameters<typeof unwrapWithRecoveryKey>[0]['wrapper'] };
+    const unwrapped = unwrapWithRecoveryKey({
+      keyring: { mmkId: stored.mmkId, wrappers: [stored.wrapper] },
+      wrapper: stored.wrapper,
+      recoveryKey: recoveryKey.keyBytes,
+    });
+    expect(unwrapped.equals((await keys.loadMmk()) as Buffer)).toBe(true);
+  });
+
+  it('a recovery file that cannot be written stops protect before any recovery method, replica or mode change', async () => {
+    const { backend, deps } = await setup();
+    await expect(
+      runMemoryCloudProtect(deps, {
+        recoveryKey: generateRecoveryKey(),
+        writeRecoveryFile: async () => {
+          throw new Error('EEXIST: file already exists');
+        },
+      }),
+    ).rejects.toThrow('EEXIST');
+    expect(await backend.listRecoveryMethods()).toHaveLength(0);
+    expect((await backend.listGenerations()).every((g) => g.privacyMode === 'standard')).toBe(true);
+    expect((await backend.getProfile())?.privacyMode ?? 'standard').toBe('standard');
   });
 });

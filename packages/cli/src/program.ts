@@ -1116,18 +1116,32 @@ const defaultDependencies: ProgramDependencies = {
     const deps = await buildMemoryCloudDeps();
     if (!deps.backend) return { status: 'not-authenticated' as const };
     const recoveryKey = generateRecoveryKey();
-    const result = await runMemoryCloudProtect(
-      { ...deps, backend: deps.backend },
-      { recoveryKey },
-    );
-    // Fail closed: if local key storage couldn't be secured, do NOT write the
-    // recovery file and report the insecure-local-key status.
-    if (result.status === 'insecure-local-key')
-      return { status: 'insecure-local-key' as const };
     const recoveryFilePath =
       options.recoveryFile ??
       path.join(process.cwd(), 'stack-memory-recovery.stackkey');
-    await writeRecoveryFile(recoveryFilePath, recoveryKey.file);
+    // Final review I8: the recovery file is written BEFORE anything changes in
+    // Cloud (and only once this device's key is secured — an insecure local
+    // key store returns before it is called).
+    const result = await runMemoryCloudProtect(
+      { ...deps, backend: deps.backend },
+      {
+        recoveryKey,
+        writeRecoveryFile: async () => {
+          try {
+            await writeRecoveryFile(recoveryFilePath, recoveryKey.file);
+          } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            throw new Error(
+              code === 'EEXIST'
+                ? `A file already exists at ${recoveryFilePath}. Choose another path with --recovery-file. Nothing was changed in Cloud.`
+                : `Couldn't write the recovery file at ${recoveryFilePath}${code ? ` (${code})` : ''}. Nothing was changed in Cloud.`,
+            );
+          }
+        },
+      },
+    );
+    if (result.status === 'insecure-local-key')
+      return { status: 'insecure-local-key' as const };
     return { migrated: result.migrated, recoveryFilePath };
   },
   memoryProtectPasskey: async () => runPasskeyProtect(await buildPasskeyDeps()),

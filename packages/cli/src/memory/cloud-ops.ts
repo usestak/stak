@@ -856,7 +856,15 @@ export type ProtectOutcome =
 /** Enable Protected: new MMK + recovery-file method + device enrollment + migrate. */
 export const runMemoryCloudProtect = async (
   deps: MemoryCloudDeps & { backend: RemoteMemoryBackend },
-  options: { recoveryKey: RecoveryKeyArtifacts },
+  options: {
+    recoveryKey: RecoveryKeyArtifacts;
+    /** Final review I8: saves `recoveryKey`'s file to disk. Called after this
+     * device's key is enrolled and BEFORE anything changes in Cloud (the
+     * recovery wrapper, replicas, the mode), so a crash or failure later can
+     * never leave a Protected account whose only key is on this device. A
+     * failure here stops protect with nothing changed in Cloud. */
+    writeRecoveryFile?: () => Promise<void>;
+  },
 ): Promise<ProtectOutcome> => {
   // Task 13 fix rounds 3-4: RESUME an interrupted protect with the Memory key
   // this device already enrolled for it, so the replicas already in Cloud are
@@ -878,6 +886,7 @@ export const runMemoryCloudProtect = async (
   // secured, persist nothing and finalize nothing in Cloud.
   if (!resumeMmk && !(await enrollDeviceSafe(deps.localKeyStore, mmk)))
     return { status: 'insecure-local-key' };
+  if (options.writeRecoveryFile) await options.writeRecoveryFile();
   const keyring = newKeyring();
   const { wrapper } = addRecoveryFileWrapper({
     keyring,
@@ -885,26 +894,21 @@ export const runMemoryCloudProtect = async (
     recoveryKey: options.recoveryKey.keyBytes,
   });
   const stored: StoredWrapper = { mmkId: keyring.mmkId, wrapper };
-  const method = await deps.backend.addRecoveryMethod({
+  await deps.backend.addRecoveryMethod({
     type: 'recovery-file',
     label: 'Recovery file',
     mmkWrapper: stored,
     cryptoVersion: CIPHER_VERSION,
   });
-  let migration: Awaited<ReturnType<typeof migrateStandardToProtected>>;
-  try {
-    migration = await migrateStandardToProtected({
-      backend: deps.backend,
-      mmk,
-      ...(deps.now ? { now: deps.now } : {}),
-    });
-  } catch (error) {
-    // Task 13 fix round 4: the recovery file for this wrapper is only written
-    // after success, so on failure the wrapper is unusable — never leave it
-    // behind. (The device key stays enrolled: a re-run resumes with it.)
-    await deps.backend.revokeRecoveryMethod(method.methodId).catch(() => undefined);
-    throw error;
-  }
+  // Final review I8: the recovery file for this wrapper is already on disk, so
+  // the wrapper is NEVER revoked on failure — it may be the only off-device
+  // copy of the key any replicas made so far were sealed with. (The device key
+  // stays enrolled too: a re-run on this machine resumes with it.)
+  const migration = await migrateStandardToProtected({
+    backend: deps.backend,
+    mmk,
+    ...(deps.now ? { now: deps.now } : {}),
+  });
   return {
     status: 'protected',
     migrated: migration.migrated,
