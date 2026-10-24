@@ -13,10 +13,15 @@
  */
 import { randomUUID } from 'node:crypto';
 
-import { hashBytes } from '../store.js';
+import { hashBytes, readMemoryManifest, writeMemoryManifest } from '../store.js';
 import type { CanonicalMainManifest } from '../canonical/domain.js';
+import { convertV1BundleForRecover } from '../canonical/convert-v1.js';
+import { isLocalStoreMigrated } from '../canonical/migrate.js';
+import { writeCanonicalMain } from '../canonical/store.js';
+import { readLocalRegistry, writeLocalRegistry } from '../project/registry-store.js';
 import {
   bundleFromStore,
+  parseBundle,
   restoreBundleToStore,
 } from './bundle-codec.js';
 import {
@@ -201,6 +206,21 @@ export const cloudRecover = async (options: {
     );
   }
 
+  // Spec §8.5 / §9.2: an old-format (v1) bundle recovered onto a store that is
+  // ALREADY upgraded. Restoring it as-is would leave `canonical/main.json`
+  // untouched (so the next push republishes current project Memory and the
+  // rollback does nothing for projects) and put project items back into
+  // `current.json` after migration. So convert it to canonical Memory instead.
+  // A dry-run conversion runs FIRST: an identity conflict fails closed here,
+  // before anything is written (never a partial recover).
+  const bundle = parseBundle(bundleBytes);
+  const convertV1 = !bundle.canonicalB64 && (await isLocalStoreMigrated(options.stackHome));
+  if (convertV1)
+    convertV1BundleForRecover(bundle, {
+      localRegistry: await readLocalRegistry(options.stackHome),
+      mint: () => 'prj_dryrun',
+    });
+
   const restored = await restoreBundleToStore({
     bytes: bundleBytes,
     stackHome: options.stackHome,
@@ -208,6 +228,22 @@ export const cloudRecover = async (options: {
   // Phase 15B: reconcile the portable project registry the bundle carried (or lazily
   // migrate legacy identities when it carried none). Never creates a path binding.
   await reconcileRegistryAfterRecover({ stackHome: options.stackHome });
+  if (convertV1) {
+    // Against the reconciled registry, so Project IDs match what reconcile
+    // recorded (snapshot first, local registry as the §9.2 fallback).
+    const converted = convertV1BundleForRecover(bundle, {
+      localRegistry: await readLocalRegistry(options.stackHome),
+    });
+    await writeLocalRegistry(options.stackHome, converted.registry);
+    await writeCanonicalMain(options.stackHome, converted.main);
+    // Same slimming as migration step D: `current.json` stays global-only.
+    const manifest = await readMemoryManifest(options.stackHome);
+    if (manifest)
+      await writeMemoryManifest({
+        stackHome: options.stackHome,
+        manifest: { ...manifest, items: manifest.items.filter((item) => item.scope === 'global') },
+      });
+  }
   return {
     generation: meta.generation,
     privacyMode: meta.privacyMode,

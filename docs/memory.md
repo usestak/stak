@@ -234,7 +234,12 @@ newest backup, and says so ("publishing a rollback to Backup #n"). Cloud history
 is never rewritten, and the push merges with Cloud like any other push: if
 another machine pushed in the meantime, its unrelated changes are kept, and
 anything changed on both sides becomes a conflict to resolve. Other machines
-pick up the rollback, including the deletions, on their next `stak pull`.
+pick up the rollback, including the deletions, on their next `stak pull`. If
+this machine was behind Cloud before you recovered (it hadn't pulled the newer
+backups), the rollback only undoes changes this machine had seen: files changed
+only in backups it never pulled keep Cloud's version. Old-format backups (from
+before this upgrade) can be recovered the same way; they are converted to the
+new format as they are recovered.
 
 One exception: on a machine that has never synced Memory before (for example a
 fresh machine), `stak push` refuses after recovering an older backup, because

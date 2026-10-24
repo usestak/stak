@@ -5,10 +5,15 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { memoryStorePaths } from '../store.js';
+import { memoryStorePaths, readMemoryManifest } from '../store.js';
 import { readMemoryObject } from '../store.js';
 import { CANONICAL_MAIN_SCHEMA_VERSION } from '../canonical/domain.js';
-import { writeCanonicalMain } from '../canonical/store.js';
+import { V1ConversionError } from '../canonical/convert-v1.js';
+import { isLocalStoreMigrated, migrateLocalStore } from '../canonical/migrate.js';
+import { readCanonicalMain, writeCanonicalMain } from '../canonical/store.js';
+import { mintProjectId } from '../project/project-id.js';
+import { emptyRegistry, identityClaim } from '../project/registry.js';
+import { readLocalRegistry, writeLocalRegistry } from '../project/registry-store.js';
 import {
   InMemoryRemoteMemoryStore,
   RemoteMemoryError,
@@ -664,5 +669,80 @@ describe('guarded retire: two devices running protect at once (Task 13 fix round
     expect(await backend.getLatest()).not.toBeNull();
     await backend.retireGeneration(std.backupId); // unguarded: allowed
     expect(await backend.getLatest()).toBeNull();
+  });
+});
+
+describe('recovering an old-format (v1) generation onto an upgraded store (spec 8.5 / 9.2)', () => {
+  /** An upgraded (migrated) store with nothing in it yet. */
+  const upgradedStore = async (): Promise<string> => {
+    const dest = await freshStore();
+    await migrateLocalStore(dest);
+    expect(await isLocalStoreMigrated(dest)).toBe(true);
+    return dest;
+  };
+
+  it('Protected: converted into canonical Memory; current.json keeps only global items', async () => {
+    const source = await writeSyntheticStore({ projects: 2, filesPerProject: 2 });
+    roots.push(source.stackHome);
+    const { backend } = backendFor('user-v1');
+    const mmk = generateMmk();
+    await protectedCloudBackup({ stackHome: source.stackHome, backend, mmk });
+    expect((await backend.getLatest())?.bundleFormatVersion).toBe('stack-mem-bundle-v1');
+
+    const dest = await upgradedStore();
+    await cloudRecover({ stackHome: dest, backend, mmk });
+    const main = await readCanonicalMain(dest);
+    expect(main.projects).toHaveLength(2);
+    expect(main.projects.flatMap((p) => p.documents.map((d) => d.path)).sort()).toEqual(
+      ['notes/f0.md', 'notes/f0.md', 'notes/f1.md', 'notes/f1.md'],
+    );
+    expect(new Set(main.projects.flatMap((p) => p.documents.map((d) => (d.state === 'present' ? d.contentHash : '')))))
+      .toEqual(new Set(source.hashes));
+    expect((await readMemoryManifest(dest))?.items.filter((i) => i.scope === 'project')).toEqual([]);
+    // Every Project ID is recorded in the local registry.
+    const registry = await readLocalRegistry(dest);
+    for (const project of main.projects)
+      expect(registry.projects.some((r) => r.projectId === project.projectId)).toBe(true);
+  });
+
+  it('an identity matching two Project IDs here fails closed: nothing is recovered or changed', async () => {
+    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 1 });
+    roots.push(source.stackHome);
+    const { backend } = backendFor('user-v1-conflict');
+    await standardCloudBackup({ stackHome: source.stackHome, backend });
+
+    const dest = await upgradedStore();
+    const claim = identityClaim({
+      kind: 'git',
+      canonical: 'github.com/example/proj0',
+      host: 'github.com',
+      owner: 'example',
+      repo: 'proj0',
+    });
+    await writeLocalRegistry(dest, {
+      ...emptyRegistry(),
+      projects: [
+        { projectId: mintProjectId(), claims: [claim], lifecycle: 'active' },
+        { projectId: mintProjectId(), claims: [claim], lifecycle: 'active' },
+      ],
+    });
+    const manifestBefore = await readFile(memoryStorePaths(dest).currentManifest, 'utf8');
+    const mainBefore = await readCanonicalMain(dest);
+
+    await expect(cloudRecover({ stackHome: dest, backend })).rejects.toBeInstanceOf(V1ConversionError);
+    expect(await readFile(memoryStorePaths(dest).currentManifest, 'utf8')).toBe(manifestBefore);
+    expect(await readCanonicalMain(dest)).toEqual(mainBefore);
+    await expect(readMemoryObject({ stackHome: dest, contentHash: source.hashes[0] as string })).rejects.toThrow();
+  });
+
+  it('a store that is NOT upgraded restores the v1 bundle exactly as before', async () => {
+    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 1 });
+    roots.push(source.stackHome);
+    const { backend } = backendFor('user-v1-fresh');
+    await standardCloudBackup({ stackHome: source.stackHome, backend });
+    const dest = await freshStore();
+    await cloudRecover({ stackHome: dest, backend });
+    await assertByteExact(source.stackHome, dest, source.hashes);
+    expect((await readCanonicalMain(dest)).projects).toEqual([]);
   });
 });

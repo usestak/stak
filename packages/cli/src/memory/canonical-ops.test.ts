@@ -2741,6 +2741,97 @@ describe('spec 8.5: recover an old generation, then push it forward', () => {
     expect(await exists(noteOf(X.claude, X.dir, 'later.md'))).toBe(false);
   });
 
+  it('an upgraded store recovering an OLD-FORMAT (v1) generation: converted to canonical Memory + tombstones, current.json stays global-only, and the next push publishes exactly that', async () => {
+    const gitRemote = 'https://github.com/acme/rollback-v1.git';
+    const identity = canonicalGitIdentity(gitRemote);
+    if (!identity) throw new Error('test setup: expected a resolvable git identity');
+    const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'spec-8-5-v1');
+
+    // Gen 0: a genuine v1 push (old CLI) with one project note, one global
+    // item, and the portable registry snapshot (spec §9.2 determinism).
+    const S = path.join(root, 'v1src-stack');
+    const noteV1 = Buffer.from('v1 note', 'utf8');
+    const globalBody = Buffer.from('global instructions', 'utf8');
+    await writeMemoryObject({ stackHome: S, contentHash: hashBytes(noteV1), bytes: noteV1 });
+    await writeMemoryObject({ stackHome: S, contentHash: hashBytes(globalBody), bytes: globalBody });
+    const minted = resolveOrMintProject(emptyRegistry(), identity);
+    await writeLocalRegistry(S, minted.registry);
+    await writePortableSnapshot(S, toPortableSnapshot(minted.registry));
+    await writeMemoryManifest({
+      stackHome: S,
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-23T00:00:00.000Z',
+        items: [
+          {
+            provider: 'claude',
+            kind: 'auto-memory',
+            scope: 'project',
+            logicalId: 'claude/auto-memory/github.com/acme/rollback-v1/MEMORY.md',
+            project: { kind: 'git', canonical: 'github.com/acme/rollback-v1', host: 'github.com', owner: 'acme', repo: 'rollback-v1' },
+            contentHash: hashBytes(noteV1),
+            restoreTarget: { base: 'claude-project-memory', relativePath: 'MEMORY.md' },
+            capturedAt: '2026-10-23T00:00:00.000Z',
+            sensitivity: 'private',
+          },
+          {
+            provider: 'claude',
+            kind: 'user-instructions',
+            scope: 'global',
+            logicalId: 'claude/user-instructions/global/CLAUDE.md',
+            contentHash: hashBytes(globalBody),
+            restoreTarget: { base: 'claude-home', relativePath: 'CLAUDE.md' },
+            capturedAt: '2026-10-23T00:00:00.000Z',
+            sensitivity: 'private',
+          },
+        ],
+      },
+    });
+    await standardCloudBackup({ stackHome: S, backend });
+    expect((await backend.getLatest())?.bundleFormatVersion).toBe('stack-mem-bundle-v1');
+
+    // X: recovers gen 0, upgrades (via pull), then pushes v2 edits as gen 1.
+    const X = { home: path.join(root, 'v1x-stack'), claude: path.join(root, 'v1x-claude'), dir: path.join(root, 'v1x-proj'), keys: path.join(root, 'v1x-keys') };
+    await mkdir(X.dir, { recursive: true });
+    const discovery = { claudeHome: X.claude, projects: [{ dir: X.dir, gitRemote }] };
+    expect((await runMemoryCloudRecover(deps(X.home, backend, X.keys))).status).toBe('recovered');
+    await pullMemoryViaCanonical(deps(X.home, backend, X.keys), discovery);
+    expect(await readFile(noteOf(X.claude, X.dir, 'MEMORY.md'), 'utf8')).toBe('v1 note');
+    await put(noteOf(X.claude, X.dir, 'MEMORY.md'), 'v2 note');
+    await put(noteOf(X.claude, X.dir, 'later.md'), 'later');
+    await stageCanonicalMemory(X.home, discovery);
+    expect(await pushMemoryViaCanonical(deps(X.home, backend, X.keys), discovery)).toMatchObject({ status: 'pushed', generation: 1 });
+    const globalOnly = async () => (await readMemoryManifest(X.home))?.items.map((i) => i.scope);
+    expect(await globalOnly()).toEqual(['global']);
+
+    // Historical recover of the v1 generation onto the upgraded store.
+    expect(await runMemoryCloudRecover(deps(X.home, backend, X.keys), { generation: 0 })).toMatchObject({ status: 'recovered', generation: 0 });
+    const recovered = await readCanonicalMain(X.home);
+    expect(recovered.projects.map((p) => p.projectId)).toEqual([minted.projectId]);
+    expect(recovered.projects[0]?.documents.find((d) => d.path === 'notes/MEMORY.md')).toMatchObject({
+      state: 'present',
+      contentHash: hashBytes(noteV1),
+    });
+    expect(recovered.projects[0]?.documents.find((d) => d.path === 'notes/later.md')).toMatchObject({
+      state: 'deleted',
+      lastContentHash: hashBytes(Buffer.from('later', 'utf8')),
+    });
+    expect(await globalOnly()).toEqual(['global']);
+
+    // Push: exactly one new generation holding gen 0's project content + tombstone.
+    expect(await pushMemoryViaCanonical(deps(X.home, backend, X.keys), discovery)).toMatchObject({ status: 'pushed', generation: 2 });
+    expect(await backend.listGenerations()).toHaveLength(3);
+    const latest = await fetchRemoteCanonical({ backend, localRegistry: await readLocalRegistry(X.home) });
+    expect(latest?.main.projects.map((p) => p.projectId)).toEqual([minted.projectId]);
+    expect(presentPaths(latest?.main)).toEqual(['notes/MEMORY.md']);
+    expect(latest?.main.projects[0]?.documents.find((d) => d.path === 'notes/MEMORY.md')).toMatchObject({ contentHash: hashBytes(noteV1) });
+    expect(tombstonePaths(latest?.main)).toEqual(['notes/later.md']);
+    expect(await globalOnly()).toEqual(['global']);
+    expect(await readFile(noteOf(X.claude, X.dir, 'MEMORY.md'), 'utf8')).toBe('v1 note');
+    expect(await exists(noteOf(X.claude, X.dir, 'later.md'))).toBe(false);
+  });
+
   it('recovering the LATEST generation adds no tombstones (non-historical recover is unchanged)', async () => {
     const { backend, Y } = await twoMachinesAtGen1('latest');
     expect(await runMemoryCloudRecover(deps(Y.home, backend, Y.keys))).toMatchObject({ status: 'recovered', generation: 1 });

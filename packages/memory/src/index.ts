@@ -17,5 +17,6 @@ export * from './canonical/push.js';
 export * from './canonical/pull.js';
 export * from './canonical/fetch-remote-canonical.js';
 export * from './canonical/migrate.js';
+export * from './canonical/convert-v1.js';
 export * from './canonical/project-sync.js';
 export * from './canonical/claude-project-adapter.js';

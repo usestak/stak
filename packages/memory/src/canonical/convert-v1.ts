@@ -1,5 +1,6 @@
 import { memoryManifestSchema, type ManifestItem } from '../domain.js';
-import { resolveProjectForIdentity, type LocalRegistry } from '../project/registry.js';
+import { projectIdentityKey } from '../project-identity.js';
+import { resolveOrMintProject, resolveProjectForIdentity, type LocalRegistry } from '../project/registry.js';
 import { emptyRegistry, mergePortableSnapshot, portableRegistrySnapshotSchema } from '../project/registry.js';
 import type { MemoryBackupBundle } from '../remote/bundle-codec.js';
 import { groupLegacyItems } from './group-legacy-items.js';
@@ -46,4 +47,62 @@ export const convertV1Bundle = (
   }
   if (tagged.length === 0) return emptyCanonicalMain();
   return groupLegacyItems(tagged).main;
+};
+
+/** A v1 bundle item whose project identity matches more than one Project ID
+ * (spec §10 "Upgrade can't continue"). Thrown BEFORE anything is written. */
+export class V1ConversionError extends Error {
+  readonly code = 'migration-invalid' as const;
+  constructor(
+    message: string,
+    readonly conflicts: { identity: string; projectIds: string[] }[],
+  ) {
+    super(message);
+    this.name = 'V1ConversionError';
+  }
+}
+
+/**
+ * `convertV1Bundle` for a recover onto an already-upgraded store (spec §8.5 /
+ * §9.2): the same snapshot-first resolution, but it never drops an item. An
+ * identity matching more than one Project ID throws `V1ConversionError` (fail
+ * closed: the caller recovers nothing). An identity neither registry knows is
+ * minted, exactly like local migration (`buildCanonicalMain`) — the returned
+ * `registry` carries those new Project IDs for the caller to persist.
+ */
+export const convertV1BundleForRecover = (
+  bundle: MemoryBackupBundle,
+  options: { localRegistry: LocalRegistry; mint?: () => string },
+): { main: CanonicalMainManifest; registry: LocalRegistry } => {
+  const manifest = memoryManifestSchema.parse(
+    JSON.parse(Buffer.from(bundle.manifestB64, 'base64').toString('utf8')),
+  );
+  let registry: LocalRegistry = options.localRegistry;
+  if (bundle.registryB64) {
+    const snapshot = portableRegistrySnapshotSchema.parse(
+      JSON.parse(Buffer.from(bundle.registryB64, 'base64').toString('utf8')),
+    );
+    registry = mergePortableSnapshot(registry, snapshot).registry;
+  }
+  const tagged: Array<ManifestItem & { __projectId: string }> = [];
+  const conflicts = new Map<string, string[]>();
+  for (const item of manifest.items) {
+    if (item.scope !== 'project' || !item.project) continue;
+    const resolution = resolveProjectForIdentity(registry, item.project);
+    if (resolution.status === 'conflict') {
+      conflicts.set(projectIdentityKey(item.project), resolution.projectIds);
+      continue;
+    }
+    const resolved = resolveOrMintProject(registry, item.project, options.mint);
+    registry = resolved.registry;
+    tagged.push({ ...item, __projectId: resolved.projectId });
+  }
+  if (conflicts.size > 0)
+    throw new V1ConversionError(
+      `This backup uses the old Memory format, and ${conflicts.size} of its project(s) match more than one project on this machine (${[...conflicts]
+        .map(([identity, ids]) => `${identity}: ${ids.join(', ')}`)
+        .join('; ')}). Nothing was recovered.`,
+      [...conflicts].map(([identity, projectIds]) => ({ identity, projectIds })),
+    );
+  return { main: tagged.length === 0 ? emptyCanonicalMain() : groupLegacyItems(tagged).main, registry };
 };
