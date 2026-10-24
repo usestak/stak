@@ -77,6 +77,42 @@ describe('renderStatus — Memory section (MACHINE vs MAIN, not Cloud)', () => {
   });
 });
 
+describe('renderStatus — local Memory conflicts (final review I4)', () => {
+  const cleanStatus = baseStatus({ summary: { ...baseSummary, satisfied: 1 } });
+  const project = (conflicts: { path: string; reason: string }[], sourceConflicts: string[] = []) => ({
+    projectId: 'prj_demo',
+    imported: [],
+    pending: 0,
+    conflicts,
+    sourceConflicts,
+    guardedPaths: [],
+  });
+
+  it('never sends a local conflict to `stak memory resolve`, and gives the action that clears each kind', () => {
+    const output = renderStatus(cleanStatus, {
+      memory: {
+        state: 'clean',
+        canonicalProjects: [
+          project(
+            [
+              { path: 'notes/MEMORY.md', reason: 'adopt-mismatch' },
+              { path: 'notes/old.md', reason: 'edit-delete' },
+              { path: 'notes/both.md', reason: 'edit-edit' },
+            ],
+            ['notes/moved.md'],
+          ),
+        ],
+      },
+    });
+    expect(output).not.toContain('stak memory resolve');
+    expect(output).toContain('notes/MEMORY.md');
+    expect(output).toMatch(/notes\/MEMORY\.md.*move the file somewhere else, then run `stak memory materialize`/);
+    expect(output).toMatch(/notes\/old\.md.*deleted in STAK/);
+    expect(output).toMatch(/notes\/moved\.md.*old and current Claude folders/);
+    expect(output).toMatch(/notes\/both\.md.*can't settle this one automatically yet/);
+  });
+});
+
 describe('renderStatus — Cloud section', () => {
   const cleanStatus = baseStatus({ summary: { ...baseSummary, satisfied: 1 } });
 

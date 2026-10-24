@@ -138,3 +138,20 @@ describe('renderCombinedPullResult', () => {
     expect(output).toContain('stak memory recover');
   });
 });
+
+describe('local Memory conflicts after a pull (final review I4)', () => {
+  it('does not claim `stak add .` resolves them; points at `stak status` and names the files', () => {
+    const skill: PullSkillOutcome = { status: 'noop' };
+    const memory: PullMemoryOutcome = { status: 'not-attempted' };
+    const output = renderCombinedPullResult(skill, memory, {
+      status: 'applied',
+      outcome: {
+        status: 'merged',
+        conflicts: [{ projectId: 'prj_demo', path: 'notes/MEMORY.md', reason: 'adopt-mismatch' }],
+      },
+    });
+    expect(output).not.toContain('need `stak add .` to resolve');
+    expect(output).toContain('notes/MEMORY.md');
+    expect(output).toContain('stak status');
+  });
+});

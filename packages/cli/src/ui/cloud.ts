@@ -538,8 +538,14 @@ export const canonicalExtraNotes = (outcome: {
     const materializeErrors = outcome.conflicts.filter((c) => c.path === '');
     const syncConflicts = outcome.conflicts.filter((c) => c.path !== '');
     for (const error of materializeErrors) notes.push(`materialize warning: ${error.reason}`);
+    // Final review I4: these are local agent-vs-STAK conflicts (`stak add .`
+    // alone doesn't clear them); `stak status` gives the fix for each.
     if (syncConflicts.length > 0)
-      notes.push(`${syncConflicts.length} native conflict(s) need \`stak add .\` to resolve`);
+      notes.push(
+        `${syncConflicts.length} agent file(s) differ from STAK and weren't overwritten (${syncConflicts
+          .map((c) => c.path)
+          .join(', ')}) — run \`stak status\` for how to fix each`,
+      );
   }
   return notes;
 };

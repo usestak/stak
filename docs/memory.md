@@ -183,6 +183,21 @@ haven't added is never silently replaced. A missing Memory folder is treated as
 `stak status` also reports, per project, Memory changes not added yet and any
 pending Memory sync conflicts.
 
+**Conflicts between an agent file and STAK's copy** (on this machine) are not
+handled by `stak memory resolve`, which is for conflicts between machines.
+`stak status` lists each one with what to do:
+
+- The agent file differs from STAK's copy (for example, a second machine that
+  already had its own file): to keep STAK's, move the file somewhere else, then
+  run `stak memory materialize`. To keep yours, do that, copy your version back,
+  then run `stak add .`.
+- Edited here but deleted in STAK: delete the file to accept the deletion, or save
+  it under a new file name and delete the original, then run `stak add .`.
+- Different copies in a moved project's old and current Claude folders: delete the
+  copy you don't want, then run `stak add .`.
+- Changed both here and in STAK since the last sync: STAK can't settle this one
+  automatically yet. Both versions are kept and nothing is overwritten.
+
 **Selecting a project.** Commands that take a `<project>` accept its Project ID
 or any unique prefix of one (as shown by `stak project`).
 

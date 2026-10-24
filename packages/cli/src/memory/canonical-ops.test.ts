@@ -2934,3 +2934,85 @@ describe('spec 8.5: recover an old generation, then push it forward', () => {
     expect(presentPaths(await readCanonicalMain(Y.home))).toEqual(['notes/MEMORY.md', 'notes/later.md']);
   });
 });
+
+describe('final review I4: the advised actions really clear local agent-vs-STAK conflicts', () => {
+  type Doc = Parameters<typeof writeCanonicalMain>[1]['projects'][number]['documents'][number];
+  const local = () => path.join(projectDir, 'CLAUDE.local.md');
+  const docOf = async (projectId: string, docPath: string) =>
+    (await readCanonicalMain(stackHome)).projects
+      .find((p) => p.projectId === projectId)
+      ?.documents.find((d) => d.path === docPath);
+  const conflictsOf = async (projectId: string) =>
+    (await canonicalMemoryStatus(stackHome, { claudeHome })).projects.find((p) => p.projectId === projectId)
+      ?.conflicts ?? [];
+  const setCanonical = async (projectId: string, doc: Doc) => {
+    const main = await readCanonicalMain(stackHome);
+    await writeCanonicalMain(stackHome, {
+      ...main,
+      projects: main.projects.map((p) =>
+        p.projectId === projectId
+          ? { ...p, documents: [...p.documents.filter((d) => d.path !== doc.path), doc].sort((a, b) => (a.path < b.path ? -1 : 1)) }
+          : p,
+      ),
+    });
+  };
+
+  it("adopt-mismatch: move aside + `stak memory materialize` keeps STAK's; copying yours back + `stak add .` keeps yours", async () => {
+    const projectId = await bindProject(projectDir);
+    await writeFile(local(), 'agent version', 'utf8');
+    await stageCanonicalMemory(stackHome, { claudeHome });
+    // First sighting with differing content: no projection, STAK holds other bytes.
+    const stakBytes = Buffer.from('stak version', 'utf8');
+    await writeMemoryObject({ stackHome, contentHash: hashBytes(stakBytes), bytes: stakBytes });
+    await setCanonical(projectId, {
+      path: 'instructions/private.md',
+      state: 'present',
+      contentHash: hashBytes(stakBytes),
+      importedFrom: 'claude',
+      importedAt: '2026-10-24T00:00:00.000Z',
+    });
+    await rm(projectionPath(), { force: true });
+    expect(await conflictsOf(projectId)).toEqual([{ path: 'instructions/private.md', reason: 'adopt-mismatch' }]);
+
+    const aside = path.join(root, 'CLAUDE.local.md.mine');
+    await writeFile(aside, await readFile(local()));
+    await rm(local());
+    await materializeMemory(stackHome, { claudeHome });
+    expect(await readFile(local(), 'utf8')).toBe('stak version');
+    expect(await conflictsOf(projectId)).toEqual([]);
+
+    await writeFile(local(), await readFile(aside));
+    const staged = await stageCanonicalMemory(stackHome, { claudeHome });
+    expect(staged.projects.find((p) => p.projectId === projectId)?.imported).toEqual(['instructions/private.md']);
+    const doc = await docOf(projectId, 'instructions/private.md');
+    expect(doc?.state === 'present' && doc.contentHash).toBe(hashBytes(Buffer.from('agent version', 'utf8')));
+  });
+
+  it('edit-delete: deleting the file accepts the deletion; saving it under a new name keeps yours', async () => {
+    const projectId = await bindProject(projectDir);
+    const vendorKey = encodeClaudeProjectKey(path.resolve(projectDir));
+    await writeAutoMemory(vendorKey, 'gone.md', 'synced');
+    await writeAutoMemory(vendorKey, 'kept.md', 'synced too');
+    await stageCanonicalMemory(stackHome, { claudeHome });
+    for (const [name, body] of [['gone.md', 'synced'], ['kept.md', 'synced too']] as const)
+      await setCanonical(projectId, {
+        path: `notes/${name}`,
+        state: 'deleted',
+        lastContentHash: hashBytes(Buffer.from(body, 'utf8')),
+        deletedAt: '2026-10-24T00:00:00.000Z',
+      });
+    await writeAutoMemory(vendorKey, 'gone.md', 'edited here');
+    await writeAutoMemory(vendorKey, 'kept.md', 'edited here too');
+    expect((await conflictsOf(projectId)).map((c) => c.reason)).toEqual(['edit-delete', 'edit-delete']);
+
+    const memoryDir = path.join(claudeHome, 'projects', vendorKey, 'memory');
+    await rm(path.join(memoryDir, 'gone.md'));
+    await writeAutoMemory(vendorKey, 'kept-mine.md', 'edited here too');
+    await rm(path.join(memoryDir, 'kept.md'));
+    const staged = await stageCanonicalMemory(stackHome, { claudeHome });
+    const mine = staged.projects.find((p) => p.projectId === projectId);
+    expect(mine?.conflicts).toEqual([]);
+    expect(mine?.imported).toEqual(['notes/kept-mine.md']);
+    expect((await docOf(projectId, 'notes/gone.md'))?.state).toBe('deleted');
+  });
+});

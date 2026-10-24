@@ -40,7 +40,7 @@ export type MemoryStatusDisplay = MemoryWorkingTreeStatus & {
   upgradePending?: boolean;
 };
 
-import { agentLabel, block, changes, skills } from './format.js';
+import { agentLabel, block, changes, localMemoryConflictAdvice, skills } from './format.js';
 
 export type RenderOptions = { verbose?: boolean };
 export type AgentReadiness = { agent: AgentId; ready: boolean };
@@ -140,10 +140,17 @@ const canonicalMemoryLines = (projects: CanonicalMemoryProjectStatus[]): string[
       lines.push(
         `  ${project.projectId}: ${project.pending} change${project.pending === 1 ? '' : 's'} not added — run \`stak add .\``,
       );
-    if (totalConflicts > 0)
+    if (totalConflicts > 0) {
+      // Final review I4: a local agent-vs-STAK conflict, never a Cloud merge
+      // conflict — give the action that actually clears each one.
       lines.push(
-        `  ${project.projectId}: ${totalConflicts} conflict${totalConflicts === 1 ? '' : 's'} — resolve with \`stak memory resolve\``,
+        `  ${project.projectId}: ${totalConflicts} conflict${totalConflicts === 1 ? '' : 's'} between agent files and STAK (nothing was overwritten):`,
       );
+      for (const conflict of project.conflicts)
+        lines.push(`    ${conflict.path}: ${localMemoryConflictAdvice(conflict.reason)}`);
+      for (const conflictPath of project.sourceConflicts)
+        lines.push(`    ${conflictPath}: ${localMemoryConflictAdvice('source-conflict')}`);
+    }
     if (project.guardedPaths.length > 0)
       lines.push(
         `  ${project.projectId}: ${project.guardedPaths.length} path${project.guardedPaths.length === 1 ? '' : 's'} will be regenerated — run \`stak memory materialize\``,

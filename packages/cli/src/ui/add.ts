@@ -69,7 +69,8 @@ export const renderSkillAdd = (
     if (options.memory.canonical?.length) {
       for (const project of options.memory.canonical) {
         if (project.imported > 0) lines.push(`  Memory: imported ${project.imported} change(s) for ${project.projectId}`);
-        if (project.conflicts > 0) lines.push(`  Memory: ${project.conflicts} conflict(s) in ${project.projectId} — resolve with \`stak memory resolve\``);
+        // Final review I4: local agent-vs-STAK conflicts; `stak status` lists each with its fix.
+        if (project.conflicts > 0) lines.push(`  Memory: ${project.conflicts} conflict(s) between agent files and STAK in ${project.projectId}, not added — run \`stak status\` for how to fix each`);
         if (project.guarded > 0) lines.push(`  Memory: ${project.guarded} path(s) will be regenerated for ${project.projectId} — run \`stak memory materialize\``);
       }
     }
