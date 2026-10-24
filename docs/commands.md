@@ -67,7 +67,8 @@ Read-only discovery of portable Claude memory on this machine. Changes nothing.
 
 Copy allowlisted memory into STAK's private store (read-only capture; native
 Claude files are never modified) and, when signed in, upload it to STAK
-Cloud. Commits the manifest last.
+Cloud. Commits the manifest last. Now the Memory part of `stak push` (it merges
+with Cloud and never overwrites); kept as a deprecated alias.
 
 ### `stak memory status [--json] [--verbose]`
 
@@ -94,6 +95,26 @@ passkey or recovery file.
 ### `stak memory history [--json]`
 
 Show your Memory backup history (newest first).
+
+### `stak memory resolve [project] [path] [--keep local|cloud|both]`
+
+Resolve a Memory conflict between machines: keep local, keep cloud, or keep
+both. With no arguments, lists the pending conflicts. `<project>` is a Project
+ID or a unique prefix of one. Choices take effect when the last conflict is
+resolved; then run `stak push`. "Keep both" keeps Cloud's version at the
+original name and yours at `<name>.conflict-<hash>.<ext>`.
+
+### `stak memory diff <project> <path>`
+
+Show both versions (local and Cloud) of one pending Memory conflict. The only
+command that prints Memory content.
+
+### `stak memory materialize [project] [--agent claude]`
+
+Rebuild agent Memory files from STAK Memory, for every project on this machine
+or just one. Never overwrites a file you edited and haven't added yet. Projects
+not found on this machine are reported as not available and nothing is written
+for them. Only `claude` is supported.
 
 Memory is currently scoped to Claude Code; Codex and Cursor memory support is
 planned.

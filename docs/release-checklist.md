@@ -49,6 +49,11 @@ is automatically verified from what requires an owner decision.
       `www.memorystak.com` redirecting permanently to it.
 - [ ] Stand up a **production Supabase** project and apply
       `supabase/migrations/0001` → `0002` → `0003` in order.
+- [ ] **STAK-native Project Memory deploy order.** If the web app goes first,
+      every Memory upload fails:
+  1. Apply Supabase migration `0018`.
+  2. Then run `notify pgrst, 'reload schema'`.
+  3. Then deploy the web app.
 - [ ] **Production web deployment** of `apps/web` with production env vars.
 - [ ] Set server secrets (`SUPABASE_SERVICE_ROLE_KEY`, `STAK_TICKET_SECRET`) in the
       hosting environment — see [env-vars.md](env-vars.md).

@@ -23,7 +23,11 @@ manifest), separate from the Skill store.
 
 ## What STAK Memory V0 preserves (Claude)
 
-Only these allowlisted, durable surfaces are captured, each classified explicitly:
+Only these allowlisted, durable surfaces are captured, each classified explicitly.
+STAK still reads the same files, but the three project rows (`auto-memory`
+project, `agent-memory` project, `project-private-instructions`) now end up in
+STAK's own Project Memory (see "Canonical Project Memory" below) instead of a
+copy of Claude's folder layout:
 
 | Classification                 | Source (read-only)                          |
 | ------------------------------ | ------------------------------------------- |
@@ -149,7 +153,109 @@ and is purely organizational:
 
 _Not yet available:_ deleting a project's memory (hard delete), an optional in-repo
 project marker, and repository-transfer reconciliation are designed in the
-architecture docs but not implemented in this release.
+architecture docs but not implemented in this release. Also not yet available:
+Cursor and Codex Memory adapters, a User (global) Memory scope, and rename
+detection (a renamed Memory file counts as one deletion plus one new file).
+
+## Canonical Project Memory
+
+STAK now owns each project's Memory itself, in its own format that belongs to no
+single agent. A project's Memory is a set of Markdown documents keyed by its
+**Project ID**, not by Claude's folder naming, so moving or re-cloning a project
+doesn't change its Memory. STAK keeps every document's bytes exactly as written.
+Documents live in three areas:
+
+- `notes/…` — project knowledge: facts, decisions, workflows. Claude's
+  `MEMORY.md` index is simply `notes/MEMORY.md`.
+- `instructions/private.md` — private recurring instructions for this project
+  (Claude's `CLAUDE.local.md`).
+- `agents/<agent>/…` — Memory that truly belongs to one agent; only that
+  agent's adapter writes it out.
+
+Claude is a two-way **adapter**. It keeps writing its own memory files during
+sessions, exactly as before, and those files work like a Git working copy:
+`stak add .` takes your edits into STAK Memory, and `stak pull` / `stak push`
+write changes from other machines back out to Claude's files. STAK only
+overwrites an agent file that hasn't changed since the last sync, so an edit you
+haven't added is never silently replaced. A missing Memory folder is treated as
+"never written here", not as "deleted everything".
+
+`stak status` also reports, per project, Memory changes not added yet and any
+pending Memory sync conflicts.
+
+**Selecting a project.** Commands that take a `<project>` accept its Project ID
+or any unique prefix of one (as shown by `stak project`).
+
+### Conflicts between machines
+
+When two machines change the same Memory document differently (or one edits it
+while the other deletes it), push and pull stop and list the conflicts. Until
+they are resolved, `stak push`, `stak pull` and `stak memory backup` stop with
+"Resolve the listed conflicts, then push again". No Memory is pushed in the
+meantime, but your Skills still push as normal.
+
+- `stak memory resolve` — with no arguments, lists the pending conflicts. With
+  `<project> <path> --keep local|cloud|both`, resolves one.
+- `stak memory diff <project> <path>` — shows both versions of one conflict.
+  This is the only command that prints Memory content.
+- `stak memory materialize [project] [--agent claude]` — rebuilds an agent's
+  Memory files from STAK Memory (for example after deleting `~/.claude`), for
+  every project on this machine or just one.
+
+Your choices take effect when the **last** conflict is resolved: STAK Memory is
+updated, Claude's files are rewritten where safe, and the next `stak push`
+publishes the result. **Keep both** keeps Cloud's version at the original name
+and saves yours next to it as `<name>.conflict-<hash>.<ext>` (the hash comes from
+your version's content, so every machine picks the same name).
+
+A resolution belongs to the exact Cloud version it was made against. If Cloud
+moves on before you finish, or Memory changes locally at a path you already
+resolved (for example after `stak add .`), STAK says the merge has gone stale.
+Run `stak push` (or `stak pull`) to merge again; earlier choices are listed again
+and need to be redone. Old decisions are never replayed blindly.
+
+`stak memory materialize` only writes to projects found on this machine. A
+project known only from another machine shows as **not available on this
+machine** until the next `stak pull` finds it, or until you map it with
+`stak project map`.
+
+### `stak memory backup` and recovering an older version
+
+`stak memory backup` is now the Memory part of `stak push`: it merges with Cloud
+the same way and never overwrites another machine's changes. It is kept as a
+deprecated alias.
+
+After `stak memory recover --backup <n>`, your local Memory is that older backup,
+and the rollback shows up as ordinary local changes, including deletions. Cloud
+history is never rewritten. `stak push` refuses while local Memory comes from an
+older backup than Cloud's latest; run `stak memory backup` (it asks you to
+confirm) to make the rollback the newest backup.
+
+### After "Delete Cloud Memory"
+
+After you delete your Cloud Memory (web app Settings → "Delete Cloud Memory"),
+the next push from any machine uploads that
+machine's Memory again. A machine whose last sync happened before the delete may
+see conflicts to resolve when it next syncs.
+
+### Upgrading from the old format
+
+The first time this CLI touches Memory (`stak status`, `stak add`, `stak push`
+or `stak pull`), it upgrades your local store to the new format, once and
+automatically. There is nothing to do and nothing is lost:
+
+- A copy of the old manifest is kept at
+  `$STAK_HOME/memory/manifests/current.v1-premigration.json` and never
+  overwritten.
+- Memory files that were missing from Claude's folders at upgrade time are
+  restored from STAK, never recorded as deletions.
+- Duplicate copies left over from older versions are merged when identical; when
+  they differ, all are kept using the "keep both" naming.
+- If the upgrade is interrupted, the next run finishes it.
+
+Once an account has Memory in the new format, older CLIs are refused with:
+"This account's Memory was upgraded by a newer STAK CLI. Update with
+`npm i -g @memstk/cli@beta`."
 
 ## Backup and restore
 
@@ -227,7 +333,9 @@ public):
 
 ### Commands
 
-- `stak memory backup` — local backup, then Cloud backup when signed in. Same
+- `stak memory backup` — local backup, then Cloud backup when signed in (now the
+  Memory part of `stak push`, kept as a deprecated alias; see "Canonical
+  Project Memory" above). Same
   command for both modes; the complexity stays under the hood. On the first
   Standard Cloud backup STAK shows `Privacy: Standard` and how to upgrade.
 - `stak memory protect` — turn on Protected mode once. Creates your encryption key,
