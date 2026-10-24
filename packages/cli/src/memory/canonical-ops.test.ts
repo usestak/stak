@@ -60,6 +60,7 @@ import {
 import {
   publishCanonicalGeneration,
   pushStagedMemory,
+  readMemoryCloudStatus,
   runMemoryCloudBackup,
   runMemoryCloudProtect,
   runMemoryCloudRecover,
@@ -2600,5 +2601,94 @@ describe('Task 14: resolve / diff / materialize', () => {
       const { Y } = await synced('matunknown');
       await expect(materializeMemory(Y.home, discoveryOf(Y), { project: 'prj_doesnotexist' })).rejects.toThrow(/No project matches/);
     });
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Spec §8.5: recovering an old version, then pushing it forward               */
+/* -------------------------------------------------------------------------- */
+
+describe('spec 8.5: recover an old generation, then push it forward', () => {
+  const secureKeys = (dir: string) =>
+    fileLocalMemoryKeyStore(dir, { harden: () => Promise.resolve(true), verify: () => Promise.resolve(true) });
+  const fakeBackup = (): Promise<BackupResult> =>
+    Promise.resolve({ provider: 'claude', files: 0, projects: 0, createdAt: '2026-10-23T00:00:00.000Z' });
+  const deps = (home: string, backend: RemoteMemoryBackend | null, keysDir: string) => ({
+    stackHome: home,
+    backend,
+    localKeyStore: secureKeys(keysDir),
+    runLocalBackup: fakeBackup,
+  });
+  const bindAt = async (home: string, dir: string, fixedProjectId?: string) => {
+    const registry = await readLocalRegistry(home);
+    const minted = resolveOrMintProject(
+      registry,
+      { kind: 'local', vendorKey: `v-${path.basename(home)}-${path.basename(dir)}` },
+      fixedProjectId ? () => fixedProjectId : mintProjectId,
+    );
+    await writeLocalRegistry(
+      home,
+      setBinding(minted.registry, { projectId: minted.projectId, dir, boundAt: '2026-10-23T00:00:00.000Z', provenance: 'user-map' }),
+    );
+    return minted.projectId;
+  };
+  const noteOf = (claudeHomeDir: string, dir: string, name: string) =>
+    path.join(claudeHomeDir, 'projects', encodeClaudeProjectKey(path.resolve(dir)), 'memory', name);
+  const put = async (file: string, body: string) => {
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, body, 'utf8');
+  };
+  const presentPaths = (main: Awaited<ReturnType<typeof readCanonicalMain>> | undefined) =>
+    (main?.projects[0]?.documents ?? []).filter((d) => d.state === 'present').map((d) => d.path);
+
+  it('the rollback becomes ordinary local changes (edit + deletion); the next push makes it the newest generation without rewriting history; another machine pulls it', async () => {
+    const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'spec-8-5');
+    const X = { home: path.join(root, 'x85-stack'), claude: path.join(root, 'x85-claude'), dir: path.join(root, 'x85-proj'), keys: path.join(root, 'x85-keys') };
+    const Y = { home: path.join(root, 'y85-stack'), claude: path.join(root, 'y85-claude'), dir: path.join(root, 'y85-proj'), keys: path.join(root, 'y85-keys') };
+    await mkdir(X.dir, { recursive: true });
+    await mkdir(Y.dir, { recursive: true });
+    const projectId = await bindAt(X.home, X.dir);
+    await bindAt(Y.home, Y.dir, projectId);
+
+    // Generation 0: MEMORY.md = v1.
+    await put(noteOf(X.claude, X.dir, 'MEMORY.md'), 'v1');
+    await stageCanonicalMemory(X.home, { claudeHome: X.claude });
+    expect(await pushMemoryViaCanonical(deps(X.home, backend, X.keys), { claudeHome: X.claude })).toMatchObject({ status: 'pushed', generation: 0 });
+    // Generation 1: MEMORY.md = v2, plus a new later.md.
+    await put(noteOf(X.claude, X.dir, 'MEMORY.md'), 'v2');
+    await put(noteOf(X.claude, X.dir, 'later.md'), 'later');
+    await stageCanonicalMemory(X.home, { claudeHome: X.claude });
+    expect(await pushMemoryViaCanonical(deps(X.home, backend, X.keys), { claudeHome: X.claude })).toMatchObject({ status: 'pushed', generation: 1 });
+    expect((await pullMemoryViaCanonical(deps(Y.home, backend, Y.keys), { claudeHome: Y.claude })).status).toBe('merged');
+    expect(await readFile(noteOf(Y.claude, Y.dir, 'later.md'), 'utf8')).toBe('later');
+
+    // `stak memory recover --generation 0`: local Memory becomes generation 0;
+    // the sync base stays at generation 1, so the rollback is a local change.
+    expect(await runMemoryCloudRecover(deps(X.home, backend, X.keys), { generation: 0 })).toMatchObject({ status: 'recovered', generation: 0 });
+    expect(presentPaths(await readCanonicalMain(X.home))).toEqual(['notes/MEMORY.md']);
+    expect((await readCanonicalBase(X.home))?.generation).toBe(1);
+    // NOTE: at the CLI level `stak push`'s `memoryPushPreflight` (program.ts)
+    // refuses while this flag is set and points to `stak memory backup`
+    // (which confirms, then publishes through this same engine).
+    expect((await readMemoryCloudStatus(deps(X.home, backend, X.keys))).historicalRecovery).toBe(true);
+
+    // The push engine: the rollback becomes the newest generation (2).
+    expect(await pushMemoryViaCanonical(deps(X.home, backend, X.keys), { claudeHome: X.claude })).toMatchObject({ status: 'pushed', generation: 2 });
+    const latest = await fetchRemoteCanonical({ backend, localRegistry: await readLocalRegistry(X.home) });
+    expect(latest?.generation).toBe(2);
+    expect(presentPaths(latest?.main)).toEqual(['notes/MEMORY.md']);
+    // History is not rewritten: generation 1 still holds the rolled-back state.
+    const gen1 = await fetchRemoteCanonical({ backend, localRegistry: await readLocalRegistry(X.home), generation: 1 });
+    expect(presentPaths(gen1?.main)).toEqual(['notes/MEMORY.md', 'notes/later.md']);
+    expect((await readMemoryCloudStatus(deps(X.home, backend, X.keys))).historicalRecovery).toBe(false);
+    // X's agent files follow the rollback (edit reverted, later.md removed).
+    expect(await readFile(noteOf(X.claude, X.dir, 'MEMORY.md'), 'utf8')).toBe('v1');
+    expect(await exists(noteOf(X.claude, X.dir, 'later.md'))).toBe(false);
+
+    // Another machine pulls the rollback like any other change, deletion included.
+    expect((await pullMemoryViaCanonical(deps(Y.home, backend, Y.keys), { claudeHome: Y.claude })).status).toBe('merged');
+    expect(await readFile(noteOf(Y.claude, Y.dir, 'MEMORY.md'), 'utf8')).toBe('v1');
+    expect(await exists(noteOf(Y.claude, Y.dir, 'later.md'))).toBe(false);
+    expect(presentPaths(await readCanonicalMain(Y.home))).toEqual(['notes/MEMORY.md']);
   });
 });
