@@ -97,6 +97,27 @@ export const recoveryKeyFromFile = (file: RecoveryFile): Buffer =>
   Buffer.from(file.secretB64, 'base64');
 export const recoveryKeyFromCode = (code: string): Buffer => decodeBase32(code);
 
+/**
+ * Read the recovery key back out of a `.stackkey` file's text (as written by
+ * `stak memory protect`). Throws a plain, secret-free error for anything that
+ * isn't a well-formed recovery file.
+ */
+export const parseRecoveryFile = (text: string): Buffer => {
+  const invalid = () => new Error("That file isn't a STAK recovery file.");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw invalid();
+  }
+  if (typeof parsed !== 'object' || parsed === null) throw invalid();
+  const file = parsed as Partial<RecoveryFile>;
+  if (file.format !== RECOVERY_FILE_FORMAT || typeof file.secretB64 !== 'string') throw invalid();
+  const key = Buffer.from(file.secretB64, 'base64');
+  if (key.length !== RECOVERY_KEY_BYTES) throw invalid();
+  return key;
+};
+
 /** Add a recovery-file/recovery-key wrapper over the MMK. */
 export const addRecoveryFileWrapper = (options: {
   keyring: MmkKeyring;

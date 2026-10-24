@@ -41,6 +41,7 @@ import {
   runMemoryCloudBackup,
   runMemoryCloudProtect,
   runMemoryCloudRecover,
+  readRecoveryKeyFile,
 } from './cloud-ops.js';
 
 const USER = 'user-ops';
@@ -1139,5 +1140,36 @@ describe('C1: protect refuses an already-Protected account', () => {
     expect(String((error as Error).message)).toContain('stak memory recover');
     expect(await deviceB.hasKey()).toBe(false);
     expect(await backend.listRecoveryMethods()).toHaveLength(1);
+  });
+});
+
+describe('recover --recovery-file reads the file (final review follow-up)', () => {
+  it('a recovery file written by protect unlocks a fresh device; a bad path or file fails without changing anything', async () => {
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const deviceA = secureKeys(await temp('stack-ops-rf-a-'));
+    const depsA = { stackHome: source.stackHome, backend, localKeyStore: deviceA, runLocalBackup: fakeBackup };
+    await runMemoryCloudBackup(depsA);
+    const recoveryKey = generateRecoveryKey();
+    await runMemoryCloudProtect(depsA, { recoveryKey });
+    const dir = await temp('stack-ops-rf-file-');
+    const filePath = path.join(dir, 'stack-memory-recovery.stackkey');
+    await writeFile(filePath, `${JSON.stringify(recoveryKey.file, null, 2)}
+`, 'utf8');
+
+    const deviceB = secureKeys(await temp('stack-ops-rf-b-'));
+    const dest = await temp('stack-ops-rf-dst-');
+    const rec = await runMemoryCloudRecover(
+      { stackHome: dest, backend, localKeyStore: deviceB, runLocalBackup: fakeBackup },
+      { recoveryKey: await readRecoveryKeyFile(filePath) },
+    );
+    expect(rec.status).toBe('recovered');
+    expect(await deviceB.hasKey()).toBe(true);
+
+    await expect(readRecoveryKeyFile(path.join(dir, 'missing.stackkey'))).rejects.toThrow(/Couldn't read the recovery file/);
+    const junk = path.join(dir, 'junk.stackkey');
+    await writeFile(junk, '{"format":"nope"}', 'utf8');
+    await expect(readRecoveryKeyFile(junk)).rejects.toThrow(/isn't a STAK recovery file/);
   });
 });

@@ -14,6 +14,8 @@
  * fully testable without the network. The commands layer builds the real backend
  * from the authenticated cloud client.
  */
+import { readFile } from 'node:fs/promises';
+
 import { applyRecoveredProjectNames } from './project-ops.js';
 import { assertNoCurrentPendingMerge, MemorySyncError } from './pending-merge.js';
 import {
@@ -41,6 +43,7 @@ import {
   migrateStandardToProtected,
   newKeyring,
   openMmkFromEnvelope,
+  parseRecoveryFile,
   protectedCloudBackup,
   pushCanonicalMemory,
   readCanonicalBase,
@@ -798,6 +801,26 @@ export const runMemoryCloudRecover = async (
     files: await recoveredFileCount(deps.stackHome),
     generation: result.generation,
   };
+};
+
+/**
+ * Read the recovery key from a `.stackkey` file for `stak memory recover
+ * --recovery-file <path>`. (Final review follow-up: the option was accepted but
+ * never read, so recovering with a recovery file always reported the device as
+ * locked.) Never echoes file content in its errors.
+ */
+export const readRecoveryKeyFile = async (filePath: string): Promise<Buffer> => {
+  let text: string;
+  try {
+    text = await readFile(filePath, 'utf8');
+  } catch {
+    throw new Error(`Couldn't read the recovery file at ${filePath}. Nothing was changed.`);
+  }
+  try {
+    return parseRecoveryFile(text);
+  } catch {
+    throw new Error(`${filePath} isn't a STAK recovery file. Nothing was changed.`);
+  }
 };
 
 /** Try each stored recovery-file wrapper until the recovery key unwraps the MMK. */

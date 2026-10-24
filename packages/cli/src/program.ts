@@ -127,6 +127,7 @@ import {
   freshRegistryRisksDuplication,
   readBackupSupersession,
   readMemoryCloudStatus,
+  readRecoveryKeyFile,
   runMemoryCloudBackup,
   runMemoryCloudProtect,
   runMemoryCloudRecover,
@@ -1083,8 +1084,12 @@ const defaultDependencies: ProgramDependencies = {
       migrate: (home) => migrateWithProjectionSeed(home, discovery),
     });
   },
-  memoryCloudRecover: async (options) =>
-    runMemoryCloudRecover(await buildMemoryCloudDeps(), options),
+  memoryCloudRecover: async ({ generation, recoveryFile }) =>
+    runMemoryCloudRecover(await buildMemoryCloudDeps(), {
+      ...(generation !== undefined ? { generation } : {}),
+      // Final review follow-up: actually read `--recovery-file`.
+      ...(recoveryFile ? { recoveryKey: await readRecoveryKeyFile(recoveryFile) } : {}),
+    }),
   memoryGenerations: async () =>
     runMemoryGenerations(await buildMemoryCloudDeps()),
   memoryCloudStatus: async () =>
