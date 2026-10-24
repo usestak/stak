@@ -62,7 +62,7 @@ import {
 
 import { resolveCanonicalProjectId } from './canonical-identity.js';
 import { stageMemoryWithProjectDedup, type StageMemoryOptions } from './stage-memory.js';
-import { hasNothingToPush, publishCanonicalGeneration, type MemoryCloudDeps } from './cloud-ops.js';
+import { hasNothingToPush, publishCanonicalGeneration, recordInSyncWithCloud, type MemoryCloudDeps } from './cloud-ops.js';
 import {
   assertNoCurrentPendingMerge,
   assertPendingMergeCurrent,
@@ -1181,6 +1181,8 @@ export const pushMemoryViaCanonical = async (
     clearPendingMerge: () => clearPendingMerge(deps.stackHome),
   });
   if (outcome.status === 'conflict') return { status: 'conflict', conflicts: outcome.conflicts };
+  // Final review T15-2: up to date means local equals Cloud — record it.
+  if (outcome.status === 'up-to-date') await recordInSyncWithCloud(deps, outcome.generation);
   // Materializes on any non-conflict outcome, including `retry-exhausted` —
   // Cloud may have moved during the retries, and whatever is now locally
   // canonical should still reach native files.

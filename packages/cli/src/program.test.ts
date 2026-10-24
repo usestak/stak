@@ -2582,6 +2582,52 @@ describe('STAK CLI', () => {
     expect(backedUp).toBe(true);
   });
 
+  it('final review T15-4: memory backup after a historical recover on a machine with no sync history refuses (like push), before asking to supersede', async () => {
+    const preview = {
+      provider: 'claude' as const,
+      native: [],
+      carriedForward: [],
+      nativeFiles: 1,
+      nativeProjects: 1,
+      availableProjects: 1,
+      retainedFiles: 0,
+      retainedProjects: 0,
+      retainedAvailableFiles: 0,
+      retainedAvailableProjects: 0,
+      retainedUnavailableFiles: 0,
+      retainedUnavailableProjects: 0,
+      finalFiles: 1,
+      finalProjects: 1,
+      privacy: 'standard' as const,
+      supersession: {
+        localRecoveredGeneration: 3,
+        cloudLatestGeneration: 4,
+        parentGeneration: 4,
+        nextGeneration: 5,
+        supersedes: true,
+        noSyncHistory: true,
+      },
+    };
+    const blocked = await runProgram(['memory', 'backup', '--yes'], {
+      memoryBackupPreview: async () => preview,
+      confirm: async () => {
+        throw new Error('must not ask to supersede');
+      },
+      memoryCloudBackup: async () => {
+        throw new Error('must not back up');
+      },
+    });
+    expect(blocked.output).toContain('stak memory recover');
+    expect(blocked.output).toContain('no Memory sync history');
+    const json = await runProgram(['memory', 'backup', '--json', '--yes'], {
+      memoryBackupPreview: async () => preview,
+      memoryCloudBackup: async () => {
+        throw new Error('must not back up');
+      },
+    });
+    expect(JSON.parse(json.output)).toMatchObject({ status: 'needs-catch-up' });
+  });
+
   it('memory backup refuses outright (no override) when the fresh/reset-registry safeguard trips — Cloud history exists but this machine never recovered it', async () => {
     const riskyPreview = {
       provider: 'claude' as const,

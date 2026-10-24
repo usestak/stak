@@ -125,6 +125,7 @@ import {
 import { mergePendingMessage, MemorySyncError } from './memory/pending-merge.js';
 import {
   freshRegistryRisksDuplication,
+  HISTORICAL_NO_SYNC_HISTORY_MESSAGE,
   readBackupSupersession,
   readMemoryCloudStatus,
   readRecoveryKeyFile,
@@ -978,8 +979,8 @@ const defaultDependencies: ProgramDependencies = {
     if ((await readCanonicalBase(stackHome)) === null)
       return {
         blocked: true,
-        reason:
-          'Local Memory was recovered from an older STAK Cloud backup, and this machine has no Memory sync history yet, so a push could not tell the rollback apart from Cloud. Run `stak memory recover` to catch up to the latest backup before pushing.',
+        // Final review T15-4: one message, shared with `stak memory backup`.
+        reason: HISTORICAL_NO_SYNC_HISTORY_MESSAGE,
       };
     return {
       blocked: false,

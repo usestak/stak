@@ -25,6 +25,7 @@ import type {
   MemoryGenerationsOutcome,
   PasskeyFailureReason,
 } from '../memory/cloud-ops.js';
+import { HISTORICAL_NO_SYNC_HISTORY_MESSAGE } from '../memory/cloud-ops.js';
 import {
   freshRegistryGuardWarning,
   historicalBaseBackupWarning,
@@ -267,6 +268,17 @@ export const registerMemoryCommand = (
           return;
         }
         dependencies.writeOut(`${freshRegistryGuardWarning()}\n`);
+        return;
+      }
+      // Final review T15-4: the same refusal as `stak push` — no sync history
+      // means the rollback can't be told apart from Cloud, so there is nothing
+      // safe to confirm.
+      if (preview.supersession.supersedes && preview.supersession.noSyncHistory) {
+        if (options.json) {
+          emitJson(dependencies, { status: 'needs-catch-up' });
+          return;
+        }
+        dependencies.writeOut(`${HISTORICAL_NO_SYNC_HISTORY_MESSAGE}\n`);
         return;
       }
       // Backing up after a historical recovery would supersede a newer Cloud

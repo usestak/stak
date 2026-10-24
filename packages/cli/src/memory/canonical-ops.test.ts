@@ -1702,8 +1702,9 @@ describe('Task 13 fix round 3', () => {
       ).rejects.toThrow('connection reset');
       expect((await backend.getProfile())?.privacyMode).toBe('standard');
       expect((await backend.getLatest())?.replicaOf).toBeTruthy();
-      // The failed run's recovery wrapper (its file was never written) is revoked.
-      expect(await backend.listRecoveryMethods()).toHaveLength(0);
+      // Final review I8: the recovery file is written before Cloud changes, so
+      // the failed run's wrapper is kept (it unlocks the replicas' key).
+      expect(await backend.listRecoveryMethods()).toHaveLength(1);
       const generationsBefore = (await backend.listGenerations()).length;
 
       // The user deletes a native file meanwhile; a fail-closed pull must
@@ -1737,13 +1738,14 @@ describe('Task 13 fix round 3', () => {
         runMemoryCloudProtect({ ...deps(stackHome, backend, otherKeys), backend }, { recoveryKey: generateRecoveryKey() }),
       ).rejects.toMatchObject({ code: 'protect-in-progress', message: expect.stringContaining('machine that started it') });
       expect(await secureKeys(otherKeys).hasKey()).toBe(false);
-      expect(await backend.listRecoveryMethods()).toHaveLength(0);
+      expect(await backend.listRecoveryMethods()).toHaveLength(1); // only the interrupted run's (I8)
 
-      // Re-run protect: resumes with this device's key and finalizes.
+      // Re-run protect: resumes with this device's key and finalizes (a fresh
+      // recovery file for the same key, beside the interrupted run's).
       const resumed = await runMemoryCloudProtect({ ...deps(stackHome, backend, keys), backend }, { recoveryKey: generateRecoveryKey() });
       expect(resumed).toMatchObject({ status: 'protected', migrated: 0 });
       expect((await backend.getProfile())?.privacyMode).toBe('protected');
-      expect(await backend.listRecoveryMethods()).toHaveLength(1);
+      expect(await backend.listRecoveryMethods()).toHaveLength(2);
       const pulled = await pullMemoryViaCanonical(deps(stackHome, backend, keys), { claudeHome });
       expect(pulled.status).toBe('up-to-date');
       expect(await readFile(memoryFile, 'utf8')).toBe('notes body');
@@ -2834,6 +2836,36 @@ describe('spec 8.5: recover an old generation, then push it forward', () => {
     expect(await readFile(noteOf(X.claude, X.dir, 'MEMORY.md'), 'utf8')).toBe('v1');
     expect(await readFile(noteOf(X.claude, X.dir, 'other.md'), 'utf8')).toBe('from Y');
     expect(await exists(noteOf(X.claude, X.dir, 'later.md'))).toBe(false);
+  });
+
+  it('final review T15-4: `stak memory backup` after a historical recover on a machine with NO sync base refuses (like push) instead of seeding the base from N and discarding the rollback', async () => {
+    const { backend, X } = await twoMachinesAtGen1('t154');
+    // A fresh machine F recovers gen 0 (historical): it has no canonical base.
+    const F = { home: path.join(root, 'f-t154-stack'), keys: path.join(root, 'f-t154-keys') };
+    expect(await runMemoryCloudRecover(deps(F.home, backend, F.keys), { generation: 0 })).toMatchObject({ status: 'recovered' });
+    expect(await readCanonicalBase(F.home)).toBeNull();
+    const out = await runMemoryCloudBackup(deps(F.home, backend, F.keys));
+    expect(out.cloud).toMatchObject({ status: 'failed' });
+    expect(out.cloud.status === 'failed' && out.cloud.message).toContain('stak memory recover');
+    expect(await backend.listGenerations()).toHaveLength(2);
+    expect(await readCanonicalBase(F.home)).toBeNull();
+    void X;
+  });
+
+  it('final review T15-2: a rollback push that ends up-to-date (the recovered content already equals Cloud) clears the historical-recovery flag too; so does `stak memory backup`', async () => {
+    const { backend, X } = await twoMachinesAtGen1('t152');
+    expect(await runMemoryCloudRecover(deps(X.home, backend, X.keys), { generation: 0 })).toMatchObject({ status: 'recovered' });
+    expect(await pushMemoryViaCanonical(deps(X.home, backend, X.keys), { claudeHome: X.claude })).toMatchObject({ status: 'pushed', generation: 2 });
+    // Recover gen 0 again: content (v1 + the kept later.md tombstone) equals gen 2 exactly.
+    expect(await runMemoryCloudRecover(deps(X.home, backend, X.keys), { generation: 0 })).toMatchObject({ status: 'recovered' });
+    expect((await readMemoryCloudStatus(deps(X.home, backend, X.keys))).historicalRecovery).toBe(true);
+    expect((await pushMemoryViaCanonical(deps(X.home, backend, X.keys), { claudeHome: X.claude })).status).toBe('up-to-date');
+    expect(await backend.listGenerations()).toHaveLength(3);
+    expect((await readMemoryCloudStatus(deps(X.home, backend, X.keys))).historicalRecovery).toBe(false);
+
+    expect(await runMemoryCloudRecover(deps(X.home, backend, X.keys), { generation: 0 })).toMatchObject({ status: 'recovered' });
+    expect((await runMemoryCloudBackup(deps(X.home, backend, X.keys))).cloud.status).toBe('up-to-date');
+    expect((await readMemoryCloudStatus(deps(X.home, backend, X.keys))).historicalRecovery).toBe(false);
   });
 
   it('an upgraded store recovering an OLD-FORMAT (v1) generation: converted to canonical Memory + tombstones, current.json stays global-only, and the next push publishes exactly that', async () => {

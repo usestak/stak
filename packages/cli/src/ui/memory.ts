@@ -402,6 +402,8 @@ export type BackupSupersessionView = {
   parentGeneration: number | null;
   nextGeneration: number | null;
   supersedes: boolean;
+  /** Final review T15-4 (see `BackupSupersession.noSyncHistory`). */
+  noSyncHistory?: boolean;
 };
 
 export type MemoryBackupPreview = BackupComposition & {

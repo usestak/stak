@@ -211,6 +211,24 @@ const recordRecoveryProvenance = async (
   });
 };
 
+/**
+ * Final review T15-2: a push or backup that ends `up-to-date` proves local
+ * Memory equals Cloud's `generation`, so record that as this machine's
+ * provenance, exactly as a publish does. Otherwise a rollback whose content
+ * already matched Cloud kept the historical-recovery flag forever (every push
+ * announcing a rollback it never publishes). Advances only, never backwards.
+ */
+export const recordInSyncWithCloud = async (deps: MemoryCloudDeps, generation: number): Promise<void> => {
+  if (!deps.backend) return;
+  const provenance = await readLocalRecoveryState(deps.stackHome);
+  if (provenance && provenance.recoveredGeneration >= generation) return;
+  await recordRecoveryProvenance(deps, {
+    generation,
+    privacyMode: (await deps.backend.getProfile())?.privacyMode ?? 'standard',
+    cloudLatest: generation,
+  });
+};
+
 /** Fingerprint of the v1 manifest currently on disk (right after a recover). */
 const restoredManifestFingerprint = async (
   stackHome: string,
@@ -516,6 +534,21 @@ const seedBaseFromLastKnownV1Generation = async (
   }
 };
 
+/** Final review T15-4: shared by `stak push`'s preflight and `stak memory
+ * backup` — after recovering an OLDER backup, a machine with no canonical sync
+ * base can't tell its rollback apart from Cloud (seeding the base from the
+ * recovered generation would silently discard the rollback). */
+export const HISTORICAL_NO_SYNC_HISTORY_MESSAGE =
+  'Local Memory was recovered from an older STAK Cloud backup, and this machine has no Memory sync history yet, so STAK could not tell the rollback apart from Cloud. Run `stak memory recover` to catch up to the latest backup first. Nothing was changed in Cloud.';
+
+/** True in exactly the T15-4 case: a historical recover and no sync base. */
+export const isHistoricalWithoutSyncHistory = async (deps: MemoryCloudDeps): Promise<boolean> => {
+  if (!deps.backend) return false;
+  const provenance = await readLocalRecoveryState(deps.stackHome);
+  if (!isHistoricalRecovery(provenance, (await deps.backend.getProfile())?.latestGeneration ?? null)) return false;
+  return (await readCanonicalBase(deps.stackHome)) === null;
+};
+
 export const runMemoryCloudBackup = async (
   deps: MemoryCloudDeps,
   options: {
@@ -581,6 +614,12 @@ export const runMemoryCloudBackup = async (
       };
     };
 
+    // Final review T15-4: the same block as `stak push` — checked BEFORE the
+    // base is seeded from the recovered generation, which would discard the
+    // rollback the user just confirmed.
+    if (await isHistoricalWithoutSyncHistory(deps))
+      return { local, cloud: { status: 'failed', message: HISTORICAL_NO_SYNC_HISTORY_MESSAGE } };
+
     // Spec Appendix A.4 / Task 13 finding 7: lazily seed base from this
     // machine's own last-known v1 generation, before the first canonical merge.
     await seedBaseFromLastKnownV1Generation(deps, mmk);
@@ -621,8 +660,10 @@ export const runMemoryCloudBackup = async (
           message: 'STAK Cloud kept moving while backing up Memory. Try again.',
         },
       };
-    if (outcome.status === 'up-to-date')
+    if (outcome.status === 'up-to-date') {
+      await recordInSyncWithCloud(deps, outcome.generation);
       return { local, cloud: { status: 'up-to-date', generation: outcome.generation } };
+    }
     // 'pushed': a generation was actually created, in whichever privacy mode
     // this account is currently in (read once, above, before publishing).
     const mode: 'standard' | 'protected' = profile?.privacyMode ?? 'standard';
@@ -1012,6 +1053,9 @@ export type BackupSupersession = {
   parentGeneration: number | null;
   nextGeneration: number | null;
   supersedes: boolean;
+  /** Final review T15-4: superseding from a machine with no Memory sync
+   * history — refused (like `stak push`), never confirmable. */
+  noSyncHistory?: boolean;
 };
 
 /**
@@ -1042,6 +1086,10 @@ export const readBackupSupersession = async (
     nextGeneration:
       cloudLatestGeneration === null ? 0 : cloudLatestGeneration + 1,
     supersedes: isHistoricalRecovery(provenance, cloudLatestGeneration),
+    // Final review T15-4: a supersede that can't be published safely at all.
+    noSyncHistory:
+      isHistoricalRecovery(provenance, cloudLatestGeneration) &&
+      (await readCanonicalBase(deps.stackHome)) === null,
   };
 };
 

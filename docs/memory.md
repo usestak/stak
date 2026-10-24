@@ -257,9 +257,9 @@ before this upgrade) can be recovered the same way; they are converted to the
 new format as they are recovered.
 
 One exception: on a machine that has never synced Memory before (for example a
-fresh machine), `stak push` refuses after recovering an older backup, because
-it can't tell the rollback apart from Cloud's changes. Run `stak memory recover`
-to catch up to the latest backup first.
+fresh machine), `stak push` and `stak memory backup` refuse after recovering an
+older backup, because they can't tell the rollback apart from Cloud's changes.
+Run `stak memory recover` to catch up to the latest backup first.
 
 ### After "Delete Cloud Memory"
 
@@ -402,7 +402,8 @@ when the latest backup contains unwanted state but an earlier backup is known-go
   (e.g. "Local source Backup #3 / Cloud latest Backup #4") instead of "up to date".
 - If you then `stak push`, STAK publishes the rollback as a **new** backup (see
   "Recovering an older version" above). `stak memory backup` does the same, but
-  first asks for confirmation, as described next.
+  first asks for confirmation, as described next. On a machine that has never
+  synced Memory before, both refuse instead (see "Recovering an older version").
 - If you then `stak memory backup`, STAK creates a **new** backup from your current
   local Memory. Cloud history is linear, so the new backup is added after your current
   latest backup (e.g. backup #5 after #4) and becomes the new latest — superseding it.
