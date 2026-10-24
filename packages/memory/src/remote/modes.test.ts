@@ -534,6 +534,69 @@ describe('protect replicas and the sticky v1-after-v2 gate (Task 13 fix round 3,
     expect((await backend.listGenerations()).filter((g) => g.privacyMode === 'standard')).toHaveLength(3);
     void source;
   });
+
+  const otherMachinePush = async (backend: RemoteMemoryBackend) =>
+    backend.createGeneration({
+      backupId: randomUUID(),
+      expectedParent: (await backend.getProfile())?.latestGeneration ?? null,
+      privacyMode: 'standard',
+      payload: Buffer.from('other machine'),
+      bundleFormatVersion: V2,
+    });
+
+  it('final review I5: a push landing while protect is still READING the originals (before any copy) makes the first copy conflict — nothing copied, retired or finalized', async () => {
+    const { backend } = await mixedHistory();
+    let pushed: string | undefined;
+    const racing: RemoteMemoryBackend = Object.create(backend);
+    racing.getPayload = async (backupId) => {
+      if (!pushed) pushed = (await otherMachinePush(backend)).backupId;
+      return backend.getPayload(backupId);
+    };
+    await expect(migrateStandardToProtected({ backend: racing, mmk: generateMmk() })).rejects.toMatchObject({ code: 'conflict' });
+    expect((await backend.getProfile())?.privacyMode).toBe('standard');
+    expect((await backend.getLatest())?.backupId).toBe(pushed);
+    expect((await backend.listGenerations()).every((g) => g.privacyMode === 'standard')).toBe(true);
+    expect(await isProtectInProgress(backend)).toBe(false);
+  });
+
+  it('final review I5: a push landing after the last copy but before the originals are retired aborts before retiring anything', async () => {
+    const { backend } = await mixedHistory();
+    let pushed: string | undefined;
+    const racing: RemoteMemoryBackend = Object.create(backend);
+    racing.getProfile = async () => {
+      // Both copies exist and nothing is retired yet: another machine pushes now.
+      if (!pushed && (await backend.listGenerations()).filter((g) => g.privacyMode === 'protected').length === 2)
+        pushed = (await otherMachinePush(backend)).backupId;
+      return backend.getProfile();
+    };
+    await expect(migrateStandardToProtected({ backend: racing, mmk: generateMmk() })).rejects.toMatchObject({
+      code: 'protect-in-progress',
+    });
+    expect(pushed).toBeDefined();
+    expect((await backend.getProfile())?.privacyMode).toBe('standard');
+    // No original was retired: every Standard generation (the 2 originals + the push) is still committed.
+    expect((await backend.listGenerations()).filter((g) => g.privacyMode === 'standard')).toHaveLength(3);
+  });
+
+  it('final review I5: a push landing while originals are being retired never finalizes; re-running protect copies it and finishes', async () => {
+    const { backend } = await mixedHistory();
+    const mmk = generateMmk();
+    let pushed: string | undefined;
+    const racing: RemoteMemoryBackend = Object.create(backend);
+    racing.retireGeneration = async (...args) => {
+      await backend.retireGeneration(...args);
+      if (!pushed) pushed = (await otherMachinePush(backend)).backupId;
+    };
+    await expect(migrateStandardToProtected({ backend: racing, mmk })).rejects.toMatchObject({ code: 'protect-in-progress' });
+    expect((await backend.getProfile())?.privacyMode).toBe('standard');
+    expect((await backend.getGenerationById(pushed as string))?.state).toBe('committed');
+
+    const finished = await migrateStandardToProtected({ backend, mmk });
+    expect(finished.finalized).toBe(true);
+    expect((await backend.getProfile())?.privacyMode).toBe('protected');
+    expect((await backend.listGenerations()).some((g) => g.privacyMode === 'standard')).toBe(false);
+    expect((await backend.listGenerations()).some((g) => g.replicaOf === pushed)).toBe(true);
+  });
 });
 
 describe('protect resume from a device WITHOUT the interrupted run\'s key (Task 13 fix round 4)', () => {

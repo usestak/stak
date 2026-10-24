@@ -390,6 +390,15 @@ export const migrateStandardToProtected = async (options: {
   mmk: Buffer;
   now?: () => Date;
 }): Promise<MigrationResult> => {
+  // Final review I5: read the commit counter FIRST, before listing — every
+  // create chains from it, so a push landing anywhere after this point (even
+  // during the long Phase 1 reads, before any copy exists) makes the first
+  // create conflict instead of being stranded as Standard behind a replica.
+  // Retiring never lowers the counter, so Phase 1b below doesn't move it.
+  const initialHead =
+    (await options.backend.getProfile())?.latestGeneration ??
+    (await options.backend.getLatest())?.generation ??
+    null;
   const generations = await options.backend.listGenerations();
   // `listGenerations` is newest-first; copy oldest-first (see above).
   const standards = generations
@@ -465,13 +474,10 @@ export const migrateStandardToProtected = async (options: {
     verified.clear();
   }
 
-  // Read ONCE (after any retirement); every later create chains from the
-  // previous create's own result. The profile's `latestGeneration` is what the
-  // commit checks against (it never drops when a generation is retired).
-  let expectedParent =
-    (await options.backend.getProfile())?.latestGeneration ??
-    (await options.backend.getLatest())?.generation ??
-    null;
+  // Every create chains from the counter read before listing (final review
+  // I5), then from the previous create's own result. The profile's
+  // `latestGeneration` is what the commit checks against.
+  let expectedParent = initialHead;
   let migrated = 0;
   let resumed = 0;
   // original backupId -> the replica this run verified or created for it.
@@ -518,6 +524,15 @@ export const migrateStandardToProtected = async (options: {
   // replica is still committed (another device's protect may have retired it
   // as an orphan meanwhile) and abort otherwise; the retire itself is guarded
   // so the backend refuses it atomically if that changes in between.
+  // Final review I5: nothing may have been committed since this run's last
+  // create (or its initial read, when every copy was resumed). Checked before
+  // retiring ANY original, so a push that landed after the last copy is never
+  // stranded as Standard in a "Protected" account.
+  if (((await options.backend.getProfile())?.latestGeneration ?? null) !== expectedParent)
+    throw new RemoteMemoryError(
+      'protect-in-progress',
+      'Your Cloud Memory changed while protect was running (another machine pushed), so nothing was retired. Run `stak memory protect` again.',
+    );
   let retiredStandard = 0;
   for (const standard of standards) {
     const replicaId = replicaFor.get(standard.backupId);
@@ -530,6 +545,14 @@ export const migrateStandardToProtected = async (options: {
     await options.backend.retireGeneration(standard.backupId, options.now, { guarded: true });
     retiredStandard += 1;
   }
+  // Final review I5: last line of defence before finalizing — no committed
+  // Standard generation may remain (one landing during the retires above).
+  // Re-running protect on this machine copies it and finishes.
+  if ((await options.backend.listGenerations()).some((g) => g.privacyMode === 'standard'))
+    throw new RemoteMemoryError(
+      'protect-in-progress',
+      'Your Cloud Memory changed while protect was finishing (another machine pushed). Run `stak memory protect` again on this machine to finish.',
+    );
   await options.backend.setPrivacyMode('protected');
   return {
     migrated,
