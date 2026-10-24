@@ -16,7 +16,9 @@ import {
   type PushSkillOutcome,
 } from '../ui/cloud.js';
 
-export type MemoryPushPreflight = { blocked: boolean; reason?: string };
+/** `note`: a one-line notice printed when the push proceeds (spec §8.5: a
+ * rollback published by an ordinary push is announced, never silent). */
+export type MemoryPushPreflight = { blocked: boolean; reason?: string; note?: string };
 
 export type PushCommandDependencies = {
   cloudPreparePush(): Promise<PushPlan>;
@@ -82,6 +84,7 @@ export const registerPushCommand = (
             memoryPreflight.reason ??
               'Memory has a predictable conflict with STAK Cloud. Resolve it before pushing.',
           );
+        if (memoryPreflight.note) dependencies.writeOut(`${memoryPreflight.note}\n`);
         if (options.dryRun) {
           dependencies.writeOut(renderPushPlan(plan, true, { verbose }));
           return;

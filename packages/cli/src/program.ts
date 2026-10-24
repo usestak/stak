@@ -74,6 +74,7 @@ import {
   createClaudeMemoryAdapter,
   fileLocalMemoryKeyStore,
   generateRecoveryKey,
+  readCanonicalBase,
   readLocalRegistry,
   readMemoryManifest,
   readMemoryStatus,
@@ -964,15 +965,27 @@ const defaultDependencies: ProgramDependencies = {
   // MACHINE -> add -> MAIN -> push -> CLOUD model forbids). Contrast with `stak memory
   // backup` (`memoryCloudBackup` below), which intentionally still does its own local
   // rescan first — that command's own behavior is unchanged.
+  // Spec §8.5: after `stak memory recover --backup N` the rollback is ordinary
+  // local changes against this machine's sync base, so `stak push` publishes it
+  // through the canonical merge like any other push (announced by `note`).
+  // This preflight dates from the pre-canonical push (e07bda4), which replaced
+  // Cloud wholesale. The one case the merge does NOT cover: no canonical base
+  // yet (a fresh machine). Push would then seed the base from the recovered
+  // generation itself and silently discard the rollback, so that case stays
+  // blocked.
   memoryPushPreflight: async () => {
     const status = await readMemoryCloudStatus(await buildMemoryCloudDeps());
-    return status.historicalRecovery
-      ? {
-          blocked: true,
-          reason:
-            'Local Memory was recovered from an older STAK Cloud generation than the current latest. Run `stak memory recover` to catch up before pushing, or `stak memory backup` to accept the historical state deliberately.',
-        }
-      : { blocked: false };
+    if (!status.historicalRecovery) return { blocked: false };
+    if ((await readCanonicalBase(stackHome)) === null)
+      return {
+        blocked: true,
+        reason:
+          'Local Memory was recovered from an older STAK Cloud backup, and this machine has no Memory sync history yet, so a push could not tell the rollback apart from Cloud. Run `stak memory recover` to catch up to the latest backup before pushing.',
+      };
+    return {
+      blocked: false,
+      note: `Memory: publishing a rollback to Backup #${status.localRecoveredGeneration ?? '?'}.`,
+    };
   },
   // `stak push` means "synchronize MAIN to Cloud" — if staged MAIN already equals the
   // latest Cloud generation, this must be a no-op: it never creates another immutable

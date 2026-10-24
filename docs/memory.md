@@ -219,17 +219,27 @@ project known only from another machine shows as **not available on this
 machine** until the next `stak pull` finds it, or until you map it with
 `stak project map`.
 
-### `stak memory backup` and recovering an older version
+### `stak memory backup`
 
 `stak memory backup` is now the Memory part of `stak push`: it merges with Cloud
 the same way and never overwrites another machine's changes. It is kept as a
 deprecated alias.
 
+### Recovering an older version
+
 After `stak memory recover --backup <n>`, your local Memory is that older backup,
-and the rollback shows up as ordinary local changes, including deletions. Cloud
-history is never rewritten. `stak push` refuses while local Memory comes from an
-older backup than Cloud's latest; run `stak memory backup` (it asks you to
-confirm) to make the rollback the newest backup.
+and the rollback shows up as ordinary local changes. Files added since that
+backup are recorded as deletions. Your next `stak push` makes the rollback the
+newest backup, and says so ("publishing a rollback to Backup #n"). Cloud history
+is never rewritten, and the push merges with Cloud like any other push: if
+another machine pushed in the meantime, its unrelated changes are kept, and
+anything changed on both sides becomes a conflict to resolve. Other machines
+pick up the rollback, including the deletions, on their next `stak pull`.
+
+One exception: on a machine that has never synced Memory before (for example a
+fresh machine), `stak push` refuses after recovering an older backup, because
+it can't tell the rollback apart from Cloud's changes. Run `stak memory recover`
+to catch up to the latest backup first.
 
 ### After "Delete Cloud Memory"
 
@@ -367,6 +377,9 @@ when the latest backup contains unwanted state but an earlier backup is known-go
   You still run `stak memory restore` to apply it to native agent Memory.
 - After recovering a previous backup, `stak memory status` shows the relationship
   (e.g. "Local source Backup #3 / Cloud latest Backup #4") instead of "up to date".
+- If you then `stak push`, STAK publishes the rollback as a **new** backup (see
+  "Recovering an older version" above). `stak memory backup` does the same, but
+  first asks for confirmation, as described next.
 - If you then `stak memory backup`, STAK creates a **new** backup from your current
   local Memory. Cloud history is linear, so the new backup is added after your current
   latest backup (e.g. backup #5 after #4) and becomes the new latest — superseding it.

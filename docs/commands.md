@@ -79,7 +79,11 @@ Show the last memory backup.
 Download the private memory store from STAK Cloud onto this machine (requires
 sign-in). Use `recover` for explicit or history-based recovery, or when Memory
 is Protected; a fresh machine normally gets its Memory from `stak pull`
-instead.
+instead. Recovering an older backup is a rollback: files added since then are
+recorded as deletions, and the next `stak push` publishes the rollback as the
+newest backup (merged with Cloud like any push; Cloud history is never
+rewritten). On a machine that has never synced Memory, push refuses after an
+older-backup recover; recover the latest first.
 
 ### `stak memory restore [--dry-run] [--json] [--verbose]`
 

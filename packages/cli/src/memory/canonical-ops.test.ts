@@ -2640,55 +2640,111 @@ describe('spec 8.5: recover an old generation, then push it forward', () => {
   };
   const presentPaths = (main: Awaited<ReturnType<typeof readCanonicalMain>> | undefined) =>
     (main?.projects[0]?.documents ?? []).filter((d) => d.state === 'present').map((d) => d.path);
+  const tombstonePaths = (main: Awaited<ReturnType<typeof readCanonicalMain>> | undefined) =>
+    (main?.projects[0]?.documents ?? []).filter((d) => d.state === 'deleted').map((d) => d.path);
 
-  it('the rollback becomes ordinary local changes (edit + deletion); the next push makes it the newest generation without rewriting history; another machine pulls it', async () => {
-    const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'spec-8-5');
-    const X = { home: path.join(root, 'x85-stack'), claude: path.join(root, 'x85-claude'), dir: path.join(root, 'x85-proj'), keys: path.join(root, 'x85-keys') };
-    const Y = { home: path.join(root, 'y85-stack'), claude: path.join(root, 'y85-claude'), dir: path.join(root, 'y85-proj'), keys: path.join(root, 'y85-keys') };
+  /** Gen 0: MEMORY.md = v1. Gen 1: MEMORY.md = v2 + later.md. Y has synced gen 1. */
+  const twoMachinesAtGen1 = async (tag: string) => {
+    const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), `spec-8-5-${tag}`);
+    const machine = (name: string) => ({
+      home: path.join(root, `${name}-${tag}-stack`),
+      claude: path.join(root, `${name}-${tag}-claude`),
+      dir: path.join(root, `${name}-${tag}-proj`),
+      keys: path.join(root, `${name}-${tag}-keys`),
+    });
+    const X = machine('x');
+    const Y = machine('y');
     await mkdir(X.dir, { recursive: true });
     await mkdir(Y.dir, { recursive: true });
     const projectId = await bindAt(X.home, X.dir);
     await bindAt(Y.home, Y.dir, projectId);
-
-    // Generation 0: MEMORY.md = v1.
     await put(noteOf(X.claude, X.dir, 'MEMORY.md'), 'v1');
     await stageCanonicalMemory(X.home, { claudeHome: X.claude });
     expect(await pushMemoryViaCanonical(deps(X.home, backend, X.keys), { claudeHome: X.claude })).toMatchObject({ status: 'pushed', generation: 0 });
-    // Generation 1: MEMORY.md = v2, plus a new later.md.
     await put(noteOf(X.claude, X.dir, 'MEMORY.md'), 'v2');
     await put(noteOf(X.claude, X.dir, 'later.md'), 'later');
     await stageCanonicalMemory(X.home, { claudeHome: X.claude });
     expect(await pushMemoryViaCanonical(deps(X.home, backend, X.keys), { claudeHome: X.claude })).toMatchObject({ status: 'pushed', generation: 1 });
     expect((await pullMemoryViaCanonical(deps(Y.home, backend, Y.keys), { claudeHome: Y.claude })).status).toBe('merged');
     expect(await readFile(noteOf(Y.claude, Y.dir, 'later.md'), 'utf8')).toBe('later');
+    return { backend, X, Y };
+  };
 
-    // `stak memory recover --generation 0`: local Memory becomes generation 0;
-    // the sync base stays at generation 1, so the rollback is a local change.
+  it('recover N records the docs added since N as tombstones; the next push publishes exactly one generation (N + tombstones) without rewriting history; another machine pulls the deletion and never resurrects it', async () => {
+    const { backend, X, Y } = await twoMachinesAtGen1('basic');
+    const laterHash = hashBytes(Buffer.from('later', 'utf8'));
+
+    // `stak memory recover --generation 0`: a rollback. later.md (added since
+    // gen 0) becomes a tombstone carrying its pre-recover hash; the sync base
+    // stays at gen 1, so the rollback is ordinary local changes.
     expect(await runMemoryCloudRecover(deps(X.home, backend, X.keys), { generation: 0 })).toMatchObject({ status: 'recovered', generation: 0 });
-    expect(presentPaths(await readCanonicalMain(X.home))).toEqual(['notes/MEMORY.md']);
+    const recovered = await readCanonicalMain(X.home);
+    expect(presentPaths(recovered)).toEqual(['notes/MEMORY.md']);
+    expect(recovered.projects[0]?.documents.find((d) => d.path === 'notes/later.md')).toMatchObject({
+      state: 'deleted',
+      lastContentHash: laterHash,
+    });
     expect((await readCanonicalBase(X.home))?.generation).toBe(1);
-    // NOTE: at the CLI level `stak push`'s `memoryPushPreflight` (program.ts)
-    // refuses while this flag is set and points to `stak memory backup`
-    // (which confirms, then publishes through this same engine).
     expect((await readMemoryCloudStatus(deps(X.home, backend, X.keys))).historicalRecovery).toBe(true);
 
-    // The push engine: the rollback becomes the newest generation (2).
+    // Push: exactly one new generation, holding gen 0's content plus the tombstone.
     expect(await pushMemoryViaCanonical(deps(X.home, backend, X.keys), { claudeHome: X.claude })).toMatchObject({ status: 'pushed', generation: 2 });
+    expect(await backend.listGenerations()).toHaveLength(3);
     const latest = await fetchRemoteCanonical({ backend, localRegistry: await readLocalRegistry(X.home) });
     expect(latest?.generation).toBe(2);
     expect(presentPaths(latest?.main)).toEqual(['notes/MEMORY.md']);
-    // History is not rewritten: generation 1 still holds the rolled-back state.
+    expect(tombstonePaths(latest?.main)).toEqual(['notes/later.md']);
+    const gen0 = await fetchRemoteCanonical({ backend, localRegistry: await readLocalRegistry(X.home), generation: 0 });
+    expect(latest?.main.projects[0]?.documents.find((d) => d.path === 'notes/MEMORY.md')).toEqual(
+      gen0?.main.projects[0]?.documents.find((d) => d.path === 'notes/MEMORY.md'),
+    );
+    // History is not rewritten.
     const gen1 = await fetchRemoteCanonical({ backend, localRegistry: await readLocalRegistry(X.home), generation: 1 });
     expect(presentPaths(gen1?.main)).toEqual(['notes/MEMORY.md', 'notes/later.md']);
+    // The historical-recovery flag clears after the publish.
     expect((await readMemoryCloudStatus(deps(X.home, backend, X.keys))).historicalRecovery).toBe(false);
-    // X's agent files follow the rollback (edit reverted, later.md removed).
     expect(await readFile(noteOf(X.claude, X.dir, 'MEMORY.md'), 'utf8')).toBe('v1');
     expect(await exists(noteOf(X.claude, X.dir, 'later.md'))).toBe(false);
 
-    // Another machine pulls the rollback like any other change, deletion included.
+    // Y pulls: the edit is reverted and later.md removed.
     expect((await pullMemoryViaCanonical(deps(Y.home, backend, Y.keys), { claudeHome: Y.claude })).status).toBe('merged');
     expect(await readFile(noteOf(Y.claude, Y.dir, 'MEMORY.md'), 'utf8')).toBe('v1');
     expect(await exists(noteOf(Y.claude, Y.dir, 'later.md'))).toBe(false);
-    expect(presentPaths(await readCanonicalMain(Y.home))).toEqual(['notes/MEMORY.md']);
+    expect(tombstonePaths(await readCanonicalMain(Y.home))).toEqual(['notes/later.md']);
+
+    // No resurrection: the deleted content reappearing natively on Y (an old
+    // folder, a stale copy) is never imported as new Memory, and a push
+    // creates no new generation.
+    await put(noteOf(Y.claude, Y.dir, 'later.md'), 'later');
+    await stageCanonicalMemory(Y.home, { claudeHome: Y.claude });
+    expect(tombstonePaths(await readCanonicalMain(Y.home))).toEqual(['notes/later.md']);
+    expect((await pushMemoryViaCanonical(deps(Y.home, backend, Y.keys), { claudeHome: Y.claude })).status).toBe('up-to-date');
+    expect(await backend.listGenerations()).toHaveLength(3);
+  });
+
+  it("Cloud moved again before the push: the rollback merges normally with the other machine's change", async () => {
+    const { backend, X, Y } = await twoMachinesAtGen1('moved');
+    expect(await runMemoryCloudRecover(deps(X.home, backend, X.keys), { generation: 0 })).toMatchObject({ status: 'recovered', generation: 0 });
+
+    // Y pushes an unrelated new note (gen 2) before X pushes its rollback.
+    await put(noteOf(Y.claude, Y.dir, 'other.md'), 'from Y');
+    await stageCanonicalMemory(Y.home, { claudeHome: Y.claude });
+    expect(await pushMemoryViaCanonical(deps(Y.home, backend, Y.keys), { claudeHome: Y.claude })).toMatchObject({ status: 'pushed', generation: 2 });
+
+    // X's push merges (base gen 1, local = gen 0 + tombstone, Cloud gen 2).
+    expect(await pushMemoryViaCanonical(deps(X.home, backend, X.keys), { claudeHome: X.claude })).toMatchObject({ status: 'pushed', generation: 3 });
+    const latest = await fetchRemoteCanonical({ backend, localRegistry: await readLocalRegistry(X.home) });
+    expect(presentPaths(latest?.main)).toEqual(['notes/MEMORY.md', 'notes/other.md']);
+    expect(tombstonePaths(latest?.main)).toEqual(['notes/later.md']);
+    expect(await readFile(noteOf(X.claude, X.dir, 'MEMORY.md'), 'utf8')).toBe('v1');
+    expect(await readFile(noteOf(X.claude, X.dir, 'other.md'), 'utf8')).toBe('from Y');
+    expect(await exists(noteOf(X.claude, X.dir, 'later.md'))).toBe(false);
+  });
+
+  it('recovering the LATEST generation adds no tombstones (non-historical recover is unchanged)', async () => {
+    const { backend, Y } = await twoMachinesAtGen1('latest');
+    expect(await runMemoryCloudRecover(deps(Y.home, backend, Y.keys))).toMatchObject({ status: 'recovered', generation: 1 });
+    expect(tombstonePaths(await readCanonicalMain(Y.home))).toEqual([]);
+    expect(presentPaths(await readCanonicalMain(Y.home))).toEqual(['notes/MEMORY.md', 'notes/later.md']);
   });
 });

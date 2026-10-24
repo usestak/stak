@@ -1652,6 +1652,28 @@ describe('STAK CLI', () => {
     expect(cloudApplyPush).not.toHaveBeenCalled();
   });
 
+  it('spec 8.5: push after a historical recover proceeds (Skills and Memory) and announces the rollback', async () => {
+    const cloudApplyPush = vi.fn(async () => ({
+      environment: 'main' as const,
+      versionId: '00000000-0000-4000-8000-000000000002',
+      versionNumber: 2,
+      digest: basePushPlan.digest,
+      createdNew: true,
+      uploaded: 0,
+    }));
+    const applyMemoryPush = vi.fn(async () => ({ status: 'standard' as const, generation: 5 }));
+    const result = await runProgram(['push', '--yes'], {
+      cloudPreparePush: async () => basePushPlan,
+      cloudApplyPush,
+      applyMemoryPush,
+      memoryPushPreflight: async () => ({ blocked: false, note: 'Memory: publishing a rollback to Backup #2.' }),
+    });
+    expect(result.output).toContain('Memory: publishing a rollback to Backup #2.');
+    expect(cloudApplyPush).toHaveBeenCalled();
+    expect(applyMemoryPush).toHaveBeenCalled();
+    expect(result.output).toContain('synced to Cloud (generation 5)');
+  });
+
   it('a fully clean push (Skills and Memory both already up to date) says "Nothing to push.", never claims a new Memory generation', async () => {
     const result = await runProgram(['push', '--yes'], {
       cloudPreparePush: async () => ({ ...basePushPlan, noop: true }),

@@ -662,6 +662,53 @@ const recoveredFileCount = async (stackHome: string): Promise<number> => {
   return (manifest?.items.length ?? 0) + canonicalCount;
 };
 
+/**
+ * Spec §7 / §8.5: a HISTORICAL recover (an older generation than Cloud's
+ * latest) is a rollback, which must show up as ordinary local changes,
+ * deletions included. The recovered `main.json` simply lacks documents added
+ * since that generation, so record each one that was present locally before
+ * the recover as a tombstone carrying its pre-recover content hash. Existing
+ * tombstones absent from the recovered generation are kept. Documents in the
+ * recovered generation are never touched. A non-historical recover (latest,
+ * e.g. a fresh machine) is left exactly as restored.
+ */
+const recordRollbackTombstones = async (
+  deps: { stackHome: string; now?: (() => Date) | undefined },
+  before: CanonicalMainManifest,
+  recoveredGeneration: number,
+  cloudLatest: number | null,
+): Promise<void> => {
+  if (cloudLatest === null || recoveredGeneration === cloudLatest) return;
+  const recovered = await readCanonicalMain(deps.stackHome);
+  const deletedAt = (deps.now ?? (() => new Date()))().toISOString();
+  let changed = false;
+  const projects = recovered.projects.map((p) => ({ ...p, documents: [...p.documents] }));
+  for (const prior of before.projects) {
+    let project = projects.find((p) => p.projectId === prior.projectId);
+    for (const doc of prior.documents) {
+      if (project?.documents.some((d) => d.path === doc.path)) continue;
+      const tombstone =
+        doc.state === 'deleted'
+          ? doc
+          : { path: doc.path, state: 'deleted' as const, lastContentHash: doc.contentHash, deletedAt };
+      if (!project) {
+        project = { projectId: prior.projectId, documents: [] };
+        projects.push(project);
+      }
+      project.documents.push(tombstone);
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  const byPath = (a: { path: string }, b: { path: string }) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  await writeCanonicalMain(deps.stackHome, {
+    ...recovered,
+    projects: projects
+      .map((p) => ({ ...p, documents: p.documents.sort(byPath) }))
+      .sort((a, b) => (a.projectId < b.projectId ? -1 : a.projectId > b.projectId ? 1 : 0)),
+  });
+};
+
 /** Recover the private store from Cloud. Does not touch native agent files. */
 export const runMemoryCloudRecover = async (
   deps: MemoryCloudDeps,
@@ -680,6 +727,8 @@ export const runMemoryCloudRecover = async (
 
   const cloudLatest = (await deps.backend.getLatest())?.generation ?? null;
 
+  const before = await readCanonicalMain(deps.stackHome);
+
   if (meta.privacyMode === 'standard') {
     const result = await cloudRecover({
       stackHome: deps.stackHome,
@@ -688,6 +737,7 @@ export const runMemoryCloudRecover = async (
         ? { generation: options.generation }
         : {}),
     });
+    await recordRollbackTombstones(deps, before, result.generation, cloudLatest);
     await recordRecoveryProvenance(deps, {
       generation: result.generation,
       privacyMode: 'standard',
@@ -721,6 +771,7 @@ export const runMemoryCloudRecover = async (
       ? { generation: options.generation }
       : {}),
   });
+  await recordRollbackTombstones(deps, before, result.generation, cloudLatest);
   // Recovery already succeeded; enrolling this device is best-effort and must not
   // persist insecure key material (enrollDeviceSafe fails closed internally).
   if (unlockedViaRecoveryKey) await enrollDeviceSafe(deps.localKeyStore, mmk);
@@ -1205,6 +1256,7 @@ export const runPasskeyRecover = async (
     envelope: poll.envelope as BridgeEnvelope,
     now,
   });
+  const before = await readCanonicalMain(deps.stackHome);
   const result = await cloudRecover({
     stackHome: deps.stackHome,
     backend: deps.backend,
@@ -1213,6 +1265,7 @@ export const runPasskeyRecover = async (
       ? { generation: options.generation }
       : {}),
   });
+  await recordRollbackTombstones(deps, before, result.generation, cloudLatest);
   // Recovery already succeeded; enroll best-effort (never persists insecure state).
   await enrollDeviceSafe(deps.localKeyStore, mmk);
   await writeLocalRecoveryState(deps.stackHome, {
