@@ -61,6 +61,7 @@ import {
 } from '@stack/memory';
 
 import { resolveCanonicalProjectId } from './canonical-identity.js';
+import { stageMemoryWithProjectDedup, type StageMemoryOptions } from './stage-memory.js';
 import { hasNothingToPush, publishCanonicalGeneration, type MemoryCloudDeps } from './cloud-ops.js';
 import {
   assertNoCurrentPendingMerge,
@@ -698,6 +699,29 @@ export const stageCanonicalMemory = async (
     unlocatableProjects,
     untrackedFolders: untrackedFolderCount,
   };
+};
+
+/**
+ * `stak add .`'s whole Memory staging: global Memory through the v1 path, project
+ * Memory through canonical staging.
+ *
+ * Final review I3: migrate FIRST. The v1 staging rewrites `current.json` (a new
+ * `createdAt`), which erases the "this manifest came straight from a Cloud
+ * recover" fingerprint migration relies on (`v1ManifestOrigin`). Migrating
+ * after it would treat recovered content as locally produced, seed P = C over a
+ * stale native file, and import that stale file — which the next push would
+ * fast-forward over newer Cloud content.
+ */
+export const stageAllMemory = async (
+  discovery: StageMemoryOptions & CanonicalDiscoveryOptions,
+): Promise<{
+  legacy: Awaited<ReturnType<typeof stageMemoryWithProjectDedup>>;
+  canonical: CanonicalMemoryStageResult;
+}> => {
+  await migrateWithProjectionSeed(discovery.stackHome, discovery);
+  const legacy = await stageMemoryWithProjectDedup(discovery);
+  const canonical = await stageCanonicalMemory(discovery.stackHome, discovery);
+  return { legacy, canonical };
 };
 
 /** The `resolveProjectId` callback the canonical scan/migration functions expect,

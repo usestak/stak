@@ -117,13 +117,12 @@ import {
   resolvePendingConflict,
   pullMemoryViaCanonical,
   pushMemoryViaCanonical,
-  stageCanonicalMemory,
+  stageAllMemory,
   type CanonicalProjectSummary,
   type CanonicalPullOutcome,
   type UnlocatableProject,
 } from './memory/canonical-ops.js';
 import { mergePendingMessage, MemorySyncError } from './memory/pending-merge.js';
-import { stageMemoryWithProjectDedup } from './memory/stage-memory.js';
 import {
   freshRegistryRisksDuplication,
   readBackupSupersession,
@@ -795,9 +794,8 @@ const defaultDependencies: ProgramDependencies = {
   // first, so a relocated/re-cloned project's stale-but-still-discovered old directory
   // never creates a second manifest record for Memory that already has one.
   stageMemory: async () => {
-    const discovery = await memoryDiscoveryOptions();
-    const legacy = await stageMemoryWithProjectDedup(discovery);
-    const canonical = await stageCanonicalMemory(stackHome, discovery);
+    // Final review I3: `stageAllMemory` migrates before the v1 staging.
+    const { legacy, canonical } = await stageAllMemory(await memoryDiscoveryOptions());
     return {
       files: legacy.files,
       projects: legacy.projects,

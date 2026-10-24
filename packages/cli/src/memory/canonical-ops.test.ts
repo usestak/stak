@@ -55,6 +55,7 @@ import {
   migrateWithProjectionSeed,
   pullMemoryViaCanonical,
   pushMemoryViaCanonical,
+  stageAllMemory,
   stageCanonicalMemory,
 } from './canonical-ops.js';
 import {
@@ -1256,6 +1257,45 @@ describe('pushMemoryViaCanonical / pullMemoryViaCanonical (Task 13)', () => {
         'utf8',
       ),
     ).toBe('source content');
+  });
+
+  it('final review I3: `stak memory recover` then `stak add .` on a not-yet-upgraded store keeps the "came from Cloud" provenance — a stale native file is a conflict, never imported or pushed over newer Cloud', async () => {
+    const stackHomeS = path.join(root, 'i3s-stack');
+    const claudeHomeS = path.join(root, 'i3s-claude');
+    const projectDirS = path.join(root, 'i3s-proj');
+    await mkdir(projectDirS, { recursive: true });
+    const projectId = await bindProjectAt(stackHomeS, projectDirS);
+    await writeAutoMemoryAt(claudeHomeS, encodeClaudeProjectKey(path.resolve(projectDirS)), 'MEMORY.md', 'newer cloud content');
+    await stageCanonicalMemory(stackHomeS, { claudeHome: claudeHomeS });
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, 'canonical-i3');
+    expect((await pushMemoryViaCanonical(deps(stackHomeS, backend, path.join(root, 'i3s-keys')), { claudeHome: claudeHomeS })).status).toBe('pushed');
+
+    // Machine B (new CLI, store never upgraded) already holds an OLDER native copy.
+    const stackHomeB = path.join(root, 'i3b-stack');
+    const claudeHomeB = path.join(root, 'i3b-claude');
+    const projectDirB = path.join(root, 'i3b-proj');
+    const keysB = path.join(root, 'i3b-keys');
+    await mkdir(projectDirB, { recursive: true });
+    const nativeB = path.join(claudeHomeB, 'projects', encodeClaudeProjectKey(path.resolve(projectDirB)), 'memory', 'MEMORY.md');
+    await writeAutoMemoryAt(claudeHomeB, encodeClaudeProjectKey(path.resolve(projectDirB)), 'MEMORY.md', 'stale local content');
+    expect((await runMemoryCloudRecover(deps(stackHomeB, backend, keysB))).status).toBe('recovered');
+    await bindProjectAt(stackHomeB, projectDirB, projectId);
+
+    const staged = await stageAllMemory({ stackHome: stackHomeB, claudeHome: claudeHomeB });
+    const summary = staged.canonical.projects.find((p) => p.projectId === projectId);
+    expect(summary?.imported ?? []).toEqual([]);
+    expect(summary?.conflicts.map((c) => c.path)).toEqual(['notes/MEMORY.md']);
+    const doc = (await readCanonicalMain(stackHomeB)).projects
+      .find((p) => p.projectId === projectId)
+      ?.documents.find((d) => d.path === 'notes/MEMORY.md');
+    expect(doc?.state === 'present' && doc.contentHash).toBe(hashBytes(Buffer.from('newer cloud content', 'utf8')));
+
+    // The next push publishes nothing over Cloud; the native file is untouched.
+    const pushB = await pushMemoryViaCanonical(deps(stackHomeB, backend, keysB), { claudeHome: claudeHomeB });
+    expect(pushB.status).toBe('up-to-date');
+    expect(await backend.listGenerations()).toHaveLength(1);
+    expect(await readFile(nativeB, 'utf8')).toBe('stale local content');
   });
 
   it('a fresh machine whose Cloud latest is STILL v1 (never canonically pushed): recover, then pull — CLAUDE.local.md and .claude/agent-memory/* are still written to disk (Task 13 fix round 2, finding 5 — "C1 residual")', async () => {
