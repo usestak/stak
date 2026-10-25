@@ -8,14 +8,14 @@ import {
   detectCapabilities,
   getPrfOutput,
   sealMmkForCli,
-  unwrapMmkWithPrf,
+  selectPasskeyMmk,
   type BridgeFailureReason,
   type BridgeSessionPublic,
-  type StoredMmkWrapper,
 } from '@/lib/recovery-webcrypto';
 
 import {
   fetchSessionAction,
+  latestKeyCheckAction,
   listPasskeyWrappersAction,
   submitEnvelopeAction,
 } from '../actions';
@@ -86,34 +86,30 @@ export function RecoverClient({
         return;
       }
 
-      // Try each enrolled passkey wrapper until one unlocks.
-      let mmk: Uint8Array | null = null;
-      for (const wrapper of wrappersResp.wrappers) {
-        if (!wrapper.publicIdentifier) continue;
-        const prf = await getPrfOutput({
-          rpId,
-          credentialId: credentialIdFromB64url(wrapper.publicIdentifier),
-        }).catch(() => null);
-        if (!prf) {
-          await signalFailure('unsupported');
-          setStatus({
-            kind: 'unsupported',
-            message:
-              'Your passkey works, but this browser or authenticator does not provide the ' +
-              'encryption capability STAK Memory requires. Use a recovery file instead.',
-          });
-          return;
-        }
-        try {
-          mmk = await unwrapMmkWithPrf({
-            stored: wrapper.mmkWrapper as StoredMmkWrapper,
-            prfOutput: prf,
-          });
-          break;
-        } catch {
-          // wrong passkey for this wrapper — try the next
-        }
+      // Final review I7: try EVERY enrolled passkey wrapper and accept only a
+      // key that opens this account's latest Protected backup — a leftover
+      // wrapper from an abandoned protect is skipped, never sent to the CLI.
+      const checkResp = await latestKeyCheckAction();
+      const selection = await selectPasskeyMmk({
+        wrappers: wrappersResp.wrappers,
+        getPrf: (publicIdentifier) =>
+          getPrfOutput({
+            rpId,
+            credentialId: credentialIdFromB64url(publicIdentifier),
+          }).catch(() => null),
+        check: checkResp.ok ? checkResp.check : null,
+      });
+      if (selection.status === 'no-prf') {
+        await signalFailure('unsupported');
+        setStatus({
+          kind: 'unsupported',
+          message:
+            'Your passkey works, but this browser or authenticator does not provide the ' +
+            'encryption capability STAK Memory requires. Use a recovery file instead.',
+        });
+        return;
       }
+      const mmk = selection.status === 'ok' ? selection.mmk : null;
       if (!mmk) {
         await signalFailure('error');
         setStatus({

@@ -4,6 +4,7 @@ import { getCloudService } from '@/lib/cloud-service';
 import {
   addPasskeyMethod,
   fetchRecoverySession,
+  latestKeyCheck,
   listPasskeyWrappers,
   submitRecoveryEnvelope,
   type FetchSessionResult,
@@ -45,6 +46,16 @@ export async function listPasskeyWrappersAction(): Promise<
     ok: true,
     wrappers: await listPasskeyWrappers(getCloudService(), { id: user.id }),
   };
+}
+
+/** Final review I7: see `latestKeyCheck`. */
+export async function latestKeyCheckAction(): Promise<
+  | { ok: true; check: Awaited<ReturnType<typeof latestKeyCheck>> }
+  | { ok: false; error: string }
+> {
+  const user = await getSessionUser();
+  if (!user) return { ok: false, error: 'You must sign in first.' };
+  return { ok: true, check: await latestKeyCheck(getCloudService(), { id: user.id }) };
 }
 
 export async function addPasskeyMethodAction(input: {

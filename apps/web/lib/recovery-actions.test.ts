@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addPasskeyMethod,
   fetchRecoverySession,
+  latestKeyCheck,
   listPasskeyWrappers,
   submitRecoveryEnvelope,
 } from './recovery-actions';
@@ -93,5 +94,29 @@ describe('recovery ceremony server logic', () => {
     expect(wrappers[0]?.publicIdentifier).toBe('cred-b64url');
     // Isolation: user B sees none.
     expect(await listPasskeyWrappers(svc, USER_B)).toHaveLength(0);
+  });
+});
+
+describe('latestKeyCheck (final review I7)', () => {
+  it("returns the latest Protected generation's backup id and wrapped DEK (no payload), null otherwise, and only the caller's", async () => {
+    const svc = service();
+    expect(await latestKeyCheck(svc, USER_A)).toBeNull();
+    await svc.memoryCreateGeneration(
+      { userId: USER_A.id },
+      {
+        backupId: 'p-0',
+        expectedParent: null,
+        privacyMode: 'protected',
+        payloadB64: Buffer.from('ciphertext').toString('base64'),
+        bundleFormatVersion: 'stack-mem-bundle-v2',
+        cryptoVersion: 'stack-mem-cipher-v1',
+        wrappedDek: { nonceB64: 'AA==', ciphertextB64: 'AQ==', tagB64: 'Ag==' },
+      },
+    );
+    expect(await latestKeyCheck(svc, USER_A)).toEqual({
+      backupId: 'p-0',
+      wrappedDek: { nonceB64: 'AA==', ciphertextB64: 'AQ==', tagB64: 'Ag==' },
+    });
+    expect(await latestKeyCheck(svc, USER_B)).toBeNull();
   });
 });
