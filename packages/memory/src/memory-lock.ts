@@ -14,8 +14,8 @@ export type MemoryLockRecord = {
 
 export class MemoryLockError extends Error {
   readonly code = 'memory-locked' as const;
-  constructor(message: string, readonly holder?: MemoryLockRecord) {
-    super(message);
+  constructor(message: string, readonly holder?: MemoryLockRecord, options?: { cause?: unknown }) {
+    super(message, options);
     this.name = 'MemoryLockError';
   }
 }
@@ -79,9 +79,10 @@ const parseRecord = (text: string): MemoryLockRecord | undefined => {
 /**
  * Windows: a file that another process just deleted stays "delete pending" for a moment, and
  * opening, linking or creating it then fails with EPERM/EACCES/EBUSY instead of ENOENT/EEXIST.
- * These codes mean "busy, look again shortly".
+ * These codes mean "busy, look again shortly". Only on win32; elsewhere they are real errors.
  */
 const isTransient = (error: unknown): boolean => {
+  if (process.platform !== 'win32') return false;
   const code = errno(error);
   return code === 'EPERM' || code === 'EACCES' || code === 'EBUSY';
 };
@@ -89,12 +90,12 @@ const isTransient = (error: unknown): boolean => {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** One read of the raw lock bytes: null = no lock; 'busy' = transiently unreadable (see isTransient). */
-const readLockBytes = async (stackHome: string): Promise<Buffer | null | 'busy'> => {
+const readLockBytes = async (stackHome: string): Promise<Buffer | null | { busy: unknown }> => {
   try {
     return await readFile(memoryLockPath(stackHome));
   } catch (error) {
     if (errno(error) === 'ENOENT') return null;
-    if (isTransient(error)) return 'busy';
+    if (isTransient(error)) return { busy: error };
     throw error;
   }
 };
@@ -132,7 +133,10 @@ const rmQuiet = async (target: string): Promise<void> => {
  * Atomic create-with-content: write a private temp file, then hard-link it into place.
  * 'held' = a lock exists (EEXIST); 'busy' = transient Windows delete-pending error, retry.
  */
-const tryCreate = async (stackHome: string, record: MemoryLockRecord): Promise<'acquired' | 'held' | 'busy'> => {
+const tryCreate = async (
+  stackHome: string,
+  record: MemoryLockRecord,
+): Promise<'acquired' | 'held' | { busy: unknown }> => {
   const target = memoryLockPath(stackHome);
   const temporary = `${target}.${record.lockId}.tmp`;
   try {
@@ -142,7 +146,7 @@ const tryCreate = async (stackHome: string, record: MemoryLockRecord): Promise<'
       return 'acquired';
     } catch (error) {
       if (errno(error) === 'EEXIST') return 'held';
-      if (isTransient(error)) return 'busy';
+      if (isTransient(error)) return { busy: error };
       throw error;
     }
   } finally {
@@ -221,7 +225,10 @@ const underGuard = async (stackHome: string, guardStaleMs: number, fn: () => Pro
   try {
     await handle.writeFile(token);
   } catch {
-    // the token is only a safety check on removal
+    // Without its token the guard could never be removed by us; drop it now rather than leave it to go stale.
+    await handle.close().catch(() => undefined);
+    await rmQuiet(guard);
+    return false;
   }
   try {
     return await fn();
@@ -248,15 +255,6 @@ const clearLeftover = async (
     return true;
   });
 
-/** Clear a corrupt lock only while holding the guard, and only if its bytes are unchanged. Returns whether it cleared it. */
-const clearCorrupt = async (stackHome: string, inspected: Buffer, guardStaleMs: number): Promise<boolean> =>
-  underGuard(stackHome, guardStaleMs, async () => {
-    const current = await readLockBytes(stackHome);
-    if (!Buffer.isBuffer(current) || !current.equals(inspected)) return false;
-    await rm(memoryLockPath(stackHome), { force: true });
-    return true;
-  });
-
 const ago = (startedAt: string, now: Date): string => {
   const seconds = Math.max(0, Math.round((now.getTime() - Date.parse(startedAt)) / 1000));
   return seconds < 120 ? `${seconds}s` : `${Math.round(seconds / 60)}m`;
@@ -271,6 +269,20 @@ export const leftoverClearedMessage = (holder: MemoryLockRecord): string =>
 const CORRUPT_MESSAGE =
   'Another STAK command is changing Memory (its lock file is unreadable). Try again when it finishes, or run `stak memory unlock`.';
 const UNKNOWN_HOLDER_MESSAGE = 'Another STAK command is changing Memory. Try again when it finishes.';
+
+const deadlineError = (
+  lastHolder: MemoryLockRecord | 'corrupt' | undefined,
+  lastTransient: unknown,
+  at: Date,
+): MemoryLockError => {
+  if (lastHolder === 'corrupt') return new MemoryLockError(CORRUPT_MESSAGE);
+  if (lastHolder) return new MemoryLockError(busyMessage(lastHolder, at), lastHolder);
+  return new MemoryLockError(
+    UNKNOWN_HOLDER_MESSAGE,
+    undefined,
+    lastTransient === undefined ? undefined : { cause: lastTransient },
+  );
+};
 
 export const acquireMemoryLock = async (
   stackHome: string,
@@ -296,36 +308,37 @@ export const acquireMemoryLock = async (
 
   const deadline = Date.now() + timeoutMs;
   let lastHolder: MemoryLockRecord | 'corrupt' | undefined;
+  let lastTransient: unknown;
+  let finalAttempt = false;
   for (;;) {
     const created = await tryCreate(stackHome, record);
     if (created === 'acquired') break;
+    if (finalAttempt) throw deadlineError(lastHolder, lastTransient, now());
     // retryNow = progress was made (lock vanished or was cleared), so skip the sleep; the deadline still applies.
     let retryNow = false;
     if (created === 'held') {
       const bytes = await readLockBytes(stackHome);
       if (bytes === null) {
         retryNow = true; // released between our attempt and our read
-      } else if (bytes !== 'busy') {
+      } else if (Buffer.isBuffer(bytes)) {
         const holder = parseRecord(bytes.toString('utf8')) ?? 'corrupt';
         lastHolder = holder;
-        if (holder !== 'corrupt') {
-          if (holder.hostname === host && !alive(holder.pid))
-            retryNow = await clearLeftover(stackHome, holder, { guardStaleMs, onLeftoverCleared: options.onLeftoverCleared });
-        } else {
-          try {
-            const info = await stat(memoryLockPath(stackHome));
-            if (Date.now() - info.mtimeMs > guardStaleMs) retryNow = await clearCorrupt(stackHome, bytes, guardStaleMs);
-          } catch (error) {
-            if (errno(error) === 'ENOENT') retryNow = true;
-            else if (!isTransient(error)) throw error;
-          }
-        }
+        // A corrupt lock is never auto-cleared: only a record whose pid is known dead on this host is.
+        if (holder !== 'corrupt' && holder.hostname === host && !alive(holder.pid))
+          retryNow = await clearLeftover(stackHome, holder, { guardStaleMs, onLeftoverCleared: options.onLeftoverCleared });
+      } else {
+        lastTransient = bytes.busy;
       }
+    } else {
+      lastTransient = created.busy;
     }
     if (Date.now() >= deadline) {
-      if (lastHolder === 'corrupt') throw new MemoryLockError(CORRUPT_MESSAGE);
-      if (lastHolder) throw new MemoryLockError(busyMessage(lastHolder, now()), lastHolder);
-      throw new MemoryLockError(UNKNOWN_HOLDER_MESSAGE);
+      // Progress on the last pass (lock vanished or was cleared): take one more shot before giving up.
+      if (retryNow) {
+        finalAttempt = true;
+        continue;
+      }
+      throw deadlineError(lastHolder, lastTransient, now());
     }
     if (!retryNow) await sleep(pollMs);
   }

@@ -223,24 +223,28 @@ describe('withMemoryLock', () => {
     expect(await readMemoryLock(stackHome)).toMatchObject({ lockId: 'planted-lock' });
   });
 
-  it('auto-clears a corrupt lock older than guardStaleMs', async () => {
+  it('never auto-clears a corrupt lock, however old: waits, then points to stak memory unlock', async () => {
     const stackHome = await temp();
     await mkdir(path.dirname(memoryLockPath(stackHome)), { recursive: true });
     await writeFile(memoryLockPath(stackHome), 'not json');
-    const old = new Date(Date.now() - 60_000);
+    const old = new Date(Date.now() - 24 * 60 * 60_000);
     await utimes(memoryLockPath(stackHome), old, old);
-    expect(await withMemoryLock(stackHome, 'stak add', async () => 'ran', { ...fast, guardStaleMs: 30_000 })).toBe('ran');
-    expect(await readMemoryLock(stackHome)).toBeNull();
+    await expect(
+      withMemoryLock(stackHome, 'stak add', async () => undefined, { ...fast, guardStaleMs: 1 }),
+    ).rejects.toThrow(/lock file is unreadable\).*`stak memory unlock`/);
+    expect(await readFile(memoryLockPath(stackHome), 'utf8')).toBe('not json');
   });
 
-  it('keeps a fresh corrupt lock and reports it as unreadable', async () => {
+  it('after clearing a leftover on the deadline pass, tries once more instead of failing', async () => {
     const stackHome = await temp();
-    await mkdir(path.dirname(memoryLockPath(stackHome)), { recursive: true });
-    await writeFile(memoryLockPath(stackHome), 'not json');
-    await expect(
-      withMemoryLock(stackHome, 'stak add', async () => undefined, { ...fast, guardStaleMs: 30_000 }),
-    ).rejects.toThrow(/lock file is unreadable/);
-    expect(await readMemoryLock(stackHome)).toBe('corrupt');
+    await plant(stackHome, { hostname: 'this-host' });
+    const result = await withMemoryLock(stackHome, 'stak add', async () => 'ran', {
+      ...fast,
+      timeoutMs: 0,
+      hostname: 'this-host',
+      isProcessAlive: () => false,
+    });
+    expect(result).toBe('ran');
   });
 
   it('treats a non-positive pid or an unparseable startedAt as corrupt', async () => {
