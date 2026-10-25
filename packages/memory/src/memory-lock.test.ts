@@ -353,6 +353,24 @@ describe('unlockMemory', () => {
       expect(result).toEqual({ status: 'no-lock' });
     });
 
+    it('gives up with reason "changing" when the lock keeps changing, even with --force', async () => {
+      const stackHome = await temp();
+      await plant(stackHome);
+      let swaps = 0;
+      const result = await unlockMemory(stackHome, {
+        hostname: 'this-host',
+        force: true,
+        // Every look finds a fresh lock: another command took it again each time.
+        isProcessAlive: () => {
+          swaps += 1;
+          writeFileSync(memoryLockPath(stackHome), JSON.stringify({ ...replacement, lockId: `churn-${swaps}` }));
+          return true;
+        },
+      });
+      expect(result).toMatchObject({ status: 'refused', reason: 'changing', holder: { command: 'stak push' } });
+      expect(existsSync(memoryLockPath(stackHome))).toBe(true);
+    });
+
     it('removes the new lock when its process is not running either', async () => {
       const stackHome = await temp();
       await plant(stackHome);

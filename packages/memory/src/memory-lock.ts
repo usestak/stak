@@ -35,7 +35,9 @@ export type MemoryLockOptions = {
 export type UnlockResult =
   | { status: 'no-lock' }
   | { status: 'removed'; holder: MemoryLockRecord | 'corrupt'; wasAlive: boolean }
-  | { status: 'refused'; holder: MemoryLockRecord };
+  /** `reason: 'changing'`: the lock was replaced on every look (other STAK commands kept
+   * taking it), so nothing was removed — not even with `force`. */
+  | { status: 'refused'; holder: MemoryLockRecord; reason?: 'changing' };
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_POLL_MS = 200;
@@ -420,7 +422,7 @@ export const unlockMemory = async (
     await rm(memoryLockPath(stackHome), { force: true });
     return { status: 'removed', holder, wasAlive: false };
   }
-  return { status: 'refused', holder };
+  return { status: 'refused', holder, reason: 'changing' };
 };
 
 const UNLOCK_ATTEMPTS = 3;

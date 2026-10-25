@@ -732,6 +732,13 @@ export const registerMemoryCommand = (
       }
       if (result.status === 'refused') {
         const { holder } = result;
+        // Re-running with --force would not help here: the lock was replaced on every look.
+        if (result.reason === 'changing')
+          throw new StackCompositionError(
+            'memory-unlock-refused',
+            `The Memory lock kept changing while STAK tried to remove it (now held by \`${holder.command}\`, process ${holder.pid} on ${holder.hostname}). ` +
+              'Other STAK commands are using Memory. Nothing was removed. Try again when they finish.',
+          );
         throw new StackCompositionError(
           'memory-unlock-refused',
           `The Memory lock is held by \`${holder.command}\` (process ${holder.pid} on ${holder.hostname}, started ${formatLockAge(holder.startedAt)} ago), which may still be running.\n` +

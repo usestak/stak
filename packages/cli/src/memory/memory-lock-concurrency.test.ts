@@ -342,24 +342,35 @@ describe('the Memory lock serializes real command pairings (spec 2026-10-25 §5)
     });
 });
 
+/** A promise plus its resolver, for deterministic hand-offs between the racing commands. */
+const deferred = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+};
+
 describe('the race is real: without the lock, the same schedule loses Memory', () => {
   it('without the lock, add + pull can lose a document (here: the staged edit)', async () => {
     const f = await synced('control');
     await writeNative(f.Y, 'MEMORY.md', 'b');
     // Pull stalls between reading local main and writing it until add has finished:
     // pull then writes a merge computed from the main it read BEFORE add staged "b".
-    let addDone!: () => void;
-    const addFinished = new Promise<void>((resolve) => {
-      addDone = resolve;
+    // Add starts only once pull has reached that stall (no timing guesses).
+    const pullStalled = deferred();
+    const addFinished = deferred();
+    const { backend, stalled } = stallingBackend(f.backend, f.yBaseGeneration, async () => {
+      pullStalled.resolve();
+      await addFinished.promise;
     });
-    const { backend, stalled } = stallingBackend(f.backend, f.yBaseGeneration, () => addFinished);
     const pull = commandFn(f, 'pull', backend)();
     const add = (async () => {
-      await sleep(20); // let pull read local main first
+      await pullStalled.promise;
       try {
         return await commandFn(f, 'add', f.backend)();
       } finally {
-        addDone();
+        addFinished.resolve();
       }
     })();
     await Promise.all([pull, add]);
@@ -376,21 +387,21 @@ describe('the race is real: without the lock, the same schedule loses Memory', (
     const f = await synced('control-locked');
     await writeNative(f.Y, 'MEMORY.md', 'b');
     const lock = programLock(f.Y.home, []);
-    let addDone!: () => void;
-    const addFinished = new Promise<void>((resolve) => {
-      addDone = resolve;
+    const pullStalled = deferred();
+    const addFinished = deferred();
+    // Same schedule; the stall is bounded because, with the lock, add can't finish
+    // while pull (stalled inside the lock) holds it.
+    const { backend, stalled } = stallingBackend(f.backend, f.yBaseGeneration, async () => {
+      pullStalled.resolve();
+      await Promise.race([addFinished.promise, sleep(300)]);
     });
-    // Same stall, but bounded: with the lock, add can't finish while pull holds it.
-    const { backend, stalled } = stallingBackend(f.backend, f.yBaseGeneration, () =>
-      Promise.race([addFinished, sleep(300)]),
-    );
     const pull = lock('stak pull', commandFn(f, 'pull', backend));
     const add = (async () => {
-      await sleep(20);
+      await pullStalled.promise;
       try {
         return await lock('stak add', commandFn(f, 'add', f.backend));
       } finally {
-        addDone();
+        addFinished.resolve();
       }
     })();
     await Promise.all([pull, add]);

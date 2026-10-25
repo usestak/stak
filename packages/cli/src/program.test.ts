@@ -2485,6 +2485,18 @@ describe('STAK CLI', () => {
       );
     });
 
+    it('when the lock kept changing, says to try again — never to rerun with --force', async () => {
+      const error = await runProgram(['memory', 'unlock', '--force'], {
+        unlockMemory: async () => ({ status: 'refused', holder: holder(1), reason: 'changing' }),
+      }).catch((caught: unknown) => caught as Error);
+      expect(error).toBeInstanceOf(Error);
+      expect(isRenderableCliError(error)).toBe(true);
+      expect((error as Error).message).toBe(
+        'The Memory lock kept changing while STAK tried to remove it (now held by `stak pull`, process 1234 on this-host). Other STAK commands are using Memory. Nothing was removed. Try again when they finish.',
+      );
+      expect((error as Error).message).not.toContain('--force');
+    });
+
     it('--force removes a possibly-running lock after a warning', async () => {
       const seen: unknown[] = [];
       const { output } = await runProgram(['memory', 'unlock', '--force'], {
