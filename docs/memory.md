@@ -205,9 +205,10 @@ or any unique prefix of one (as shown by `stak project`).
 
 When two machines change the same Memory document differently (or one edits it
 while the other deletes it), push and pull stop and list the conflicts. Until
-they are resolved, `stak push`, `stak pull` and `stak memory backup` stop with
-"Resolve the listed conflicts, then push again". No Memory is pushed in the
-meantime, but your Skills still push as normal.
+they are resolved, `stak push` and `stak memory backup` stop with "Resolve the
+listed conflicts, then push again", and `stak pull` reports "Project Memory has
+N unresolved conflict(s) — run `stak memory resolve`". No Memory is pushed in
+the meantime, but your Skills still push as normal.
 
 - `stak memory resolve` — with no arguments, lists the pending conflicts. With
   `<project> <path> --keep local|cloud|both`, resolves one.
@@ -223,11 +224,14 @@ publishes the result. **Keep both** keeps Cloud's version at the original name
 and saves yours next to it as `<name>.conflict-<hash>.<ext>` (the hash comes from
 your version's content, so every machine picks the same name).
 
-A resolution belongs to the exact Cloud version it was made against. If Cloud
-moves on before you finish, or Memory changes locally at a path you already
-resolved (for example after `stak add .`), STAK says the merge has gone stale.
-Run `stak push` (or `stak pull`) to merge again; earlier choices are listed again
-and need to be redone. Old decisions are never replayed blindly.
+A resolution belongs to the exact Cloud version it was made against. If Memory
+changes locally at a path you already resolved (for example after `stak add .`),
+`stak memory resolve` says the merge has gone stale and changes nothing. If Cloud
+moves on before you finish, your resolutions still complete against the version
+they were made for; the next `stak push` (or `stak pull`) then merges again
+against the newer version, and anything that changed again shows up as a fresh
+conflict. A merge that is redone this way drops choices made for it so far, so
+they need to be redone. Old decisions are never replayed blindly.
 
 `stak memory materialize` only writes to projects found on this machine. A
 project known only from another machine shows as **not available on this
@@ -270,9 +274,11 @@ see conflicts to resolve when it next syncs.
 
 ### Upgrading from the old format
 
-The first time this CLI touches Memory (`stak status`, `stak add`, `stak push`
-or `stak pull`), it upgrades your local store to the new format, once and
-automatically. There is nothing to do and nothing is lost:
+The first time this CLI changes Memory (`stak add`, `stak push`, `stak pull`,
+`stak memory backup` or `stak memory materialize`), it upgrades your local store
+to the new format, once and automatically. `stak status` never changes anything:
+until the upgrade has run it just says one is pending. There is nothing to do and
+nothing is lost:
 
 - A copy of the old manifest is kept at
   `$STAK_HOME/memory/manifests/current.v1-premigration.json` and never
@@ -283,9 +289,12 @@ automatically. There is nothing to do and nothing is lost:
   they differ, all are kept using the "keep both" naming.
 - If the upgrade is interrupted, the next run finishes it.
 
-Once an account has Memory in the new format, older CLIs are refused with:
-"This account's Memory was upgraded by a newer STAK CLI. Update with
-`npm i -g @memstk/cli@beta`."
+Once an account has Memory in the new format, pushes and `stak memory backup`
+from older CLIs are refused with: "This account's Memory was upgraded by a newer
+STAK CLI. Update with `npm i -g @memstk/cli@beta`." Other commands on an older
+CLI (for example pull or recover) fail without changing anything on the machine.
+`stak memory protect` from an older CLI is refused the same way before any backup
+is changed.
 
 ## Backup and restore
 
