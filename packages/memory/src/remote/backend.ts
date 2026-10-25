@@ -141,6 +141,10 @@ export const REPLICA_PAYLOAD_OVERHEAD_BYTES = NONCE_BYTES + TAG_BYTES;
 export const INCOMPATIBLE_FORMAT_MESSAGE =
   "This account's Memory was upgraded by a newer STAK CLI. Update with `npm i -g @memstk/cli@beta`.";
 
+/** Final review I6: refused old-CLI protect (see `assertCreateGenerationAllowed`). */
+export const OLD_CLI_PROTECT_MESSAGE =
+  'Protecting Cloud Memory needs a newer STAK CLI. Update with `npm i -g @memstk/cli@beta`, then run `stak memory protect` again. No backup was changed.';
+
 /**
  * The create-time format gate (spec §9.3/A.5) and the protect-replica
  * exemption, shared VERBATIM by every backend-facing layer (the in-memory
@@ -196,6 +200,19 @@ export const assertCreateGenerationAllowed = (
     if (input.privacyMode !== 'protected') refuse('a replica must be Protected');
     verifiedReplica = true;
   }
+  // Final review I6: an UNCLAIMED Protected create while the account is still
+  // Standard and holds committed Standard generations is an old CLI's protect
+  // (0.1.2 copies without `replicaOf`, then its guarded retires fail, leaving
+  // the account half-migrated). Refuse its FIRST copy, before anything changes.
+  // The current CLI only creates Protected non-replicas once the account is
+  // Protected (or on an account with no Standard generations).
+  if (
+    !verifiedReplica &&
+    input.privacyMode === 'protected' &&
+    (context.profile?.privacyMode ?? 'standard') === 'standard' &&
+    context.committed.some((g) => g.privacyMode === 'standard')
+  )
+    throw new RemoteMemoryError('incompatible-format', OLD_CLI_PROTECT_MESSAGE);
   if (
     !verifiedReplica &&
     input.bundleFormatVersion === BUNDLE_FORMAT &&

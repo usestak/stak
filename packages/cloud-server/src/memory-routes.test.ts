@@ -323,6 +323,37 @@ describe('remote Memory routes', () => {
     expect(errorOf(afterFinalized).code).toBe('memory-incompatible-format');
   });
 
+  it('final review I6: an old CLI (0.1.2) protect is refused at its FIRST create — a Protected copy with no replicaOf on a Standard account with Standard backups — so nothing is copied, retired or finalized', async () => {
+    const { call, signIn } = setup();
+    const token = await signIn(USER_A);
+    const original = randomUUID();
+    await call('POST', 'memory/generations', {
+      token,
+      body: { backupId: original, expectedParent: null, privacyMode: 'standard', payloadB64: b64('v1-bundle'), bundleFormatVersion: 'stack-mem-bundle-v1' },
+    });
+    // The old protect's copy: Protected, same format, no replicaOf.
+    const oldCopy = await call('POST', 'memory/generations', {
+      token,
+      body: {
+        backupId: randomUUID(),
+        expectedParent: 0,
+        privacyMode: 'protected',
+        payloadB64: b64('r'.repeat(9 + 28)),
+        bundleFormatVersion: 'stack-mem-bundle-v1',
+        cryptoVersion: 'stack-mem-cipher-v1',
+        wrappedDek: { nonceB64: 'AA==', ciphertextB64: 'AA==', tagB64: 'AA==' },
+      },
+    });
+    expect(oldCopy.status).toBe(409);
+    const error = (oldCopy.jsonBody as { error: { code: string; message: string } }).error;
+    expect(error.code).toBe('memory-incompatible-format');
+    expect(error.message).toContain('@memstk/cli@beta');
+    const list = await call('GET', 'memory/generations', { token });
+    const generations = (list.jsonBody as { generations: { backupId: string; privacyMode: string; state: string }[] }).generations;
+    expect(generations).toHaveLength(1);
+    expect(generations[0]).toMatchObject({ backupId: original, privacyMode: 'standard', state: 'committed' });
+  });
+
   it('retire over the HTTP route is GUARDED: a Standard original with no committed Protected copy is refused (Task 13 fix round 5)', async () => {
     const { call, signIn } = setup();
     const token = await signIn(USER_A);
