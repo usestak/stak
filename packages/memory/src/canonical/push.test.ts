@@ -245,20 +245,21 @@ describe('pushCanonicalMemory: global Memory (final review I1)', () => {
     const deps = baseDeps({
       getLocalMain: vi.fn(async () => same),
       getLocalGlobalDigest: vi.fn(async () => 'g-new'),
-      getBase: vi.fn(async () => ({ generation: 3, main: same })),
+      getBase: vi.fn(async () => ({ generation: 3, main: same, globalDigest: 'g-old' })),
       fetchRemote: vi.fn(async () => ({ generation: 3, main: same, globalDigest: 'g-old' })),
       publish: vi.fn(async () => ({ generation: 4 })),
     });
     expect(await pushCanonicalMemory(deps)).toEqual({ status: 'pushed', generation: 4, main: same });
     expect(deps.publish).toHaveBeenCalledTimes(1);
     expect(deps.publish).toHaveBeenCalledWith(same, 3);
+    expect(deps.setBase).toHaveBeenCalledWith({ generation: 4, main: same, globalDigest: 'g-new' });
   });
 
   it('publishes a global-only change on the merge path (base behind Cloud, canonical identical)', async () => {
     const deps = baseDeps({
       getLocalMain: vi.fn(async () => same),
       getLocalGlobalDigest: vi.fn(async () => 'g-new'),
-      getBase: vi.fn(async () => ({ generation: 2, main: same })),
+      getBase: vi.fn(async () => ({ generation: 2, main: same, globalDigest: 'g-old' })),
       fetchRemote: vi.fn(async () => ({ generation: 5, main: same, globalDigest: 'g-old' })),
       publish: vi.fn(async () => ({ generation: 6 })),
     });
@@ -276,6 +277,32 @@ describe('pushCanonicalMemory: global Memory (final review I1)', () => {
     });
     expect(await pushCanonicalMemory(deps)).toEqual({ status: 'up-to-date', generation: 4 });
     expect(deps.publish).not.toHaveBeenCalled();
-    expect(deps.setBase).toHaveBeenCalledWith({ generation: 4, main: same });
+    expect(deps.setBase).toHaveBeenCalledWith({ generation: 4, main: same, globalDigest: 'g' });
+  });
+
+  it('re-fix: a global that differs from Cloud but is UNCHANGED since this machine last synced publishes nothing (two machines with different global files)', async () => {
+    const deps = baseDeps({
+      getLocalMain: vi.fn(async () => same),
+      getLocalGlobalDigest: vi.fn(async () => 'g-mine'),
+      getBase: vi.fn(async () => ({ generation: 3, main: same, globalDigest: 'g-mine' })),
+      fetchRemote: vi.fn(async () => ({ generation: 7, main: same, globalDigest: 'g-other-machine' })),
+      publish: vi.fn(),
+    });
+    expect(await pushCanonicalMemory(deps)).toEqual({ status: 'up-to-date', generation: 7 });
+    expect(deps.publish).not.toHaveBeenCalled();
+    expect(deps.setBase).toHaveBeenCalledWith({ generation: 7, main: same, globalDigest: 'g-mine' });
+  });
+
+  it('re-fix legacy rule: a base with no recorded global digest never publishes a global-only difference, and records the digest', async () => {
+    const deps = baseDeps({
+      getLocalMain: vi.fn(async () => same),
+      getLocalGlobalDigest: vi.fn(async () => 'g-mine'),
+      getBase: vi.fn(async () => ({ generation: 3, main: same })),
+      fetchRemote: vi.fn(async () => ({ generation: 3, main: same, globalDigest: 'g-cloud' })),
+      publish: vi.fn(),
+    });
+    expect(await pushCanonicalMemory(deps)).toEqual({ status: 'up-to-date', generation: 3 });
+    expect(deps.publish).not.toHaveBeenCalled();
+    expect(deps.setBase).toHaveBeenCalledWith({ generation: 3, main: same, globalDigest: 'g-mine' });
   });
 });

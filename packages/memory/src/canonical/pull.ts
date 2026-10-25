@@ -4,9 +4,11 @@ import { pendingMergeGenerationOf, type RemoteCanonical } from './push.js';
 
 export type PullDeps = {
   getLocalMain(): Promise<CanonicalMainManifest>;
-  getBase(): Promise<{ generation: number; main: CanonicalMainManifest } | null>;
+  getBase(): Promise<{ generation: number; main: CanonicalMainManifest; globalDigest?: string } | null>;
   setLocalMain(main: CanonicalMainManifest): Promise<void>;
-  setBase(base: { generation: number; main: CanonicalMainManifest }): Promise<void>;
+  setBase(base: { generation: number; main: CanonicalMainManifest; globalDigest?: string }): Promise<void>;
+  /** See `PushDeps.getLocalGlobalDigest` (final review I1 re-fix). */
+  getLocalGlobalDigest?(): Promise<string>;
   fetchRemote(): Promise<RemoteCanonical | null>;
   savePendingMerge(pending: {
     basedOnGeneration: number;
@@ -49,6 +51,15 @@ export const pullCanonicalMemory = async (deps: PullDeps): Promise<PullOutcome> 
 
   const local = await deps.getLocalMain();
   const base = await deps.getBase();
+  // Final review I1 (re-fix): pull never changes global Memory locally, so it
+  // keeps the recorded last-synced global digest — overwriting it with the
+  // local one would swallow an unpushed global edit. With no record yet, it
+  // records one only when local global already equals Cloud's.
+  const localGlobal = deps.getLocalGlobalDigest ? await deps.getLocalGlobalDigest() : undefined;
+  const recordedGlobal =
+    base?.globalDigest ?? (localGlobal !== undefined && localGlobal === remote.globalDigest ? localGlobal : undefined);
+  const withGlobal = (next: { generation: number; main: CanonicalMainManifest }) =>
+    recordedGlobal !== undefined ? { ...next, globalDigest: recordedGlobal } : next;
 
   if (canonicalDigest(remote.main) === canonicalDigest(local)) {
     // Nothing to pull. Repair a missing or stale base (a crash right after an
@@ -56,7 +67,7 @@ export const pullCanonicalMemory = async (deps: PullDeps): Promise<PullOutcome> 
     // already happens to match Cloud) so a LATER pull or push never merges
     // against a base that no longer reflects reality.
     if (base === null || base.generation !== remote.generation)
-      await deps.setBase({ generation: remote.generation, main: remote.main });
+      await deps.setBase(withGlobal({ generation: remote.generation, main: remote.main }));
     // Task 14 fix round 1: local equals Cloud — a leftover merge.json is a phantom.
     await deps.clearPendingMerge();
     return { status: 'up-to-date', generation: remote.generation };
@@ -77,7 +88,7 @@ export const pullCanonicalMemory = async (deps: PullDeps): Promise<PullOutcome> 
     return { status: 'conflict', conflicts };
   }
   await deps.setLocalMain(merged);
-  await deps.setBase({ generation: remote.generation, main: remote.main });
+  await deps.setBase(withGlobal({ generation: remote.generation, main: remote.main }));
   await deps.clearPendingMerge();
   return { status: 'merged-local', main: merged };
 };

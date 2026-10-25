@@ -1233,6 +1233,7 @@ export const pullMemoryViaCanonical = async (
   await seedBaseFromLastKnownV1Generation(deps, mmk);
   const outcome = await pullCanonicalMemory({
     getLocalMain: () => readCanonicalMain(deps.stackHome),
+    getLocalGlobalDigest: async () => globalManifestDigest(await readMemoryManifest(deps.stackHome)),
     // Task 13 fix round 7: a base Cloud no longer holds merges as empty.
     getBase: async () => effectiveCanonicalBase(deps.backend, await readCanonicalBase(deps.stackHome)),
     setLocalMain: (main) => writeCanonicalMain(deps.stackHome, main),
@@ -1432,7 +1433,13 @@ export const resolvePendingConflict = async (
   // fast-forward over Cloud's changes).
   const changed = projectsWithChangedDocs(local, nextMerged);
   await writeCanonicalMain(deps.stackHome, nextMerged);
-  await writeCanonicalBase(deps.stackHome, { generation: pending.basedOnGeneration, main: cloud.main });
+  // Final review I1 (re-fix): keep the recorded last-synced global digest.
+  const priorGlobal = (await readCanonicalBase(deps.stackHome))?.globalDigest;
+  await writeCanonicalBase(deps.stackHome, {
+    generation: pending.basedOnGeneration,
+    main: cloud.main,
+    ...(priorGlobal !== undefined ? { globalDigest: priorGlobal } : {}),
+  });
   await clearPendingMerge(deps.stackHome);
   let materialize: MaterializeOutcome;
   try {

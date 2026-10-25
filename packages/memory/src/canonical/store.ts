@@ -75,11 +75,18 @@ export const writeCanonicalMain = async (
 export type CanonicalBase = {
   generation: number;
   main: CanonicalMainManifest;
+  /** `globalManifestDigest` of this machine's global Memory as of its last
+   * sync (I1 re-fix). Global Memory is never pulled onto an established
+   * machine, so "changed locally" means "differs from this", never "differs
+   * from Cloud". Absent on bases written before it existed (legacy rule: see
+   * `pushCanonicalMemory`). */
+  globalDigest?: string;
 };
 
 const canonicalBaseSchema = z.object({
   generation: z.number().int().nonnegative(),
   main: canonicalMainManifestSchema,
+  globalDigest: z.string().optional(),
 });
 
 export const readCanonicalBase = async (
@@ -88,7 +95,8 @@ export const readCanonicalBase = async (
   const raw = await readJson(canonicalStorePaths(stackHome).base);
   if (raw === undefined) return null;
   try {
-    return canonicalBaseSchema.parse(raw);
+    const { globalDigest, ...rest } = canonicalBaseSchema.parse(raw);
+    return globalDigest !== undefined ? { ...rest, globalDigest } : rest;
   } catch (error) {
     throw new CanonicalStoreError('base-corrupt', 'Canonical Memory base is malformed.', {
       cause: error,

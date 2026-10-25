@@ -3048,3 +3048,114 @@ describe('final review I4: the advised actions really clear local agent-vs-STAK 
     expect((await docOf(projectId, 'notes/gone.md'))?.state).toBe('deleted');
   });
 });
+
+describe('final review I1 re-fix: global Memory between two machines', () => {
+  const secureKeys = (dir: string) =>
+    fileLocalMemoryKeyStore(dir, { harden: () => Promise.resolve(true), verify: () => Promise.resolve(true) });
+  const fakeBackup = (): Promise<BackupResult> =>
+    Promise.resolve({ provider: 'claude', files: 0, projects: 0, createdAt: '2026-10-23T00:00:00.000Z' });
+  type Machine = { home: string; claude: string; dir: string; keys: string };
+  const machine = (name: string): Machine => ({
+    home: path.join(root, `${name}-g-stack`),
+    claude: path.join(root, `${name}-g-claude`),
+    dir: path.join(root, `${name}-g-proj`),
+    keys: path.join(root, `${name}-g-keys`),
+  });
+  const depsOf = (m: Machine, backend: RemoteMemoryBackend) => ({
+    stackHome: m.home,
+    backend,
+    localKeyStore: secureKeys(m.keys),
+    runLocalBackup: fakeBackup,
+  });
+  const bind = async (m: Machine, fixedProjectId?: string) => {
+    await mkdir(m.dir, { recursive: true });
+    const minted = resolveOrMintProject(
+      await readLocalRegistry(m.home),
+      { kind: 'local', vendorKey: `v-${path.basename(m.home)}` },
+      fixedProjectId ? () => fixedProjectId : mintProjectId,
+    );
+    await writeLocalRegistry(
+      m.home,
+      setBinding(minted.registry, { projectId: minted.projectId, dir: m.dir, boundAt: '2026-10-23T00:00:00.000Z', provenance: 'user-map' }),
+    );
+    return minted.projectId;
+  };
+  /** Stage this machine's global Memory (as `stak add .` would), keeping existing project state. */
+  const setGlobal = async (m: Machine, body: string, stamp: string) => {
+    const bytes = Buffer.from(body, 'utf8');
+    const contentHash = hashBytes(bytes);
+    await writeMemoryObject({ stackHome: m.home, contentHash, bytes });
+    await writeMemoryManifest({
+      stackHome: m.home,
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: stamp,
+        items: [
+          {
+            provider: 'claude',
+            kind: 'user-instructions',
+            scope: 'global',
+            logicalId: 'claude/user-instructions/CLAUDE.md',
+            contentHash,
+            restoreTarget: { base: 'claude-home', relativePath: 'CLAUDE.md' },
+            capturedAt: stamp,
+            sensitivity: 'private',
+          },
+        ],
+      },
+    });
+  };
+  const push = (m: Machine, backend: RemoteMemoryBackend) => pushMemoryViaCanonical(depsOf(m, backend), { claudeHome: m.claude });
+  const pull = (m: Machine, backend: RemoteMemoryBackend) => pullMemoryViaCanonical(depsOf(m, backend), { claudeHome: m.claude });
+  const cloudGlobal = async (backend: RemoteMemoryBackend) =>
+    (await fetchRemoteCanonical({ backend, localRegistry: emptyRegistry() }))?.globalDigest;
+
+  const setup = async (tag: string) => {
+    const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), `i1-refix-${tag}`);
+    const A = machine(`a-${tag}`);
+    const B = machine(`b-${tag}`);
+    const projectId = await bind(A);
+    await writeFile(path.join(A.dir, 'CLAUDE.local.md'), 'shared project memory', 'utf8');
+    await stageCanonicalMemory(A.home, { claudeHome: A.claude });
+    await setGlobal(A, '# A global', '2026-10-24T01:00:00.000Z');
+    expect((await push(A, backend)).status).toBe('pushed');
+    await bind(B, projectId);
+    await stageCanonicalMemory(B.home, { claudeHome: B.claude });
+    await setGlobal(B, '# B global (different)', '2026-10-24T01:30:00.000Z');
+    expect((await pull(B, backend)).status).toBe('merged');
+    return { backend, A, B };
+  };
+
+  it('different global files and no edits: repeated pushes from both machines create no new generations, and Cloud keeps its global', async () => {
+    const { backend, A, B } = await setup('pingpong');
+    const before = await cloudGlobal(backend);
+    for (const m of [B, A, B, A, B]) expect((await push(m, backend)).status).toBe('up-to-date');
+    expect(await backend.listGenerations()).toHaveLength(1);
+    expect(await cloudGlobal(backend)).toBe(before);
+  });
+
+  it("one global edit publishes exactly one generation, and the other machine's next push doesn't revert it", async () => {
+    const { backend, A, B } = await setup('edit');
+    expect((await push(B, backend)).status).toBe('up-to-date');
+    await setGlobal(A, '# A global, edited', '2026-10-24T02:00:00.000Z');
+    expect((await push(A, backend)).status).toBe('pushed');
+    expect(await backend.listGenerations()).toHaveLength(2);
+    const edited = await cloudGlobal(backend);
+    expect((await push(B, backend)).status).toBe('up-to-date');
+    expect((await push(A, backend)).status).toBe('up-to-date');
+    expect(await backend.listGenerations()).toHaveLength(2);
+    expect(await cloudGlobal(backend)).toBe(edited);
+  });
+
+  it('a crash after a global-only publish (base not saved) repairs on the next push without a duplicate generation', async () => {
+    const { backend, A } = await setup('crash');
+    const staleBase = await readCanonicalBase(A.home);
+    await setGlobal(A, '# A global, edited', '2026-10-24T02:00:00.000Z');
+    expect((await push(A, backend)).status).toBe('pushed');
+    await writeCanonicalBase(A.home, staleBase!); // simulate the crash before the base was saved
+    expect((await push(A, backend)).status).toBe('up-to-date');
+    expect(await backend.listGenerations()).toHaveLength(2);
+    expect((await readCanonicalBase(A.home))?.generation).toBe(1);
+  });
+});

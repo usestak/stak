@@ -159,3 +159,40 @@ describe('pullCanonicalMemory: pending merge bookkeeping (Task 14 fix round 1)',
     expect(notMoved.clearPendingMerge).toHaveBeenCalled();
   });
 });
+
+describe('pullCanonicalMemory: last-synced global digest (final review I1 re-fix)', () => {
+  const m = (n: number): CanonicalMainManifest => ({
+    schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+    projects: [{ projectId: 'prj_x', documents: [{ path: 'notes/a.md', state: 'present', contentHash: `sha256:${n.toString().padStart(64, '0')}`, importedFrom: 'claude', importedAt: '2026-10-22T00:00:00.000Z' }] }],
+  });
+  const run = async (
+    base: { generation: number; main: CanonicalMainManifest; globalDigest?: string } | null,
+    local: string,
+    cloud: string,
+    localMain: CanonicalMainManifest = m(1),
+  ) => {
+    const setBase = vi.fn(async () => undefined);
+    await pullCanonicalMemory({
+      getLocalMain: async () => localMain,
+      getBase: async () => base,
+      setLocalMain: async () => undefined,
+      setBase,
+      getLocalGlobalDigest: async () => local,
+      fetchRemote: async () => ({ generation: 5, main: m(2), globalDigest: cloud }),
+      savePendingMerge: async () => undefined,
+      clearPendingMerge: async () => undefined,
+    });
+    return setBase;
+  };
+
+  it('keeps the recorded digest (never swallows an unpushed local global edit)', async () => {
+    const setBase = await run({ generation: 4, main: m(1), globalDigest: 'g-synced' }, 'g-edited-locally', 'g-cloud');
+    expect(setBase).toHaveBeenCalledWith({ generation: 5, main: m(2), globalDigest: 'g-synced' });
+  });
+
+  it('with no record: records only when local global equals Cloud', async () => {
+    // Local canonical already equals Cloud: the base-repair branch writes the base.
+    expect(await run(null, 'g', 'g', m(2))).toHaveBeenCalledWith({ generation: 5, main: m(2), globalDigest: 'g' });
+    expect(await run(null, 'g-mine', 'g-cloud', m(2))).toHaveBeenCalledWith({ generation: 5, main: m(2) });
+  });
+});

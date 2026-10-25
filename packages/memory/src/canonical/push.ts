@@ -55,14 +55,14 @@ export type PushDeps = {
    * review I1). When provided, Cloud is only "up to date" when its
    * `globalDigest` matches too, so a global-only change is published. */
   getLocalGlobalDigest?(): Promise<string>;
-  getBase(): Promise<{ generation: number; main: CanonicalMainManifest } | null>;
+  getBase(): Promise<{ generation: number; main: CanonicalMainManifest; globalDigest?: string } | null>;
   /** Called whenever a clean merge's result differs from what `getLocalMain`
    * returned — regardless of whether that result also gets published. A merge
    * can incorporate remote-only documents local never had; if that result is
    * never written to local storage, the NEXT push would re-upload the stale,
    * pre-merge local state and silently delete those documents from Cloud. */
   setLocalMain(main: CanonicalMainManifest): Promise<void>;
-  setBase(base: { generation: number; main: CanonicalMainManifest }): Promise<void>;
+  setBase(base: { generation: number; main: CanonicalMainManifest; globalDigest?: string }): Promise<void>;
   fetchRemote(): Promise<RemoteCanonical | null>;
   publish(main: CanonicalMainManifest, expectedParent: number | null): Promise<{ generation: number }>;
   savePendingMerge(pending: {
@@ -111,17 +111,27 @@ export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> 
   const maxAttempts = deps.maxAttempts ?? 3;
   const local = await deps.getLocalMain();
   const localGlobal = deps.getLocalGlobalDigest ? await deps.getLocalGlobalDigest() : undefined;
-  // Final review I1: global Memory travels in the same generation, so Cloud
-  // only "already has" local when the global Memory matches as well.
-  const globalMatches = (remote: RemoteCanonical): boolean =>
-    localGlobal === undefined || remote.globalDigest === localGlobal;
+  // Every base this push writes records the global Memory it synced.
+  const withGlobal = (next: { generation: number; main: CanonicalMainManifest }) =>
+    localGlobal !== undefined ? { ...next, globalDigest: localGlobal } : next;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const remote = await deps.fetchRemote();
     const base = await deps.getBase();
+    // Final review I1 (re-fix): global Memory travels in the same generation
+    // but is never pulled onto an established machine, so two machines can
+    // legitimately hold different global files. Global needs publishing only
+    // when it changed HERE since this machine's last sync (`base.globalDigest`).
+    // It is in sync when it matches Cloud's OR is unchanged locally. Legacy
+    // rule: a base with no recorded digest counts as unchanged — a global-only
+    // difference never publishes without a record (the next sync records one).
+    const globalUnchangedLocally =
+      localGlobal === undefined || base?.globalDigest === undefined || base.globalDigest === localGlobal;
+    const globalMatches = (r: RemoteCanonical): boolean =>
+      globalUnchangedLocally || r.globalDigest === localGlobal;
 
     if (remote && canonicalDigest(remote.main) === canonicalDigest(local) && globalMatches(remote)) {
-      await deps.setBase({ generation: remote.generation, main: local });
+      await deps.setBase(withGlobal({ generation: remote.generation, main: local }));
       // Task 14 fix round 1: local and Cloud agree, so any leftover
       // `merge.json` (e.g. a crash after a final resolve wrote main/base but
       // before it cleared the merge) describes nothing real any more.
@@ -142,7 +152,7 @@ export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> 
       const expectedParent = remote?.generation ?? null;
       try {
         const result = await deps.publish(local, expectedParent);
-        await deps.setBase({ generation: result.generation, main: local });
+        await deps.setBase(withGlobal({ generation: result.generation, main: local }));
         await deps.clearPendingMerge(); // Task 14 fix round 1: no phantom merge.json
         return { status: 'pushed', generation: result.generation, main: local };
       } catch (error) {
@@ -168,7 +178,7 @@ export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> 
       // Cloud's committed state, so it is safe to adopt immediately: advance
       // local storage and the base together and stop.
       await deps.setLocalMain(merged);
-      await deps.setBase({ generation: remoteGeneration, main: merged });
+      await deps.setBase(withGlobal({ generation: remoteGeneration, main: merged }));
       await deps.clearPendingMerge(); // Task 14 fix round 1: no phantom merge.json
       return { status: 'up-to-date', generation: remoteGeneration };
     }
@@ -184,7 +194,7 @@ export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> 
     try {
       const result = await deps.publish(merged, remoteGeneration);
       await deps.setLocalMain(merged);
-      await deps.setBase({ generation: result.generation, main: merged });
+      await deps.setBase(withGlobal({ generation: result.generation, main: merged }));
       await deps.clearPendingMerge();
       return { status: 'pushed', generation: result.generation, main: merged };
     } catch (error) {
