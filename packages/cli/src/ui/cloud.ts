@@ -565,6 +565,28 @@ const canonicalPullLine = (canonical: PullCanonicalOutcome): string | null => {
   return notes.length > 0 ? `  ${head}; ${notes.join('; ')}.` : `  ${head}.`;
 };
 
+/**
+ * `stak pull` with no Skills changes on an established machine: only Project Memory
+ * is synced. A sync that changes nothing reads exactly like the plain no-op pull.
+ * `lockError` is a busy Memory lock, which is a Memory failure (like any other).
+ */
+export const renderProjectMemoryOnlyPull = (
+  canonical: PullCanonicalOutcome,
+  lockError?: string,
+): string => {
+  const line = lockError ? `  FAILED: ${lockError}` : canonicalPullLine(canonical);
+  if (line === null) return block(['Everything is already up to date.']);
+  return block([
+    'Skills',
+    '  already up to date with main.',
+    '',
+    'Memory',
+    line,
+    '',
+    lockError ? 'Pull did not fully succeed.' : 'Pull complete.',
+  ]);
+};
+
 export const renderCombinedPullResult = (
   skill: PullSkillOutcome,
   memory: PullMemoryOutcome,

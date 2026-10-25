@@ -2133,6 +2133,98 @@ describe('STAK CLI', () => {
       expect(events).toEqual(['lock:stak pull', 'preflight', 'recover', 'canonical', 'unlock']);
     });
 
+    // Review fix (Task 13): an established machine with no Skills changes must still
+    // pull Project Memory — `stak pull` syncs canonical Memory on every run.
+    describe('stak pull with no Skills changes on an established machine', () => {
+      const noopPlan = { ...basePullPlan, mode: 'noop' as const };
+      const established = async () => ({
+        eligible: false,
+        reason: 'Local Memory already exists on this machine.',
+      });
+
+      it('runs the canonical pull inside the lock and reports what it synced', async () => {
+        const events: string[] = [];
+        const { calls, withMemoryLock } = recordingLock(events);
+        const cloudApplyPull = vi.fn(restoredPull);
+        const applyMemoryPull = vi.fn(async () => ({ status: 'no-backup' as const }));
+        const confirm = vi.fn(async () => true);
+        const result = await runProgram(['pull'], {
+          cloudPreparePull: async () => noopPlan,
+          cloudApplyPull,
+          memoryPullPreflight: async () => {
+            events.push('preflight');
+            return established();
+          },
+          applyMemoryPull,
+          applyCanonicalPull: async () => {
+            events.push('canonical');
+            return { status: 'merged' as const };
+          },
+          confirm,
+          withMemoryLock,
+        });
+        expect(calls).toEqual(['stak pull']);
+        // One preflight decides there is no fresh-machine recover; the authoritative one
+        // is re-read under the lock right before the canonical pull.
+        expect(events).toEqual(['preflight', 'lock:stak pull', 'preflight', 'canonical', 'unlock']);
+        expect(cloudApplyPull).not.toHaveBeenCalled();
+        expect(applyMemoryPull).not.toHaveBeenCalled();
+        expect(confirm).not.toHaveBeenCalled();
+        expect(result.output).toBe(
+          'Skills\n  already up to date with main.\n\nMemory\n  Project Memory synced.\n\nPull complete.\n',
+        );
+      });
+
+      it('still says everything is up to date when the canonical pull changes nothing', async () => {
+        const applyCanonicalPull = vi.fn(async () => ({ status: 'up-to-date' as const }));
+        const result = await runProgram(['pull', '--yes'], {
+          cloudPreparePull: async () => noopPlan,
+          memoryPullPreflight: established,
+          applyCanonicalPull,
+        });
+        expect(applyCanonicalPull).toHaveBeenCalledTimes(1);
+        expect(result.output).toBe('Everything is already up to date.\n');
+      });
+
+      it('reports a busy lock as a Memory failure', async () => {
+        const applyCanonicalPull = vi.fn(async () => ({ status: 'up-to-date' as const }));
+        const chunks: string[] = [];
+        await expect(
+          runProgram(['pull', '--yes'], {
+            cloudPreparePull: async () => noopPlan,
+            memoryPullPreflight: established,
+            applyCanonicalPull,
+            withMemoryLock: busyLock(),
+            writeOut: (value) => chunks.push(value),
+          }),
+        ).rejects.toThrow('Pull did not fully succeed');
+        expect(applyCanonicalPull).not.toHaveBeenCalled();
+        expect(chunks.join('')).toContain(`FAILED: ${BUSY}`);
+      });
+
+      it('--dry-run stays read-only: no canonical pull, no lock', async () => {
+        const calls: string[] = [];
+        const applyCanonicalPull = vi.fn(async () => ({ status: 'merged' as const }));
+        const result = await runProgram(['pull', '--dry-run'], {
+          cloudPreparePull: async () => noopPlan,
+          memoryPullPreflight: established,
+          applyCanonicalPull,
+          withMemoryLock: busyLock(calls),
+        });
+        expect(applyCanonicalPull).not.toHaveBeenCalled();
+        expect(calls).toEqual([]);
+        expect(result.output).toBe('Everything is already up to date.\n');
+      });
+
+      it('without canonical Memory wired, prints the plan as before', async () => {
+        const result = await runProgram(['pull', '--yes'], {
+          cloudPreparePull: async () => noopPlan,
+          memoryPullPreflight: established,
+        });
+        expect(result.output).toBe('Everything is already up to date.\n');
+      });
+    });
+
     it('stak pull with a busy lock still pulls Skills and reports Memory FAILED with the lock message', async () => {
       const applyCanonicalPull = vi.fn(async () => ({ status: 'up-to-date' }) as never);
       const applyMemoryPull = vi.fn(async () => ({ status: 'no-backup' as const }));

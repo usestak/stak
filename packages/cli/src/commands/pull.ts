@@ -10,6 +10,7 @@ import {
   pullFailed,
   pullPlanJson,
   renderCombinedPullResult,
+  renderProjectMemoryOnlyPull,
   renderPullPlan,
   type PullCanonicalOutcome,
   type PullMemoryOutcome,
@@ -95,10 +96,52 @@ export const registerPullCommand = (
             ? await dependencies.memoryPullPreflight()
             : { eligible: false };
         // Only a Skills no-op needs the Memory preflight up front, to decide whether
-        // there is anything to pull at all. The decision that acts on it is made from a
-        // fresh read under the Memory lock below.
+        // there is a fresh-machine recover to confirm. The decision that acts on it is
+        // made from a fresh read under the Memory lock.
         if (plan.mode === 'noop' && !(await readMemoryPreflight()).eligible) {
-          dependencies.writeOut(renderPullPlan(plan, { verbose }));
+          const applyCanonicalPull = dependencies.applyCanonicalPull;
+          if (!applyCanonicalPull) {
+            dependencies.writeOut(renderPullPlan(plan, { verbose }));
+            return;
+          }
+          // Established machine, no Skills changes: Project Memory still syncs on every
+          // `stak pull` (a merge; local changes are kept, conflicts become pending),
+          // so there is nothing to confirm. Runs under the Memory lock.
+          let canonicalMemory: PullCanonicalOutcome = { status: 'not-attempted' };
+          let lockError: string | undefined;
+          try {
+            canonicalMemory = await (dependencies.withMemoryLock ?? runDirectly)(
+              'stak pull',
+              async (): Promise<PullCanonicalOutcome> => {
+                // Re-read under the lock: a machine that became fresh meanwhile must
+                // not run the canonical pull's migration (Task 13 Important-8).
+                if ((await readMemoryPreflight()).eligible) return { status: 'not-attempted' };
+                try {
+                  return { status: 'applied', outcome: await applyCanonicalPull.call(dependencies) };
+                } catch (error) {
+                  return {
+                    status: 'failed',
+                    error: error instanceof Error ? error.message : String(error),
+                  };
+                }
+              },
+            );
+          } catch (error) {
+            if (!(error instanceof MemoryLockError)) throw error;
+            lockError = error.message;
+          }
+          const rendered = renderProjectMemoryOnlyPull(canonicalMemory, lockError);
+          // Nothing changed: the same message as before (verbose keeps its detail).
+          dependencies.writeOut(
+            verbose && rendered === renderPullPlan(plan)
+              ? renderPullPlan(plan, { verbose })
+              : rendered,
+          );
+          if (lockError)
+            throw new StackCompositionError(
+              'pull-partial-failure',
+              'Pull did not fully succeed — see the report above for which domain failed.',
+            );
           return;
         }
         if (!options.yes && !(await dependencies.confirm('Pull main?'))) {
