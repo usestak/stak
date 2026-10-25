@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -309,5 +310,61 @@ describe('unlockMemory', () => {
     await mkdir(path.dirname(memoryLockPath(stackHome)), { recursive: true });
     await writeFile(memoryLockPath(stackHome), 'not json');
     expect(await unlockMemory(stackHome)).toMatchObject({ status: 'removed', holder: 'corrupt' });
+  });
+
+  // The liveness check runs between unlock's read and its remove, so it is used here to
+  // replace or remove the lock at exactly that moment.
+  describe('when the lock changes between the read and the remove', () => {
+    const replacement: MemoryLockRecord = {
+      lockId: 'replacement-lock',
+      pid: 4242,
+      hostname: 'this-host',
+      startedAt: new Date().toISOString(),
+      command: 'stak push',
+    };
+
+    it('reports the new live holder as refused, and leaves it in place', async () => {
+      const stackHome = await temp();
+      await plant(stackHome);
+      const result = await unlockMemory(stackHome, {
+        hostname: 'this-host',
+        isProcessAlive: (pid) => {
+          if (pid === 999_999) {
+            writeFileSync(memoryLockPath(stackHome), JSON.stringify(replacement));
+            return false;
+          }
+          return true;
+        },
+      });
+      expect(result).toEqual({ status: 'refused', holder: replacement });
+      expect(JSON.parse(await readFile(memoryLockPath(stackHome), 'utf8'))).toEqual(replacement);
+    });
+
+    it('reports no-lock when the lock disappeared meanwhile', async () => {
+      const stackHome = await temp();
+      await plant(stackHome);
+      const result = await unlockMemory(stackHome, {
+        hostname: 'this-host',
+        isProcessAlive: () => {
+          rmSync(memoryLockPath(stackHome), { force: true });
+          return false;
+        },
+      });
+      expect(result).toEqual({ status: 'no-lock' });
+    });
+
+    it('removes the new lock when its process is not running either', async () => {
+      const stackHome = await temp();
+      await plant(stackHome);
+      const result = await unlockMemory(stackHome, {
+        hostname: 'this-host',
+        isProcessAlive: (pid) => {
+          if (pid === 999_999) writeFileSync(memoryLockPath(stackHome), JSON.stringify(replacement));
+          return false;
+        },
+      });
+      expect(result).toEqual({ status: 'removed', holder: replacement, wasAlive: false });
+      expect(existsSync(memoryLockPath(stackHome))).toBe(false);
+    });
   });
 });

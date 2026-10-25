@@ -396,15 +396,31 @@ export const unlockMemory = async (
   stackHome: string,
   options: { force?: boolean; isProcessAlive?: (pid: number) => boolean; hostname?: string } = {},
 ): Promise<UnlockResult> => {
+  const host = options.hostname ?? osHostname();
+  const isAlive = options.isProcessAlive ?? isProcessAlive;
+  // The lock can be released or replaced between our read and our lockId-checked remove.
+  // Then we never claim "removed": we look again and report the lock that is there now
+  // (no-lock, or the new holder, which is judged the same way). Bounded, never spins.
+  for (let attempt = 0; attempt < UNLOCK_ATTEMPTS; attempt += 1) {
+    const holder = await readMemoryLock(stackHome);
+    if (holder === null) return { status: 'no-lock' };
+    if (holder === 'corrupt') {
+      await rm(memoryLockPath(stackHome), { force: true });
+      return { status: 'removed', holder, wasAlive: false };
+    }
+    const alive = holder.hostname !== host || isAlive(holder.pid);
+    if (alive && options.force !== true) return { status: 'refused', holder };
+    if (await removeIfLockId(stackHome, holder.lockId)) return { status: 'removed', holder, wasAlive: alive };
+  }
+  // Still changing under us after several looks: other STAK commands are actively taking
+  // the lock, so report the current holder as possibly running and remove nothing.
   const holder = await readMemoryLock(stackHome);
   if (holder === null) return { status: 'no-lock' };
   if (holder === 'corrupt') {
     await rm(memoryLockPath(stackHome), { force: true });
     return { status: 'removed', holder, wasAlive: false };
   }
-  const host = options.hostname ?? osHostname();
-  const alive = holder.hostname !== host || (options.isProcessAlive ?? isProcessAlive)(holder.pid);
-  if (alive && options.force !== true) return { status: 'refused', holder };
-  await removeIfLockId(stackHome, holder.lockId);
-  return { status: 'removed', holder, wasAlive: alive };
+  return { status: 'refused', holder };
 };
+
+const UNLOCK_ATTEMPTS = 3;
