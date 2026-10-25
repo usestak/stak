@@ -8,6 +8,15 @@ if (mode === 'hold') {
     process.stdout.write('ready\n');
     await new Promise(() => {});
   }, { timeoutMs: 5_000, pollMs: 20 });
+} else if (mode === 'churn') {
+  // Churn test: many short acquire/release cycles to hit Windows delete-pending windows.
+  const cycles = Number(process.argv[6] ?? 40);
+  for (let i = 0; i < cycles; i += 1) {
+    await withMemoryLock(stackHome, `child ${name}`, async () => {
+      await appendFile(log, `${name}:start\n`);
+      await appendFile(log, `${name}:end\n`);
+    }, { timeoutMs: 20_000, pollMs: 2, installSignalHandlers: false });
+  }
 } else {
   await withMemoryLock(stackHome, `child ${name}`, async () => {
     await appendFile(log, `${name}:start\n`);

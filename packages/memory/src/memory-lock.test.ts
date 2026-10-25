@@ -175,6 +175,98 @@ describe('withMemoryLock', () => {
     expect(code).toBe(130);
     expect(await readMemoryLock(stackHome)).toBeNull();
   });
+
+  it('churn: several processes doing many acquire/release cycles never hit an fs error or overlap', async () => {
+    const stackHome = await temp();
+    const helper = fileURLToPath(new URL('./memory-lock-child.test-helper.mjs', import.meta.url));
+    const log = path.join(stackHome, 'log.txt');
+    const names = ['a', 'b', 'c', 'd'];
+    const cycles = 40;
+    const run = (name: string) =>
+      new Promise<number>((resolve) => {
+        const child = spawn(process.execPath, [helper, stackHome, name, log, 'churn', String(cycles)], { stdio: 'inherit' });
+        child.on('exit', (code) => resolve(code ?? 1));
+      });
+    const codes = await Promise.all(names.map(run));
+    expect(codes).toEqual(names.map(() => 0));
+    const lines = (await readFile(log, 'utf8')).trim().split('\n');
+    expect(lines).toHaveLength(names.length * cycles * 2);
+    for (let i = 0; i < lines.length; i += 2) {
+      const [who, phase] = lines[i]!.split(':');
+      expect(phase).toBe('start');
+      expect(lines[i + 1]).toBe(`${who}:end`);
+    }
+    expect(await readMemoryLock(stackHome)).toBeNull();
+  }, 30_000);
+
+  it('a fresh guard held by someone else: stops with memory-locked near timeoutMs, not guardStaleMs, without spinning', async () => {
+    const stackHome = await temp();
+    await plant(stackHome, { hostname: 'this-host' });
+    await writeFile(path.join(stackHome, 'memory', '.memory.lock.clearing'), '');
+    let checks = 0;
+    const started = Date.now();
+    const error = await withMemoryLock(stackHome, 'stak add', async () => 'never', {
+      timeoutMs: 300,
+      pollMs: 20,
+      installSignalHandlers: false,
+      hostname: 'this-host',
+      guardStaleMs: 30_000,
+      isProcessAlive: () => {
+        checks += 1;
+        return false;
+      },
+    }).catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: 'memory-locked' });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    // Polling at ~20 ms for 300 ms is about 15 checks; a hot spin would be thousands.
+    expect(checks).toBeLessThan(100);
+    expect(await readMemoryLock(stackHome)).toMatchObject({ lockId: 'planted-lock' });
+  });
+
+  it('auto-clears a corrupt lock older than guardStaleMs', async () => {
+    const stackHome = await temp();
+    await mkdir(path.dirname(memoryLockPath(stackHome)), { recursive: true });
+    await writeFile(memoryLockPath(stackHome), 'not json');
+    const old = new Date(Date.now() - 60_000);
+    await utimes(memoryLockPath(stackHome), old, old);
+    expect(await withMemoryLock(stackHome, 'stak add', async () => 'ran', { ...fast, guardStaleMs: 30_000 })).toBe('ran');
+    expect(await readMemoryLock(stackHome)).toBeNull();
+  });
+
+  it('keeps a fresh corrupt lock and reports it as unreadable', async () => {
+    const stackHome = await temp();
+    await mkdir(path.dirname(memoryLockPath(stackHome)), { recursive: true });
+    await writeFile(memoryLockPath(stackHome), 'not json');
+    await expect(
+      withMemoryLock(stackHome, 'stak add', async () => undefined, { ...fast, guardStaleMs: 30_000 }),
+    ).rejects.toThrow(/lock file is unreadable/);
+    expect(await readMemoryLock(stackHome)).toBe('corrupt');
+  });
+
+  it('treats a non-positive pid or an unparseable startedAt as corrupt', async () => {
+    const stackHome = await temp();
+    await plant(stackHome, { pid: 0 });
+    expect(await readMemoryLock(stackHome)).toBe('corrupt');
+    await plant(stackHome, { startedAt: 'not a date' });
+    expect(await readMemoryLock(stackHome)).toBe('corrupt');
+  });
+
+  it('sweeps orphaned lock temp files older than 60 s, and keeps fresh ones', async () => {
+    const stackHome = await temp();
+    const dir = path.join(stackHome, 'memory');
+    await mkdir(dir, { recursive: true });
+    const stale = path.join(dir, '.memory.lock.dead-id.tmp');
+    const fresh = path.join(dir, '.memory.lock.live-id.tmp');
+    await writeFile(stale, '{}');
+    await writeFile(fresh, '{}');
+    const old = new Date(Date.now() - 120_000);
+    await utimes(stale, old, old);
+    await withMemoryLock(stackHome, 'stak add', async () => undefined, fast);
+    const { readdir } = await import('node:fs/promises');
+    const names = await readdir(dir);
+    expect(names).not.toContain('.memory.lock.dead-id.tmp');
+    expect(names).toContain('.memory.lock.live-id.tmp');
+  });
 });
 
 describe('unlockMemory', () => {
