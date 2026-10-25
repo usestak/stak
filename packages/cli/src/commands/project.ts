@@ -41,6 +41,11 @@ export type ProjectCommandDependencies = {
     project: string;
     name: string;
   }): Promise<SetProjectNameResult>;
+  /**
+   * Runs `fn` while holding the cross-process Memory lock (spec 2026-10-25).
+   * Optional so existing tests keep working; when absent, `fn` runs directly.
+   */
+  withMemoryLock?<T>(command: string, fn: () => Promise<T>): Promise<T>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -187,6 +192,12 @@ export const registerProjectCommand = (
       'Review logical projects and map recovered memory to directories',
     );
 
+  // The project registry lives in the Memory store (spec 2026-10-25 §1), so every
+  // registry-writing subcommand holds the Memory lock around its read-modify-write.
+  // The confirmation prompts come before any registry read, so they stay outside it.
+  const locked = <T>(command: string, fn: () => Promise<T>): Promise<T> =>
+    dependencies.withMemoryLock ? dependencies.withMemoryLock(command, fn) : fn();
+
   project
     .command('list', { isDefault: true })
     .description('List logical projects STAK knows about (read-only)')
@@ -224,10 +235,9 @@ export const registerProjectCommand = (
             return;
           }
         }
-        const result = await dependencies.projectMap({
-          project: projectSelector,
-          dir: directory,
-        });
+        const result = await locked('stak project map', () =>
+          dependencies.projectMap({ project: projectSelector, dir: directory }),
+        );
         if (options.json) {
           dependencies.writeOut(`${JSON.stringify(result, null, 2)}\n`);
           return;
@@ -248,10 +258,9 @@ export const registerProjectCommand = (
         name: string,
         options: { json?: boolean },
       ) => {
-        const result = await dependencies.projectSetName({
-          project: projectSelector,
-          name,
-        });
+        const result = await locked('stak project name', () =>
+          dependencies.projectSetName({ project: projectSelector, name }),
+        );
         if (options.json) {
           dependencies.writeOut(`${JSON.stringify(result, null, 2)}\n`);
           return;
@@ -283,9 +292,9 @@ export const registerProjectCommand = (
             return;
           }
         }
-        const result = await dependencies.projectArchive({
-          project: projectSelector,
-        });
+        const result = await locked('stak project archive', () =>
+          dependencies.projectArchive({ project: projectSelector }),
+        );
         if (options.json) {
           dependencies.writeOut(`${JSON.stringify(result, null, 2)}\n`);
           return;
@@ -300,9 +309,9 @@ export const registerProjectCommand = (
     .description('Return an archived project to active')
     .option('--json', 'emit structured JSON only')
     .action(async (projectSelector: string, options: { json?: boolean }) => {
-      const result = await dependencies.projectUnarchive({
-        project: projectSelector,
-      });
+      const result = await locked('stak project unarchive', () =>
+        dependencies.projectUnarchive({ project: projectSelector }),
+      );
       if (options.json) {
         dependencies.writeOut(`${JSON.stringify(result, null, 2)}\n`);
         return;

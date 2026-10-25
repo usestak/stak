@@ -7,7 +7,20 @@ import {
   StackCloudError,
 } from '@stack/cloud-client';
 
-import { formatCliError } from './errors.js';
+import { MemoryLockError } from '@stack/memory';
+
+import { formatCliError, isRenderableCliError } from './errors.js';
+
+describe('MemoryLockError rendering (spec 2026-10-25)', () => {
+  it('is a typed STAK error: rendered as its message alone, never a stack trace', () => {
+    const message =
+      'Another STAK command (`stak pull`, started 12s ago) is changing Memory. Try again when it finishes.';
+    const error = new MemoryLockError(message);
+    expect(isRenderableCliError(error)).toBe(true);
+    expect(formatCliError(error)).toBe(message);
+    expect(isRenderableCliError(new Error('boom'))).toBe(false);
+  });
+});
 
 describe('formatCliError', () => {
   it('turns a generic cloud failure into a calm, actionable message', () => {

@@ -74,6 +74,8 @@ import {
   createClaudeMemoryAdapter,
   fileLocalMemoryKeyStore,
   generateRecoveryKey,
+  leftoverClearedMessage,
+  withMemoryLock,
   readCanonicalBase,
   readLocalRegistry,
   readMemoryManifest,
@@ -396,6 +398,11 @@ export type ProgramDependencies = {
   openBrowser(url: string): Promise<void>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
+  /**
+   * Runs `fn` while holding the cross-process Memory lock (spec 2026-10-25).
+   * Optional so existing tests keep working; when absent, `fn` runs directly.
+   */
+  withMemoryLock?<T>(command: string, fn: () => Promise<T>): Promise<T>;
   /**
    * Phase P1: best-effort machine check-in after a state-changing command succeeds.
    * Optional so the test harness can omit it; the real CLI wires it in
@@ -1329,7 +1336,13 @@ const defaultDependencies: ProgramDependencies = {
     }
   },
   writeOut: (value) => process.stdout.write(value),
-  reportMachineCheckin: async () => {
+  // Spec 2026-10-25: every Memory-changing command wraps its Memory work in this. The
+  // one-line leftover-lock note goes to stderr so it never corrupts `--json` stdout.
+  withMemoryLock: (command, fn) =>
+    withMemoryLock(stackHome, command, fn, {
+      onLeftoverCleared: (holder) => process.stderr.write(`${leftoverClearedMessage(holder)}\n`),
+    }),
+  reportMachineCheckin: async (commandName) => {
     // Best-effort check-in; signed out → nothing to report. Connectivity failures are
     // swallowed by reportCheckin; a 401/403 propagates so a revoked machine is explicit.
     const credential = await cloudDeps.credentials.read();
@@ -1422,16 +1435,30 @@ const defaultDependencies: ProgramDependencies = {
       // adopt the authoritative projectId locally NOW, in this same invocation, so
       // the next backup/check-in never re-sends the just-retired id and recreates the
       // duplicate Cloud refused to create.
-      if (response?.reconciled && response.reconciled.length > 0) {
-        let registry = await readLocalRegistry(stackHome);
-        for (const { fromProjectId, toProjectId } of response.reconciled)
-          registry = adoptReconciledProjectId(
-            registry,
-            fromProjectId,
-            toProjectId,
-          );
-        await writeLocalRegistry(stackHome, registry);
-      }
+      // The registry lives in the Memory store, so this read-modify-write holds the
+      // Memory lock (spec 2026-10-25). It runs after the command's own lock is released.
+      // Best-effort: a busy lock (short wait) just skips it, like any failure here.
+      const reconciled = response?.reconciled ?? [];
+      if (reconciled.length > 0)
+        await withMemoryLock(
+          stackHome,
+          `stak ${commandName} check-in`,
+          async () => {
+            let registry = await readLocalRegistry(stackHome);
+            for (const { fromProjectId, toProjectId } of reconciled)
+              registry = adoptReconciledProjectId(
+                registry,
+                fromProjectId,
+                toProjectId,
+              );
+            await writeLocalRegistry(stackHome, registry);
+          },
+          {
+            timeoutMs: 2_000,
+            onLeftoverCleared: (holder) =>
+              process.stderr.write(`${leftoverClearedMessage(holder)}\n`),
+          },
+        );
     } catch {
       // Non-fatal: the project registry refreshes on the next successful check-in.
     }

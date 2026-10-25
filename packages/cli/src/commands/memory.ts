@@ -96,6 +96,11 @@ export type MemoryCommandDependencies = {
     path: string;
   }): Promise<ConflictDiff>;
   memoryMaterialize?(options: { project?: string }): Promise<MaterializeOutcome>;
+  /**
+   * Runs `fn` while holding the cross-process Memory lock (spec 2026-10-25).
+   * Optional so existing tests keep working; when absent, `fn` runs directly.
+   */
+  withMemoryLock?<T>(command: string, fn: () => Promise<T>): Promise<T>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -186,6 +191,11 @@ export const registerMemoryCommand = (
     .command('memory')
     .description('Back up, protect, and recover private agent memory (Claude)');
 
+  // Memory-changing subcommands hold the Memory lock from their first Memory read to
+  // their last Memory write (spec 2026-10-25 §3.2). Read-only ones never take it.
+  const locked = <T>(command: string, fn: () => Promise<T>): Promise<T> =>
+    dependencies.withMemoryLock ? dependencies.withMemoryLock(command, fn) : fn();
+
   memory
     .command('scan')
     .description('Discover portable agent memory on this machine (read-only)')
@@ -257,64 +267,68 @@ export const registerMemoryCommand = (
         );
         return;
       }
-      // Fresh/reset-registry safeguard: this machine has never recovered Cloud Memory,
-      // Cloud already has history, and this backup would mint a brand-new Local-only
-      // Project — refuse outright (no `-y` override; silently minting a duplicate
-      // logical Project is never something to confirm past).
-      const preview = await dependencies.memoryBackupPreview();
-      if (preview.risksDuplicatingLocalProjects) {
-        if (options.json) {
-          emitJson(dependencies, { status: 'needs-recovery-first' });
+      // The preview read, the confirmation and the backup write all happen under the
+      // lock, so the confirmed preview cannot go stale (spec 2026-10-25 §3.2).
+      await locked('stak memory backup', async () => {
+        // Fresh/reset-registry safeguard: this machine has never recovered Cloud Memory,
+        // Cloud already has history, and this backup would mint a brand-new Local-only
+        // Project — refuse outright (no `-y` override; silently minting a duplicate
+        // logical Project is never something to confirm past).
+        const preview = await dependencies.memoryBackupPreview();
+        if (preview.risksDuplicatingLocalProjects) {
+          if (options.json) {
+            emitJson(dependencies, { status: 'needs-recovery-first' });
+            return;
+          }
+          dependencies.writeOut(`${freshRegistryGuardWarning()}\n`);
           return;
         }
-        dependencies.writeOut(`${freshRegistryGuardWarning()}\n`);
-        return;
-      }
-      // Final review T15-4: the same refusal as `stak push` — no sync history
-      // means the rollback can't be told apart from Cloud, so there is nothing
-      // safe to confirm.
-      if (preview.supersession.supersedes && preview.supersession.noSyncHistory) {
-        if (options.json) {
-          emitJson(dependencies, { status: 'needs-catch-up' });
+        // Final review T15-4: the same refusal as `stak push` — no sync history
+        // means the rollback can't be told apart from Cloud, so there is nothing
+        // safe to confirm.
+        if (preview.supersession.supersedes && preview.supersession.noSyncHistory) {
+          if (options.json) {
+            emitJson(dependencies, { status: 'needs-catch-up' });
+            return;
+          }
+          dependencies.writeOut(`${HISTORICAL_NO_SYNC_HISTORY_MESSAGE}\n`);
           return;
         }
-        dependencies.writeOut(`${HISTORICAL_NO_SYNC_HISTORY_MESSAGE}\n`);
-        return;
-      }
-      // Backing up after a historical recovery would supersede a newer Cloud
-      // backup — require explicit confirmation (fail closed).
-      if (preview.supersession.supersedes) {
-        if (options.json && options.yes !== true) {
-          emitJson(dependencies, {
-            status: 'supersession-unconfirmed',
-            supersedes: true,
-            localSourceBackup: preview.supersession.localRecoveredGeneration,
-            cloudLatestBackup: preview.supersession.cloudLatestGeneration,
-            parentBackup: preview.supersession.parentGeneration,
-            nextBackup: preview.supersession.nextGeneration,
-          });
-          return;
+        // Backing up after a historical recovery would supersede a newer Cloud
+        // backup — require explicit confirmation (fail closed).
+        if (preview.supersession.supersedes) {
+          if (options.json && options.yes !== true) {
+            emitJson(dependencies, {
+              status: 'supersession-unconfirmed',
+              supersedes: true,
+              localSourceBackup: preview.supersession.localRecoveredGeneration,
+              cloudLatestBackup: preview.supersession.cloudLatestGeneration,
+              parentBackup: preview.supersession.parentGeneration,
+              nextBackup: preview.supersession.nextGeneration,
+            });
+            return;
+          }
+          if (!options.json)
+            dependencies.writeOut(
+              `${historicalBaseBackupWarning(preview.supersession)}\n\n`,
+            );
+          const ok =
+            options.yes === true ||
+            (await dependencies.confirm('Create the new backup and supersede?'));
+          if (!ok) {
+            if (!options.json) dependencies.writeOut('Cancelled.\n');
+            return;
+          }
         }
         if (!options.json)
-          dependencies.writeOut(
-            `${historicalBaseBackupWarning(preview.supersession)}\n\n`,
-          );
-        const ok =
-          options.yes === true ||
-          (await dependencies.confirm('Create the new backup and supersede?'));
-        if (!ok) {
-          if (!options.json) dependencies.writeOut('Cancelled.\n');
+          dependencies.writeOut('Backing up Claude memory...\n\n');
+        const outcome = await dependencies.memoryCloudBackup();
+        if (options.json) {
+          emitJson(dependencies, outcome);
           return;
         }
-      }
-      if (!options.json)
-        dependencies.writeOut('Backing up Claude memory...\n\n');
-      const outcome = await dependencies.memoryCloudBackup();
-      if (options.json) {
-        emitJson(dependencies, outcome);
-        return;
-      }
-      dependencies.writeOut(renderMemoryCloudBackup(outcome));
+        dependencies.writeOut(renderMemoryCloudBackup(outcome));
+      });
     });
 
   // `stak memory history` (was `generations`). Users see immutable Cloud generations
@@ -369,7 +383,7 @@ export const registerMemoryCommand = (
         passkey?: boolean;
         recoveryFile?: string;
         json?: boolean;
-      }) => {
+      }) => locked('stak memory protect', async () => {
         if (options.passkey) {
           const result = await dependencies.memoryProtectPasskey();
           if (options.json) {
@@ -428,7 +442,7 @@ export const registerMemoryCommand = (
         dependencies.writeOut(
           renderMemoryProtect({ ...result, recoveryMethod: 'recovery-file' }),
         );
-      },
+      }),
     );
 
   memory
@@ -473,75 +487,77 @@ export const registerMemoryCommand = (
             ? `Backup #${generation} was not found.\n`
             : 'No Cloud backup found for this account.\n';
 
-        if (options.passkey) {
-          const result = await dependencies.memoryRecoverPasskey({
+        await locked('stak memory recover', async () => {
+          if (options.passkey) {
+            const result = await dependencies.memoryRecoverPasskey({
+              ...(generation !== undefined ? { generation } : {}),
+            });
+            if (options.json) {
+              emitJson(
+                dependencies,
+                result.status === 'recovered'
+                  ? {
+                      status: result.status,
+                      objects: result.objects,
+                      files: result.files,
+                      backup: result.generation,
+                    }
+                  : result,
+              );
+              return;
+            }
+            if (result.status === 'not-authenticated') {
+              dependencies.writeOut('Not signed in.\nRun `stak login` first.\n');
+              return;
+            }
+            if (result.status === 'no-backup') {
+              dependencies.writeOut(notFoundMessage);
+              return;
+            }
+            if (result.status === 'passkey-failed') {
+              dependencies.writeOut(
+                renderPasskeyFailure('recover', result.reason),
+              );
+              return;
+            }
+            dependencies.writeOut(
+              renderMemoryRecover({
+                status: 'recovered',
+                privacyMode: 'protected',
+                objects: result.objects,
+                files: result.files,
+                generation: result.generation,
+              }),
+            );
+            return;
+          }
+          const outcome = await dependencies.memoryCloudRecover({
             ...(generation !== undefined ? { generation } : {}),
+            ...(options.recoveryFile
+              ? { recoveryFile: options.recoveryFile }
+              : {}),
           });
           if (options.json) {
             emitJson(
               dependencies,
-              result.status === 'recovered'
+              outcome.status === 'recovered'
                 ? {
-                    status: result.status,
-                    objects: result.objects,
-                    files: result.files,
-                    backup: result.generation,
+                    status: outcome.status,
+                    privacyMode: outcome.privacyMode,
+                    objects: outcome.objects,
+                    files: outcome.files,
+                    backup: outcome.generation,
                   }
-                : result,
+                : outcome,
             );
             return;
           }
-          if (result.status === 'not-authenticated') {
-            dependencies.writeOut('Not signed in.\nRun `stak login` first.\n');
-            return;
-          }
-          if (result.status === 'no-backup') {
+          if (outcome.status === 'no-backup') {
             dependencies.writeOut(notFoundMessage);
             return;
           }
-          if (result.status === 'passkey-failed') {
-            dependencies.writeOut(
-              renderPasskeyFailure('recover', result.reason),
-            );
-            return;
-          }
-          dependencies.writeOut(
-            renderMemoryRecover({
-              status: 'recovered',
-              privacyMode: 'protected',
-              objects: result.objects,
-              files: result.files,
-              generation: result.generation,
-            }),
-          );
-          return;
-        }
-        const outcome = await dependencies.memoryCloudRecover({
-          ...(generation !== undefined ? { generation } : {}),
-          ...(options.recoveryFile
-            ? { recoveryFile: options.recoveryFile }
-            : {}),
+          dependencies.writeOut(renderMemoryRecover(outcome));
         });
-        if (options.json) {
-          emitJson(
-            dependencies,
-            outcome.status === 'recovered'
-              ? {
-                  status: outcome.status,
-                  privacyMode: outcome.privacyMode,
-                  objects: outcome.objects,
-                  files: outcome.files,
-                  backup: outcome.generation,
-                }
-              : outcome,
-          );
-          return;
-        }
-        if (outcome.status === 'no-backup') {
-          dependencies.writeOut(notFoundMessage);
-          return;
-        }
-        dependencies.writeOut(renderMemoryRecover(outcome));
       },
     );
 
@@ -626,11 +642,10 @@ export const registerMemoryCommand = (
             'memory-resolve-usage',
             'Choose a side: --keep local, --keep cloud, or --keep both.',
           );
-        const outcome = await required(dependencies.memoryResolveConflict)({
-          project,
-          path: docPath,
-          keep,
-        });
+        const resolveConflict = required(dependencies.memoryResolveConflict);
+        const outcome = await locked('stak memory resolve', () =>
+          resolveConflict({ project, path: docPath, keep }),
+        );
         dependencies.writeOut(renderResolveOutcome(outcome));
       },
     );
@@ -648,8 +663,9 @@ export const registerMemoryCommand = (
             'memory-materialize-agent',
             `Unsupported agent "${options.agent}". Only claude is supported in this version.`,
           );
-        const outcome = await required(dependencies.memoryMaterialize)(
-          project !== undefined ? { project } : {},
+        const materialize = required(dependencies.memoryMaterialize);
+        const outcome = await locked('stak memory materialize', () =>
+          materialize(project !== undefined ? { project } : {}),
         );
         dependencies.writeOut(renderMaterializeOutcome(outcome));
       },
@@ -663,7 +679,12 @@ export const registerMemoryCommand = (
     .option('--verbose', 'show per-item detail')
     .action(async (options: Flags) => {
       const dryRun = options.dryRun === true;
-      const plan = await dependencies.memoryRestore({ apply: !dryRun });
+      // Only an applying restore writes Memory; a --dry-run preview never takes the lock.
+      const plan = dryRun
+        ? await dependencies.memoryRestore({ apply: false })
+        : await locked('stak memory restore', () =>
+            dependencies.memoryRestore({ apply: true }),
+          );
       if (options.json) {
         emitJson(dependencies, {
           provider: plan.provider,

@@ -1,6 +1,7 @@
 import type { Command } from 'commander';
 
 import { LocalEnvironmentConflictError } from '@stack/cloud-client';
+import { MemoryLockError } from '@stack/memory';
 import { StackCompositionError, type ApplyPullResult, type PullPlan } from '@stack/core';
 
 import type { CloudRecoverOutcome } from '../memory/cloud-ops.js';
@@ -38,9 +39,16 @@ export type PullCommandDependencies = {
    * this command.
    */
   applyCanonicalPull?(): Promise<CanonicalPullOutcome>;
+  /**
+   * Runs `fn` while holding the cross-process Memory lock (spec 2026-10-25).
+   * Optional so existing tests keep working; when absent, `fn` runs directly.
+   */
+  withMemoryLock?<T>(command: string, fn: () => Promise<T>): Promise<T>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
+
+const runDirectly = async <T>(_command: string, fn: () => Promise<T>): Promise<T> => fn();
 
 export const registerPullCommand = (
   program: Command,
@@ -78,14 +86,18 @@ export const registerPullCommand = (
         // A local conflict blocks pull, and --yes never bypasses it.
         if (plan.conflict)
           throw new LocalEnvironmentConflictError(plan.conflict.message);
-        const memoryPreflight = dependencies.memoryPullPreflight
-          ? await dependencies.memoryPullPreflight()
-          : { eligible: false };
         if (options.dryRun) {
           dependencies.writeOut(renderPullPlan(plan, { verbose }));
           return;
         }
-        if (plan.mode === 'noop' && !memoryPreflight.eligible) {
+        const readMemoryPreflight = async (): Promise<MemoryPullPreflight> =>
+          dependencies.memoryPullPreflight
+            ? await dependencies.memoryPullPreflight()
+            : { eligible: false };
+        // Only a Skills no-op needs the Memory preflight up front, to decide whether
+        // there is anything to pull at all. The decision that acts on it is made from a
+        // fresh read under the Memory lock below.
+        if (plan.mode === 'noop' && !(await readMemoryPreflight()).eligible) {
           dependencies.writeOut(renderPullPlan(plan, { verbose }));
           return;
         }
@@ -107,47 +119,75 @@ export const registerPullCommand = (
             };
           }
 
-        let memory: PullMemoryOutcome;
-        if (!memoryPreflight.eligible || !dependencies.applyMemoryPull)
-          memory = memoryPreflight.reason
-            ? { status: 'skipped', reason: memoryPreflight.reason }
-            : { status: 'not-attempted' };
-        else
-          try {
-            memory = { status: 'applied', outcome: await dependencies.applyMemoryPull() };
-          } catch (error) {
-            memory = {
-              status: 'failed',
-              error: error instanceof Error ? error.message : String(error),
-            };
-          }
+        // All Memory work (preflight read, fresh-machine recover, canonical pull) runs
+        // under the Memory lock (spec 2026-10-25 §3.2); Skills above run outside it.
+        const memoryPart = async (): Promise<{
+          memory: PullMemoryOutcome;
+          canonicalMemory: PullCanonicalOutcome;
+        }> => {
+          const memoryPreflight = await readMemoryPreflight();
+          let memory: PullMemoryOutcome;
+          if (!memoryPreflight.eligible || !dependencies.applyMemoryPull)
+            memory = memoryPreflight.reason
+              ? { status: 'skipped', reason: memoryPreflight.reason }
+              : { status: 'not-attempted' };
+          else
+            try {
+              memory = { status: 'applied', outcome: await dependencies.applyMemoryPull() };
+            } catch (error) {
+              memory = {
+                status: 'failed',
+                error: error instanceof Error ? error.message : String(error),
+              };
+            }
 
-        // Task 13 Important-8: a fresh machine whose full recover attempt was
-        // ATTEMPTED but did NOT succeed (Protected locked, no backup, a network
-        // error, …) must not run the canonical pull's `migrateLocalStore` here —
-        // that call writes `manifests/current.json` (even with zero items, via
-        // its "slim to global" step) and the completion marker, which would make
-        // `memoryPullPreflight`'s "no local manifest yet" fresh-machine check
-        // read this machine as already established on the VERY NEXT `stak pull`,
-        // permanently disabling auto-recovery after a single transient failure.
-        // An established machine (not eligible for fresh recover at all) is
-        // unaffected — canonical pull still runs for it every time, as normal.
-        const freshRecoverAttemptedButDidNotSucceed =
-          memoryPreflight.eligible &&
-          !!dependencies.applyMemoryPull &&
-          !(memory.status === 'applied' && memory.outcome.status === 'recovered');
+          // Task 13 Important-8: a fresh machine whose full recover attempt was
+          // ATTEMPTED but did NOT succeed (Protected locked, no backup, a network
+          // error, …) must not run the canonical pull's `migrateLocalStore` here —
+          // that call writes `manifests/current.json` (even with zero items, via
+          // its "slim to global" step) and the completion marker, which would make
+          // `memoryPullPreflight`'s "no local manifest yet" fresh-machine check
+          // read this machine as already established on the VERY NEXT `stak pull`,
+          // permanently disabling auto-recovery after a single transient failure.
+          // An established machine (not eligible for fresh recover at all) is
+          // unaffected — canonical pull still runs for it every time, as normal.
+          const freshRecoverAttemptedButDidNotSucceed =
+            memoryPreflight.eligible &&
+            !!dependencies.applyMemoryPull &&
+            !(memory.status === 'applied' && memory.outcome.status === 'recovered');
 
-        let canonicalMemory: PullCanonicalOutcome;
-        if (!dependencies.applyCanonicalPull || freshRecoverAttemptedButDidNotSucceed)
-          canonicalMemory = { status: 'not-attempted' };
-        else
+          let canonicalMemory: PullCanonicalOutcome;
+          if (!dependencies.applyCanonicalPull || freshRecoverAttemptedButDidNotSucceed)
+            canonicalMemory = { status: 'not-attempted' };
+          else
+            try {
+              canonicalMemory = { status: 'applied', outcome: await dependencies.applyCanonicalPull() };
+            } catch (error) {
+              canonicalMemory = {
+                status: 'failed',
+                error: error instanceof Error ? error.message : String(error),
+              };
+            }
+          return { memory, canonicalMemory };
+        };
+
+        let memory: PullMemoryOutcome = { status: 'not-attempted' };
+        let canonicalMemory: PullCanonicalOutcome = { status: 'not-attempted' };
+        const hasMemoryWork =
+          dependencies.memoryPullPreflight !== undefined ||
+          dependencies.applyMemoryPull !== undefined ||
+          dependencies.applyCanonicalPull !== undefined;
+        if (hasMemoryWork)
           try {
-            canonicalMemory = { status: 'applied', outcome: await dependencies.applyCanonicalPull() };
+            ({ memory, canonicalMemory } = await (dependencies.withMemoryLock ?? runDirectly)(
+              'stak pull',
+              memoryPart,
+            ));
           } catch (error) {
-            canonicalMemory = {
-              status: 'failed',
-              error: error instanceof Error ? error.message : String(error),
-            };
+            // A busy lock stops only the Memory part: it reports FAILED with the lock
+            // message, like any Memory failure, and changed nothing in Memory.
+            if (!(error instanceof MemoryLockError)) throw error;
+            memory = { status: 'failed', error: error.message };
           }
 
         dependencies.writeOut(renderCombinedPullResult(skill, memory, canonicalMemory));
