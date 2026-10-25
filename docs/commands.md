@@ -69,6 +69,9 @@ Copy allowlisted memory into STAK's private store (read-only capture; native
 Claude files are never modified) and, when signed in, upload it to STAK
 Cloud. Commits the manifest last. Now the Memory part of `stak push` (it merges
 with Cloud and never overwrites); kept as a deprecated alias.
+While its "supersede?" confirmation is waiting for your answer, it holds the
+Memory lock, so other Memory commands wait (up to 10 seconds) and then ask you
+to try again.
 
 ### `stak memory status [--json] [--verbose]`
 
@@ -95,6 +98,9 @@ reported as a conflict and left untouched (never merged).
 
 Enable client-side encrypted (Protected) Cloud backup, optionally with a
 passkey or recovery file.
+The `--passkey` flows of `protect` and `recover` hold the Memory lock while they
+wait for you in the browser, so finish or cancel them before running other
+Memory commands.
 
 ### `stak memory history [--json]`
 
@@ -119,6 +125,15 @@ Rebuild agent Memory files from STAK Memory, for every project on this machine
 or just one. Never overwrites a file you edited and haven't added yet. Projects
 not found on this machine are reported as not available and nothing is written
 for them. Only `claude` is supported.
+
+### `stak memory unlock [--force]`
+
+Remove a leftover Memory lock left behind by a crashed STAK command. Shows which
+command held it and when it started. Removes it if that process is no longer
+running; refuses if it may still be running. `--force` removes it anyway, after
+a warning: doing this while a real STAK command is running can lose its Memory
+changes. Says so, and succeeds, when no lock is held. Leftover locks normally
+clear themselves; this is the manual fallback.
 
 Memory is currently scoped to Claude Code; Codex and Cursor memory support is
 planned.

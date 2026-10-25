@@ -75,6 +75,7 @@ import {
   fileLocalMemoryKeyStore,
   generateRecoveryKey,
   leftoverClearedMessage,
+  unlockMemory,
   withMemoryLock,
   readCanonicalBase,
   readLocalRegistry,
@@ -378,6 +379,7 @@ export type ProgramDependencies = {
   memoryResolveConflict?: NonNullable<MemoryCommandDependencies['memoryResolveConflict']>;
   memoryDiffConflict?: NonNullable<MemoryCommandDependencies['memoryDiffConflict']>;
   memoryMaterialize?: NonNullable<MemoryCommandDependencies['memoryMaterialize']>;
+  unlockMemory?: NonNullable<MemoryCommandDependencies['unlockMemory']>;
   projectList(): Promise<ProjectListRow[]>;
   projectMap(options: {
     project: string;
@@ -1342,6 +1344,8 @@ const defaultDependencies: ProgramDependencies = {
     withMemoryLock(stackHome, command, fn, {
       onLeftoverCleared: (holder) => process.stderr.write(`${leftoverClearedMessage(holder)}\n`),
     }),
+  // `stak memory unlock` — deliberately NOT wrapped in withMemoryLock.
+  unlockMemory: (options) => unlockMemory(stackHome, options),
   reportMachineCheckin: async (commandName) => {
     // Best-effort check-in; signed out → nothing to report. Connectivity failures are
     // swallowed by reportCheckin; a 401/403 propagates so a revoked machine is explicit.

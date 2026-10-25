@@ -31,8 +31,9 @@ import {
   type ProgramDependencies,
 } from './program.js';
 import { gatherCheckinInputs, reportCheckin } from './cloud/checkin.js';
+import { isRenderableCliError } from './ui/errors.js';
 import type { PullPlan, PushPlan, TrialStackResolution } from '@stack/core';
-import { MemoryLockError, withMemoryLock, type DiscoveredMemoryItem } from '@stack/memory';
+import { MemoryLockError, unlockMemory, withMemoryLock, type DiscoveredMemoryItem } from '@stack/memory';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -1892,6 +1893,7 @@ describe('STAK CLI', () => {
       'resolve',
       'diff',
       'materialize',
+      'unlock',
     ])
       expect(result.output).toContain(sub);
   });
@@ -2432,6 +2434,105 @@ describe('STAK CLI', () => {
         // Nothing changed: the planted lock is intact and nothing else appeared.
         expect(await readFile(lockFile, 'utf8')).toBe(planted);
         expect(await readdir(path.join(home, 'memory'))).toEqual(['.memory.lock']);
+      } finally {
+        await rm(home, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // Lock Task 3 (spec 2026-10-25 §3.6): `stak memory unlock [--force]`.
+  describe('stak memory unlock', () => {
+    const holder = (secondsAgo: number) => ({
+      lockId: 'lock-1',
+      pid: 1234,
+      hostname: 'this-host',
+      startedAt: new Date(Date.now() - secondsAgo * 1000).toISOString(),
+      command: 'stak pull',
+    });
+
+    it('says so when no lock is held', async () => {
+      const seen: unknown[] = [];
+      const { output } = await runProgram(['memory', 'unlock'], {
+        unlockMemory: async (options) => {
+          seen.push(options);
+          return { status: 'no-lock' };
+        },
+      });
+      expect(output).toBe('No Memory lock is held.\n');
+      expect(seen).toEqual([{ force: false }]);
+    });
+
+    it('removes a lock whose process is no longer running', async () => {
+      const { output } = await runProgram(['memory', 'unlock'], {
+        unlockMemory: async () => ({ status: 'removed', holder: holder(180), wasAlive: false }),
+      });
+      expect(output).toBe(
+        'Removed the Memory lock held by `stak pull` (process 1234, started 3m ago, no longer running).\n',
+      );
+    });
+
+    it('refuses, exiting non-zero, when the process may still be running', async () => {
+      await expect(
+        runProgram(['memory', 'unlock'], {
+          unlockMemory: async () => ({ status: 'refused', holder: holder(12) }),
+        }),
+      ).rejects.toSatisfy(
+        (error: Error) =>
+          // A typed STAK error, so the CLI prints the message alone (no stack trace).
+          isRenderableCliError(error) &&
+          error.message ===
+            'The Memory lock is held by `stak pull` (process 1234 on this-host, started 12s ago), which may still be running.\nWait for it to finish. If you are sure it is not a STAK command, run `stak memory unlock --force`.',
+      );
+    });
+
+    it('--force removes a possibly-running lock after a warning', async () => {
+      const seen: unknown[] = [];
+      const { output } = await runProgram(['memory', 'unlock', '--force'], {
+        unlockMemory: async (options) => {
+          seen.push(options);
+          return { status: 'removed', holder: holder(12), wasAlive: true };
+        },
+      });
+      expect(seen).toEqual([{ force: true }]);
+      expect(output).toBe(
+        'Warning: removing a Memory lock that may belong to a running STAK command. If one is running, its Memory changes can be lost.\nRemoved the Memory lock held by `stak pull` (process 1234).\n',
+      );
+    });
+
+    it('removes an unreadable lock file', async () => {
+      const { output } = await runProgram(['memory', 'unlock'], {
+        unlockMemory: async () => ({ status: 'removed', holder: 'corrupt', wasAlive: false }),
+      });
+      expect(output).toBe('Removed an unreadable Memory lock file.\n');
+    });
+
+    it('never takes the Memory lock itself', async () => {
+      const calls: string[] = [];
+      await runProgram(['memory', 'unlock'], {
+        unlockMemory: async () => ({ status: 'no-lock' }),
+        withMemoryLock: async <T,>(command: string, fn: () => Promise<T>) => {
+          calls.push(command);
+          return fn();
+        },
+      });
+      expect(calls).toEqual([]);
+    });
+
+    it('real unlock: removes a planted lock whose process is gone, even while the lock looks held', async () => {
+      const home = await mkdtemp(path.join(os.tmpdir(), 'stak-unlock-cli-'));
+      try {
+        await mkdir(path.join(home, 'memory'), { recursive: true });
+        await writeFile(
+          path.join(home, 'memory', '.memory.lock'),
+          JSON.stringify({ ...holder(5), hostname: os.hostname() }),
+        );
+        const { output } = await runProgram(['memory', 'unlock'], {
+          unlockMemory: (options) => unlockMemory(home, { ...options, isProcessAlive: () => false }),
+        });
+        expect(output).toBe(
+          'Removed the Memory lock held by `stak pull` (process 1234, started 5s ago, no longer running).\n',
+        );
+        expect(await readdir(path.join(home, 'memory'))).toEqual([]);
       } finally {
         await rm(home, { recursive: true, force: true });
       }

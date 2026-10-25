@@ -4,8 +4,9 @@ import type {
   DiscoveredMemoryItem,
   MemoryStatus,
   RestorePlan,
+  UnlockResult,
 } from '@stack/memory';
-import { toManifestItem } from '@stack/memory';
+import { formatLockAge, toManifestItem } from '@stack/memory';
 
 import { StackCompositionError } from '@stack/core';
 
@@ -101,6 +102,8 @@ export type MemoryCommandDependencies = {
    * Optional so existing tests keep working; when absent, `fn` runs directly.
    */
   withMemoryLock?<T>(command: string, fn: () => Promise<T>): Promise<T>;
+  /** `stak memory unlock` (spec 2026-10-25 §3.6). Never takes the lock itself. */
+  unlockMemory?(options: { force: boolean }): Promise<UnlockResult>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -704,6 +707,51 @@ export const registerMemoryCommand = (
           dryRun,
           verbose: options.verbose === true,
         }),
+      );
+    });
+
+  // Spec 2026-10-25 §3.6: the manual fallback for a leftover lock that looks held (for
+  // example a crashed command's PID reused by another program). It must never take the
+  // Memory lock itself — that is the lock it is removing.
+  memory
+    .command('unlock')
+    .description('Remove a leftover Memory lock left behind by a crashed STAK command')
+    .option(
+      '--force',
+      'remove the lock even if its process may still be running (can lose Memory changes)',
+    )
+    .action(async (options: { force?: boolean }) => {
+      if (!dependencies.unlockMemory)
+        throw new Error('Memory unlock is not available.');
+      const result = await dependencies.unlockMemory({
+        force: options.force === true,
+      });
+      if (result.status === 'no-lock') {
+        dependencies.writeOut('No Memory lock is held.\n');
+        return;
+      }
+      if (result.status === 'refused') {
+        const { holder } = result;
+        throw new StackCompositionError(
+          'memory-unlock-refused',
+          `The Memory lock is held by \`${holder.command}\` (process ${holder.pid} on ${holder.hostname}, started ${formatLockAge(holder.startedAt)} ago), which may still be running.\n` +
+            'Wait for it to finish. If you are sure it is not a STAK command, run `stak memory unlock --force`.',
+        );
+      }
+      const { holder, wasAlive } = result;
+      if (holder === 'corrupt') {
+        dependencies.writeOut('Removed an unreadable Memory lock file.\n');
+        return;
+      }
+      if (wasAlive) {
+        dependencies.writeOut(
+          'Warning: removing a Memory lock that may belong to a running STAK command. If one is running, its Memory changes can be lost.\n' +
+            `Removed the Memory lock held by \`${holder.command}\` (process ${holder.pid}).\n`,
+        );
+        return;
+      }
+      dependencies.writeOut(
+        `Removed the Memory lock held by \`${holder.command}\` (process ${holder.pid}, started ${formatLockAge(holder.startedAt)} ago, no longer running).\n`,
       );
     });
 };

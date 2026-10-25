@@ -255,13 +255,14 @@ const clearLeftover = async (
     return true;
   });
 
-const ago = (startedAt: string, now: Date): string => {
+/** How long ago a lock was taken, e.g. `12s` or `3m` (used as "started 12s ago"). */
+export const formatLockAge = (startedAt: string, now: Date = new Date()): string => {
   const seconds = Math.max(0, Math.round((now.getTime() - Date.parse(startedAt)) / 1000));
   return seconds < 120 ? `${seconds}s` : `${Math.round(seconds / 60)}m`;
 };
 
 export const busyMessage = (holder: MemoryLockRecord, now: Date = new Date()): string =>
-  `Another STAK command (\`${holder.command}\`, started ${ago(holder.startedAt, now)} ago) is changing Memory. Try again when it finishes.`;
+  `Another STAK command (\`${holder.command}\`, started ${formatLockAge(holder.startedAt, now)} ago) is changing Memory. Try again when it finishes.`;
 
 export const leftoverClearedMessage = (holder: MemoryLockRecord): string =>
   `Cleared a leftover Memory lock from \`${holder.command}\` (process ${holder.pid}, no longer running).`;

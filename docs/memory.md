@@ -244,6 +244,16 @@ machine** until the next `stak pull` finds it, or until you map it with
 the same way and never overwrites another machine's changes. It is kept as a
 deprecated alias.
 
+### One Memory command at a time
+
+Memory commands now run one at a time. If another is running, a command waits up
+to 10 seconds, then asks you to try again. After a crash, a leftover lock clears
+itself automatically. `stak memory unlock` is the manual fallback.
+
+A command keeps its turn while it waits for you: `stak memory backup`'s
+confirmation prompt and the `--passkey` browser flows of `protect` and `recover`
+hold the Memory lock until you answer or cancel.
+
 ### Recovering an older version
 
 After `stak memory recover --backup <n>`, your local Memory is that older backup,
