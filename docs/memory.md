@@ -180,6 +180,10 @@ overwrites an agent file that hasn't changed since the last sync, so an edit you
 haven't added is never silently replaced. A missing Memory folder is treated as
 "never written here", not as "deleted everything".
 
+`stak pull` always syncs Project Memory, with no extra prompt, even when no
+Skills changed. It merges rather than overwrites, so your unpushed Memory
+changes are kept and real conflicts stop safely.
+
 `stak status` also reports, per project, Memory changes not added yet and any
 pending Memory sync conflicts.
 
