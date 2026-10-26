@@ -265,7 +265,8 @@ describe('stageCanonicalMemory', () => {
     expect(registryAfter.projects).toHaveLength(1); // no second, phantom Project
   });
 
-  it('win32: a local project whose notes-folder vendor key uses a differently-cased drive letter than its CLAUDE.local.md key resolves to ONE Project ID, both documents under it', async () => {
+  // Drive-letter casing only exists on Windows; on POSIX the key starts with '-'.
+  it.skipIf(process.platform !== 'win32')('win32: a local project whose notes-folder vendor key uses a differently-cased drive letter than its CLAUDE.local.md key resolves to ONE Project ID, both documents under it', async () => {
     const dir = path.join(root, 'case-project');
     await mkdir(dir, { recursive: true });
     const naturalKey = encodeClaudeProjectKey(path.resolve(dir));
