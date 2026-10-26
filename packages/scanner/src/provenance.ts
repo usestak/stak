@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { stat } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -87,8 +87,14 @@ export const detectProvenance = async (
     } catch {
       ref = undefined;
     }
+    // Git reports the toplevel with symlinks resolved, so the Skill directory must be
+    // resolved too before relating them. Otherwise a Skill reached through any symlink
+    // (macOS /var -> /private/var, a symlinked ~/Developers, …) yields `../../…`, which
+    // `git status -- <path>` rejects as outside the repository and the Skill silently
+    // fell back to `local`.
+    const realDirectory = await realpath(directory);
     const sourcePath =
-      path.relative(repository, directory).split(path.sep).join('/') || '.';
+      path.relative(repository, realDirectory).split(path.sep).join('/') || '.';
     const clean =
       (await git(repository, [
         'status',

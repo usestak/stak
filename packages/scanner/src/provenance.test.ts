@@ -55,6 +55,43 @@ describe('detectProvenance', () => {
     expect(source.type === 'git' && source.ref).toMatch(/^refs\/heads\/.+/);
   }, 15_000);
 
+  it('records Git provenance for a Skill reached through a symlinked path', async (context) => {
+    // Regression: `git rev-parse --show-toplevel` returns the resolved path, so relating it
+    // to the unresolved Skill path produced `../../…`, `git status` refused it, and the
+    // Skill silently fell back to `local`. Reproduced explicitly here so it fails on every
+    // OS, not just macOS (where tmpdir itself sits behind /var -> /private/var).
+    const { mkdir, symlink } = await import('node:fs/promises');
+    const root = await mkdtemp(path.join(tmpdir(), 'stack-git-link-'));
+    directories.push(root);
+    const repository = path.join(root, 'repo');
+    const skill = path.join(repository, 'skills', 'demo');
+    await mkdir(skill, { recursive: true });
+    await writeFile(path.join(skill, 'SKILL.md'), 'demo');
+    for (const args of [
+      ['init', '-q'],
+      ['config', 'user.email', 'test@example.com'],
+      ['config', 'user.name', 'Stack Test'],
+      ['add', '.'],
+      ['commit', '-qm', 'fixture'],
+    ])
+      execFileSync('git', args, { cwd: repository });
+    const linked = path.join(root, 'linked-repo');
+    try {
+      await symlink(repository, linked, 'junction');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EPERM') context.skip();
+      throw error;
+    }
+
+    const source = await detectProvenance(path.join(linked, 'skills', 'demo'));
+
+    expect(source).toMatchObject({
+      type: 'git',
+      path: 'skills/demo',
+      clean: true,
+    });
+  }, 15_000);
+
   it('omits the tracked ref on a detached HEAD (exact-commit-pinned)', async () => {
     const repository = await mkdtemp(path.join(tmpdir(), 'stack-git-detach-'));
     directories.push(repository);
