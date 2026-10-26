@@ -25,8 +25,10 @@ export type RemoteCanonicalObject = { contentHash: string; bytes: Uint8Array };
  * Task 13 fix round 3 (7(c) minor): generation `n` is gone from the committed
  * set because `stak memory protect` retired it — find the committed Protected
  * replica that re-encrypts it (`replicaOf`), whose plaintext is byte-identical.
+ * Also used by the CLI to move this machine's recovery provenance onto that
+ * replica once protect finishes.
  */
-const replicaOfRetiredGeneration = async (
+export const replicaOfRetiredGeneration = async (
   backend: RemoteMemoryBackend,
   generation: number,
 ): Promise<MemoryGenerationMeta | null> => {

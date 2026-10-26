@@ -38,6 +38,7 @@ import {
   migrateLocalStore,
   PROTECT_NEEDS_ORIGINAL_KEY_MESSAGE,
   protectInProgressMessage,
+  replicaOfRetiredGeneration,
   replicasNeedingOriginalKey,
   RemoteMemoryError,
   migrateStandardToProtected,
@@ -227,6 +228,55 @@ export const recordInSyncWithCloud = async (deps: MemoryCloudDeps, generation: n
     privacyMode: (await deps.backend.getProfile())?.privacyMode ?? 'standard',
     cloudLatest: generation,
   });
+};
+
+/**
+ * Called once `stak memory protect` has finalized (recovery-file or passkey,
+ * fresh or resumed). Protect re-encrypts each Standard generation as a
+ * Protected replica under a NEW, higher generation number and retires the
+ * original, but this machine's provenance still names the original. Status
+ * would then compare it with the replica that is now latest and report a
+ * "historical recovery" (and `stak push` a rollback) for identical content.
+ *
+ * Moves each recorded generation (`recoveredGeneration`, `cloudLatestAtRecovery`)
+ * that is no longer committed onto its committed Protected replica, using the
+ * same `replicaOf` lookup as `effectiveCanonicalBase`. A genuine historical
+ * recover moves to the OLDER generation's replica, so it stays historical. The
+ * semantic digest is kept (the replica's plaintext is byte-identical), as are
+ * the recover fingerprint and timestamp.
+ *
+ * Best-effort: Cloud is already Protected, and protect can't be re-run to
+ * retry this, so a local failure here must not fail protect. The next push
+ * or backup that ends up to date records fresh provenance anyway.
+ */
+const moveProvenanceToProtectReplicas = async (
+  stackHome: string,
+  backend: RemoteMemoryBackend,
+): Promise<void> => {
+  try {
+    const provenance = await readLocalRecoveryState(stackHome);
+    if (!provenance) return;
+    const replicaGenerationOf = async (generation: number): Promise<number> => {
+      if ((await backend.getGeneration(generation)) !== null) return generation;
+      return (await replicaOfRetiredGeneration(backend, generation))?.generation ?? generation;
+    };
+    const recoveredGeneration = await replicaGenerationOf(provenance.recoveredGeneration);
+    const cloudLatestAtRecovery =
+      provenance.cloudLatestAtRecovery === null ? null : await replicaGenerationOf(provenance.cloudLatestAtRecovery);
+    if (
+      recoveredGeneration === provenance.recoveredGeneration &&
+      cloudLatestAtRecovery === provenance.cloudLatestAtRecovery
+    )
+      return;
+    await writeLocalRecoveryState(stackHome, {
+      ...provenance,
+      recoveredGeneration,
+      cloudLatestAtRecovery,
+      ...(recoveredGeneration !== provenance.recoveredGeneration ? { privacyMode: 'protected' as const } : {}),
+    });
+  } catch {
+    // See above: never fail a finished protect over local provenance.
+  }
 };
 
 /** Fingerprint of the v1 manifest currently on disk (right after a recover). */
@@ -950,6 +1000,7 @@ export const runMemoryCloudProtect = async (
     mmk,
     ...(deps.now ? { now: deps.now } : {}),
   });
+  await moveProvenanceToProtectReplicas(deps.stackHome, deps.backend);
   return {
     status: 'protected',
     migrated: migration.migrated,
@@ -1227,6 +1278,7 @@ export const runPasskeyProtect = async (
     const resumeMmk = await deps.localKeyStore.loadMmk().catch(() => null);
     if (resumeMmk) {
       const resumed = await migrateStandardToProtected({ backend: deps.backend, mmk: resumeMmk, now });
+      await moveProvenanceToProtectReplicas(deps.stackHome, deps.backend);
       return { status: 'protected', migrated: resumed.migrated };
     }
     // Fix round 4 (d): never open a passkey ceremony for a key that can't finish.
@@ -1276,6 +1328,7 @@ export const runPasskeyProtect = async (
     mmk,
     now,
   });
+  await moveProvenanceToProtectReplicas(deps.stackHome, deps.backend);
   return { status: 'protected', migrated: migration.migrated };
 };
 

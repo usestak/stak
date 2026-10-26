@@ -3159,3 +3159,41 @@ describe('final review I1 re-fix: global Memory between two machines', () => {
     expect((await readCanonicalBase(A.home))?.generation).toBe(1);
   });
 });
+
+describe('protect moves this machine\'s sync provenance to the Protected replica (push)', () => {
+  const secureKeys = (dir: string) =>
+    fileLocalMemoryKeyStore(dir, {
+      harden: () => Promise.resolve(true),
+      verify: () => Promise.resolve(true),
+    });
+  const fakeBackup = (): Promise<BackupResult> =>
+    Promise.resolve({ provider: 'claude', files: 0, projects: 0, createdAt: '2026-10-26T00:00:00.000Z' });
+  const deps = (home: string, backend: RemoteMemoryBackend | null, keysDir: string) => ({
+    stackHome: home,
+    backend,
+    localKeyStore: secureKeys(keysDir),
+    runLocalBackup: fakeBackup,
+  });
+
+  it('backup -> protect -> push: no historical recovery (no rollback note) and nothing published', async () => {
+    await bindProject(projectDir);
+    await writeAutoMemory(encodeClaudeProjectKey(path.resolve(projectDir)), 'MEMORY.md', 'notes body');
+    await stageCanonicalMemory(stackHome, { claudeHome });
+    const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), 'protect-provenance-push');
+    const keys = path.join(root, 'keys');
+    expect((await runMemoryCloudBackup(deps(stackHome, backend, keys))).cloud).toMatchObject({ status: 'standard', generation: 0 });
+    expect((await runMemoryCloudProtect({ ...deps(stackHome, backend, keys), backend }, { recoveryKey: generateRecoveryKey() })).status).toBe('protected');
+    expect((await backend.getLatest())?.generation).toBe(1);
+
+    // `stak push`'s preflight announces a rollback exactly when status reports
+    // a historical recovery (program.ts `memoryPushPreflight`).
+    const status = await readMemoryCloudStatus(deps(stackHome, backend, keys));
+    expect(status.historicalRecovery).toBe(false);
+    expect(status.localRecoveredGeneration).toBe(1);
+
+    const generationsBefore = (await backend.listGenerations()).length;
+    const pushed = await pushMemoryViaCanonical(deps(stackHome, backend, keys), { claudeHome });
+    expect(pushed).toMatchObject({ status: 'up-to-date', generation: 1 });
+    expect(await backend.listGenerations()).toHaveLength(generationsBefore);
+  });
+});

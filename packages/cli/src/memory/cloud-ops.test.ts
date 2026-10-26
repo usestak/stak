@@ -16,6 +16,7 @@ import {
   memoryStorePaths,
   mintProjectId,
   readCanonicalMain,
+  readLocalRecoveryState,
   readLocalRegistry,
   readMemoryManifest,
   readMemoryObject,
@@ -1236,5 +1237,96 @@ describe('I8: protect writes the recovery file before anything changes in Cloud'
     expect(await backend.listRecoveryMethods()).toHaveLength(0);
     expect((await backend.listGenerations()).every((g) => g.privacyMode === 'standard')).toBe(true);
     expect((await backend.getProfile())?.privacyMode ?? 'standard').toBe('standard');
+  });
+});
+
+describe('protect moves this machine\'s sync provenance to the Protected replica', () => {
+  const setup = async () => {
+    const source = await writeStore();
+    const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), USER);
+    const keys = secureKeys(await temp('stack-ops-prov-keys-'));
+    const deps = { stackHome: source.stackHome, backend, localKeyStore: keys, runLocalBackup: fakeBackup };
+    return { stackHome: source.stackHome, backend, keys, deps };
+  };
+  /** A genuine change to canonical Memory, so the next backup publishes. */
+  const addDoc = async (stackHome: string, body: string) => {
+    const main = await readCanonicalMain(stackHome);
+    const bytes = Buffer.from(body, 'utf8');
+    const contentHash = hashBytes(bytes);
+    await writeMemoryObject({ stackHome, contentHash, bytes });
+    await writeCanonicalMain(stackHome, {
+      ...main,
+      projects: main.projects.map((p, i) =>
+        i === 0
+          ? {
+              ...p,
+              documents: [
+                ...p.documents,
+                { path: `notes/${contentHash.slice(0, 8)}.md`, state: 'present' as const, contentHash, importedFrom: 'claude' as const, importedAt: '2026-10-26T00:00:00.000Z' },
+              ],
+            }
+          : p,
+      ),
+    });
+  };
+
+  it('backup -> protect -> status: no historical recovery, local source is the latest replica', async () => {
+    const { stackHome, backend, deps } = await setup();
+    expect((await runMemoryCloudBackup(deps)).cloud).toMatchObject({ status: 'standard', generation: 0 });
+    expect((await runMemoryCloudProtect(deps, { recoveryKey: generateRecoveryKey() })).status).toBe('protected');
+    const latest = await backend.getLatest();
+    expect(latest?.generation).toBe(1);
+
+    const status = await readMemoryCloudStatus(deps);
+    expect(status.historicalRecovery).toBe(false);
+    expect(status.localRecoveredGeneration).toBe(1);
+    expect(status.latestGeneration).toBe(1);
+    const provenance = await readLocalRecoveryState(stackHome);
+    expect(provenance).toMatchObject({ recoveredGeneration: 1, cloudLatestAtRecovery: 1, privacyMode: 'protected' });
+    // The staged state is unchanged, so a Protected push is already up to date.
+    expect(await resolveMemoryPushState(deps)).toEqual({ status: 'already-up-to-date', generation: 1 });
+  });
+
+  it('backup x2 -> recover the older -> protect -> status: still historical, pointing at the older backup\'s replica', async () => {
+    const { stackHome, backend, deps } = await setup();
+    expect((await runMemoryCloudBackup(deps)).cloud).toMatchObject({ status: 'standard', generation: 0 });
+    await addDoc(stackHome, 'second backup note');
+    expect((await runMemoryCloudBackup(deps)).cloud).toMatchObject({ status: 'standard', generation: 1 });
+    const [newer, older] = await backend.listGenerations();
+    expect((await runMemoryCloudRecover(deps, { generation: 0 })).status).toBe('recovered');
+    expect((await readMemoryCloudStatus(deps)).historicalRecovery).toBe(true);
+
+    expect((await runMemoryCloudProtect(deps, { recoveryKey: generateRecoveryKey() })).status).toBe('protected');
+    const committed = await backend.listGenerations();
+    const olderReplica = committed.find((g) => g.replicaOf === older!.backupId)!;
+    const newerReplica = committed.find((g) => g.replicaOf === newer!.backupId)!;
+    expect(olderReplica.generation).toBe(2);
+    expect(newerReplica.generation).toBe(3);
+
+    const status = await readMemoryCloudStatus(deps);
+    expect(status.historicalRecovery).toBe(true);
+    expect(status.localRecoveredGeneration).toBe(olderReplica.generation);
+    expect(status.latestGeneration).toBe(newerReplica.generation);
+    expect(await readLocalRecoveryState(stackHome)).toMatchObject({
+      recoveredGeneration: olderReplica.generation,
+      cloudLatestAtRecovery: newerReplica.generation,
+    });
+  });
+
+  it('resuming an interrupted protect moves the provenance too', async () => {
+    const { stackHome, backend, deps } = await setup();
+    expect((await runMemoryCloudBackup(deps)).cloud).toMatchObject({ status: 'standard', generation: 0 });
+    // Interrupt after the replica is committed and the original retired.
+    const interrupted: typeof backend = Object.create(backend);
+    interrupted.setPrivacyMode = () => Promise.reject(new Error('connection reset'));
+    await expect(
+      runMemoryCloudProtect({ ...deps, backend: interrupted }, { recoveryKey: generateRecoveryKey() }),
+    ).rejects.toThrow('connection reset');
+    expect((await runMemoryCloudProtect(deps, { recoveryKey: generateRecoveryKey() })).status).toBe('protected');
+
+    const status = await readMemoryCloudStatus(deps);
+    expect(status.historicalRecovery).toBe(false);
+    expect(status.localRecoveredGeneration).toBe(1);
+    expect((await readLocalRecoveryState(stackHome))?.recoveredGeneration).toBe(1);
   });
 });
