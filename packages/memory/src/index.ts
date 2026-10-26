@@ -13,6 +13,8 @@ export * from './remote/index.js';
 export * from './canonical/domain.js';
 export * from './canonical/store.js';
 export * from './canonical/merge.js';
+export * from './canonical/project-fold.js';
+export * from './canonical/fold-store.js';
 export * from './canonical/push.js';
 export * from './canonical/pull.js';
 export * from './canonical/fetch-remote-canonical.js';

@@ -6,7 +6,13 @@ import { protectInProgressMessage } from '../remote/modes.js';
 import { hashBytes } from '../store.js';
 import { memoryManifestSchema } from '../domain.js';
 import { globalManifestDigest } from './push.js';
-import { portableRegistrySnapshotSchema, type LocalRegistry, type PortableRegistrySnapshot } from '../project/registry.js';
+import {
+  portableRegistrySnapshotSchema,
+  projectAliasResolver,
+  type LocalRegistry,
+  type PortableRegistrySnapshot,
+} from '../project/registry.js';
+import { foldProjectAliases } from './project-fold.js';
 import { convertV1Bundle } from './convert-v1.js';
 import { canonicalMainManifestSchema, emptyCanonicalMain, type CanonicalMainManifest } from './domain.js';
 import type { CanonicalBase } from './store.js';
@@ -184,10 +190,19 @@ export const fetchRemoteCanonical = async (options: {
   if (hashBytes(manifestBytes) !== bundle.manifestSha256)
     throw new RemoteMemoryError('integrity', 'The bundled manifest does not match its hash.');
   const globalDigest = globalManifestDigest(memoryManifestSchema.parse(JSON.parse(manifestBytes.toString('utf8'))));
+  // Spec §4.2.1: every Cloud version read is folded with the same alias map a
+  // sync uses for local Memory and the base (local registry ∪ this
+  // generation's snapshot), so a merged project never looks like a deletion
+  // and the "already up to date" / "no duplicate generation" checks compare
+  // folded content.
+  const folded = foldProjectAliases(
+    main ?? emptyCanonicalMain(),
+    projectAliasResolver(options.localRegistry, registrySnapshot),
+  ).main;
   return {
     generation: head !== null && head > meta.generation ? head : meta.generation,
     contentGeneration: meta.generation,
-    main: main ?? emptyCanonicalMain(),
+    main: folded,
     globalDigest,
     objects,
     registrySnapshot,

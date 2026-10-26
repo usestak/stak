@@ -10,7 +10,7 @@ import {
 import { projectMemoryOf, type CanonicalDoc, type CanonicalMainManifest } from './domain.js';
 import { namespaceOf } from './paths.js';
 import { planSync, type SyncAction, type NativeEntry } from './sync.js';
-import { readCanonicalMain, readProjection, writeCanonicalMain, writeProjection } from './store.js';
+import { readCanonicalMain, readProjection, writeCanonicalMain, writeProjection, type ProjectionFile } from './store.js';
 
 export type ScanOptionsForAdapter = Parameters<typeof scanClaudeProject>[1];
 
@@ -24,15 +24,18 @@ export const planProjectSync = async (
   project: BoundProject,
   stackHome: string,
   scanOptions: ScanOptionsForAdapter,
+  /** Plan against this canonical state instead of what is on disk — read-only
+   * callers (`stak status`) pass the in-memory project fold (spec §4.2.1). */
+  state?: { main: CanonicalMainManifest; projection: ProjectionFile },
 ): Promise<ProjectSyncPlan> => {
   const claudeHome = (scanOptions as { claudeHome?: string }).claudeHome;
   const roots = await nativeRootsExist(project, claudeHome);
   if (!roots.projectDirExists) return { actions: [], sourceConflicts: [], guardedPaths: [] };
 
   const scanResult = await scanClaudeProject(project, scanOptions);
-  const main = await readCanonicalMain(stackHome);
+  const main = state?.main ?? (await readCanonicalMain(stackHome));
   const canonicalDocs = projectMemoryOf(main, project.projectId)?.documents ?? [];
-  const projectionFile = await readProjection(stackHome, 'claude');
+  const projectionFile = state?.projection ?? (await readProjection(stackHome, 'claude'));
   const projection = projectionFile.projects[project.projectId] ?? {};
 
   const guardedPaths = roots.notesRootExists

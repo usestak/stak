@@ -70,6 +70,32 @@ describe('fetchRemoteCanonical', () => {
     expect(result?.main).toEqual(canonicalMain);
   });
 
+  it('folds a former Project ID into its surviving one, using the local registry (spec §4.2.1)', async () => {
+    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 1 });
+    const formerId = mintProjectId();
+    const survivingId = mintProjectId();
+    const doc = {
+      path: 'notes/f0.md',
+      state: 'present' as const,
+      contentHash: source.hashes[0]!,
+      importedFrom: 'claude' as const,
+      importedAt: '2026-09-25T12:00:00.000Z',
+    };
+    await writeCanonicalMain(source.stackHome, {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [{ projectId: formerId, documents: [doc] }],
+    });
+    const { backend } = backendFor('user-fold');
+    await standardCloudBackup({ stackHome: source.stackHome, backend });
+
+    const localRegistry: LocalRegistry = {
+      ...emptyRegistry(),
+      projects: [{ projectId: survivingId, claims: [{ type: 'git', canonical: 'github.com/a/b' }], formerIds: [formerId] }],
+    };
+    const result = await fetchRemoteCanonical({ backend, localRegistry });
+    expect(result?.main.projects).toEqual([{ projectId: survivingId, documents: [doc] }]);
+  });
+
   it('falls back to convertV1Bundle for a v1 generation, using the provided localRegistry', async () => {
     // No canonical/main.json written — bundleFromStore produces a v1 bundle.
     const source = await writeSyntheticStore({ projects: 1, filesPerProject: 2 });
