@@ -196,19 +196,31 @@ const seedRecoveredProjectNames = async (deps: {
  */
 export const pushStagedMemory = async (
   deps: MemoryCloudDeps,
+  /** Reads `resolveMemoryPushState` just made, so push doesn't repeat them. */
+  known?: { semanticDigest: string; latestGeneration: number | null },
 ): Promise<CloudBackupOutcome> => {
   if (!deps.backend) return { status: 'skipped' };
+  const backend = deps.backend;
   try {
-    const semanticDigest = await computeSemanticDigest(deps.stackHome);
-    const profile = await deps.backend.getProfile();
+    const [semanticDigest, profile] = await Promise.all([
+      known
+        ? Promise.resolve(known.semanticDigest)
+        : computeSemanticDigest(deps.stackHome),
+      backend.getProfile(),
+    ]);
+    const knownCloud = {
+      profileExists: profile !== null,
+      ...(known ? { expectedParent: known.latestGeneration } : {}),
+    };
     const mode = profile?.privacyMode ?? 'standard';
     if (mode === 'protected') {
       const mmk = await deps.localKeyStore.loadMmk();
       if (!mmk) return { status: 'protected-locked' };
       const result = await protectedCloudBackup({
         stackHome: deps.stackHome,
-        backend: deps.backend,
+        backend,
         mmk,
+        known: knownCloud,
         ...(deps.now ? { now: deps.now } : {}),
       });
       // Local state now equals the new latest generation — clear any historical
@@ -223,7 +235,8 @@ export const pushStagedMemory = async (
     }
     const result = await standardCloudBackup({
       stackHome: deps.stackHome,
-      backend: deps.backend,
+      backend,
+      known: knownCloud,
       ...(deps.now ? { now: deps.now } : {}),
     });
     await recordRecoveryProvenance(deps, {
@@ -242,7 +255,12 @@ export type MemoryPushState =
   | { status: 'nothing-staged' }
   | { status: 'no-remote-backup' }
   | { status: 'already-up-to-date'; generation: number }
-  | { status: 'needs-push' };
+  | {
+      status: 'needs-push';
+      /** Carried into `pushStagedMemory` so it doesn't rebuild the bundle or refetch. */
+      semanticDigest: string;
+      latestGeneration: number;
+    };
 
 /**
  * Whether the top-level `stak push` actually needs to create a new Memory generation.
@@ -272,15 +290,36 @@ export const resolveMemoryPushState = async (
   if (!deps.backend) return { status: 'no-remote-backup' };
   const latest = await deps.backend.getLatest();
   if (!latest) return { status: 'no-remote-backup' };
+  const needsPush = {
+    status: 'needs-push',
+    semanticDigest,
+    latestGeneration: latest.generation,
+  } as const;
   if (latest.privacyMode === 'standard')
     return semanticDigest === latest.payloadSha256
       ? { status: 'already-up-to-date', generation: latest.generation }
-      : { status: 'needs-push' };
+      : needsPush;
   const local = await readLocalRecoveryState(deps.stackHome);
   return local?.recoveredGeneration === latest.generation &&
     local.semanticDigest === semanticDigest
     ? { status: 'already-up-to-date', generation: latest.generation }
-    : { status: 'needs-push' };
+    : needsPush;
+};
+
+/**
+ * The one question `stak push`'s Memory preflight asks: was local Memory recovered from an
+ * older generation than Cloud's latest? Same answer as `readMemoryCloudStatus(...)
+ * .historicalRecovery`, but skips the network entirely when there's no recovery
+ * provenance, and otherwise needs only the profile.
+ */
+export const isMemoryHistoricalRecovery = async (
+  deps: MemoryCloudDeps,
+): Promise<boolean> => {
+  if (!deps.backend) return false;
+  const provenance = await readLocalRecoveryState(deps.stackHome);
+  if (!provenance) return false;
+  const profile = await deps.backend.getProfile();
+  return isHistoricalRecovery(provenance, profile?.latestGeneration ?? null);
 };
 
 /** backup: local first, then Cloud (never fails the local commit). */
@@ -487,9 +526,11 @@ export const readMemoryCloudStatus = async (
       localRecoveredGeneration,
       historicalRecovery: false,
     };
-  const profile = await deps.backend.getProfile();
-  const latest = await deps.backend.getLatest();
-  const methods = await deps.backend.listRecoveryMethods();
+  const [profile, latest, methods] = await Promise.all([
+    deps.backend.getProfile(),
+    deps.backend.getLatest(),
+    deps.backend.listRecoveryMethods(),
+  ]);
   const latestGeneration = profile?.latestGeneration ?? null;
   return {
     authenticated: true,

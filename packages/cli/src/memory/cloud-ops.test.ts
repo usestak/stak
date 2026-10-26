@@ -508,7 +508,7 @@ describe('resolveMemoryPushState — top-level push must not create duplicate Me
     });
 
     const state = await resolveMemoryPushState(deps);
-    expect(state).toEqual({ status: 'needs-push' });
+    expect(state).toMatchObject({ status: 'needs-push' });
 
     const second = await pushStagedMemory(deps);
     expect(second).toMatchObject({ status: 'standard', generation: 1 });
@@ -590,7 +590,9 @@ describe('resolveMemoryPushState — top-level push must not create duplicate Me
       ],
     });
 
-    expect(await resolveMemoryPushState(deps)).toEqual({ status: 'needs-push' });
+    expect(await resolveMemoryPushState(deps)).toMatchObject({
+      status: 'needs-push',
+    });
     const second = await pushStagedMemory(deps);
     expect(second).toMatchObject({ status: 'standard', generation: 1 });
     expect(await resolveMemoryPushState(deps)).toEqual({

@@ -113,6 +113,7 @@ import {
   pushStagedMemory,
   readBackupSupersession,
   readMemoryCloudStatus,
+  isMemoryHistoricalRecovery,
   resolveMemoryPushState,
   runMemoryCloudBackup,
   runMemoryCloudProtect,
@@ -891,8 +892,7 @@ const defaultDependencies: ProgramDependencies = {
   // backup` (`memoryCloudBackup` below), which intentionally still does its own local
   // rescan first — that command's own behavior is unchanged.
   memoryPushPreflight: async () => {
-    const status = await readMemoryCloudStatus(await buildMemoryCloudDeps());
-    return status.historicalRecovery
+    return (await isMemoryHistoricalRecovery(await buildMemoryCloudDeps()))
       ? {
           blocked: true,
           reason:
@@ -910,7 +910,15 @@ const defaultDependencies: ProgramDependencies = {
     if (state.status === 'nothing-staged') return { status: 'nothing-staged' };
     if (state.status === 'already-up-to-date')
       return { status: 'up-to-date', generation: state.generation };
-    return pushStagedMemory(deps);
+    return pushStagedMemory(
+      deps,
+      state.status === 'needs-push'
+        ? {
+            semanticDigest: state.semanticDigest,
+            latestGeneration: state.latestGeneration,
+          }
+        : undefined,
+    );
   },
   // Unified pull (P3): Memory only auto-recovers on a genuinely fresh machine (no local
   // manifest yet) — an established machine's Memory is never silently overwritten here;

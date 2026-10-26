@@ -72,18 +72,43 @@ const verifyPayload = (bytes: Uint8Array, expectedSha: string): void => {
     );
 };
 
+/**
+ * What a caller already read from Cloud moments ago, so a backup can skip repeating those
+ * round trips. `createGeneration` still enforces `expectedParent` server-side, so a stale
+ * value fails as a conflict rather than forking history.
+ */
+export type KnownCloudState = {
+  /** The latest generation number, or null when Cloud has none. */
+  expectedParent?: number | null;
+  /** The caller saw an existing Memory profile, so `ensureProfile` would be a no-op. */
+  profileExists?: boolean;
+};
+
+const resolveExpectedParent = async (
+  backend: RemoteMemoryBackend,
+  known: KnownCloudState | undefined,
+): Promise<number | null> =>
+  known && known.expectedParent !== undefined
+    ? known.expectedParent
+    : ((await backend.getLatest())?.generation ?? null);
+
 /** Standard: upload the canonical bundle as a new generation. */
 export const standardCloudBackup = async (options: {
   stackHome: string;
   backend: RemoteMemoryBackend;
   now?: () => Date;
+  known?: KnownCloudState;
 }): Promise<CloudBackupResult> => {
-  await options.backend.ensureProfile(REMOTE_FORMAT_VERSION);
+  if (!options.known?.profileExists)
+    await options.backend.ensureProfile(REMOTE_FORMAT_VERSION);
   const { bytes } = await bundleFromStore(options.stackHome);
-  const latest = await options.backend.getLatest();
+  const expectedParent = await resolveExpectedParent(
+    options.backend,
+    options.known,
+  );
   const meta = await options.backend.createGeneration({
     backupId: randomUUID(),
-    expectedParent: latest?.generation ?? null,
+    expectedParent,
     privacyMode: 'standard',
     payload: bytes,
     bundleFormatVersion: BUNDLE_FORMAT,
@@ -98,6 +123,7 @@ export const protectedCloudBackup = async (options: {
   backend: RemoteMemoryBackend;
   mmk: Buffer;
   now?: () => Date;
+  known?: KnownCloudState;
 }): Promise<CloudBackupResult> => {
   const { bytes: bundleBytes } = await bundleFromStore(options.stackHome);
   const backupId = randomUUID();
@@ -105,10 +131,13 @@ export const protectedCloudBackup = async (options: {
   const sealed = seal(bundleBytes, dek, protectedBundleAad(backupId));
   const payload = Buffer.concat([sealed.nonce, sealed.ciphertext, sealed.tag]);
   const wrappedDek = wrapDekWithMmk(dek, options.mmk, backupId);
-  const latest = await options.backend.getLatest();
+  const expectedParent = await resolveExpectedParent(
+    options.backend,
+    options.known,
+  );
   const meta = await options.backend.createGeneration({
     backupId,
-    expectedParent: latest?.generation ?? null,
+    expectedParent,
     privacyMode: 'protected',
     payload,
     bundleFormatVersion: BUNDLE_FORMAT,

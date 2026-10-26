@@ -58,6 +58,14 @@ export const registerPushCommand = (
         verbose?: boolean;
       }) => {
         const verbose = options.verbose === true;
+        // The Memory preflight is read-only and independent of the Skills plan, so its
+        // Cloud round trips overlap with planning instead of following it. Its outcome is
+        // still only acted on after the Skills conflict check, preserving error priority.
+        const memoryPreflightPromise =
+          dependencies.memoryPushPreflight && !options.json
+            ? dependencies.memoryPushPreflight()
+            : Promise.resolve<MemoryPushPreflight>({ blocked: false });
+        memoryPreflightPromise.catch(() => undefined);
         const plan = await dependencies.cloudPreparePush();
         if (options.json) {
           if (!options.dryRun)
@@ -72,9 +80,7 @@ export const registerPushCommand = (
           throw plan.conflict.kind === 'remote-newer'
             ? new RemoteEnvironmentConflictError(plan.conflict.message)
             : new LocalEnvironmentConflictError(plan.conflict.message);
-        const memoryPreflight = dependencies.memoryPushPreflight
-          ? await dependencies.memoryPushPreflight()
-          : { blocked: false };
+        const memoryPreflight = await memoryPreflightPromise;
         // Preflight for BOTH domains completes before either is mutated — a predictable
         // Memory conflict stops the Skill push too, even though Skills had none.
         if (memoryPreflight.blocked)
@@ -96,29 +102,31 @@ export const registerPushCommand = (
         }
         dependencies.writeOut('Pushing main...\n\n');
 
-        let skill: PushSkillOutcome;
-        if (plan.noop) skill = { status: 'noop' };
-        else
+        // Skills and Memory are independent domains with their own Cloud state, so they
+        // upload concurrently; each still reports its own outcome.
+        const applySkills = async (): Promise<PushSkillOutcome> => {
+          if (plan.noop) return { status: 'noop' };
           try {
-            skill = { status: 'applied', result: await dependencies.cloudApplyPush(plan) };
+            return { status: 'applied', result: await dependencies.cloudApplyPush(plan) };
           } catch (error) {
-            skill = {
+            return {
               status: 'failed',
               error: error instanceof Error ? error.message : String(error),
             };
           }
-
-        let memory: PushMemoryOutcome;
-        if (!dependencies.applyMemoryPush) memory = { status: 'not-attempted' };
-        else
+        };
+        const applyMemory = async (): Promise<PushMemoryOutcome> => {
+          if (!dependencies.applyMemoryPush) return { status: 'not-attempted' };
           try {
-            memory = { status: 'applied', outcome: await dependencies.applyMemoryPush() };
+            return { status: 'applied', outcome: await dependencies.applyMemoryPush() };
           } catch (error) {
-            memory = {
+            return {
               status: 'failed',
               error: error instanceof Error ? error.message : String(error),
             };
           }
+        };
+        const [skill, memory] = await Promise.all([applySkills(), applyMemory()]);
 
         dependencies.writeOut(renderCombinedPushResult(skill, memory));
         // A runtime/network failure in either domain after apply began is partial

@@ -11,6 +11,7 @@ import {
   SnapshotUploadFailedError,
   type CloudClient,
 } from '@stack/cloud-client';
+import { mapWithConcurrency } from '@stack/shared';
 import { packStoreObject, type SkillArchive } from '@stack/store';
 
 import { buildCloudEnvironmentBundle } from './cloud-bundle.js';
@@ -21,6 +22,10 @@ import {
 } from './sync-metadata.js';
 
 const DEFAULT_MAX_SNAPSHOT_BYTES = 200 * 1024 * 1024;
+/** Snapshot existence checks / uploads in flight at once. Each is a full Cloud round trip. */
+const SNAPSHOT_CONCURRENCY = 6;
+/** Reuse a plan-time upload ticket in apply while comfortably inside the server's 10-minute TTL. */
+const UPLOAD_TICKET_REUSE_MS = 5 * 60 * 1000;
 
 export type PushConflict = {
   kind: 'remote-newer' | 'unsynced-remote';
@@ -46,13 +51,22 @@ export type PushPlan = {
   snapshotsAlready: number;
   snapshotsToUpload: string[];
   /** In-memory packed archives to upload; not serialized to JSON output. */
-  pendingUploads: Array<{ contentHash: string; archive: SkillArchive }>;
+  pendingUploads: PendingUpload[];
+};
+
+export type PendingUpload = {
+  contentHash: string;
+  archive: SkillArchive;
+  /** Ticket issued while planning, reused by apply if still fresh (saves a round trip). */
+  uploadTicket?: string;
+  ticketIssuedAt?: number;
 };
 
 export type PreparePushOptions = {
   stackHome: string;
   client: Pick<CloudClient, 'getEnvironment' | 'prepareSnapshot'>;
   maxSnapshotBytes?: number;
+  nowMs?: () => number;
 };
 
 export const preparePush = async (
@@ -100,28 +114,54 @@ export const preparePush = async (
   }
 
   const maxBytes = options.maxSnapshotBytes ?? DEFAULT_MAX_SNAPSHOT_BYTES;
-  const pendingUploads: Array<{ contentHash: string; archive: SkillArchive }> =
-    [];
+  const nowMs = options.nowMs ?? Date.now;
+  const pendingUploads: PendingUpload[] = [];
   let snapshotsAlready = 0;
-  if (!conflict && !noop)
-    for (const requirement of bundle.contentUploadRequirements) {
-      const archive = await packStoreObject({
-        stackHome: options.stackHome,
-        contentHash: requirement.contentHash,
-      });
-      if (archive.byteSize > maxBytes)
-        throw new SnapshotUploadFailedError(
-          `Snapshot ${requirement.contentHash} is ${archive.byteSize} bytes, exceeding the ${maxBytes}-byte limit.`,
-        );
-      const prepared = await options.client.prepareSnapshot({
-        contentHash: requirement.contentHash,
-        archiveHash: archive.archiveHash,
-        byteSize: archive.byteSize,
-      });
-      if (prepared.status === 'exists') snapshotsAlready += 1;
-      else
-        pendingUploads.push({ contentHash: requirement.contentHash, archive });
-    }
+  if (!conflict && !noop) {
+    // Content this Machine's previous push confirmed is in Cloud needs no re-check
+    // (snapshots are never deleted). Deliberately NOT the remote bundle's own requirement
+    // list: legacy bundles derive it from every Skill, including Git-backed ones older
+    // CLIs never uploaded. Only new content costs a round trip, and those run concurrently.
+    const known = new Set(
+      sync?.lastSyncedVersionId === remote?.latest?.version.versionId
+        ? (sync?.confirmedContentHashes ?? [])
+        : [],
+    );
+    const unknown = bundle.contentUploadRequirements.filter(
+      (requirement) => !known.has(requirement.contentHash),
+    );
+    snapshotsAlready +=
+      bundle.contentUploadRequirements.length - unknown.length;
+    const checked = await mapWithConcurrency(
+      unknown,
+      SNAPSHOT_CONCURRENCY,
+      async (requirement): Promise<PendingUpload | null> => {
+        const archive = await packStoreObject({
+          stackHome: options.stackHome,
+          contentHash: requirement.contentHash,
+        });
+        if (archive.byteSize > maxBytes)
+          throw new SnapshotUploadFailedError(
+            `Snapshot ${requirement.contentHash} is ${archive.byteSize} bytes, exceeding the ${maxBytes}-byte limit.`,
+          );
+        const prepared = await options.client.prepareSnapshot({
+          contentHash: requirement.contentHash,
+          archiveHash: archive.archiveHash,
+          byteSize: archive.byteSize,
+        });
+        if (prepared.status === 'exists') return null;
+        return {
+          contentHash: requirement.contentHash,
+          archive,
+          uploadTicket: prepared.uploadTicket,
+          ticketIssuedAt: nowMs(),
+        };
+      },
+    );
+    for (const pending of checked)
+      if (pending) pendingUploads.push(pending);
+      else snapshotsAlready += 1;
+  }
 
   return {
     environment: 'main',
@@ -165,6 +205,7 @@ export type ApplyPushOptions = {
     | 'commitEnvironmentVersion'
   >;
   now?: () => Date;
+  nowMs?: () => number;
   idempotencyKey?: string;
 };
 
@@ -181,27 +222,40 @@ export const applyPush = async (
       'main is already up to date; nothing to push.',
     );
 
-  let uploaded = 0;
-  for (const pending of plan.pendingUploads) {
-    const prepared = await options.client.prepareSnapshot({
-      contentHash: pending.contentHash,
-      archiveHash: pending.archive.archiveHash,
-      byteSize: pending.archive.byteSize,
-    });
-    if (prepared.status === 'upload') {
-      await options.client.uploadSnapshot(
-        prepared.uploadTicket,
-        pending.archive.bytes,
-      );
+  const nowMs = options.nowMs ?? Date.now;
+  const results = await mapWithConcurrency(
+    plan.pendingUploads,
+    SNAPSHOT_CONCURRENCY,
+    async (pending): Promise<boolean> => {
+      let uploadTicket: string;
+      if (
+        pending.uploadTicket !== undefined &&
+        pending.ticketIssuedAt !== undefined &&
+        nowMs() - pending.ticketIssuedAt < UPLOAD_TICKET_REUSE_MS
+      )
+        uploadTicket = pending.uploadTicket;
+      else {
+        // The plan is stale (e.g. a long confirmation prompt): re-check, which also
+        // catches content another Machine uploaded in the meantime.
+        const prepared = await options.client.prepareSnapshot({
+          contentHash: pending.contentHash,
+          archiveHash: pending.archive.archiveHash,
+          byteSize: pending.archive.byteSize,
+        });
+        if (prepared.status !== 'upload') return false;
+        uploadTicket = prepared.uploadTicket;
+      }
+      await options.client.uploadSnapshot(uploadTicket, pending.archive.bytes);
       await options.client.finalizeSnapshot({
         contentHash: pending.contentHash,
         archiveHash: pending.archive.archiveHash,
         byteSize: pending.archive.byteSize,
-        uploadTicket: prepared.uploadTicket,
+        uploadTicket,
       });
-      uploaded += 1;
-    }
-  }
+      return true;
+    },
+  );
+  const uploaded = results.filter(Boolean).length;
 
   const committed = await options.client.commitEnvironmentVersion('main', {
     bundle: plan.bundle,
@@ -219,6 +273,11 @@ export const applyPush = async (
       lastSyncedVersionId: committed.version.versionId,
       lastSyncedDigest: committed.version.digest,
       syncedAt: (options.now ?? (() => new Date()))().toISOString(),
+      // Every requirement is now confirmed in Cloud: checked at plan time, carried over
+      // from the previous push's confirmation, or uploaded above.
+      confirmedContentHashes: plan.bundle.contentUploadRequirements.map(
+        (requirement) => requirement.contentHash,
+      ),
     },
   });
 
