@@ -37,7 +37,9 @@ import {
 
 import {
   freshRegistryRisksDuplication,
+  isHistoricalWithoutSyncHistory,
   pushStagedMemory,
+  readBackupSupersession,
   readMemoryCloudStatus,
   resolveMemoryPushState,
   runMemoryCloudBackup,
@@ -1328,5 +1330,64 @@ describe('protect moves this machine\'s sync provenance to the Protected replica
     expect(status.historicalRecovery).toBe(false);
     expect(status.localRecoveredGeneration).toBe(1);
     expect((await readLocalRecoveryState(stackHome))?.recoveredGeneration).toBe(1);
+  });
+
+  describe('another machine (read-time mapping)', () => {
+    const machineB = async (backend: ReturnType<typeof inMemoryRemoteMemoryBackend>) => ({
+      stackHome: await temp('stack-ops-prov-b-'),
+      backend,
+      localKeyStore: secureKeys(await temp('stack-ops-prov-b-keys-')),
+      runLocalBackup: fakeBackup,
+    });
+
+    it('B synced #0, then A protects: B shows no historical recovery, no rollback, no supersession; B\'s provenance file is not rewritten', async () => {
+      const { backend, deps: depsA } = await setup();
+      expect((await runMemoryCloudBackup(depsA)).cloud).toMatchObject({ status: 'standard', generation: 0 });
+      const depsB = await machineB(backend);
+      expect((await runMemoryCloudRecover(depsB)).status).toBe('recovered');
+      const before = await readFile(memoryStorePaths(depsB.stackHome).recoveryState, 'utf8');
+      expect((await runMemoryCloudProtect(depsA, { recoveryKey: generateRecoveryKey() })).status).toBe('protected');
+
+      // `stak push`'s preflight prints the rollback note exactly when
+      // `historicalRecovery` is true (program.ts `memoryPushPreflight`).
+      const status = await readMemoryCloudStatus(depsB);
+      expect(status.historicalRecovery).toBe(false);
+      expect(status.localRecoveredGeneration).toBe(1);
+      expect(status.latestGeneration).toBe(1);
+      expect(await readBackupSupersession(depsB)).toMatchObject({ supersedes: false, noSyncHistory: false, localRecoveredGeneration: 1 });
+      expect(await isHistoricalWithoutSyncHistory(depsB)).toBe(false);
+      // Read-only: status never writes provenance.
+      expect(await readFile(memoryStorePaths(depsB.stackHome).recoveryState, 'utf8')).toBe(before);
+    });
+
+    it('a genuine older recover on B before A protects still counts as historical (at the older backup\'s replica)', async () => {
+      const { stackHome: homeA, backend, deps: depsA } = await setup();
+      expect((await runMemoryCloudBackup(depsA)).cloud).toMatchObject({ status: 'standard', generation: 0 });
+      await addDoc(homeA, 'second backup note');
+      expect((await runMemoryCloudBackup(depsA)).cloud).toMatchObject({ status: 'standard', generation: 1 });
+      const depsB = await machineB(backend);
+      expect((await runMemoryCloudRecover(depsB, { generation: 0 })).status).toBe('recovered');
+      expect((await runMemoryCloudProtect(depsA, { recoveryKey: generateRecoveryKey() })).status).toBe('protected');
+
+      const status = await readMemoryCloudStatus(depsB);
+      expect(status.historicalRecovery).toBe(true);
+      expect(status.localRecoveredGeneration).toBe(2);
+      expect(status.latestGeneration).toBe(3);
+      expect((await readBackupSupersession(depsB)).supersedes).toBe(true);
+    });
+
+    it('fails safe: when the replica lookup errors, status keeps the recorded generation', async () => {
+      const { backend, deps: depsA } = await setup();
+      expect((await runMemoryCloudBackup(depsA)).cloud).toMatchObject({ status: 'standard', generation: 0 });
+      const depsB = await machineB(backend);
+      expect((await runMemoryCloudRecover(depsB)).status).toBe('recovered');
+      expect((await runMemoryCloudProtect(depsA, { recoveryKey: generateRecoveryKey() })).status).toBe('protected');
+
+      const broken: typeof backend = Object.create(backend);
+      broken.getGenerationById = () => Promise.reject(new Error('network down'));
+      const status = await readMemoryCloudStatus({ ...depsB, backend: broken });
+      expect(status.historicalRecovery).toBe(true);
+      expect(status.localRecoveredGeneration).toBe(0);
+    });
   });
 });

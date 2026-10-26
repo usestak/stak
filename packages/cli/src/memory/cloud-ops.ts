@@ -69,6 +69,7 @@ import {
   type BridgeEnvelope,
   type BridgeFailureReason,
   type LocalMemoryKeyStore,
+  type LocalRecoveryState,
   type MergeConflict,
   type MmkKeyring,
   type MmkWrapper,
@@ -276,6 +277,33 @@ const moveProvenanceToProtectReplicas = async (
     });
   } catch {
     // See above: never fail a finished protect over local provenance.
+  }
+};
+
+/**
+ * Read-time counterpart of `moveProvenanceToProtectReplicas`, for every
+ * machine that did NOT run protect (and for homes protected before that fix):
+ * when the recorded generation is older than `latest`, and protect retired it
+ * in favour of a committed Protected replica (same plaintext), treat the
+ * replica's generation as the recorded one. Same `replicaOf` lookup as
+ * `effectiveCanonicalBase`. A genuine older recover maps to the older
+ * generation's replica and stays historical.
+ *
+ * Read-only (never writes provenance). Costs one lookup, and only when the
+ * recorded generation is behind `latest`. Fails safe: on any lookup error the
+ * recorded provenance is returned unchanged (today's behaviour).
+ */
+const effectiveRecoveryProvenance = async (
+  backend: RemoteMemoryBackend,
+  provenance: LocalRecoveryState | null,
+  latest: number | null,
+): Promise<LocalRecoveryState | null> => {
+  if (!provenance || !isHistoricalRecovery(provenance, latest)) return provenance;
+  try {
+    const replica = await replicaOfRetiredGeneration(backend, provenance.recoveredGeneration);
+    return replica ? { ...provenance, recoveredGeneration: replica.generation } : provenance;
+  } catch {
+    return provenance;
   }
 };
 
@@ -594,8 +622,13 @@ export const HISTORICAL_NO_SYNC_HISTORY_MESSAGE =
 /** True in exactly the T15-4 case: a historical recover and no sync base. */
 export const isHistoricalWithoutSyncHistory = async (deps: MemoryCloudDeps): Promise<boolean> => {
   if (!deps.backend) return false;
-  const provenance = await readLocalRecoveryState(deps.stackHome);
-  if (!isHistoricalRecovery(provenance, (await deps.backend.getProfile())?.latestGeneration ?? null)) return false;
+  const latest = (await deps.backend.getProfile())?.latestGeneration ?? null;
+  const provenance = await effectiveRecoveryProvenance(
+    deps.backend,
+    await readLocalRecoveryState(deps.stackHome),
+    latest,
+  );
+  if (!isHistoricalRecovery(provenance, latest)) return false;
   return (await readCanonicalBase(deps.stackHome)) === null;
 };
 
@@ -1025,8 +1058,7 @@ export const readMemoryCloudStatus = async (
   deps: MemoryCloudDeps,
 ): Promise<MemoryCloudStatus> => {
   const deviceEnrolled = await deps.localKeyStore.hasKey();
-  const provenance = await readLocalRecoveryState(deps.stackHome);
-  const localRecoveredGeneration = provenance?.recoveredGeneration ?? null;
+  const recorded = await readLocalRecoveryState(deps.stackHome);
   if (!deps.backend)
     return {
       authenticated: false,
@@ -1035,13 +1067,15 @@ export const readMemoryCloudStatus = async (
       lastCloudBackupAt: null,
       recoveryMethodTypes: [],
       deviceEnrolled,
-      localRecoveredGeneration,
+      localRecoveredGeneration: recorded?.recoveredGeneration ?? null,
       historicalRecovery: false,
     };
   const profile = await deps.backend.getProfile();
   const latest = await deps.backend.getLatest();
   const methods = await deps.backend.listRecoveryMethods();
   const latestGeneration = profile?.latestGeneration ?? null;
+  const provenance = await effectiveRecoveryProvenance(deps.backend, recorded, latestGeneration);
+  const localRecoveredGeneration = provenance?.recoveredGeneration ?? null;
   return {
     authenticated: true,
     privacyMode: profile?.privacyMode ?? null,
@@ -1118,11 +1152,10 @@ export type BackupSupersession = {
 export const readBackupSupersession = async (
   deps: MemoryCloudDeps,
 ): Promise<BackupSupersession> => {
-  const provenance = await readLocalRecoveryState(deps.stackHome);
-  const localRecoveredGeneration = provenance?.recoveredGeneration ?? null;
+  const recorded = await readLocalRecoveryState(deps.stackHome);
   if (!deps.backend)
     return {
-      localRecoveredGeneration,
+      localRecoveredGeneration: recorded?.recoveredGeneration ?? null,
       cloudLatestGeneration: null,
       parentGeneration: null,
       nextGeneration: null,
@@ -1130,6 +1163,8 @@ export const readBackupSupersession = async (
     };
   const cloudLatestGeneration =
     (await deps.backend.getLatest())?.generation ?? null;
+  const provenance = await effectiveRecoveryProvenance(deps.backend, recorded, cloudLatestGeneration);
+  const localRecoveredGeneration = provenance?.recoveredGeneration ?? null;
   return {
     localRecoveredGeneration,
     cloudLatestGeneration,
