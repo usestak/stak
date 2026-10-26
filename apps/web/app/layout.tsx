@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 
 import { SkipLink } from './_components/skip-link';
+import { StakSyncMount } from './_components/stak-sync-mount';
 import './globals.css';
 
 export const metadata = {
@@ -31,6 +32,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body>
         <SkipLink />
+        <StakSyncMount />
         {children}
       </body>
     </html>

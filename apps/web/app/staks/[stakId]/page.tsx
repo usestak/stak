@@ -6,8 +6,7 @@ import { AppSidebar } from '../../_components/app-sidebar';
 import { ShellNotice } from '../../_components/shell-notice';
 import { getCloudService } from '../../../lib/cloud-service';
 import { readActiveMachinePreference } from '../../../lib/machine-preference';
-import { resolveSidebarMachineContext } from '../../../lib/sidebar-machine-context';
-import { loadSidebarSummary } from '../../../lib/sidebar-summary';
+import { loadSidebarShell } from '../../../lib/sidebar-shell';
 import { displayNameOf, getSessionUser } from '../../../lib/session';
 
 import {
@@ -37,19 +36,13 @@ export default async function EditStakPage({
   const { machine: requestedMachine } = await searchParams;
   const machine = requestedMachine ?? (await readActiveMachinePreference());
   const handle = user.githubUsername ?? displayNameOf(user);
-  const machineContext = await resolveSidebarMachineContext(
-    getCloudService(),
-    user.id,
-    machine,
-  );
-  const sidebarCounts = await loadSidebarSummary(
-    getCloudService(),
-    user,
-    machineContext.viewing?.machineId ?? null,
-    machineContext.activeCount,
-  );
-
-  const [detailResult, skillsResult, publicationResult] = await Promise.all([
+  const [
+    { machineContext, sidebarCounts },
+    detailResult,
+    skillsResult,
+    publicationResult,
+  ] = await Promise.all([
+    loadSidebarShell(getCloudService(), user, machine),
     getUserStackDetailAction(stakId),
     listApprovedSkillsForPickerAction(),
     getUserStackPublicationStatusAction(stakId),

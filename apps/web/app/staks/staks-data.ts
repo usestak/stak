@@ -128,6 +128,14 @@ export const loadStacksView = async (
   if (!viewingId)
     return { kind: 'choose-machine', machines: options, anyCheckedIn };
 
+  // Badge counts don't depend on this page's own reads — fetch them concurrently.
+  const sidebarPromise = loadSidebarSummary(
+    service,
+    user,
+    viewingId,
+    active.length,
+  );
+
   const viewing = active.find((m) => m.machineId === viewingId)!;
 
   let ownedSummaries: OwnedStackSummary[];
@@ -167,12 +175,7 @@ export const loadStacksView = async (
       : `Your ${owned.name} STAK has ${owned.skillCount} Skill${owned.skillCount === 1 ? '' : 's'}.`
     : "You don't have a STAK yet.";
 
-  const sidebar = await loadSidebarSummary(
-    service,
-    user,
-    viewingId,
-    active.length,
-  );
+  const sidebar = await sidebarPromise;
 
   return {
     kind: 'ready',

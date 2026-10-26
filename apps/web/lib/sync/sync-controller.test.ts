@@ -104,3 +104,45 @@ describe('createSyncController', () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 });
+
+describe('createSyncController focus throttling', () => {
+  it('ignores focus within focusMinIntervalMs of fresh data, then refreshes after it', () => {
+    let clock = 0;
+    const refresh = vi.fn();
+    const controller = createSyncController({
+      refresh,
+      focusMinIntervalMs: 30_000,
+      now: () => clock,
+    });
+    controller.markFresh();
+
+    clock = 10_000;
+    controller.onFocus();
+    vi.advanceTimersByTime(1_000);
+    expect(refresh).not.toHaveBeenCalled();
+
+    clock = 31_000;
+    controller.onVisible();
+    vi.advanceTimersByTime(1_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts its own refresh as fresh data', () => {
+    let clock = 0;
+    const refresh = vi.fn();
+    const controller = createSyncController({
+      refresh,
+      focusMinIntervalMs: 30_000,
+      now: () => clock,
+    });
+
+    controller.onBroadcastMessage();
+    vi.advanceTimersByTime(1_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    clock = 5_000;
+    controller.onFocus();
+    vi.advanceTimersByTime(1_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+});

@@ -839,3 +839,54 @@
     z-index: 5;
   }
 }
+
+/* Loading skeleton (app/_components/app-shell-loading.tsx). Appears with a short delay so
+   fast navigations never flash it. */
+.stak-skel {
+  display: block;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #1a1918 0%, #232220 50%, #1a1918 100%);
+  background-size: 200% 100%;
+  opacity: 0;
+  animation:
+    stak-skel-in 160ms ease-out 120ms forwards,
+    stak-skel-shimmer 1.4s ease-in-out infinite;
+}
+.stak-skel-body {
+  padding: 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.stak-skel-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+@media (max-width: 1023.98px) {
+  .stak-skel-body {
+    padding: 20px 16px;
+  }
+  .stak-skel-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@keyframes stak-skel-in {
+  to {
+    opacity: 1;
+  }
+}
+@keyframes stak-skel-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stak-skel {
+    animation: stak-skel-in 1ms linear 120ms forwards;
+  }
+}

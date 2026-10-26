@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
-import { createSyncController } from './sync-controller';
+import { createSyncController, type SyncController } from './sync-controller';
 import { subscribePrivateRealtime } from './realtime-sync';
 import {
   SYNC_CHANNEL_NAME,
@@ -12,9 +12,20 @@ import {
 } from './stak-sync';
 import { createSupabaseBrowserClient } from '../supabase-browser';
 
+/** Focus/visibility refreshes are skipped while the page's data is younger than this. */
+export const FOCUS_REFRESH_MIN_INTERVAL_MS = 30_000;
+
+export type UseStakSyncOptions = {
+  /** Listen only while true; the subscription survives navigations as long as it stays on. */
+  enabled?: boolean;
+  /** Changes whenever the page renders fresh server data (e.g. the pathname). */
+  freshKey?: string;
+  focusMinIntervalMs?: number;
+};
+
 /**
- * Mount once per authenticated page. In practice this is called from `AppSidebar`, which
- * every authenticated route already renders, so no per-page wiring is needed.
+ * Mounted once, from the root layout (`StakSyncMount`), so the Realtime channel and
+ * listeners persist across navigations instead of being torn down and rejoined per page.
  *
  * Reacts to three external signals, all coalesced through one `createSyncController`, by
  * calling `router.refresh()` (the same mechanism every existing mutation site already
@@ -32,13 +43,29 @@ import { createSupabaseBrowserClient } from '../supabase-browser';
  * subscribing throws (e.g. no session yet), the hook stays silent and falls back to
  * BroadcastChannel + focus refresh only — no thrown error, no user-visible error state.
  */
-export function useStakSync(): void {
+export function useStakSync({
+  enabled = true,
+  freshKey,
+  focusMinIntervalMs = FOCUS_REFRESH_MIN_INTERVAL_MS,
+}: UseStakSyncOptions = {}): void {
   const router = useRouter();
+  // Read through a ref so the subscription never depends on the router object's identity.
+  const routerRef = useRef(router);
+  routerRef.current = router;
+  const controllerRef = useRef<SyncController | null>(null);
 
   useEffect(() => {
+    controllerRef.current?.markFresh();
+  }, [freshKey]);
+
+  useEffect(() => {
+    if (!enabled) return;
     const controller = createSyncController({
-      refresh: () => router.refresh(),
+      refresh: () => routerRef.current.refresh(),
+      focusMinIntervalMs,
     });
+    controller.markFresh();
+    controllerRef.current = controller;
 
     let channel: BroadcastChannel | null = null;
     if (typeof BroadcastChannel !== 'undefined') {
@@ -74,6 +101,7 @@ export function useStakSync(): void {
 
     return () => {
       controller.dispose();
+      if (controllerRef.current === controller) controllerRef.current = null;
       document.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('focus', onFocus);
       channel?.close();
@@ -83,5 +111,5 @@ export function useStakSync(): void {
         // Best-effort cleanup only.
       }
     };
-  }, [router]);
+  }, [enabled, focusMinIntervalMs]);
 }
