@@ -339,7 +339,10 @@ describe('the Memory lock serializes real command pairings (spec 2026-10-25 §5)
         // Equal to running the two commands back to back, in one order or the other.
         expect(orders).toContainEqual(final);
       }
-    });
+      // Each pairing runs 2 sequential orders + 3 contended races against a
+      // stalling backend; under the full parallel suite on Windows it can pass
+      // the 30 s default (it takes ~10 s alone), so it gets more headroom.
+    }, 120_000);
 });
 
 /** A promise plus its resolver, for deterministic hand-offs between the racing commands. */

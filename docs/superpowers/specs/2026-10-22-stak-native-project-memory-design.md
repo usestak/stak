@@ -127,6 +127,19 @@ What every machine does, in the same way:
   same project folder, so only STAK's bookkeeping changes; the files on disk stay as
   they are.
 - **Chains resolve.** If A became B and B became C, everything ends up under C.
+  When one fold merges several former IDs, they are folded in Project ID order,
+  so the same input always gives the same result. One rare case remains (review
+  note, 2026-10-27): when three or more IDs hold *different* content at the same
+  path and machines learn the aliases in different orders (for example A→C
+  before B→C on one machine, both at once on another), which former version
+  keeps the original path can differ, and an extra `.conflict-<hash>` copy can
+  appear. Nothing is ever lost — every version is kept at some path — and the
+  extra copy is an ordinary file the user can delete.
+- **Only trusted aliases are learned** (review fix, 2026-10-27). A former ID
+  listed in a Cloud snapshot is believed only when this machine's record of it
+  shares a claim with the surviving record (the same Git repository, or the same
+  legacy folder claim) and is not bound to a different folder. Anything else is
+  ignored, so a corrupt snapshot can never retire an unrelated project.
 - **The user sees one line**, for example: "Merged project prj_rvznx… into prj_4f68…
   (same repository); 1 file kept both."
 
