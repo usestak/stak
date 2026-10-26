@@ -492,13 +492,21 @@ export type PullMemoryOutcome =
   | { status: 'applied'; outcome: CloudRecoverOutcome }
   | { status: 'failed'; error: string };
 
+/**
+ * True when any part of the pull did not fully succeed. A fresh-machine Memory
+ * recover that returned a status (rather than throwing) is NOT a failure:
+ * - `no-backup`: the account has no Memory in Cloud yet (e.g. Skills-only).
+ *   There is nothing to recover; reported as "no Cloud Memory backup exists yet."
+ * - `needs-recovery-method`: Protected Memory is locked on this device. A
+ *   friendly, actionable status, the same as push's `protected-locked`.
+ * - `not-authenticated`: no Cloud session, the same as push's `skipped`.
+ * Genuine errors (a thrown recover, a busy Memory lock) arrive as
+ * `memory.status === 'failed'` and still fail the pull.
+ */
 export const pullFailed = (
   skill: PullSkillOutcome,
   memory: PullMemoryOutcome,
-): boolean =>
-  skill.status === 'failed' ||
-  memory.status === 'failed' ||
-  (memory.status === 'applied' && memory.outcome.status !== 'recovered');
+): boolean => skill.status === 'failed' || memory.status === 'failed';
 
 /** `stak pull`'s canonical (Project) Memory half (Task 13) — an ADDITIVE operation
  * alongside the legacy fresh-machine `PullMemoryOutcome` above; it runs on every

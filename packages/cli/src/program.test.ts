@@ -1771,9 +1771,9 @@ describe('STAK CLI', () => {
   it('Task 13 Important-8: a fresh-machine recover attempt that does NOT succeed (Protected locked, network error, …) skips the canonical pull entirely, so the next `stak pull` still auto-recovers', async () => {
     const applyMemoryPull = vi.fn(async () => ({ status: 'needs-recovery-method' as const }));
     const applyCanonicalPull = vi.fn(async () => ({ status: 'merged' as const }));
-    // The failed recover itself correctly makes `stak pull` report a partial
-    // failure (unchanged, pre-existing behavior) — this test is only about
-    // whether `applyCanonicalPull` ran, not about the overall exit status.
+    // Locked Protected Memory is a friendly status, not a failure (the same
+    // treatment push gives `protected-locked`) — this test is only about
+    // whether `applyCanonicalPull` ran.
     await expect(
       runProgram(['pull', '--yes'], {
         cloudPreparePull: async () => basePullPlan,
@@ -1793,7 +1793,7 @@ describe('STAK CLI', () => {
         applyMemoryPull,
         applyCanonicalPull,
       }),
-    ).rejects.toThrow('Pull did not fully succeed');
+    ).resolves.toBeDefined();
     expect(applyMemoryPull).toHaveBeenCalledTimes(1);
     // `applyCanonicalPull`'s own `migrateLocalStore` call writes
     // `manifests/current.json` (even with zero items) and, eventually, the
@@ -1801,6 +1801,60 @@ describe('STAK CLI', () => {
     // `stak pull` see this machine as already established and never retry the
     // recover that just failed. It must not even run here.
     expect(applyCanonicalPull).not.toHaveBeenCalled();
+  });
+
+  it('a fresh machine whose account has no Cloud Memory yet (Skills-only) completes the pull and does not exit with an error', async () => {
+    const applyMemoryPull = vi.fn(async () => ({ status: 'no-backup' as const }));
+    const applyCanonicalPull = vi.fn(async () => ({ status: 'up-to-date' as const }));
+    const result = await runProgram(['pull', '--yes'], {
+      cloudPreparePull: async () => basePullPlan,
+      cloudApplyPull: async () => ({
+        status: 'restored',
+        environment: 'main',
+        desiredSkills: 2,
+        importedStackVersions: 1,
+        snapshotsDownloaded: 2,
+        referencesRestored: 0,
+        reusedFromStore: 0,
+        localSnapshotRecords: 2,
+        digest: basePullPlan.remoteDigest ?? `sha256:${'a'.repeat(64)}`,
+      }),
+      memoryPullPreflight: async () => ({ eligible: true }),
+      applyMemoryPull,
+      applyCanonicalPull,
+    });
+    expect(result.output).toContain('no Cloud Memory backup exists yet.');
+    expect(result.output).toContain('Pull complete.');
+    expect(result.output).not.toContain('did not fully succeed');
+    // Unchanged: a recover that did not succeed still skips the canonical pull.
+    expect(applyCanonicalPull).not.toHaveBeenCalled();
+  });
+
+  it('a fresh-machine Memory recover that throws (a genuine error) still makes `stak pull` fail', async () => {
+    const applyMemoryPull = vi.fn(async (): Promise<never> => {
+      throw new Error('network down');
+    });
+    const chunks: string[] = [];
+    await expect(
+      runProgram(['pull', '--yes'], {
+        cloudPreparePull: async () => basePullPlan,
+        cloudApplyPull: async () => ({
+          status: 'restored',
+          environment: 'main',
+          desiredSkills: 2,
+          importedStackVersions: 1,
+          snapshotsDownloaded: 2,
+          referencesRestored: 0,
+          reusedFromStore: 0,
+          localSnapshotRecords: 2,
+          digest: basePullPlan.remoteDigest ?? `sha256:${'a'.repeat(64)}`,
+        }),
+        memoryPullPreflight: async () => ({ eligible: true }),
+        applyMemoryPull,
+        writeOut: (value) => chunks.push(value),
+      }),
+    ).rejects.toThrow('Pull did not fully succeed');
+    expect(chunks.join('')).toContain('FAILED: network down');
   });
 
   it('Task 13 Important-8 (contrast): a SUCCESSFUL fresh-machine recover still runs the canonical pull right after it', async () => {

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import type { CloudRecoverOutcome } from '../memory/cloud-ops.js';
 import {
+  pullFailed,
   renderCombinedPullResult,
   renderCombinedPushResult,
   type MemoryPushOutcome,
@@ -136,6 +138,45 @@ describe('renderCombinedPullResult', () => {
     const output = renderCombinedPullResult(skill, memory);
     expect(output).toContain('Local Memory already exists');
     expect(output).toContain('stak memory recover');
+  });
+});
+
+describe('pullFailed (fresh-machine Memory outcomes)', () => {
+  const restored: PullSkillOutcome = {
+    status: 'applied',
+    result: { status: 'restored', desiredSkills: 2, digest: `sha256:${'a'.repeat(64)}` } as never,
+  };
+  const applied = (outcome: CloudRecoverOutcome): PullMemoryOutcome => ({ status: 'applied', outcome });
+
+  it('no Cloud Memory backup yet (a Skills-only account on a new machine) is not a failure', () => {
+    const memory = applied({ status: 'no-backup' });
+    expect(pullFailed(restored, memory)).toBe(false);
+    const output = renderCombinedPullResult(restored, memory);
+    expect(output).toContain('no Cloud Memory backup exists yet.');
+    expect(output).toContain('Pull complete.');
+    expect(output).not.toContain('did not fully succeed');
+  });
+
+  it('locked Protected Memory is the same friendly, non-failing status push gives `protected-locked`', () => {
+    const memory = applied({ status: 'needs-recovery-method' });
+    expect(pullFailed(restored, memory)).toBe(false);
+    expect(renderCombinedPullResult(restored, memory)).toContain('needs a recovery method');
+  });
+
+  it('not signed in is not a failure, like push reporting `skipped`', () => {
+    expect(pullFailed(restored, applied({ status: 'not-authenticated' }))).toBe(false);
+  });
+
+  it('a genuine Memory error is still a failure', () => {
+    const memory: PullMemoryOutcome = { status: 'failed', error: 'network down' };
+    expect(pullFailed(restored, memory)).toBe(true);
+    const output = renderCombinedPullResult(restored, memory);
+    expect(output).toContain('FAILED: network down');
+    expect(output).toContain('Pull did not fully succeed.');
+  });
+
+  it('a Skills failure is still a failure even when Memory has no backup', () => {
+    expect(pullFailed({ status: 'failed', error: 'offline' }, applied({ status: 'no-backup' }))).toBe(true);
   });
 });
 
