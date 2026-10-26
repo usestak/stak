@@ -8,7 +8,7 @@ import { memoryManifestSchema } from '../domain.js';
 import { globalManifestDigest } from './push.js';
 import {
   portableRegistrySnapshotSchema,
-  projectAliasResolver,
+  trustedAliasResolver,
   type LocalRegistry,
   type PortableRegistrySnapshot,
 } from '../project/registry.js';
@@ -197,7 +197,7 @@ export const fetchRemoteCanonical = async (options: {
   // folded content.
   const folded = foldProjectAliases(
     main ?? emptyCanonicalMain(),
-    projectAliasResolver(options.localRegistry, registrySnapshot),
+    trustedAliasResolver(options.localRegistry, registrySnapshot),
   ).main;
   return {
     generation: head !== null && head > meta.generation ? head : meta.generation,

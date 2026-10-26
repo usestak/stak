@@ -13,6 +13,7 @@ import {
   resolveProjectAlias,
   setBinding,
   toPortableSnapshot,
+  trustedAliasResolver,
   type LocalRegistry,
   type PortableRegistrySnapshot,
 } from './registry.js';
@@ -161,5 +162,93 @@ describe('learning aliases from a snapshot', () => {
     );
     expect(snapshot.projects.map((p) => p.projectId)).toEqual([Y]);
     expect(snapshot.projects[0]?.formerIds).toEqual([W, X]);
+  });
+});
+
+describe('review fixes: aliases are only trusted when the projects share a claim', () => {
+  const other = { type: 'git' as const, canonical: 'github.com/acme/unrelated' };
+  const L = 'prj_kkkkkkkkkkkkkkkkkkkkkkkkkk';
+  const M = 'prj_mmmmmmmmmmmmmmmmmmmmmmmmmm';
+  const forged: PortableRegistrySnapshot = {
+    snapshotVersion: 1,
+    projects: [{ projectId: M, claims: [gitClaim], lifecycle: 'active', formerIds: [L] }],
+  };
+  const bound = (id: string, dir: string) => ({
+    projectId: id,
+    dir,
+    boundAt: '2026-10-26T00:00:00.000Z',
+    provenance: 'user-map' as const,
+  });
+  const localL = (): LocalRegistry =>
+    setBinding(registryWith({ projectId: L, claims: [other], lifecycle: 'active' }), bound(L, '/work/unrelated'));
+
+  it('learnProjectAliases leaves an unrelated local project untouched (I1)', () => {
+    const local = localL();
+    const learned = learnProjectAliases(local, forged);
+    expect(learned.adopted).toEqual([]);
+    expect(learned.registry).toBe(local);
+  });
+
+  it('mergePortableSnapshot does not retire an unrelated local project (I1)', () => {
+    const merged = mergePortableSnapshot(localL(), forged).registry;
+    expect(recordFor(merged, L)?.claims).toEqual([other]);
+    expect(merged.bindings.map((b) => b.projectId)).toEqual([L]);
+  });
+
+  it('trustedAliasResolver ignores the forged alias, so nothing of L is folded (I1)', () => {
+    expect(trustedAliasResolver(localL(), forged)(L)).toBe(L);
+    // ...while a genuine alias (a shared Git claim) is honored.
+    const genuine = registryWith({ projectId: X, claims: [gitClaim], lifecycle: 'active' });
+    const snapshot: PortableRegistrySnapshot = {
+      snapshotVersion: 1,
+      projects: [{ projectId: Y, claims: [gitClaim], formerIds: [X] }],
+    };
+    expect(trustedAliasResolver(genuine, snapshot)(X)).toBe(Y);
+  });
+
+  it('never retires a record whose binding points somewhere the surviving record does not bind (I1)', () => {
+    let local = registryWith(
+      { projectId: X, claims: [gitClaim], lifecycle: 'active' },
+      { projectId: Y, claims: [gitClaim], lifecycle: 'active' },
+    );
+    local = setBinding(setBinding(local, bound(X, '/work/one')), bound(Y, '/work/two'));
+    const learned = learnProjectAliases(local, {
+      snapshotVersion: 1,
+      projects: [{ projectId: Y, claims: [gitClaim], formerIds: [X] }],
+    });
+    expect(learned.adopted).toEqual([]);
+    expect(learned.registry.bindings.map((b) => b.dir).sort()).toEqual(['/work/one', '/work/two']);
+  });
+
+  it('persists learned former IDs on the surviving record even without a local former record (I2)', () => {
+    const local = registryWith({ projectId: Y, claims: [gitClaim], lifecycle: 'active' });
+    const learned = learnProjectAliases(local, {
+      snapshotVersion: 1,
+      projects: [{ projectId: Y, claims: [gitClaim], formerIds: [X] }],
+    });
+    expect(learned.changed).toBe(true);
+    expect(recordFor(learned.registry, Y)?.formerIds).toEqual([X]);
+  });
+
+  it('persists nothing from a same-ID record whose claims are disjoint (I2)', () => {
+    const local = registryWith({ projectId: Y, claims: [other], lifecycle: 'active' });
+    const learned = learnProjectAliases(local, {
+      snapshotVersion: 1,
+      projects: [{ projectId: Y, claims: [gitClaim], formerIds: [X] }],
+    });
+    expect(learned.changed).toBe(false);
+    expect(learned.registry).toBe(local);
+  });
+
+  it('composeBundleSnapshot never publishes a record the fetched snapshot names as a former ID, and keeps formerIds (C1)', () => {
+    // Local still holds X (not folded yet); the fetched snapshot says X became Y.
+    const local = registryWith({ projectId: X, claims: [gitClaim], lifecycle: 'active' });
+    const { snapshot } = composeBundleSnapshot(
+      local,
+      { snapshotVersion: 1, projects: [{ projectId: Y, claims: [gitClaim], lifecycle: 'active', formerIds: [X] }] },
+      [Y],
+    );
+    expect(snapshot.projects.map((p) => p.projectId)).toEqual([Y]);
+    expect(snapshot.projects[0]?.formerIds).toEqual([X]);
   });
 });
