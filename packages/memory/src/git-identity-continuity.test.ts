@@ -313,7 +313,8 @@ describe('reconstructProjectDir ambiguity (15B.4 closure)', () => {
     ).toBeNull();
   });
 
-  it('10. a differently-cased real-machine key (`c--users-nt-desktop-stack`, as PowerShell can record it) decodes to the real, naturally-cased directory on win32', async () => {
+  // Uses the real file system's case-insensitivity, which only Windows/NTFS has.
+  it.skipIf(process.platform !== 'win32')('10. a differently-cased real-machine key (`c--users-nt-desktop-stack`, as PowerShell can record it) decodes to the real, naturally-cased directory on win32', async () => {
     const base = await tempDir('case-');
     const projectDir = path.join(base, 'Stack');
     await mkdir(projectDir, { recursive: true });

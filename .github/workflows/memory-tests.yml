@@ -46,12 +46,15 @@ jobs:
         run: pnpm --filter @stack/memory exec vitest run src/memory-lock.test.ts --reporter=verbose
 
       - name: Memory, CLI and Cloud test suites
+        # Run every suite even if one fails, then fail the step at the end.
         run: |
-          pnpm --filter @stack/memory test
-          pnpm --filter @memstk/cli test
-          pnpm --filter @stack/cloud-server test
-          pnpm --filter @stack/cloud-client test
-          pnpm --filter @stack/spec test
+          status=0
+          for pkg in @stack/memory @memstk/cli @stack/cloud-server @stack/cloud-client @stack/spec; do
+            echo "::group::$pkg"
+            pnpm --filter "$pkg" test || { echo "::error::$pkg tests failed"; status=1; }
+            echo "::endgroup::"
+          done
+          exit $status
 
       - name: Typecheck
         run: |
