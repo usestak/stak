@@ -26,6 +26,8 @@ import {
   readCanonicalBase,
   readCanonicalMain,
   readLocalRecoveryState,
+  recordedAsHistorical,
+  writeLocalRecoveryState,
   readLocalRegistry,
   readMemoryManifest,
   refreshPortableSnapshot,
@@ -1218,6 +1220,9 @@ export const pushMemoryViaCanonical = async (
  * an up-to-date push (`recordInSyncWithCloud`). That clears a historical
  * recover the pull synced past, and keeps `status`'s "Backup #N" current.
  *  - merged: Cloud moved and was merged in; the base is now that generation.
+ *    Exception: a historical recover whose rollback diff is still unpushed
+ *    (local main differs from the new base) stays historical, keeping the
+ *    recovered generation; only `cloudLatestAtRecovery` moves forward.
  *  - up to date: only when local Memory (project and global) equals the base
  *    generation. An up-to-date pull that merely found Cloud unmoved while local
  *    holds unpushed changes (e.g. a rollback just recovered) synced nothing, so
@@ -1228,8 +1233,24 @@ const recordPullSync = async (deps: MemoryCloudDeps, merged: boolean): Promise<v
   try {
     const base = await effectiveCanonicalBase(deps.backend, await readCanonicalBase(deps.stackHome));
     if (!base) return;
+    const localDiffers = canonicalDigest(await readCanonicalMain(deps.stackHome)) !== canonicalDigest(base.main);
+    if (merged && localDiffers) {
+      // A historical recover whose rollback diff is still unpushed after the
+      // merge stays historical (the next push keeps its rollback note and the
+      // backup supersession confirm); only Cloud's side moves forward. The
+      // recovered generation is kept: it is the backup the note names.
+      const provenance = await readLocalRecoveryState(deps.stackHome);
+      if (provenance && recordedAsHistorical(provenance)) {
+        await writeLocalRecoveryState(deps.stackHome, {
+          ...provenance,
+          historical: true,
+          cloudLatestAtRecovery: Math.max(base.generation, provenance.cloudLatestAtRecovery ?? base.generation),
+        });
+        return;
+      }
+    }
     if (!merged) {
-      if (canonicalDigest(await readCanonicalMain(deps.stackHome)) !== canonicalDigest(base.main)) return;
+      if (localDiffers) return;
       if (
         base.globalDigest !== undefined &&
         base.globalDigest !== globalManifestDigest(await readMemoryManifest(deps.stackHome))

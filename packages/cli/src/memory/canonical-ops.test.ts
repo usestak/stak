@@ -3294,6 +3294,46 @@ describe('two-machine manual test: a machine that is merely behind is never a hi
     expect((await push(A, backend)).preflight).toEqual({ blocked: false, note: 'Memory: publishing a rollback to Backup #0.' });
   });
 
+  it('R1: recover #0 as a rollback, another machine pushes, this machine pulls (merged), then push: the rollback note still shows', async () => {
+    const { backend, A, B } = await toStep4('r1-kept');
+    expect(await runMemoryCloudRecover(deps(A.home, backend, A.keys), { generation: 0 })).toMatchObject({ status: 'recovered', generation: 0 });
+    await edit(B, 'other.md', 'from B');
+    await add(B);
+    expect((await push(B, backend)).outcome).toMatchObject({ status: 'pushed', generation: 2 });
+
+    expect((await pull(A, backend)).status).toBe('merged');
+    expect((await readMemoryCloudStatus(deps(A.home, backend, A.keys))).historicalRecovery).toBe(true);
+    expect((await readBackupSupersession(deps(A.home, backend, A.keys))).supersedes).toBe(true);
+    expect(await readLocalRecoveryState(A.home)).toMatchObject({ recoveredGeneration: 0, cloudLatestAtRecovery: 2, historical: true });
+
+    const rolled = await push(A, backend);
+    expect(rolled.preflight).toEqual({ blocked: false, note: 'Memory: publishing a rollback to Backup #0.' });
+    expect(rolled.outcome).toMatchObject({ status: 'pushed', generation: 3 });
+    // The publish clears it.
+    expect((await readMemoryCloudStatus(deps(A.home, backend, A.keys))).historicalRecovery).toBe(false);
+  });
+
+  it('R1: a merged pull with no unpushed rollback left (Cloud already holds it) clears the flag', async () => {
+    const { backend, A, B } = await toStep4('r1-cleared');
+    // Fixed clock, so both machines' rollback tombstones are identical.
+    const at = (m: Machine) => ({ ...deps(m.home, backend, m.keys), now: () => new Date('2026-10-26T12:00:00.000Z') });
+    expect(await runMemoryCloudRecover(at(A), { generation: 0 })).toMatchObject({ status: 'recovered', generation: 0 });
+    expect((await readMemoryCloudStatus(at(A))).historicalRecovery).toBe(true);
+
+    // B makes the very same rollback, publishes it, then adds an unrelated note.
+    expect(await runMemoryCloudRecover(at(B), { generation: 0 })).toMatchObject({ status: 'recovered' });
+    expect(await pushMemoryViaCanonical(at(B), { claudeHome: B.claude })).toMatchObject({ status: 'pushed', generation: 2 });
+    await edit(B, 'other.md', 'from B');
+    await add(B);
+    expect((await push(B, backend)).outcome).toMatchObject({ status: 'pushed', generation: 3 });
+
+    expect((await pull(A, backend)).status).toBe('merged');
+    expect(canonicalDigest(await readCanonicalMain(A.home))).toBe(canonicalDigest((await readCanonicalBase(A.home))!.main));
+    expect((await readMemoryCloudStatus(at(A))).historicalRecovery).toBe(false);
+    expect(await resolveMemoryPushPreflight(at(A))).toEqual({ blocked: false });
+    expect(await readLocalRecoveryState(A.home)).toMatchObject({ recoveredGeneration: 3, historical: false });
+  });
+
   it('the no-base block still fires for a genuine historical recover with no sync base', async () => {
     const { backend } = await toStep4('no-base');
     const F = machine('f', 'no-base');
