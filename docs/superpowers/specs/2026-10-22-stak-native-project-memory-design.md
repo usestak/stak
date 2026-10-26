@@ -139,7 +139,10 @@ What every machine does, in the same way:
   listed in a Cloud snapshot is believed only when this machine's record of it
   shares a claim with the surviving record (the same Git repository, or the same
   legacy folder claim) and is not bound to a different folder. Anything else is
-  ignored, so a corrupt snapshot can never retire an unrelated project.
+  ignored, so a corrupted snapshot can never retire an unrelated project. (This guards
+  against corruption and client bugs, not a hostile server: in Standard mode a server
+  that can forge a snapshot could already forge Memory itself. Protected mode keeps
+  the snapshot encrypted.)
 - **The user sees one line**, for example: "Merged project prj_rvznx… into prj_4f68…
   (same repository); 1 file kept both."
 
