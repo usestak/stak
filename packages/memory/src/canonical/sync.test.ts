@@ -90,6 +90,26 @@ describe('planSync', () => {
     expect(actions).toEqual([{ kind: 'materialize-delete', path: 'notes/a.md' }]);
   });
 
+  // Spec §7: "STAK never treats a missing entry as a deletion." Only a
+  // tombstone deletes a native file; a canonical document that is simply
+  // ABSENT (e.g. Memory filed under an ID this pass did not fold) leaves the
+  // native file alone. The stale projection entry is ignored, so the path is
+  // treated as never synced: `stak add .` re-imports it, and materialize
+  // writes nothing.
+  it('canonical ABSENT, native unchanged (N=P) -> never materialize-delete; re-import on add', () => {
+    const actions = planSync({
+      native: [native('notes/a.md', 1)],
+      projection: { 'notes/a.md': h(1) },
+      canonical: [],
+    });
+    expect(actions).toEqual([{ kind: 'import-edit', path: 'notes/a.md', contentHash: h(1) }]);
+  });
+
+  it('canonical ABSENT, native gone too -> nothing', () => {
+    const actions = planSync({ native: [], projection: { 'notes/a.md': h(1) }, canonical: [] });
+    expect(actions).toEqual([{ kind: 'none' }]);
+  });
+
   it('canonical deleted, native edited (N!=P) -> conflict edit-delete', () => {
     const actions = planSync({
       native: [native('notes/a.md', 2)],

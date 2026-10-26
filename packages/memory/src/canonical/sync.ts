@@ -48,8 +48,16 @@ export const planSync = (input: {
   const actions: SyncAction[] = [];
   for (const path of [...paths].sort()) {
     const N = nativeByPath.get(path); // undefined = native file absent
-    const P = input.projection[path]; // undefined = never synced
     const canonicalDoc = canonicalByPath.get(path);
+    // Spec §7: "STAK never treats a missing entry as a deletion" — only a
+    // tombstone deletes. A projection entry for a path canonical Memory has no
+    // document for at all is stale bookkeeping (e.g. Memory filed under a
+    // Project ID that was not folded in this pass), so it is ignored and the
+    // path is planned as never synced: materialize then never deletes the
+    // native file, and `stak add .` re-imports it (nothing is lost; the
+    // projection is rewritten by that import). Keeping P would instead hide
+    // the file from `stak add .` forever.
+    const P = canonicalDoc === undefined ? undefined : input.projection[path]; // undefined = never synced
     const C = canonicalContentHash(canonicalDoc); // undefined = canonical absent or deleted
     const tombstone = canonicalTombstoneHash(canonicalDoc);
 
