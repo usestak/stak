@@ -1,5 +1,7 @@
 import type { SkillAddIssue, SkillAddProposal } from '@stack/core';
 
+import type { ProjectFoldNote } from '../memory/project-fold.js';
+import { projectFoldNotes } from './cloud.js';
 import { block, skills } from './format.js';
 
 const issueLine = (issue: SkillAddIssue): string => {
@@ -36,6 +38,8 @@ export type StagedMemorySummary = {
    * directory — a quieter, un-actionable count distinct from `unlocatableProjects`
    * (there is no project here to name or map). */
   untrackedFolders?: number;
+  /** Spec §4.2.1: former Project IDs folded into their surviving ones. */
+  folded?: ProjectFoldNote[];
 };
 
 export const renderSkillAdd = (
@@ -66,6 +70,7 @@ export const renderSkillAdd = (
       `  staged ${options.memory.files} file${options.memory.files === 1 ? '' : 's'}` +
         ` across ${options.memory.projects} project${options.memory.projects === 1 ? '' : 's'}`,
     );
+    for (const note of projectFoldNotes(options.memory.folded)) lines.push(`  Memory: ${note}.`);
     if (options.memory.canonical?.length) {
       for (const project of options.memory.canonical) {
         if (project.imported > 0) lines.push(`  Memory: imported ${project.imported} change(s) for ${project.projectId}`);

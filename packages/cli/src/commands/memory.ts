@@ -18,7 +18,7 @@ import type {
   PendingConflictSummary,
   ResolveConflictOutcome,
 } from '../memory/canonical-ops.js';
-import { canonicalExtraNotes } from '../ui/cloud.js';
+import { canonicalExtraNotes, projectFoldNotes } from '../ui/cloud.js';
 import type {
   CloudRecoverOutcome,
   MemoryBackupOutcome,
@@ -137,7 +137,11 @@ const renderResolveOutcome = (outcome: ResolveConflictOutcome): string => {
   const kept = outcome.altPath
     ? `kept both: Cloud's version at ${outcome.path}, yours at ${outcome.altPath}`
     : `kept ${outcome.keep}${outcome.state === 'deleted' ? ' (deleted)' : ''}`;
-  const lines = [`Resolved ${outcome.path} in ${outcome.name}: ${kept}.`];
+  const lines = [
+    // Spec §4.2.1: a project merged before resolving is reported once.
+    ...projectFoldNotes(outcome.folded).map((note) => `${note}.`),
+    `Resolved ${outcome.path} in ${outcome.name}: ${kept}.`,
+  ];
   if (outcome.remaining > 0)
     lines.push(
       `${outcome.remaining} Memory conflict(s) left. Run \`stak memory resolve\` to list them.`,
@@ -162,6 +166,7 @@ const renderMaterializeOutcome = (outcome: MaterializeOutcome): string => {
   const notes = canonicalExtraNotes({
     unavailable: outcome.unavailable,
     conflicts: outcome.conflicts,
+    folded: outcome.folded,
   });
   if (notes.length > 0) lines.push(`${notes.join('; ')}.`);
   return `${lines.join('\n')}\n`;

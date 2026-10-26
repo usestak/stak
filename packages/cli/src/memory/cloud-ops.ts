@@ -18,8 +18,11 @@ import { readFile } from 'node:fs/promises';
 
 import { applyRecoveredProjectNames } from './project-ops.js';
 import { assertNoCurrentPendingMerge, MemorySyncError } from './pending-merge.js';
+import { foldProjectMemory, type ProjectFoldNote } from './project-fold.js';
 import {
   BundleError,
+  foldProjectAliases,
+  projectAliasResolver,
   CIPHER_VERSION,
   addRecoveryFileWrapper,
   asBridgeFailure,
@@ -142,6 +145,8 @@ export type CanonicalMaterializeExtras = {
   /** Files materialized back from STAK because migration found them absent
    * natively (Task 13 fix round 4). */
   restoredFromStak?: number;
+  /** Spec §4.2.1: former Project IDs folded into their surviving ones. */
+  folded?: ProjectFoldNote[];
 };
 
 export type MemoryBackupOutcome = {
@@ -744,16 +749,6 @@ export const runMemoryCloudBackup = async (
       !(await deps.localKeyStore.loadMmk().catch(() => null))
     )
       return { local, cloud: { status: 'protected-locked' } };
-    // Task 14 fix round 1 — spec A.6 `merge-pending`, the same gate as `stak
-    // push`: a still-current pending merge against an unmoved Cloud stops here
-    // before anything changes (its partial resolutions are kept).
-    try {
-      await assertNoCurrentPendingMerge(deps);
-    } catch (error) {
-      if (error instanceof MemorySyncError)
-        return { local, cloud: { status: 'conflict', conflicts: error.conflicts } };
-      throw error;
-    }
     const mmk = (await deps.localKeyStore.loadMmk().catch(() => undefined)) ?? undefined;
     // Also persists every object the fetched generation carries into this
     // machine's local content store (same fix as `canonical-ops.ts`'s
@@ -762,7 +757,18 @@ export const runMemoryCloudBackup = async (
     // The fetched generation's registry snapshot, carried into the publish
     // (see `publishCanonicalGeneration`'s `remoteSnapshot`).
     let remoteSnapshot: PortableRegistrySnapshot | undefined;
+    // Spec §4.2.1: Cloud's latest is fetched once up front for the project
+    // fold below; the merge engine's first fetch reuses it.
+    let prefetched: Awaited<ReturnType<typeof fetchNow>> | undefined;
     const fetchRemote = async () => {
+      if (prefetched !== undefined) {
+        const result = prefetched;
+        prefetched = undefined;
+        return result;
+      }
+      return fetchNow();
+    };
+    const fetchNow = async () => {
       remoteSnapshot = undefined;
       if (!deps.backend) return null;
       const result = await fetchRemoteCanonical({
@@ -781,6 +787,21 @@ export const runMemoryCloudBackup = async (
         globalDigest: result.globalDigest,
       };
     };
+    // Spec §4.2.1: fold before any sync decision, exactly as `stak push` does.
+    prefetched = await fetchNow();
+    const { notes: folded } = await foldProjectMemory(deps.stackHome, { remoteSnapshot });
+    const foldedExtra = folded.length > 0 ? { folded } : {};
+
+    // Task 14 fix round 1 — spec A.6 `merge-pending`, the same gate as `stak
+    // push`: a still-current pending merge against an unmoved Cloud stops here
+    // before anything changes (its partial resolutions are kept).
+    try {
+      await assertNoCurrentPendingMerge(deps);
+    } catch (error) {
+      if (error instanceof MemorySyncError)
+        return { local, cloud: { status: 'conflict', conflicts: error.conflicts } };
+      throw error;
+    }
 
     // Final review T15-4: the same block as `stak push` — checked BEFORE the
     // base is seeded from the recovered generation, which would discard the
@@ -830,12 +851,12 @@ export const runMemoryCloudBackup = async (
       };
     if (outcome.status === 'up-to-date') {
       await recordInSyncWithCloud(deps, outcome.generation);
-      return { local, cloud: { status: 'up-to-date', generation: outcome.generation } };
+      return { local, cloud: { status: 'up-to-date', generation: outcome.generation, ...foldedExtra } };
     }
     // 'pushed': a generation was actually created, in whichever privacy mode
     // this account is currently in (read once, above, before publishing).
     const mode: 'standard' | 'protected' = profile?.privacyMode ?? 'standard';
-    return { local, cloud: { status: mode, generation: outcome.generation } };
+    return { local, cloud: { status: mode, generation: outcome.generation, ...foldedExtra } };
   } catch (error) {
     return { local, cloud: { status: 'failed', message: errorMessage(error) } };
   }
@@ -881,6 +902,23 @@ const recoveredFileCount = async (stackHome: string): Promise<number> => {
     0,
   );
   return (manifest?.items.length ?? 0) + canonicalCount;
+};
+
+/**
+ * Spec §4.2.1, recover and historical recover: the restored `main.json` is
+ * Cloud's raw content, and the registry now also holds the recovered
+ * snapshot's former IDs. Fold the restored state on disk, and fold the
+ * pre-recover Memory with the SAME aliases, so the rollback comparison below
+ * never mistakes a merged project for deleted documents. Returns the folded
+ * pre-recover Memory.
+ */
+const foldAfterRecover = async (
+  stackHome: string,
+  before: CanonicalMainManifest,
+): Promise<CanonicalMainManifest> => {
+  const aliasOf = projectAliasResolver(await readLocalRegistry(stackHome));
+  await foldProjectMemory(stackHome);
+  return foldProjectAliases(before, aliasOf).main;
 };
 
 /**
@@ -958,7 +996,7 @@ export const runMemoryCloudRecover = async (
         ? { generation: options.generation }
         : {}),
     });
-    await recordRollbackTombstones(deps, before, result.generation, cloudLatest);
+    await recordRollbackTombstones(deps, await foldAfterRecover(deps.stackHome, before), result.generation, cloudLatest);
     await recordRecoveryProvenance(deps, {
       generation: result.generation,
       privacyMode: 'standard',
@@ -992,7 +1030,7 @@ export const runMemoryCloudRecover = async (
       ? { generation: options.generation }
       : {}),
   });
-  await recordRollbackTombstones(deps, before, result.generation, cloudLatest);
+  await recordRollbackTombstones(deps, await foldAfterRecover(deps.stackHome, before), result.generation, cloudLatest);
   // Recovery already succeeded; enrolling this device is best-effort and must not
   // persist insecure key material (enrollDeviceSafe fails closed internally).
   if (unlockedViaRecoveryKey) await enrollDeviceSafe(deps.localKeyStore, mmk);
@@ -1526,7 +1564,7 @@ export const runPasskeyRecover = async (
       ? { generation: options.generation }
       : {}),
   });
-  await recordRollbackTombstones(deps, before, result.generation, cloudLatest);
+  await recordRollbackTombstones(deps, await foldAfterRecover(deps.stackHome, before), result.generation, cloudLatest);
   // Recovery already succeeded; enroll best-effort (never persists insecure state).
   await enrollDeviceSafe(deps.localKeyStore, mmk);
   await writeLocalRecoveryState(deps.stackHome, {

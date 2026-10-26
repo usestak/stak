@@ -13,6 +13,7 @@ import type {
   MemoryCloudStatus,
   PasskeyFailureReason,
 } from '../memory/cloud-ops.js';
+import { projectFoldNotes } from './cloud.js';
 import { block } from './format.js';
 
 type RenderOptions = { verbose?: boolean };
@@ -90,7 +91,9 @@ export const renderMemoryCloudBackup = (
   outcome: MemoryBackupOutcome,
 ): string => {
   const { local, cloud } = outcome;
-  const head = [`${files(local.files)} saved locally.`, ''];
+  // Spec §4.2.1: a project merged before syncing is reported once, up front.
+  const folded = 'folded' in cloud ? projectFoldNotes(cloud.folded).map((note) => `${note}.`) : [];
+  const head = [`${files(local.files)} saved locally.`, ...folded, ''];
   if (cloud.status === 'skipped')
     return block([
       ...head,

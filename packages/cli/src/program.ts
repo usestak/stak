@@ -70,7 +70,6 @@ import type {
   TrialStackResolution,
 } from '@stack/core';
 import {
-  adoptReconciledProjectId,
   createClaudeMemoryAdapter,
   fileLocalMemoryKeyStore,
   generateRecoveryKey,
@@ -80,7 +79,6 @@ import {
   readLocalRegistry,
   readMemoryManifest,
   readMemoryStatus,
-  writeLocalRegistry,
   type BackupResult,
   type DiscoveredMemoryItem,
   type MemoryStatus,
@@ -125,6 +123,8 @@ import {
   type UnlocatableProject,
 } from './memory/canonical-ops.js';
 import { mergePendingMessage, MemorySyncError } from './memory/pending-merge.js';
+import { applyCheckinReconciliation } from './memory/project-fold.js';
+import { projectFoldNotes } from './ui/cloud.js';
 import {
   freshRegistryRisksDuplication,
   resolveMemoryPushPreflight,
@@ -818,6 +818,7 @@ const defaultDependencies: ProgramDependencies = {
       conflictedProjects: canonical.conflictedProjects,
       unlocatableProjects: canonical.unlocatableProjects,
       untrackedFolders: canonical.untrackedFolders,
+      ...(canonical.folded ? { folded: canonical.folded } : {}),
     };
   },
   prepareUse: async (input, options) => {
@@ -1013,6 +1014,7 @@ const defaultDependencies: ProgramDependencies = {
       ...(outcome.unavailable ? { unavailable: outcome.unavailable } : {}),
       ...(outcome.conflicts ? { materializeConflicts: outcome.conflicts } : {}),
       ...(outcome.restoredFromStak ? { restoredFromStak: outcome.restoredFromStak } : {}),
+      ...(outcome.folded ? { folded: outcome.folded } : {}),
     };
     return outcome.status === 'up-to-date'
       ? { status: 'up-to-date', generation: outcome.generation ?? 0, ...extras }
@@ -1435,14 +1437,15 @@ const defaultDependencies: ProgramDependencies = {
           stackHome,
           `stak ${commandName} check-in`,
           async () => {
-            let registry = await readLocalRegistry(stackHome);
-            for (const { fromProjectId, toProjectId } of reconciled)
-              registry = adoptReconciledProjectId(
-                registry,
-                fromProjectId,
-                toProjectId,
-              );
-            await writeLocalRegistry(stackHome, registry);
+            // Spec §4.2.1: adopt Cloud's ID AND fold this machine's Memory filed
+            // under the retired one into it now — a registry-only adoption split
+            // the project in two on the next `stak add .`.
+            const { merged } = await applyCheckinReconciliation(
+              stackHome,
+              reconciled,
+            );
+            for (const note of projectFoldNotes(merged))
+              process.stderr.write(`${note}.\n`);
           },
           {
             timeoutMs: 2_000,

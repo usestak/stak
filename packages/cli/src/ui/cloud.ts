@@ -7,12 +7,14 @@ import type {
   StackOwnedUseProposal,
   StackRemoteUseProposal,
 } from '@stack/core';
+import { shortProjectId } from '@stack/memory';
 import type { PublishPublicStackVersionResponse } from '@stack/spec';
 import type {
   CloudBackupOutcome,
   CloudRecoverOutcome,
 } from '../memory/cloud-ops.js';
 import type { CanonicalPullOutcome } from '../memory/canonical-ops.js';
+import type { ProjectFoldNote } from '../memory/project-fold.js';
 
 import { block, renamedNote, skills } from './format.js';
 
@@ -437,6 +439,7 @@ export const renderCombinedPushResult = (
         unavailable: outcome.unavailable,
         conflicts: outcome.materializeConflicts,
         restoredFromStak: outcome.restoredFromStak,
+        folded: outcome.folded,
       });
       lines.push(
         notes.length > 0
@@ -462,6 +465,7 @@ export const renderCombinedPushResult = (
         unavailable: outcome.unavailable,
         conflicts: outcome.materializeConflicts,
         restoredFromStak: outcome.restoredFromStak,
+        folded: outcome.folded,
       });
       lines.push(
         notes.length > 0
@@ -518,6 +522,15 @@ export type PullCanonicalOutcome =
   | { status: 'applied'; outcome: CanonicalPullOutcome }
   | { status: 'failed'; error: string };
 
+/** Spec §4.2.1's one line per folded project, e.g. "Merged project prj_rvznx…
+ * into prj_4f68… (same repository); 1 file kept both". */
+export const projectFoldNotes = (folded: readonly ProjectFoldNote[] | undefined): string[] =>
+  (folded ?? []).map(
+    (note) =>
+      `Merged project ${shortProjectId(note.fromProjectId)} into ${shortProjectId(note.toProjectId)} (same repository)` +
+      (note.keptBoth > 0 ? `; ${note.keptBoth} file${note.keptBoth === 1 ? '' : 's'} kept both` : ''),
+  );
+
 /** A short, terse line for a non-`up-to-date` canonical outcome — `null` when
  * there is nothing worth saying (not attempted, or already up to date). */
 /** Unavailable-project and native-conflict notes shared by push's and pull's
@@ -526,8 +539,10 @@ export const canonicalExtraNotes = (outcome: {
   unavailable?: { projectId: string; name: string }[] | undefined;
   conflicts?: { projectId: string; path: string; reason: string }[] | undefined;
   restoredFromStak?: number | undefined;
+  folded?: ProjectFoldNote[] | undefined;
 }): string[] => {
-  const notes: string[] = [];
+  // Spec §4.2.1: one line per merged project, first — it explains the rest.
+  const notes: string[] = projectFoldNotes(outcome.folded);
   // Task 13 fix round 4: files the upgrade found missing natively and wrote
   // back from STAK (never silently recorded as deletions).
   if (outcome.restoredFromStak && outcome.restoredFromStak > 0)
