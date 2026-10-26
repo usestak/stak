@@ -28,6 +28,7 @@ import {
   readLocalRecoveryState,
   readLocalRegistry,
   readMemoryManifest,
+  refreshPortableSnapshot,
   readProjection,
   reconstructProjectDir,
   recordFor,
@@ -693,6 +694,11 @@ export const stageCanonicalMemory = async (
     const { imported } = await applyImportActions({ projectId: entry.projectId, dir: entry.dir }, stackHome, entry.scanResult, entry.plan.actions);
     summaries.push(toSummary(entry, imported, 0));
   }
+  // Two-machine fix: staging may have minted Project IDs or learned claims after
+  // the legacy staging step last wrote the portable snapshot. Keep the local
+  // snapshot current (publishing refreshes it again right before bundling).
+  // Skipped when the registry is empty so a Memory-less machine gets no new file.
+  if ((await readLocalRegistry(stackHome)).projects.length > 0) await refreshPortableSnapshot(stackHome);
   return {
     projects: summaries,
     conflictedProjects: conflictedCount,

@@ -20,6 +20,7 @@ import {
   inMemoryRemoteMemoryBackend,
   legacyCompatKey,
   mintProjectId,
+  parseBundle,
   planProjectSync,
   pushCanonicalMemory,
   readCanonicalBase,
@@ -740,6 +741,98 @@ describe('pushMemoryViaCanonical / pullMemoryViaCanonical (Task 13)', () => {
     expect(staged.projects[0]?.projectId).toBe(minted.projectId);
     const registryBFinal = await readLocalRegistry(stackHomeB);
     expect(registryBFinal.projects.filter((p) => gitClaimOf(p)?.canonical.toLowerCase() === identity.canonical.toLowerCase())).toHaveLength(1);
+  });
+
+  describe('two-machine manual test regression: `stak add .` + `stak push` must carry the Git claim to a fresh machine', () => {
+    // Reproduces the manual two-machine finding exactly. Unlike the test above,
+    // NOTHING here writes the portable snapshot by hand: machine A only runs what
+    // `stak add .` runs (`stageAllMemory`) and what `stak push` runs
+    // (`pushMemoryViaCanonical`); machine B starts with an EMPTY registry and runs
+    // what `stak pull` runs on a fresh machine (`runMemoryCloudRecover`, then
+    // `pullMemoryViaCanonical`).
+    const gitRemote = 'https://github.com/example/stak-2m-demo.git';
+
+    const setUpMachineA = async () => {
+      const stackHomeA = path.join(root, 'a-stack');
+      const claudeHomeA = path.join(root, 'a-claude');
+      const projectDirA = path.join(root, 'machine-a', 'stak-2m-demo');
+      await mkdir(projectDirA, { recursive: true });
+      await writeAutoMemoryAt(
+        claudeHomeA,
+        encodeClaudeProjectKey(path.resolve(projectDirA)),
+        'MEMORY.md',
+        'notes from A',
+      );
+      await writeFile(path.join(projectDirA, 'CLAUDE.local.md'), 'private instructions from A', 'utf8');
+      const discoveryA = { claudeHome: claudeHomeA, projects: [{ dir: projectDirA, gitRemote }] };
+      const staged = await stageAllMemory({ stackHome: stackHomeA, ...discoveryA });
+      expect(staged.canonical.projects).toHaveLength(1);
+      const projectId = staged.canonical.projects[0]!.projectId;
+
+      const store = new InMemoryRemoteMemoryStore();
+      const backend = inMemoryRemoteMemoryBackend(store, 'two-machine-snapshot');
+      const pushOutcome = await pushMemoryViaCanonical(
+        deps(stackHomeA, backend, path.join(root, 'a-keys')),
+        discoveryA,
+      );
+      expect(pushOutcome.status).toBe('pushed');
+      return { stackHomeA, projectDirA, projectId, backend };
+    };
+
+    it("machine B (empty registry, different path, same Git remote) recovers and materializes A's Memory via `stak pull`", async () => {
+      const { backend, projectId } = await setUpMachineA();
+
+      const stackHomeB = path.join(root, 'b-stack');
+      const claudeHomeB = path.join(root, 'b-claude');
+      const projectDirB = path.join(root, 'machine-b', 'elsewhere', 'stak-2m-demo');
+      await mkdir(projectDirB, { recursive: true });
+      const keysB = path.join(root, 'b-keys');
+      expect((await readLocalRegistry(stackHomeB)).projects).toHaveLength(0);
+
+      // `stak pull` on a fresh machine: the full recover, then the canonical pull.
+      const recovered = await runMemoryCloudRecover(deps(stackHomeB, backend, keysB));
+      expect(recovered.status).toBe('recovered');
+      const pullOutcome = await pullMemoryViaCanonical(deps(stackHomeB, backend, keysB), {
+        claudeHome: claudeHomeB,
+        projects: [{ dir: projectDirB, gitRemote }],
+      });
+      expect(pullOutcome.unavailable ?? []).toEqual([]);
+      expect(pullOutcome.status).not.toBe('conflict');
+
+      expect(
+        await readFile(
+          path.join(claudeHomeB, 'projects', encodeClaudeProjectKey(path.resolve(projectDirB)), 'memory', 'MEMORY.md'),
+          'utf8',
+        ),
+      ).toBe('notes from A');
+      expect(await readFile(path.join(projectDirB, 'CLAUDE.local.md'), 'utf8')).toBe('private instructions from A');
+      // B learned the same Project ID (no second Project minted for the repo).
+      expect(recordFor(await readLocalRegistry(stackHomeB), projectId)).toBeDefined();
+    });
+
+    it("the pushed bundle's registry snapshot carries the Project and its Git claim, and no machine paths or bindings", async () => {
+      const { backend, projectId, projectDirA, stackHomeA } = await setUpMachineA();
+      const latest = await backend.getLatest();
+      if (!latest) throw new Error('expected a committed generation');
+      const bundle = parseBundle(await backend.getPayload(latest.backupId));
+      expect(bundle.registryB64).toBeDefined();
+      const raw = Buffer.from(bundle.registryB64!, 'base64').toString('utf8');
+      const snapshot = JSON.parse(raw) as {
+        projects: { projectId: string; claims: { type: string; canonical?: string }[] }[];
+        bindings?: unknown;
+      };
+      expect(snapshot.projects.map((p) => p.projectId)).toEqual([projectId]);
+      expect(snapshot.projects[0]!.claims).toContainEqual({
+        type: 'git',
+        canonical: canonicalGitIdentity(gitRemote)!.canonical,
+      });
+      expect(snapshot.bindings).toBeUndefined();
+      for (const machinePath of [root, projectDirA, stackHomeA]) {
+        expect(raw).not.toContain(machinePath);
+        expect(raw).not.toContain(JSON.stringify(machinePath).slice(1, -1));
+      }
+      expect(raw).not.toContain(path.basename(root));
+    });
   });
 
   it('pushing again with no changes creates no new generation (no-op)', async () => {

@@ -50,6 +50,7 @@ import {
   readCanonicalBase,
   readCanonicalMain,
   readLocalRegistry,
+  refreshPortableSnapshot,
   resolveProjectForIdentity,
   standardCloudBackup,
   unwrapWithRecoveryKey,
@@ -395,6 +396,8 @@ export const pushStagedMemory = async (
 ): Promise<CloudBackupOutcome> => {
   if (!deps.backend) return { status: 'skipped' };
   try {
+    // Same as `publishCanonicalGeneration`: bundle a current registry snapshot.
+    await refreshPortableSnapshot(deps.stackHome);
     const semanticDigest = await computeSemanticDigest(deps.stackHome);
     const profile = await deps.backend.getProfile();
     const mode = profile?.privacyMode ?? 'standard';
@@ -482,6 +485,12 @@ export const publishCanonicalGeneration = async (
   // commit conflict and the engine re-fetch.
   if (expectedParent === null && (await deps.backend.getLatest()) === null)
     expectedParent = (await deps.backend.getProfile())?.latestGeneration ?? null;
+  // Two-machine fix: the bundle must carry a portable registry snapshot derived
+  // from the registry AS IT IS NOW. Canonical staging mints Project IDs after the
+  // legacy staging step last wrote the snapshot, so without this a fresh machine
+  // receives an empty snapshot and cannot locate the project by its Git claim.
+  // Written before the digest so the digest matches the uploaded bundle.
+  await refreshPortableSnapshot(deps.stackHome);
   const semanticDigest = await computeSemanticDigest(deps.stackHome, main);
   const profile = await deps.backend.getProfile();
   const mode = profile?.privacyMode ?? 'standard';
