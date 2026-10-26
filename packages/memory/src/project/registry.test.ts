@@ -513,14 +513,31 @@ describe('composeBundleSnapshot', () => {
     expect(ids).toContain(xId);
     expect(ids).not.toContain(yId); // not in main
     expect(ids).not.toContain(zId); // its claim is held locally by another ID
-    // Local record wins for the shared ID.
-    expect(snapshot.projects.find((p) => p.projectId === ownId)?.claims).toEqual(localReg.projects[0]?.claims);
-    expect(conflicts).toEqual([
-      { kind: 'claims-differ', projectId: ownId },
-      { kind: 'claim-held-locally', projectId: zId, heldBy: ownId },
-    ]);
+    // Shared ID: local claims kept, plus the compatible remote claim (union).
+    const ownClaims = snapshot.projects.find((p) => p.projectId === ownId)?.claims.map(claimKey);
+    expect(ownClaims).toEqual(['git:github.com/o/mine', 'git:github.com/o/other']);
+    expect(conflicts).toEqual([{ kind: 'claim-held-locally', projectId: zId, heldBy: ownId }]);
+    // The local registry itself is untouched.
+    expect(localReg.projects[0]?.claims.map(claimKey)).toEqual(['git:github.com/o/mine']);
     expect(JSON.stringify(snapshot)).not.toContain('/home/me');
     expect(JSON.stringify(snapshot)).not.toContain('bindings');
+  });
+
+  it('a remote claim on a shared ID that ANOTHER local project holds is not added, and is reported', () => {
+    counter = 0;
+    const a = resolveOrMintProject(emptyRegistry(), git('github.com/o/a'), mint);
+    const b = resolveOrMintProject(a.registry, git('github.com/o/b'), mint);
+    const remote = {
+      snapshotVersion: 1 as const,
+      projects: [{ projectId: a.projectId, claims: [identityClaim(git('github.com/o/b'))] }],
+    };
+    const { snapshot, conflicts } = composeBundleSnapshot(b.registry, remote, [a.projectId]);
+    expect(snapshot.projects.find((p) => p.projectId === a.projectId)?.claims.map(claimKey)).toEqual([
+      'git:github.com/o/a',
+    ]);
+    expect(conflicts).toEqual([
+      { kind: 'claim-held-by-other', projectId: a.projectId, claimKey: 'git:github.com/o/b', heldBy: b.projectId },
+    ]);
   });
 
   it('without a remote snapshot it is exactly the local snapshot', () => {

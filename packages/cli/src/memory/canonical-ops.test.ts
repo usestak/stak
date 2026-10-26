@@ -878,6 +878,50 @@ describe('pushMemoryViaCanonical / pullMemoryViaCanonical (Task 13)', () => {
       // Carried read-only: C's own registry was never given A's record.
       expect(recordFor(await readLocalRegistry(stackHomeC), projectId)).toBeUndefined();
     });
+
+    it('a machine holding an OLDER record of a project does not strip a Git claim another machine learned for it', async () => {
+      const store = new InMemoryRemoteMemoryStore();
+      const backend = inMemoryRemoteMemoryBackend(store, 'two-machine-claim-union');
+      const sharedId = mintProjectId();
+      const gitClaim = { type: 'git' as const, canonical: 'github.com/example/p-repo' };
+
+      // Machine A: P is bound locally, then LEARNS a Git claim for it, then pushes.
+      const stackHomeA = path.join(root, 'a-stack');
+      const claudeHomeA = path.join(root, 'a-claude');
+      const dirA = path.join(root, 'machine-a', 'p');
+      await mkdir(dirA, { recursive: true });
+      await bindProjectAt(stackHomeA, dirA, sharedId);
+      await writeAutoMemoryAt(claudeHomeA, encodeClaudeProjectKey(path.resolve(dirA)), 'MEMORY.md', 'from A');
+      await stageCanonicalMemory(stackHomeA, { claudeHome: claudeHomeA });
+      const regA = await readLocalRegistry(stackHomeA);
+      await writeLocalRegistry(stackHomeA, {
+        ...regA,
+        projects: regA.projects.map((p) => (p.projectId === sharedId ? { ...p, claims: [...p.claims, gitClaim] } : p)),
+      });
+      expect((await pushMemoryViaCanonical(deps(stackHomeA, backend, path.join(root, 'a-keys')), { claudeHome: claudeHomeA })).status).toBe('pushed');
+
+      // Machine C: holds an older record of P (no Git claim) and pushes its own edit.
+      const stackHomeC = path.join(root, 'c-stack');
+      const claudeHomeC = path.join(root, 'c-claude');
+      const dirC = path.join(root, 'machine-c', 'p');
+      await mkdir(dirC, { recursive: true });
+      await bindProjectAt(stackHomeC, dirC, sharedId);
+      await writeAutoMemoryAt(claudeHomeC, encodeClaudeProjectKey(path.resolve(dirC)), 'from-c.md', 'from C');
+      await stageCanonicalMemory(stackHomeC, { claudeHome: claudeHomeC });
+      expect(gitClaimOf(recordFor(await readLocalRegistry(stackHomeC), sharedId)!)).toBeUndefined();
+      const pushC = await pushMemoryViaCanonical(deps(stackHomeC, backend, path.join(root, 'c-keys')), { claudeHome: claudeHomeC });
+      expect(pushC.status).toBe('pushed');
+
+      // Cloud's latest (C's) snapshot still carries the Git claim A learned.
+      const latest = (await backend.getLatest())!;
+      const bundle = parseBundle(await backend.getPayload(latest.backupId));
+      const snapshot = JSON.parse(Buffer.from(bundle.registryB64!, 'base64').toString('utf8')) as {
+        projects: { projectId: string; claims: unknown[] }[];
+      };
+      expect(snapshot.projects.find((p) => p.projectId === sharedId)?.claims).toContainEqual(gitClaim);
+      // In memory and in the bundle only: C's local registry is unchanged.
+      expect(gitClaimOf(recordFor(await readLocalRegistry(stackHomeC), sharedId)!)).toBeUndefined();
+    });
   });
 
   it('pushing again with no changes creates no new generation (no-op)', async () => {

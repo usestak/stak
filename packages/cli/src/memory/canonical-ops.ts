@@ -1054,6 +1054,8 @@ export const materializeCanonicalProjects = async (
 const remoteOf = (deps: MemoryCloudDeps, mmk: Buffer | undefined) => {
   let lastRegistrySnapshot: PortableRegistrySnapshot | undefined;
   const fetch = async () => {
+    // A re-fetch that finds nothing must not leave an earlier fetch's snapshot behind.
+    lastRegistrySnapshot = undefined;
     if (!deps.backend) return null;
     const result = await fetchRemoteCanonical({
       backend: deps.backend,

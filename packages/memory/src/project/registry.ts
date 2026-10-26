@@ -329,8 +329,9 @@ export const toPortableSnapshot = (
 });
 
 export type BundleSnapshotConflict =
-  /** Same Project ID locally and remotely with different claims; local kept. */
-  | { kind: 'claims-differ'; projectId: string }
+  /** A remote claim on a Project ID this machine also knows is held locally by a
+   * DIFFERENT Project ID; that one claim is not added (local stays authoritative). */
+  | { kind: 'claim-held-by-other'; projectId: string; claimKey: string; heldBy: string }
   /** A remote record's claim is already held locally by a DIFFERENT Project ID;
    * the remote record is not carried (local stays authoritative). */
   | { kind: 'claim-held-locally'; projectId: string; heldBy: string };
@@ -344,11 +345,17 @@ export type BundleSnapshotConflict =
  * publish a snapshot without that project's claim, and every later fresh machine
  * could no longer locate it.
  *
+ * A Project ID known both locally and remotely keeps its local record (and local
+ * lifecycle), with the remote claims that no OTHER local Project holds added to
+ * it — the same compatible-claim union `mergePortableSnapshot` does — so a machine
+ * holding an older record can't strip a claim another machine learned. This
+ * applies whether or not the project is in `main`.
+ *
  * Pure: never touches the local registry, never creates a binding, and only
- * portable records (claims + lifecycle, no paths) are carried. A Project ID known
- * locally always keeps its local record. A remote record whose claim a different
- * local Project already holds is not carried. Both cases are returned as
- * `conflicts` for the caller to report; neither fails the publish.
+ * portable records (claims + lifecycle, no paths) are carried. A remote claim (or
+ * a whole carried record) that a different local Project already holds is left
+ * out and returned in `conflicts` for the caller to report; neither fails the
+ * publish.
  */
 export const composeBundleSnapshot = (
   local: LocalRegistry,
@@ -362,17 +369,31 @@ export const composeBundleSnapshot = (
   const localClaimOwner = new Map<string, string>();
   for (const record of local.projects)
     for (const claim of record.claims) localClaimOwner.set(claimKey(claim), record.projectId);
+  const sortClaims = (claims: ProjectClaim[]) =>
+    [...claims].sort((x, y) => (claimKey(x) < claimKey(y) ? -1 : 1));
+  const unioned = new Map<string, ProjectClaim[]>();
   const carried: PortableProjectRecord[] = [];
   const conflicts: BundleSnapshotConflict[] = [];
   for (const record of remote.projects) {
-    if (!published.has(record.projectId)) continue;
     const mine = localById.get(record.projectId);
     if (mine) {
-      const a = mine.claims.map(claimKey).sort().join('|');
-      const b = record.claims.map(claimKey).sort().join('|');
-      if (a !== b) conflicts.push({ kind: 'claims-differ', projectId: record.projectId });
+      const claims = [...(unioned.get(record.projectId) ?? mine.claims)];
+      const have = new Set(claims.map(claimKey));
+      for (const claim of record.claims) {
+        const key = claimKey(claim);
+        if (have.has(key)) continue;
+        const heldBy = localClaimOwner.get(key);
+        if (heldBy !== undefined && heldBy !== record.projectId) {
+          conflicts.push({ kind: 'claim-held-by-other', projectId: record.projectId, claimKey: key, heldBy });
+          continue;
+        }
+        claims.push(claim);
+        have.add(key);
+      }
+      if (claims.length !== mine.claims.length) unioned.set(record.projectId, claims);
       continue;
     }
+    if (!published.has(record.projectId)) continue;
     const heldBy = record.claims
       .map((claim) => localClaimOwner.get(claimKey(claim)))
       .find((owner): owner is string => owner !== undefined);
@@ -382,14 +403,18 @@ export const composeBundleSnapshot = (
     }
     carried.push({
       projectId: record.projectId,
-      claims: [...record.claims].sort((x, y) => (claimKey(x) < claimKey(y) ? -1 : 1)),
+      claims: sortClaims(record.claims),
       lifecycle: lifecycleOf(record),
     });
   }
+  const ownProjects = own.projects.map((p) => {
+    const claims = unioned.get(p.projectId);
+    return claims ? { ...p, claims: sortClaims(claims) } : p;
+  });
   return {
     snapshot: {
       snapshotVersion: PROJECT_REGISTRY_SNAPSHOT_VERSION,
-      projects: [...own.projects, ...carried].sort((a, b) => (a.projectId < b.projectId ? -1 : 1)),
+      projects: [...ownProjects, ...carried].sort((a, b) => (a.projectId < b.projectId ? -1 : 1)),
     },
     carried: carried.map((r) => r.projectId),
     conflicts,
