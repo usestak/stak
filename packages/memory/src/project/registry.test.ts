@@ -297,6 +297,8 @@ describe('adoptReconciledProjectId (identity reconciliation — one logical Proj
         projectId: 'prj_cloud0000000000000000001',
         claims: [identityClaim(git('github.com/usestak/stak'))],
         lifecycle: 'active',
+        // Spec §4.2.1: the surviving record remembers the retired ID.
+        formerIds: ['prj_from00000000000000000001'],
       },
     ]);
   });

@@ -56,6 +56,13 @@ export const portableProjectRecordSchema = z.object({
   claims: z.array(projectClaimSchema).min(1),
   // Optional so pre-15C records decode safely; absence means `active`.
   lifecycle: projectLifecycleSchema.optional(),
+  /**
+   * Spec §4.2.1: Project IDs that turned out to be this same project and were
+   * merged into it (this record's ID is the SURVIVING one). Travels in the
+   * portable snapshot so every machine learns the alias. Optional so older
+   * records decode safely; absence means none.
+   */
+  formerIds: z.array(z.string().regex(PROJECT_ID_PATTERN)).optional(),
 });
 export type PortableProjectRecord = z.infer<typeof portableProjectRecordSchema>;
 
@@ -248,7 +255,14 @@ export const mergePortableSnapshot = (
   local: LocalRegistry,
   snapshot: PortableRegistrySnapshot,
 ): MergeResult => {
-  const projects = local.projects.map((record) => ({
+  // Spec §4.2.1: former IDs are honored first. A local record that is a former
+  // ID (per this machine's own aliases or the snapshot's) is retired into its
+  // surviving ID, and a snapshot record of a former ID is not imported as a
+  // project of its own — otherwise the two IDs' shared claim would read as a
+  // conflict.
+  const aliases = projectAliasMap(local, snapshot);
+  const learned = learnProjectAliases(local, snapshot).registry;
+  const projects = learned.projects.map((record) => ({
     ...record,
     claims: [...record.claims],
   }));
@@ -266,6 +280,7 @@ export const mergePortableSnapshot = (
   };
 
   for (const incoming of snapshot.projects) {
+    if (resolveProjectAlias(aliases, incoming.projectId) !== incoming.projectId) continue;
     const owners = claimOwner();
     const byId = projects.find((r) => r.projectId === incoming.projectId);
     // Does any incoming claim already belong to a DIFFERENT project id?
@@ -285,7 +300,10 @@ export const mergePortableSnapshot = (
       // NOT merge its claims into the conflicting existing record. The same-id record
       // still adopts the recovered (authoritative) lifecycle.
       if (!byId) projects.push({ ...incoming, claims: [...incoming.claims] });
-      else byId.lifecycle = incoming.lifecycle;
+      else {
+        byId.lifecycle = incoming.lifecycle;
+        unionFormerIds(byId, incoming.formerIds);
+      }
       continue;
     }
 
@@ -293,6 +311,7 @@ export const mergePortableSnapshot = (
       byId.claims = dedupeClaims([...byId.claims, ...incoming.claims]);
       // Recovered lifecycle is authoritative for portable state; bindings stay local.
       byId.lifecycle = incoming.lifecycle;
+      unionFormerIds(byId, incoming.formerIds);
     } else projects.push({ ...incoming, claims: [...incoming.claims] });
   }
 
@@ -306,7 +325,7 @@ export const mergePortableSnapshot = (
   });
 
   return {
-    registry: { ...local, projects, bindings: local.bindings },
+    registry: { ...learned, projects, bindings: learned.bindings },
     conflicts: dedupedConflicts,
   };
 };
@@ -324,6 +343,8 @@ export const toPortableSnapshot = (
       ),
       // Always serialize an explicit lifecycle so a new backup records it.
       lifecycle: lifecycleOf(record),
+      // Only when there are any, so a record without aliases keeps its bytes.
+      ...withFormerIds(record.formerIds),
     }))
     .sort((a, b) => (a.projectId < b.projectId ? -1 : 1)),
 });
@@ -364,6 +385,8 @@ export const composeBundleSnapshot = (
 ): { snapshot: PortableRegistrySnapshot; carried: string[]; conflicts: BundleSnapshotConflict[] } => {
   const own = toPortableSnapshot(local);
   if (!remote) return { snapshot: own, carried: [], conflicts: [] };
+  // Spec §4.2.1: a remote record of a former ID is never carried as a project.
+  const aliases = projectAliasMap(local, remote);
   const published = new Set(publishedProjectIds);
   const localById = new Map(local.projects.map((p) => [p.projectId, p]));
   const localClaimOwner = new Map<string, string>();
@@ -372,11 +395,18 @@ export const composeBundleSnapshot = (
   const sortClaims = (claims: ProjectClaim[]) =>
     [...claims].sort((x, y) => (claimKey(x) < claimKey(y) ? -1 : 1));
   const unioned = new Map<string, ProjectClaim[]>();
+  const formerUnion = new Map<string, string[]>();
   const carried: PortableProjectRecord[] = [];
   const conflicts: BundleSnapshotConflict[] = [];
   for (const record of remote.projects) {
+    if (resolveProjectAlias(aliases, record.projectId) !== record.projectId) continue;
     const mine = localById.get(record.projectId);
     if (mine) {
+      const formerIds = sortedFormerIds(
+        [...(formerUnion.get(record.projectId) ?? mine.formerIds ?? []), ...(record.formerIds ?? [])],
+        record.projectId,
+      );
+      if (formerIds.length !== (mine.formerIds ?? []).length) formerUnion.set(record.projectId, formerIds);
       const claims = [...(unioned.get(record.projectId) ?? mine.claims)];
       const have = new Set(claims.map(claimKey));
       for (const claim of record.claims) {
@@ -405,11 +435,18 @@ export const composeBundleSnapshot = (
       projectId: record.projectId,
       claims: sortClaims(record.claims),
       lifecycle: lifecycleOf(record),
+      ...withFormerIds(record.formerIds),
     });
   }
   const ownProjects = own.projects.map((p) => {
     const claims = unioned.get(p.projectId);
-    return claims ? { ...p, claims: sortClaims(claims) } : p;
+    const formerIds = formerUnion.get(p.projectId);
+    if (!claims && !formerIds) return p;
+    return {
+      ...p,
+      ...(claims ? { claims: sortClaims(claims) } : {}),
+      ...(formerIds ? withFormerIds(formerIds) : {}),
+    };
   });
   return {
     snapshot: {
@@ -547,9 +584,15 @@ export const adoptReconciledProjectId = (
     ...fromRecord.claims,
   ]);
   const lifecycle = lifecycleOf(toRecord ?? fromRecord);
+  // Spec §4.2.1: the surviving record remembers the retired ID (and any IDs
+  // already merged into it) so every machine can fold Memory filed under them.
+  const formerIds = sortedFormerIds(
+    [...(toRecord?.formerIds ?? []), fromProjectId, ...(fromRecord.formerIds ?? [])],
+    toProjectId,
+  );
   const projects = registry.projects
     .filter((r) => r.projectId !== fromProjectId && r.projectId !== toProjectId)
-    .concat([{ projectId: toProjectId, claims, lifecycle }]);
+    .concat([{ projectId: toProjectId, claims, lifecycle, formerIds }]);
 
   const toBinding = bindingFor(registry, toProjectId);
   const fromBinding = bindingFor(registry, fromProjectId);
@@ -615,3 +658,105 @@ export const recordFor = (
   projectId: string,
 ): PortableProjectRecord | undefined =>
   registry.projects.find((record) => record.projectId === projectId);
+
+/* -------------------------------------------------------------------------- */
+/* Project aliases (spec §4.2.1)                                                */
+/* -------------------------------------------------------------------------- */
+
+/** Distinct, sorted former IDs, never including the surviving ID itself. */
+const sortedFormerIds = (ids: Iterable<string>, survivingId: string): string[] =>
+  [...new Set(ids)].filter((id) => id !== survivingId).sort();
+
+/** `{ formerIds }` when there are any, else nothing (older bytes stay unchanged). */
+const withFormerIds = (formerIds: readonly string[] | undefined): { formerIds?: string[] } =>
+  formerIds && formerIds.length > 0 ? { formerIds: [...formerIds].sort() } : {};
+
+const unionFormerIds = (
+  record: { projectId: string; formerIds?: string[] | undefined },
+  incoming: readonly string[] | undefined,
+): void => {
+  if (!incoming || incoming.length === 0) return;
+  const formerIds = sortedFormerIds([...(record.formerIds ?? []), ...incoming], record.projectId);
+  if (formerIds.length > 0) record.formerIds = formerIds;
+};
+
+/** Anything listing project records with their former IDs: a local registry or
+ * a portable snapshot. */
+export type ProjectAliasSource = {
+  projects: readonly Pick<PortableProjectRecord, 'projectId' | 'formerIds'>[];
+};
+
+/**
+ * former ID -> surviving ID, from every record's `formerIds` in the given
+ * registries/snapshots (a sync uses the local registry plus the fetched remote
+ * snapshot). Deterministic: when two records list the same former ID, the
+ * lexicographically smaller surviving ID wins. Only direct links are stored;
+ * `resolveProjectAlias` follows chains.
+ */
+export const projectAliasMap = (...sources: (ProjectAliasSource | null | undefined)[]): Map<string, string> => {
+  const map = new Map<string, string>();
+  for (const source of sources)
+    for (const record of source?.projects ?? [])
+      for (const formerId of record.formerIds ?? []) {
+        if (formerId === record.projectId) continue;
+        const existing = map.get(formerId);
+        if (existing === undefined || record.projectId < existing) map.set(formerId, record.projectId);
+      }
+  return map;
+};
+
+/**
+ * The surviving Project ID for `projectId` (itself when it is not an alias).
+ * Follows chains (A became B, B became C: A resolves to C). Guarded against
+ * cycles, which resolve deterministically to the smallest ID in the cycle.
+ */
+export const resolveProjectAlias = (
+  source: ProjectAliasSource | ReadonlyMap<string, string>,
+  projectId: string,
+): string => {
+  const map: ReadonlyMap<string, string> =
+    source instanceof Map ? source : projectAliasMap(source as ProjectAliasSource);
+  const seen: string[] = [];
+  let current = projectId;
+  for (;;) {
+    const next = map.get(current);
+    if (next === undefined) return current;
+    seen.push(current);
+    const at = seen.indexOf(next);
+    if (at !== -1) return [...seen.slice(at)].sort()[0] as string;
+    current = next;
+  }
+};
+
+/** `projectId => survivingId` over the given sources (see `projectAliasMap`). */
+export const projectAliasResolver = (
+  ...sources: (ProjectAliasSource | null | undefined)[]
+): ((projectId: string) => string) => {
+  const map = projectAliasMap(...sources);
+  return (projectId) => resolveProjectAlias(map, projectId);
+};
+
+/**
+ * Spec §4.2.1 "every machine learns them": retire each LOCAL record whose ID
+ * is a former ID (per the local registry together with `snapshot`) into its
+ * surviving ID, exactly like a Cloud reconciliation does
+ * (`adoptReconciledProjectId` keeps the binding and name hint and records the
+ * alias). Nothing else is taken from the snapshot: no other record, claim,
+ * lifecycle or binding. Returns the input registry itself when there is
+ * nothing to learn.
+ */
+export const learnProjectAliases = (
+  local: LocalRegistry,
+  snapshot: ProjectAliasSource | null | undefined,
+): { registry: LocalRegistry; adopted: { fromProjectId: string; toProjectId: string }[] } => {
+  const map = projectAliasMap(local, snapshot);
+  let registry = local;
+  const adopted: { fromProjectId: string; toProjectId: string }[] = [];
+  for (const record of [...local.projects].sort((a, b) => (a.projectId < b.projectId ? -1 : 1))) {
+    const survivor = resolveProjectAlias(map, record.projectId);
+    if (survivor === record.projectId) continue;
+    registry = adoptReconciledProjectId(registry, record.projectId, survivor);
+    adopted.push({ fromProjectId: record.projectId, toProjectId: survivor });
+  }
+  return { registry, adopted };
+};
