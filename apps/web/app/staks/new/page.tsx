@@ -6,8 +6,7 @@ import { AppSidebar } from '../../_components/app-sidebar';
 import { ShellNotice } from '../../_components/shell-notice';
 import { getCloudService } from '../../../lib/cloud-service';
 import { readActiveMachinePreference } from '../../../lib/machine-preference';
-import { resolveSidebarMachineContext } from '../../../lib/sidebar-machine-context';
-import { loadSidebarSummary } from '../../../lib/sidebar-summary';
+import { loadSidebarShell } from '../../../lib/sidebar-shell';
 import { displayNameOf, getSessionUser } from '../../../lib/session';
 
 import { listApprovedSkillsForPickerAction } from '../actions';
@@ -30,19 +29,10 @@ export default async function NewStakPage({
   const { machine: requestedMachine } = await searchParams;
   const machine = requestedMachine ?? (await readActiveMachinePreference());
   const handle = user.githubUsername ?? displayNameOf(user);
-  const machineContext = await resolveSidebarMachineContext(
-    getCloudService(),
-    user.id,
-    machine,
-  );
-  const sidebarCounts = await loadSidebarSummary(
-    getCloudService(),
-    user,
-    machineContext.viewing?.machineId ?? null,
-    machineContext.activeCount,
-  );
-
-  const skills = await listApprovedSkillsForPickerAction();
+  const [{ machineContext, sidebarCounts }, skills] = await Promise.all([
+    loadSidebarShell(getCloudService(), user, machine),
+    listApprovedSkillsForPickerAction(),
+  ]);
   if (!skills.ok)
     return (
       <ShellNotice active="staks" handle={handle} title="Couldn't load Skills">

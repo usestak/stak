@@ -10,7 +10,7 @@ import { getCloudService } from '../../../lib/cloud-service';
 import { readActiveMachinePreference } from '../../../lib/machine-preference';
 import { displayNameOf, getSessionUser } from '../../../lib/session';
 import { relative } from '../../../lib/machine-context';
-import { loadSidebarSummary } from '../../../lib/sidebar-summary';
+import { loadSidebarShell } from '../../../lib/sidebar-shell';
 
 import { loadSkillDetail, type SkillDetailView } from '../skill-detail-data';
 import { SkillActions } from '../_components/skill-actions';
@@ -79,6 +79,9 @@ export default async function SkillDetailPage({
   const { machine: requestedMachine } = await searchParams;
   const machine = requestedMachine ?? (await readActiveMachinePreference());
   const handle = user.githubUsername ?? displayNameOf(user);
+  // Resolves the same viewing machine as the loader; started first so the badge reads
+  // overlap with the page's own instead of following them.
+  const shellPromise = loadSidebarShell(getCloudService(), user, machine);
   const view = await loadSkillDetail(getCloudService(), user, skillId, machine);
 
   if (view.kind === 'error')
@@ -147,12 +150,7 @@ export default async function SkillDetailPage({
         : view.sourceCheckState === 'update-available'
           ? 'Approve the update above, then run this on this machine to install it.'
           : 'Reconciles this machine to the approved version.';
-  const sidebarCounts = await loadSidebarSummary(
-    getCloudService(),
-    user,
-    view.viewing.machineId,
-    view.machines.length,
-  );
+  const { sidebarCounts } = await shellPromise;
 
   return (
     <div className="stak-frame">

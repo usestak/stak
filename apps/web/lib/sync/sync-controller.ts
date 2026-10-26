@@ -11,12 +11,21 @@ export type SyncControllerOptions = {
   focusDebounceMs?: number;
   /** Minimum time between actual refresh() calls, so near-simultaneous triggers can't overlap. */
   cooldownMs?: number;
+  /**
+   * Ignore focus/visibility signals while the page's data is younger than this. Focus is
+   * only a fallback for missed Realtime/broadcast signals, and a full server re-render on
+   * every alt-tab back makes navigation feel sluggish. Broadcasts are never throttled.
+   */
+  focusMinIntervalMs?: number;
+  now?: () => number;
 };
 
 export type SyncController = {
   onBroadcastMessage: () => void;
   onVisible: () => void;
   onFocus: () => void;
+  /** The page just rendered fresh server data (e.g. a navigation completed). */
+  markFresh: () => void;
   dispose: () => void;
 };
 
@@ -30,14 +39,18 @@ export function createSyncController(
   const coalesceMs = options.coalesceMs ?? DEFAULT_COALESCE_MS;
   const focusDebounceMs = options.focusDebounceMs ?? DEFAULT_FOCUS_DEBOUNCE_MS;
   const cooldownMs = options.cooldownMs ?? DEFAULT_COOLDOWN_MS;
+  const focusMinIntervalMs = options.focusMinIntervalMs ?? 0;
+  const now = options.now ?? Date.now;
 
   let scheduled: ReturnType<typeof setTimeout> | null = null;
   let cooling: ReturnType<typeof setTimeout> | null = null;
   let refreshing = false;
+  let freshAt = Number.NEGATIVE_INFINITY;
 
   const runRefresh = () => {
     if (refreshing) return;
     refreshing = true;
+    freshAt = now();
     try {
       options.refresh();
     } finally {
@@ -56,10 +69,18 @@ export function createSyncController(
     }, delay);
   };
 
+  const scheduleFocus = () => {
+    if (now() - freshAt < focusMinIntervalMs) return;
+    schedule(focusDebounceMs);
+  };
+
   return {
     onBroadcastMessage: () => schedule(coalesceMs),
-    onVisible: () => schedule(focusDebounceMs),
-    onFocus: () => schedule(focusDebounceMs),
+    onVisible: () => scheduleFocus(),
+    onFocus: () => scheduleFocus(),
+    markFresh: () => {
+      freshAt = now();
+    },
     dispose: () => {
       if (scheduled) clearTimeout(scheduled);
       if (cooling) clearTimeout(cooling);

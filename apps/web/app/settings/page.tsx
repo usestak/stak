@@ -6,8 +6,7 @@ import { InlineCommand } from '@/app/_components/inline-command';
 import { ShellNotice } from '@/app/_components/shell-notice';
 import { getCloudService } from '@/lib/cloud-service';
 import { readActiveMachinePreference } from '@/lib/machine-preference';
-import { resolveSidebarMachineContext } from '@/lib/sidebar-machine-context';
-import { loadSidebarSummary } from '@/lib/sidebar-summary';
+import { loadSidebarShell } from '@/lib/sidebar-shell';
 import { displayNameOf, getSessionUser } from '@/lib/session';
 
 import { loadSettingsView } from './settings-data';
@@ -38,18 +37,11 @@ export default async function SettingsPage() {
   const user = await getSessionUser();
   if (!user) redirect('/auth/login?next=/settings');
   const handle = user.githubUsername ?? displayNameOf(user);
-  const view = await loadSettingsView(getCloudService(), user);
-  const machineContext = await resolveSidebarMachineContext(
-    getCloudService(),
-    user.id,
-    await readActiveMachinePreference(),
-  );
-  const sidebarCounts = await loadSidebarSummary(
-    getCloudService(),
-    user,
-    machineContext.viewing?.machineId ?? null,
-    machineContext.activeCount,
-  );
+  const machine = await readActiveMachinePreference();
+  const [view, { machineContext, sidebarCounts }] = await Promise.all([
+    loadSettingsView(getCloudService(), user),
+    loadSidebarShell(getCloudService(), user, machine),
+  ]);
 
   if (view.kind === 'error')
     return (

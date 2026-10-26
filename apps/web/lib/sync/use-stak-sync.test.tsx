@@ -32,8 +32,16 @@ vi.mock('../supabase-browser', () => ({
 import { useStakSync } from './use-stak-sync';
 import { SYNC_CHANNEL_NAME, emitSync } from './stak-sync';
 
-function Mounted() {
-  useStakSync();
+function Mounted({
+  enabled = true,
+  freshKey,
+  focusMinIntervalMs = 0,
+}: {
+  enabled?: boolean;
+  freshKey?: string;
+  focusMinIntervalMs?: number;
+}) {
+  useStakSync({ enabled, freshKey, focusMinIntervalMs });
   return null;
 }
 
@@ -160,5 +168,46 @@ describe('useStakSync', () => {
     });
 
     expect(() => render(<Mounted />)).not.toThrow();
+  });
+
+  it('skips focus refreshes while the page data is still fresh', async () => {
+    render(<Mounted focusMinIntervalMs={60_000} />);
+
+    window.dispatchEvent(new Event('focus'));
+    setHidden(true);
+    setHidden(false);
+
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('never throttles another tab broadcast, even while fresh', async () => {
+    render(<Mounted focusMinIntervalMs={60_000} />);
+    const sender = new BroadcastChannel(SYNC_CHANNEL_NAME);
+
+    sender.postMessage({ domains: ['staks'], at: Date.now(), source: 'x' });
+
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    sender.close();
+  });
+
+  it('keeps one Realtime subscription across navigations (freshKey changes)', () => {
+    createSupabaseBrowserClient.mockClear();
+    const { rerender } = render(<Mounted freshKey="/overview" />);
+    rerender(<Mounted freshKey="/skills" />);
+    rerender(<Mounted freshKey="/machines" />);
+
+    expect(createSupabaseBrowserClient).toHaveBeenCalledTimes(1);
+    expect(removeChannel).not.toHaveBeenCalled();
+  });
+
+  it('does nothing while disabled (signed-out or public routes)', async () => {
+    createSupabaseBrowserClient.mockClear();
+    render(<Mounted enabled={false} />);
+    window.dispatchEvent(new Event('focus'));
+
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(refresh).not.toHaveBeenCalled();
+    expect(createSupabaseBrowserClient).not.toHaveBeenCalled();
   });
 });
