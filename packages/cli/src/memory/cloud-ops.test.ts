@@ -1374,6 +1374,9 @@ describe('protect moves this machine\'s sync provenance to the Protected replica
       expect(status.localRecoveredGeneration).toBe(2);
       expect(status.latestGeneration).toBe(3);
       expect((await readBackupSupersession(depsB)).supersedes).toBe(true);
+      // B has no canonical sync base, so the no-base push/backup block
+      // (final review T15-4) must still apply after protect.
+      expect(await isHistoricalWithoutSyncHistory(depsB)).toBe(true);
     });
 
     it('fails safe: when the replica lookup errors, status keeps the recorded generation', async () => {

@@ -289,8 +289,9 @@ const moveProvenanceToProtectReplicas = async (
  * `effectiveCanonicalBase`. A genuine older recover maps to the older
  * generation's replica and stays historical.
  *
- * Read-only (never writes provenance). Costs one lookup, and only when the
- * recorded generation is behind `latest`. Fails safe: on any lookup error the
+ * Read-only (never writes provenance). Only when the recorded generation is
+ * behind `latest`: one `getGeneration` (a still-committed generation is
+ * returned unchanged), then the replica lookup only if it was retired. Fails safe: on any lookup error the
  * recorded provenance is returned unchanged (today's behaviour).
  */
 const effectiveRecoveryProvenance = async (
@@ -300,6 +301,8 @@ const effectiveRecoveryProvenance = async (
 ): Promise<LocalRecoveryState | null> => {
   if (!provenance || !isHistoricalRecovery(provenance, latest)) return provenance;
   try {
+    // Still committed: not retired by protect (as in `effectiveCanonicalBase`).
+    if ((await backend.getGeneration(provenance.recoveredGeneration)) !== null) return provenance;
     const replica = await replicaOfRetiredGeneration(backend, provenance.recoveredGeneration);
     return replica ? { ...provenance, recoveredGeneration: replica.generation } : provenance;
   } catch {
