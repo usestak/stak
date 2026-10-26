@@ -28,6 +28,7 @@ import {
   readLocalRecoveryState,
   readLocalRegistry,
   readMemoryManifest,
+  readMemoryStatus,
   resolveOrMintProject,
   RemoteMemoryError,
   setBinding,
@@ -3327,6 +3328,16 @@ describe('two-machine manual test: a machine that is merely behind is never a hi
 
     // B (did not protect, merely behind) is not historical either.
     expect((await readMemoryCloudStatus(deps(B.home, backend, B.keys))).historicalRecovery).toBe(false);
+  });
+
+  it('Bug B: `memory status` counts canonical Project Memory (projects and files), not just the global-only v1 manifest', async () => {
+    const { backend, A } = await toStep4('status-counts');
+    const rendered = renderMemoryCloudStatus(
+      await readMemoryStatus(A.home),
+      await readMemoryCloudStatus(deps(A.home, backend, A.keys)),
+    );
+    expect(rendered).toContain('1 project backed up');
+    expect(rendered).toContain('2 memory files');
   });
 
   it('a genuine historical recover before protect stays historical after protect', async () => {
