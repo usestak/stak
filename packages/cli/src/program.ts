@@ -77,7 +77,6 @@ import {
   leftoverClearedMessage,
   unlockMemory,
   withMemoryLock,
-  readCanonicalBase,
   readLocalRegistry,
   readMemoryManifest,
   readMemoryStatus,
@@ -128,7 +127,7 @@ import {
 import { mergePendingMessage, MemorySyncError } from './memory/pending-merge.js';
 import {
   freshRegistryRisksDuplication,
-  HISTORICAL_NO_SYNC_HISTORY_MESSAGE,
+  resolveMemoryPushPreflight,
   readBackupSupersession,
   readMemoryCloudStatus,
   readRecoveryKeyFile,
@@ -982,20 +981,8 @@ const defaultDependencies: ProgramDependencies = {
   // yet (a fresh machine). Push would then seed the base from the recovered
   // generation itself and silently discard the rollback, so that case stays
   // blocked.
-  memoryPushPreflight: async () => {
-    const status = await readMemoryCloudStatus(await buildMemoryCloudDeps());
-    if (!status.historicalRecovery) return { blocked: false };
-    if ((await readCanonicalBase(stackHome)) === null)
-      return {
-        blocked: true,
-        // Final review T15-4: one message, shared with `stak memory backup`.
-        reason: HISTORICAL_NO_SYNC_HISTORY_MESSAGE,
-      };
-    return {
-      blocked: false,
-      note: `Memory: publishing a rollback to Backup #${status.localRecoveredGeneration ?? '?'}.`,
-    };
-  },
+  // Final review T15-4: the block message is shared with `stak memory backup`.
+  memoryPushPreflight: async () => resolveMemoryPushPreflight(await buildMemoryCloudDeps()),
   // `stak push` means "synchronize MAIN to Cloud" — if staged MAIN already equals the
   // latest Cloud generation, this must be a no-op: it never creates another immutable
   // generation containing identical state (unlike the explicit `stak memory backup`,

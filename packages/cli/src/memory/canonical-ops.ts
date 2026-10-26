@@ -1213,6 +1213,36 @@ export const pushMemoryViaCanonical = async (
 };
 
 /**
+ * Spec §8.5 / two-machine Bug A: a pull that SYNCS this machine records the
+ * generation it synced as this machine's provenance, exactly like a publish or
+ * an up-to-date push (`recordInSyncWithCloud`). That clears a historical
+ * recover the pull synced past, and keeps `status`'s "Backup #N" current.
+ *  - merged: Cloud moved and was merged in; the base is now that generation.
+ *  - up to date: only when local Memory (project and global) equals the base
+ *    generation. An up-to-date pull that merely found Cloud unmoved while local
+ *    holds unpushed changes (e.g. a rollback just recovered) synced nothing, so
+ *    the recorded provenance stays as it is.
+ * Never fails the pull (nothing in Cloud or Memory depends on it).
+ */
+const recordPullSync = async (deps: MemoryCloudDeps, merged: boolean): Promise<void> => {
+  try {
+    const base = await effectiveCanonicalBase(deps.backend, await readCanonicalBase(deps.stackHome));
+    if (!base) return;
+    if (!merged) {
+      if (canonicalDigest(await readCanonicalMain(deps.stackHome)) !== canonicalDigest(base.main)) return;
+      if (
+        base.globalDigest !== undefined &&
+        base.globalDigest !== globalManifestDigest(await readMemoryManifest(deps.stackHome))
+      )
+        return;
+    }
+    await recordInSyncWithCloud(deps, base.generation);
+  } catch {
+    // Provenance is advisory; the next push or pull records it again.
+  }
+};
+
+/**
  * `stak pull`'s canonical-Memory half (Task 13) — an ADDITIVE operation alongside
  * the existing fresh-machine `applyMemoryPull` (unchanged; that one remains gated
  * by `memoryPullPreflight` and is the legacy full-store recover). This one runs
@@ -1253,6 +1283,7 @@ export const pullMemoryViaCanonical = async (
     clearPendingMerge: () => clearPendingMerge(deps.stackHome),
   });
   if (outcome.status === 'conflict') return { status: 'conflict', conflicts: outcome.conflicts };
+  await recordPullSync(deps, outcome.status === 'merged-local');
   const materialize = await materializeCanonicalProjects(deps.stackHome, {
     ...discovery,
     remoteRegistrySnapshot: remote.lastRegistrySnapshot(),

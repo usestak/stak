@@ -1389,8 +1389,46 @@ describe('protect moves this machine\'s sync provenance to the Protected replica
       const broken: typeof backend = Object.create(backend);
       broken.getGenerationById = () => Promise.reject(new Error('network down'));
       const status = await readMemoryCloudStatus({ ...depsB, backend: broken });
+      // B recovered the latest: being behind (or a failed lookup) never makes
+      // it a historical recovery (two-machine Bug A).
+      expect(status.historicalRecovery).toBe(false);
+      expect(status.localRecoveredGeneration).toBe(0);
+    });
+
+    it('fails safe: a genuine older recover stays historical when the replica lookup errors', async () => {
+      const { stackHome: homeA, backend, deps: depsA } = await setup();
+      expect((await runMemoryCloudBackup(depsA)).cloud).toMatchObject({ status: 'standard', generation: 0 });
+      await addDoc(homeA, 'second backup note');
+      expect((await runMemoryCloudBackup(depsA)).cloud).toMatchObject({ status: 'standard', generation: 1 });
+      const depsB = await machineB(backend);
+      expect((await runMemoryCloudRecover(depsB, { generation: 0 })).status).toBe('recovered');
+      expect((await runMemoryCloudProtect(depsA, { recoveryKey: generateRecoveryKey() })).status).toBe('protected');
+
+      const broken: typeof backend = Object.create(backend);
+      broken.getGenerationById = () => Promise.reject(new Error('network down'));
+      const status = await readMemoryCloudStatus({ ...depsB, backend: broken });
       expect(status.historicalRecovery).toBe(true);
       expect(status.localRecoveredGeneration).toBe(0);
+      expect(await isHistoricalWithoutSyncHistory({ ...depsB, backend: broken })).toBe(true);
+    });
+
+    it('a machine that synced #0 by push and fell behind (another push) is not historical, before or after protect', async () => {
+      const { stackHome: homeA, backend, deps: depsA } = await setup();
+      expect((await runMemoryCloudBackup(depsA)).cloud).toMatchObject({ status: 'standard', generation: 0 });
+      const depsB = await machineB(backend);
+      expect((await runMemoryCloudRecover(depsB)).status).toBe('recovered');
+      await addDoc(homeA, 'second backup note');
+      expect((await runMemoryCloudBackup(depsA)).cloud).toMatchObject({ status: 'standard', generation: 1 });
+      expect((await readMemoryCloudStatus(depsB)).historicalRecovery).toBe(false);
+      expect((await readBackupSupersession(depsB)).supersedes).toBe(false);
+      expect(await isHistoricalWithoutSyncHistory(depsB)).toBe(false);
+
+      expect((await runMemoryCloudProtect(depsA, { recoveryKey: generateRecoveryKey() })).status).toBe('protected');
+      const status = await readMemoryCloudStatus(depsB);
+      expect(status.historicalRecovery).toBe(false);
+      // Behind, so the display maps to the committed replica of what it synced.
+      expect(status.localRecoveredGeneration).toBe(2);
+      expect(status.latestGeneration).toBe(3);
     });
   });
 });

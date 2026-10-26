@@ -58,6 +58,7 @@ import {
   standardCloudBackup,
   unwrapWithRecoveryKey,
   isHistoricalRecovery,
+  recordedAsHistorical,
   readLocalRecoveryState,
   readMemoryManifest,
   writeCanonicalBase,
@@ -182,6 +183,9 @@ const isStoredWrapper = (value: unknown): value is StoredWrapper =>
   typeof (value as { mmkId?: unknown }).mmkId === 'string' &&
   typeof (value as { wrapper?: unknown }).wrapper === 'object';
 
+const isOlderThanLatest = (generation: number, cloudLatest: number | null): boolean =>
+  cloudLatest !== null && generation < cloudLatest;
+
 /**
  * Record which Cloud generation the local private store now reflects (Phase 15B.6).
  * Machine-local, non-secret provenance so `status` can flag a historical recovery and
@@ -208,6 +212,10 @@ const recordRecoveryProvenance = async (
     cloudLatestAtRecovery: recovered.cloudLatest,
     recoveredAt: (deps.now ?? (() => new Date()))().toISOString(),
     privacyMode: recovered.privacyMode,
+    // Spec §8.5: historical only for a recover of an OLDER generation than the
+    // latest at that moment. Every publish/sync records `cloudLatest ===
+    // generation`, which is what clears it.
+    historical: isOlderThanLatest(recovered.generation, recovered.cloudLatest),
     ...(recovered.semanticDigest
       ? { semanticDigest: recovered.semanticDigest }
       : {}),
@@ -227,7 +235,7 @@ const recordRecoveryProvenance = async (
 export const recordInSyncWithCloud = async (deps: MemoryCloudDeps, generation: number): Promise<void> => {
   if (!deps.backend) return;
   const provenance = await readLocalRecoveryState(deps.stackHome);
-  if (provenance && provenance.recoveredGeneration >= generation) return;
+  if (provenance && !recordedAsHistorical(provenance) && provenance.recoveredGeneration >= generation) return;
   await recordRecoveryProvenance(deps, {
     generation,
     privacyMode: (await deps.backend.getProfile())?.privacyMode ?? 'standard',
@@ -275,6 +283,9 @@ const moveProvenanceToProtectReplicas = async (
       return;
     await writeLocalRecoveryState(stackHome, {
       ...provenance,
+      // Decided from the generations as recorded, before any is moved: a
+      // replica numbering can't turn a sync into a rollback or back.
+      historical: recordedAsHistorical(provenance),
       recoveredGeneration,
       cloudLatestAtRecovery,
       ...(recoveredGeneration !== provenance.recoveredGeneration ? { privacyMode: 'protected' as const } : {}),
@@ -297,18 +308,25 @@ const moveProvenanceToProtectReplicas = async (
  * behind `latest`: one `getGeneration` (a still-committed generation is
  * returned unchanged), then the replica lookup only if it was retired. Fails safe: on any lookup error the
  * recorded provenance is returned unchanged (today's behaviour).
+ *
+ * Whether the state is historical never depends on this mapping: it is
+ * decided from the state as recorded (`recordedAsHistorical`) and carried
+ * explicitly onto the mapped state. Being behind is not historical; the mapping
+ * only keeps the displayed "Backup #N" a generation Cloud still holds.
  */
 const effectiveRecoveryProvenance = async (
   backend: RemoteMemoryBackend,
   provenance: LocalRecoveryState | null,
   latest: number | null,
 ): Promise<LocalRecoveryState | null> => {
-  if (!provenance || !isHistoricalRecovery(provenance, latest)) return provenance;
+  if (!provenance || latest === null || provenance.recoveredGeneration >= latest) return provenance;
   try {
     // Still committed: not retired by protect (as in `effectiveCanonicalBase`).
     if ((await backend.getGeneration(provenance.recoveredGeneration)) !== null) return provenance;
     const replica = await replicaOfRetiredGeneration(backend, provenance.recoveredGeneration);
-    return replica ? { ...provenance, recoveredGeneration: replica.generation } : provenance;
+    return replica
+      ? { ...provenance, historical: recordedAsHistorical(provenance), recoveredGeneration: replica.generation }
+      : provenance;
   } catch {
     return provenance;
   }
@@ -670,6 +688,28 @@ export const isHistoricalWithoutSyncHistory = async (deps: MemoryCloudDeps): Pro
   );
   if (!isHistoricalRecovery(provenance, latest)) return false;
   return (await readCanonicalBase(deps.stackHome)) === null;
+};
+
+/**
+ * `stak push`'s Memory preflight (spec §8.5), wired by `program.ts`'s
+ * `memoryPushPreflight`. After `stak memory recover --backup N` the rollback is
+ * ordinary local changes against this machine's sync base, so push publishes it
+ * through the canonical merge like any other push, announced by `note`. The one
+ * case the merge does NOT cover is a historical recover with no canonical base
+ * yet: push would seed the base from the recovered generation itself and
+ * silently discard the rollback, so that case stays blocked (T15-4).
+ */
+export const resolveMemoryPushPreflight = async (
+  deps: MemoryCloudDeps,
+): Promise<{ blocked: boolean; reason?: string; note?: string }> => {
+  const status = await readMemoryCloudStatus(deps);
+  if (!status.historicalRecovery) return { blocked: false };
+  if ((await readCanonicalBase(deps.stackHome)) === null)
+    return { blocked: true, reason: HISTORICAL_NO_SYNC_HISTORY_MESSAGE };
+  return {
+    blocked: false,
+    note: `Memory: publishing a rollback to Backup #${status.localRecoveredGeneration ?? '?'}.`,
+  };
 };
 
 export const runMemoryCloudBackup = async (
@@ -1495,6 +1535,7 @@ export const runPasskeyRecover = async (
     cloudLatestAtRecovery: cloudLatest,
     recoveredAt: now().toISOString(),
     privacyMode: 'protected',
+    historical: isOlderThanLatest(result.generation, cloudLatest),
     ...(await restoredManifestFingerprint(deps.stackHome)),
   });
   await seedRecoveredProjectNames(deps);

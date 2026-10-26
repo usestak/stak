@@ -46,6 +46,7 @@ import {
 } from '@stack/memory';
 
 import { renderCombinedPullResult } from '../ui/cloud.js';
+import { renderMemoryCloudStatus } from '../ui/memory.js';
 import {
   canonicalMemoryStatus,
   diffPendingConflict,
@@ -62,7 +63,10 @@ import {
 import {
   publishCanonicalGeneration,
   pushStagedMemory,
+  isHistoricalWithoutSyncHistory,
+  readBackupSupersession,
   readMemoryCloudStatus,
+  resolveMemoryPushPreflight,
   runMemoryCloudBackup,
   runMemoryCloudProtect,
   runMemoryCloudRecover,
@@ -3147,6 +3151,193 @@ describe('spec 8.5: recover an old generation, then push it forward', () => {
     expect(await runMemoryCloudRecover(deps(Y.home, backend, Y.keys))).toMatchObject({ status: 'recovered', generation: 1 });
     expect(tombstonePaths(await readCanonicalMain(Y.home))).toEqual([]);
     expect(presentPaths(await readCanonicalMain(Y.home))).toEqual(['notes/MEMORY.md', 'notes/later.md']);
+  });
+});
+
+describe('two-machine manual test: a machine that is merely behind is never a historical recovery (Bug A)', () => {
+  const secureKeys = (dir: string) =>
+    fileLocalMemoryKeyStore(dir, { harden: () => Promise.resolve(true), verify: () => Promise.resolve(true) });
+  const fakeBackup = (): Promise<BackupResult> =>
+    Promise.resolve({ provider: 'claude', files: 0, projects: 0, createdAt: '2026-10-26T00:00:00.000Z' });
+  const deps = (home: string, backend: RemoteMemoryBackend | null, keysDir: string) => ({
+    stackHome: home,
+    backend,
+    localKeyStore: secureKeys(keysDir),
+    runLocalBackup: fakeBackup,
+  });
+  type Machine = { home: string; claude: string; dir: string; keys: string };
+  const machine = (name: string, tag: string): Machine => ({
+    home: path.join(root, `${name}-${tag}-stack`),
+    claude: path.join(root, `${name}-${tag}-claude`),
+    dir: path.join(root, `${name}-${tag}-proj`),
+    keys: path.join(root, `${name}-${tag}-keys`),
+  });
+  const bindAt = async (m: Machine, fixedProjectId?: string) => {
+    await mkdir(m.dir, { recursive: true });
+    const registry = await readLocalRegistry(m.home);
+    const minted = resolveOrMintProject(
+      registry,
+      { kind: 'local', vendorKey: `v-${path.basename(m.home)}` },
+      fixedProjectId ? () => fixedProjectId : mintProjectId,
+    );
+    await writeLocalRegistry(
+      m.home,
+      setBinding(minted.registry, { projectId: minted.projectId, dir: m.dir, boundAt: '2026-10-26T00:00:00.000Z', provenance: 'user-map' }),
+    );
+    return minted.projectId;
+  };
+  const note = (m: Machine, name: string) =>
+    path.join(m.claude, 'projects', encodeClaudeProjectKey(path.resolve(m.dir)), 'memory', name);
+  const edit = async (m: Machine, name: string, body: string) => {
+    await mkdir(path.dirname(note(m, name)), { recursive: true });
+    await writeFile(note(m, name), body, 'utf8');
+  };
+  /** `stak add .` */
+  const add = (m: Machine) => stageAllMemory({ stackHome: m.home, claudeHome: m.claude });
+  /** `stak push`'s Memory half: the preflight (rollback note / T15-4 block), then the push. */
+  const push = async (m: Machine, backend: RemoteMemoryBackend) => {
+    const preflight = await resolveMemoryPushPreflight(deps(m.home, backend, m.keys));
+    if (preflight.blocked) return { preflight, outcome: null };
+    return { preflight, outcome: await pushMemoryViaCanonical(deps(m.home, backend, m.keys), { claudeHome: m.claude }) };
+  };
+  /** `stak pull`'s Memory half: the fresh-machine recover (no local manifest yet), then the canonical pull. */
+  const pull = async (m: Machine, backend: RemoteMemoryBackend) => {
+    if (!(await readMemoryManifest(m.home))) await runMemoryCloudRecover(deps(m.home, backend, m.keys));
+    return pullMemoryViaCanonical(deps(m.home, backend, m.keys), { claudeHome: m.claude });
+  };
+
+  /** Steps 1-4: A pushes gen 0, B (fresh) pulls, B edits and pushes gen 1, A pulls. */
+  const toStep4 = async (tag: string) => {
+    const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), `bug-a-${tag}`);
+    const A = machine('a', tag);
+    const B = machine('b', tag);
+    const projectId = await bindAt(A);
+    await edit(A, 'MEMORY.md', 'a0');
+    await add(A);
+    expect((await push(A, backend)).outcome).toMatchObject({ status: 'pushed', generation: 0 });
+
+    await bindAt(B, projectId);
+    await pull(B, backend);
+    expect(await readFile(note(B, 'MEMORY.md'), 'utf8')).toBe('a0');
+    await edit(B, 'b.md', 'b1');
+    await add(B);
+    const b1 = await push(B, backend);
+    expect(b1.preflight).toEqual({ blocked: false });
+    expect(b1.outcome).toMatchObject({ status: 'pushed', generation: 1 });
+
+    expect((await pull(A, backend)).status).toBe('merged');
+    expect(await readFile(note(A, 'b.md'), 'utf8')).toBe('b1');
+    return { backend, A, B };
+  };
+
+  it("A push -> B fresh pull -> B push -> A pull -> A push: no rollback note, not historical; B's next push (merely behind) the same", async () => {
+    const { backend, A, B } = await toStep4('seq');
+    expect((await readMemoryCloudStatus(deps(A.home, backend, A.keys))).historicalRecovery).toBe(false);
+
+    // Step 5: A edits, adds, pushes.
+    await edit(A, 'MEMORY.md', 'a2');
+    await add(A);
+    const a2 = await push(A, backend);
+    expect(a2.preflight).toEqual({ blocked: false });
+    expect(a2.outcome).toMatchObject({ status: 'pushed', generation: 2 });
+
+    // Step 6: B is now merely BEHIND (last pushed gen 1, Cloud is at gen 2).
+    expect((await readMemoryCloudStatus(deps(B.home, backend, B.keys))).historicalRecovery).toBe(false);
+    expect(await isHistoricalWithoutSyncHistory(deps(B.home, backend, B.keys))).toBe(false);
+    expect((await readBackupSupersession(deps(B.home, backend, B.keys))).supersedes).toBe(false);
+    await edit(B, 'b.md', 'b3');
+    await add(B);
+    const b3 = await push(B, backend);
+    expect(b3.preflight).toEqual({ blocked: false });
+    expect(b3.outcome).toMatchObject({ status: 'pushed', generation: 3 });
+    expect((await readMemoryCloudStatus(deps(B.home, backend, B.keys))).historicalRecovery).toBe(false);
+  });
+
+  it('a pull that syncs this machine records the synced generation (status reports it, not the older push)', async () => {
+    const { backend, A } = await toStep4('pull-records');
+    const status = await readMemoryCloudStatus(deps(A.home, backend, A.keys));
+    expect(status.localRecoveredGeneration).toBe(1);
+    expect(status.historicalRecovery).toBe(false);
+  });
+
+  it('a fresh machine that recovered the latest and never synced, then fell behind, is not blocked by the no-base check', async () => {
+    const { backend, A } = await toStep4('fresh-behind');
+    const F = machine('f', 'fresh-behind');
+    expect(await runMemoryCloudRecover(deps(F.home, backend, F.keys))).toMatchObject({ status: 'recovered', generation: 1 });
+    expect(await readCanonicalBase(F.home)).toBeNull();
+    await edit(A, 'MEMORY.md', 'a2');
+    await add(A);
+    expect((await push(A, backend)).outcome).toMatchObject({ status: 'pushed', generation: 2 });
+    expect(await isHistoricalWithoutSyncHistory(deps(F.home, backend, F.keys))).toBe(false);
+    expect(await resolveMemoryPushPreflight(deps(F.home, backend, F.keys))).toEqual({ blocked: false });
+    expect((await readBackupSupersession(deps(F.home, backend, F.keys))).noSyncHistory).toBe(false);
+  });
+
+  it('a genuine `recover --backup <older>` then push still announces the rollback, and status reports it', async () => {
+    const { backend, A } = await toStep4('genuine');
+    expect(await runMemoryCloudRecover(deps(A.home, backend, A.keys), { generation: 0 })).toMatchObject({ status: 'recovered', generation: 0 });
+    expect((await readMemoryCloudStatus(deps(A.home, backend, A.keys))).historicalRecovery).toBe(true);
+    expect((await readBackupSupersession(deps(A.home, backend, A.keys))).supersedes).toBe(true);
+    const rolled = await push(A, backend);
+    expect(rolled.preflight).toEqual({ blocked: false, note: 'Memory: publishing a rollback to Backup #0.' });
+    expect(rolled.outcome).toMatchObject({ status: 'pushed', generation: 2 });
+    expect((await readMemoryCloudStatus(deps(A.home, backend, A.keys))).historicalRecovery).toBe(false);
+  });
+
+  it('a genuine historical recover is still announced when Cloud moves on before this machine pushes', async () => {
+    const { backend, A, B } = await toStep4('genuine-moved');
+    expect(await runMemoryCloudRecover(deps(A.home, backend, A.keys), { generation: 0 })).toMatchObject({ status: 'recovered' });
+    await edit(B, 'other.md', 'from B');
+    await add(B);
+    expect((await push(B, backend)).outcome).toMatchObject({ status: 'pushed', generation: 2 });
+    expect((await push(A, backend)).preflight).toEqual({ blocked: false, note: 'Memory: publishing a rollback to Backup #0.' });
+  });
+
+  it('the no-base block still fires for a genuine historical recover with no sync base', async () => {
+    const { backend } = await toStep4('no-base');
+    const F = machine('f', 'no-base');
+    expect(await runMemoryCloudRecover(deps(F.home, backend, F.keys), { generation: 0 })).toMatchObject({ status: 'recovered' });
+    expect(await readCanonicalBase(F.home)).toBeNull();
+    expect(await isHistoricalWithoutSyncHistory(deps(F.home, backend, F.keys))).toBe(true);
+    const preflight = await resolveMemoryPushPreflight(deps(F.home, backend, F.keys));
+    expect(preflight.blocked).toBe(true);
+    expect(preflight.reason).toContain('stak memory recover');
+  });
+
+  it('after A protects, following a pull, `memory status` shows no "Historical recovery"', async () => {
+    const { backend, A, B } = await toStep4('protect');
+    await edit(A, 'MEMORY.md', 'a2');
+    await add(A);
+    expect((await push(A, backend)).outcome).toMatchObject({ status: 'pushed', generation: 2 });
+    await edit(B, 'b.md', 'b3');
+    await add(B);
+    expect((await push(B, backend)).outcome).toMatchObject({ status: 'pushed', generation: 3 });
+    expect((await pull(A, backend)).status).toBe('merged');
+
+    expect(
+      (await runMemoryCloudProtect({ ...deps(A.home, backend, A.keys), backend }, { recoveryKey: generateRecoveryKey() })).status,
+    ).toBe('protected');
+    const status = await readMemoryCloudStatus(deps(A.home, backend, A.keys));
+    expect(status.historicalRecovery).toBe(false);
+    expect(status.localRecoveredGeneration).toBe(status.latestGeneration);
+    const rendered = renderMemoryCloudStatus(null, status);
+    expect(rendered).not.toContain('Historical recovery');
+    expect(rendered).not.toContain('Local source');
+    expect(await resolveMemoryPushPreflight(deps(A.home, backend, A.keys))).toEqual({ blocked: false });
+
+    // B (did not protect, merely behind) is not historical either.
+    expect((await readMemoryCloudStatus(deps(B.home, backend, B.keys))).historicalRecovery).toBe(false);
+  });
+
+  it('a genuine historical recover before protect stays historical after protect', async () => {
+    const { backend, A } = await toStep4('genuine-protect');
+    expect(await runMemoryCloudRecover(deps(A.home, backend, A.keys), { generation: 0 })).toMatchObject({ status: 'recovered' });
+    expect(
+      (await runMemoryCloudProtect({ ...deps(A.home, backend, A.keys), backend }, { recoveryKey: generateRecoveryKey() })).status,
+    ).toBe('protected');
+    const status = await readMemoryCloudStatus(deps(A.home, backend, A.keys));
+    expect(status.historicalRecovery).toBe(true);
+    expect(status.localRecoveredGeneration).toBeLessThan(status.latestGeneration as number);
   });
 });
 
