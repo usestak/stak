@@ -109,15 +109,20 @@ const isConflictError = (error: unknown): boolean =>
  */
 export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> => {
   const maxAttempts = deps.maxAttempts ?? 3;
-  const local = await deps.getLocalMain();
   const localGlobal = deps.getLocalGlobalDigest ? await deps.getLocalGlobalDigest() : undefined;
   // Every base this push writes records the global Memory it synced.
   const withGlobal = (next: { generation: number; main: CanonicalMainManifest }) =>
     localGlobal !== undefined ? { ...next, globalDigest: localGlobal } : next;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    // Remote FIRST, then base and local, on EVERY attempt (spec §4.2.1 review
+    // fix C1): fetching may teach this machine a project alias (the caller
+    // folds local and base with the same alias map as the fetched remote), so
+    // local and base are only read after it — never reused from an earlier
+    // attempt's, possibly un-folded, read.
     const remote = await deps.fetchRemote();
     const base = await deps.getBase();
+    const local = await deps.getLocalMain();
     // Final review I1 (re-fix): global Memory travels in the same generation
     // but is never pulled onto an established machine, so two machines can
     // legitimately hold different global files. Global needs publishing only

@@ -12,6 +12,7 @@ import {
   effectiveCanonicalBase,
   encodeClaudeProjectKey,
   fetchRemoteCanonical,
+  foldPendingMerge,
   globalManifestDigest,
   gitClaimOf,
   hashBytes,
@@ -66,7 +67,7 @@ import {
 } from '@stack/memory';
 
 import { resolveCanonicalProjectId } from './canonical-identity.js';
-import { foldProjectMemory, type ProjectFoldNote } from './project-fold.js';
+import { foldingFetch, foldNoteCollector, foldProjectMemory, type ProjectFoldNote } from './project-fold.js';
 import { stageMemoryWithProjectDedup, type StageMemoryOptions } from './stage-memory.js';
 import { hasNothingToPush, publishCanonicalGeneration, recordInSyncWithCloud, type MemoryCloudDeps } from './cloud-ops.js';
 import {
@@ -1106,11 +1107,14 @@ const remoteOf = (deps: MemoryCloudDeps, mmk: Buffer | undefined) => {
   // project fold can use its registry snapshot before any sync decision; the
   // engine's first `fetch` then reuses that result instead of fetching again.
   let prefetched: Awaited<ReturnType<typeof fetchNow>> | undefined;
-  const prefetch = async () => {
+  const collector = foldNoteCollector();
+  /** Fetch Cloud's latest and fold local state with its snapshot (before the
+   * merge-pending gate and any other sync decision). */
+  const prefetchAndFold = async () => {
     prefetched = await fetchNow();
-    return prefetched;
+    collector.add((await foldProjectMemory(deps.stackHome, { remoteSnapshot: lastRegistrySnapshot })).notes);
   };
-  const fetch = async () => {
+  const cachedFetch = async () => {
     if (prefetched !== undefined) {
       const result = prefetched;
       prefetched = undefined;
@@ -1118,7 +1122,15 @@ const remoteOf = (deps: MemoryCloudDeps, mmk: Buffer | undefined) => {
     }
     return fetchNow();
   };
-  return { fetch, prefetch, lastRegistrySnapshot: () => lastRegistrySnapshot };
+  // Review fix C1: every engine fetch, including a retry's, re-learns and
+  // re-folds local/base with that fetch's alias map before returning the
+  // remote folded with the same map.
+  const fetch = foldingFetch(deps.stackHome, cachedFetch, () => lastRegistrySnapshot, collector.add);
+  const foldedExtra = () => {
+    const folded = collector.notes();
+    return folded.length > 0 ? { folded } : {};
+  };
+  return { fetch, prefetchAndFold, foldedExtra, lastRegistrySnapshot: () => lastRegistrySnapshot };
 };
 
 /**
@@ -1209,12 +1221,8 @@ export const pushMemoryViaCanonical = async (
   const remote = remoteOf(deps, mmk);
   // Spec §4.2.1: fold before ANY sync decision (including the pending-merge
   // gate below), with the alias map local registry ∪ Cloud latest's snapshot.
-  // Cloud's latest itself comes back folded with the same map.
-  await remote.prefetch();
-  const { notes: folded } = await foldProjectMemory(deps.stackHome, {
-    remoteSnapshot: remote.lastRegistrySnapshot(),
-  });
-  const foldedExtra = folded.length > 0 ? { folded } : {};
+  // Every engine fetch (retries too) folds again — see `remoteOf`.
+  await remote.prefetchAndFold();
   // Task 14 fix round 1 — spec A.6 `merge-pending`: a pending merge that is
   // still current against an unmoved Cloud stops here, before anything
   // (base seeding, merging) changes; its partial resolutions are kept.
@@ -1246,7 +1254,7 @@ export const pushMemoryViaCanonical = async (
     savePendingMerge: (pending) => writePendingMerge(deps.stackHome, pending),
     clearPendingMerge: () => clearPendingMerge(deps.stackHome),
   });
-  if (outcome.status === 'conflict') return { status: 'conflict', conflicts: outcome.conflicts, ...foldedExtra };
+  if (outcome.status === 'conflict') return { status: 'conflict', conflicts: outcome.conflicts, ...remote.foldedExtra() };
   // Final review T15-2: up to date means local equals Cloud — record it.
   if (outcome.status === 'up-to-date') await recordInSyncWithCloud(deps, outcome.generation);
   // Materializes on any non-conflict outcome, including `retry-exhausted` —
@@ -1263,7 +1271,7 @@ export const pushMemoryViaCanonical = async (
     ...(materialize.unavailable.length > 0 ? { unavailable: materialize.unavailable } : {}),
     ...(materialize.conflicts.length > 0 ? { conflicts: materialize.conflicts } : {}),
     ...(restoredFromStak > 0 ? { restoredFromStak } : {}),
-    ...foldedExtra,
+    ...remote.foldedExtra(),
   };
   if (outcome.status === 'retry-exhausted') return { status: 'retry-exhausted', ...extras };
   return { status: outcome.status, generation: outcome.generation, ...extras };
@@ -1346,11 +1354,7 @@ export const pullMemoryViaCanonical = async (
   // Spec §4.2.1: fold before any sync decision — see `pushMemoryViaCanonical`.
   // A machine that never got Cloud's reconciliation learns it here, from the
   // snapshot of the generation it is pulling.
-  await remote.prefetch();
-  const { notes: folded } = await foldProjectMemory(deps.stackHome, {
-    remoteSnapshot: remote.lastRegistrySnapshot(),
-  });
-  const foldedExtra = folded.length > 0 ? { folded } : {};
+  await remote.prefetchAndFold();
   // Task 14 fix round 1 — spec A.6 `merge-pending`: a pending merge that is
   // still current against an unmoved Cloud stops here, before anything
   // (base seeding, merging) changes; its partial resolutions are kept.
@@ -1369,7 +1373,7 @@ export const pullMemoryViaCanonical = async (
     savePendingMerge: (pending) => writePendingMerge(deps.stackHome, pending),
     clearPendingMerge: () => clearPendingMerge(deps.stackHome),
   });
-  if (outcome.status === 'conflict') return { status: 'conflict', conflicts: outcome.conflicts, ...foldedExtra };
+  if (outcome.status === 'conflict') return { status: 'conflict', conflicts: outcome.conflicts, ...remote.foldedExtra() };
   await recordPullSync(deps, outcome.status === 'merged-local');
   const materialize = await materializeCanonicalProjects(deps.stackHome, {
     ...discovery,
@@ -1379,7 +1383,7 @@ export const pullMemoryViaCanonical = async (
     ...(materialize.unavailable.length > 0 ? { unavailable: materialize.unavailable } : {}),
     ...(materialize.conflicts.length > 0 ? { conflicts: materialize.conflicts } : {}),
     ...(restoredFromStak > 0 ? { restoredFromStak } : {}),
-    ...foldedExtra,
+    ...remote.foldedExtra(),
   };
   return outcome.status === 'merged-local'
     ? { status: 'merged', ...extras }
@@ -1626,10 +1630,18 @@ export const diffPendingConflict = async (
   projectSelector: string,
   docPath: string,
 ): Promise<ConflictDiff> => {
-  const pending = await requirePending(deps.stackHome);
+  const stored = await requirePending(deps.stackHome);
+  const cloud = await fetchCloudAtGeneration(deps, stored.basedOnGeneration);
+  // Spec §4.2.1 (review fix M4): Cloud's side comes back folded, so fold local
+  // Memory and the pending merge with the same alias map — in memory only;
+  // diff never writes Memory.
+  const fold = await foldProjectMemory(deps.stackHome, {
+    remoteSnapshot: cloud.registrySnapshot,
+    persist: false,
+  });
+  const pending = foldPendingMerge(stored, fold.aliasOf).pending;
   const conflict = findPendingConflict(pending, projectSelector, docPath);
-  const cloud = await fetchCloudAtGeneration(deps, pending.basedOnGeneration);
-  const local = await readCanonicalMain(deps.stackHome);
+  const local = fold.main;
   const sideOf = async (doc: CanonicalDoc | undefined): Promise<ConflictSide> => {
     if (!doc) return { state: 'absent' };
     if (doc.state === 'deleted') return { state: 'deleted' };

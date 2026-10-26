@@ -174,6 +174,8 @@ export const renderMemoryRecover = (outcome: CloudRecoverOutcome): string => {
     '',
     `${plainFiles(outcome.files)} available`,
     `Privacy: ${outcome.privacyMode === 'protected' ? 'Protected' : 'Standard'}`,
+    // Spec §4.2.1 (review fix M3): a project merged by the recover, once.
+    ...projectFoldNotes(outcome.folded).map((note) => `${note}.`),
     '',
     'Run `stak memory restore`.',
   ]);

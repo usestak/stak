@@ -28,8 +28,10 @@ import {
 } from '@stack/memory';
 
 import { projectFoldNotes } from '../ui/cloud.js';
+import { renderMemoryRecover } from '../ui/memory.js';
 import {
   canonicalMemoryStatus,
+  diffPendingConflict,
   pullMemoryViaCanonical,
   pushMemoryViaCanonical,
   stageAllMemory,
@@ -328,6 +330,120 @@ describe('two Project IDs for the same repository (spec §4.2.1)', () => {
     expect(projectIds(await readCanonicalMain(ctx.A.stackHome))).toEqual([ctx.Y]);
     expect(projectIds(await cloudMain(ctx.backend))).toEqual([ctx.Y]);
     await expectNoNativeDelete(ctx.A);
+  });
+
+  // Review C1: A pushes under X while B's alias-carrying push lands first; A's
+  // retry must fold local, base and remote with ONE map (the new one).
+  it.each(['push', 'backup'] as const)(
+    'a %s retry after another machine published the alias never deletes native files or re-splits (C1)',
+    async (command) => {
+      const raw = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), `fold-race-${command}`);
+      const A = await machine('a');
+      const B = await machine('b');
+      await writeNative(A, 'MEMORY.md', '# index from A\n');
+      await writeNative(A, 'auth.md', 'auth notes from A');
+      const X = (await stageAllMemory({ stackHome: A.stackHome, ...A.discovery })).canonical.projects[0]!.projectId;
+      expect((await pushMemoryViaCanonical(A.deps(raw), A.discovery)).status).toBe('pushed');
+      await expectNoNativeDelete(A);
+
+      expect((await runMemoryCloudRecover(B.deps(raw))).status).toBe('recovered');
+      await pullMemoryViaCanonical(B.deps(raw), B.discovery);
+      const Y = mintProjectId();
+      await applyCheckinReconciliation(B.stackHome, [{ fromProjectId: X, toProjectId: Y }]);
+      await writeNative(B, 'auth.md', 'auth notes, edited on B');
+      await writeNative(B, 'deploy.md', 'deploy notes from B');
+      await stageAllMemory({ stackHome: B.stackHome, ...B.discovery });
+
+      // A stages under X (it has not learned the alias) and syncs; B's push
+      // lands between A's fetch and A's publish.
+      await writeNative(A, 'style.md', 'style notes from A');
+      await stageAllMemory({ stackHome: A.stackHome, ...A.discovery });
+      await expectNoNativeDelete(A);
+      let raced = false;
+      const racing = new Proxy(raw, {
+        get(target, prop, receiver) {
+          if (prop === 'createGeneration')
+            return async (input: Parameters<RemoteMemoryBackend['createGeneration']>[0]) => {
+              if (!raced) {
+                raced = true;
+                expect((await pushMemoryViaCanonical(B.deps(raw), B.discovery)).status).toBe('pushed');
+              }
+              return target.createGeneration(input);
+            };
+          const value: unknown = Reflect.get(target, prop, receiver);
+          return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+        },
+      });
+      if (command === 'push') {
+        const pushA = await pushMemoryViaCanonical(A.deps(racing), A.discovery);
+        expect(pushA.status).toBe('pushed');
+        expect(pushA.unavailable ?? []).toEqual([]);
+        expect(pushA.conflicts ?? []).toEqual([]);
+        expect(await nativeFiles(A)).toEqual({
+          'MEMORY.md': '# index from A\n',
+          'auth.md': 'auth notes, edited on B',
+          'deploy.md': 'deploy notes from B',
+          'style.md': 'style notes from A',
+        });
+      } else {
+        const backupA = await runMemoryCloudBackup(A.deps(racing));
+        expect(backupA.cloud.status).toBe('standard');
+      }
+      expect(raced).toBe(true);
+      await expectNoNativeDelete(A);
+
+      // One project in Cloud, and its former ID survived into the snapshot.
+      expect(projectIds(await cloudMain(raw))).toEqual([Y]);
+      const latest = (await raw.getLatest())!;
+      const bundle = parseBundle(await raw.getPayload(latest.backupId));
+      const snapshot = JSON.parse(Buffer.from(bundle.registryB64!, 'base64').toString('utf8')) as {
+        projects: { projectId: string; formerIds?: string[] }[];
+      };
+      expect(snapshot.projects.map((p) => p.projectId)).toEqual([Y]);
+      expect(snapshot.projects[0]!.formerIds).toEqual([X]);
+      expect(recordFor(await readLocalRegistry(A.stackHome), X)).toBeUndefined();
+      expect(projectIds(await readCanonicalMain(A.stackHome))).toEqual([Y]);
+
+      // B gets A's file; nothing on B is deleted either.
+      const pullB = await pullMemoryViaCanonical(B.deps(raw), B.discovery);
+      expect(pullB.conflicts ?? []).toEqual([]);
+      expect((await nativeFiles(B))['style.md']).toBe('style notes from A');
+      await expectNoNativeDelete(B);
+    },
+  );
+
+  it('recover folds and prints the fold line (M3)', async () => {
+    const ctx = await reproduceUpToReconciliation('recover');
+    const outcome = await runMemoryCloudRecover(ctx.A.deps(ctx.backend));
+    expect(outcome.status).toBe('recovered');
+    expect(outcome.status === 'recovered' ? outcome.folded : undefined).toEqual([
+      { fromProjectId: ctx.X, toProjectId: ctx.Y, keptBoth: 0 },
+    ]);
+    expect(renderMemoryRecover(outcome)).toContain(
+      `Merged project ${ctx.X.slice(0, 10)}… into ${ctx.Y.slice(0, 10)}… (same repository).`,
+    );
+    expect(projectIds((await readCanonicalBase(ctx.A.stackHome))!.main)).toEqual([ctx.Y]);
+    await expectNoNativeDelete(ctx.A);
+  });
+
+  it('`stak memory diff` folds local Memory and the pending merge with the same map as Cloud (M4)', async () => {
+    const ctx = await reproduceUpToReconciliation('diff');
+    const { A, X, Y, backend } = ctx;
+    // A edits the file B also edited, stages (still under X), and pulls: conflict.
+    await writeNative(A, 'auth.md', 'auth notes, edited on A');
+    await stageAllMemory({ stackHome: A.stackHome, ...A.discovery });
+    expect((await pullMemoryViaCanonical(A.deps(backend), A.discovery)).status).toBe('conflict');
+    // Simulate a pending merge and local Memory written before the fold (e.g.
+    // by an older CLI): both still under X; the registry knows X became Y.
+    const canonicalDir = path.join(A.stackHome, 'memory', 'canonical');
+    for (const file of ['merge.json', 'main.json']) {
+      const text = await readFile(path.join(canonicalDir, file), 'utf8');
+      await writeFile(path.join(canonicalDir, file), text.split(Y).join(X), 'utf8');
+    }
+    const diff = await diffPendingConflict(A.deps(backend), Y, 'notes/auth.md');
+    expect(diff.projectId).toBe(Y);
+    expect(diff.local).toEqual({ state: 'present', text: 'auth notes, edited on A' });
+    expect(diff.cloud).toEqual({ state: 'present', text: 'auth notes, edited on B' });
   });
 
   it('both IDs hold different content at the same path: keep both, identically on every machine', async () => {

@@ -18,11 +18,10 @@ import { readFile } from 'node:fs/promises';
 
 import { applyRecoveredProjectNames } from './project-ops.js';
 import { assertNoCurrentPendingMerge, MemorySyncError } from './pending-merge.js';
-import { foldProjectMemory, type ProjectFoldNote } from './project-fold.js';
+import { foldingFetch, foldNoteCollector, foldProjectMemory, type ProjectFoldNote } from './project-fold.js';
 import {
   BundleError,
   foldProjectAliases,
-  projectAliasResolver,
   CIPHER_VERSION,
   addRecoveryFileWrapper,
   asBridgeFailure,
@@ -760,7 +759,7 @@ export const runMemoryCloudBackup = async (
     // Spec §4.2.1: Cloud's latest is fetched once up front for the project
     // fold below; the merge engine's first fetch reuses it.
     let prefetched: Awaited<ReturnType<typeof fetchNow>> | undefined;
-    const fetchRemote = async () => {
+    const cachedFetch = async () => {
       if (prefetched !== undefined) {
         const result = prefetched;
         prefetched = undefined;
@@ -768,6 +767,10 @@ export const runMemoryCloudBackup = async (
       }
       return fetchNow();
     };
+    const collector = foldNoteCollector();
+    // Review fix C1: every engine fetch (a retry's too) re-learns aliases and
+    // re-folds local/base with that fetch's map before returning the remote.
+    const fetchRemote = foldingFetch(deps.stackHome, cachedFetch, () => remoteSnapshot, collector.add);
     const fetchNow = async () => {
       remoteSnapshot = undefined;
       if (!deps.backend) return null;
@@ -789,8 +792,11 @@ export const runMemoryCloudBackup = async (
     };
     // Spec §4.2.1: fold before any sync decision, exactly as `stak push` does.
     prefetched = await fetchNow();
-    const { notes: folded } = await foldProjectMemory(deps.stackHome, { remoteSnapshot });
-    const foldedExtra = folded.length > 0 ? { folded } : {};
+    collector.add((await foldProjectMemory(deps.stackHome, { remoteSnapshot })).notes);
+    const foldedExtra = () => {
+      const folded = collector.notes();
+      return folded.length > 0 ? { folded } : {};
+    };
 
     // Task 14 fix round 1 — spec A.6 `merge-pending`, the same gate as `stak
     // push`: a still-current pending merge against an unmoved Cloud stops here
@@ -851,12 +857,12 @@ export const runMemoryCloudBackup = async (
       };
     if (outcome.status === 'up-to-date') {
       await recordInSyncWithCloud(deps, outcome.generation);
-      return { local, cloud: { status: 'up-to-date', generation: outcome.generation, ...foldedExtra } };
+      return { local, cloud: { status: 'up-to-date', generation: outcome.generation, ...foldedExtra() } };
     }
     // 'pushed': a generation was actually created, in whichever privacy mode
     // this account is currently in (read once, above, before publishing).
     const mode: 'standard' | 'protected' = profile?.privacyMode ?? 'standard';
-    return { local, cloud: { status: mode, generation: outcome.generation, ...foldedExtra } };
+    return { local, cloud: { status: mode, generation: outcome.generation, ...foldedExtra() } };
   } catch (error) {
     return { local, cloud: { status: 'failed', message: errorMessage(error) } };
   }
@@ -880,6 +886,8 @@ export type CloudRecoverOutcome =
        */
       files: number;
       generation: number;
+      /** Spec §4.2.1: former Project IDs folded after the recover. */
+      folded?: ProjectFoldNote[];
     }
   | { status: 'needs-recovery-method' }
   | { status: 'not-authenticated' }
@@ -910,15 +918,14 @@ const recoveredFileCount = async (stackHome: string): Promise<number> => {
  * snapshot's former IDs. Fold the restored state on disk, and fold the
  * pre-recover Memory with the SAME aliases, so the rollback comparison below
  * never mistakes a merged project for deleted documents. Returns the folded
- * pre-recover Memory.
+ * pre-recover Memory and the fold line notes (review fix M3).
  */
 const foldAfterRecover = async (
   stackHome: string,
   before: CanonicalMainManifest,
-): Promise<CanonicalMainManifest> => {
-  const aliasOf = projectAliasResolver(await readLocalRegistry(stackHome));
-  await foldProjectMemory(stackHome);
-  return foldProjectAliases(before, aliasOf).main;
+): Promise<{ before: CanonicalMainManifest; notes: ProjectFoldNote[] }> => {
+  const { notes, aliasOf } = await foldProjectMemory(stackHome);
+  return { before: foldProjectAliases(before, aliasOf).main, notes };
 };
 
 /**
@@ -996,7 +1003,8 @@ export const runMemoryCloudRecover = async (
         ? { generation: options.generation }
         : {}),
     });
-    await recordRollbackTombstones(deps, await foldAfterRecover(deps.stackHome, before), result.generation, cloudLatest);
+    const recoverFold = await foldAfterRecover(deps.stackHome, before);
+    await recordRollbackTombstones(deps, recoverFold.before, result.generation, cloudLatest);
     await recordRecoveryProvenance(deps, {
       generation: result.generation,
       privacyMode: 'standard',
@@ -1006,6 +1014,7 @@ export const runMemoryCloudRecover = async (
     await seedRecoveredProjectNames(deps);
     return {
       status: 'recovered',
+      ...(recoverFold.notes.length > 0 ? { folded: recoverFold.notes } : {}),
       privacyMode: 'standard',
       objects: result.objects,
       files: await recoveredFileCount(deps.stackHome),
@@ -1030,7 +1039,8 @@ export const runMemoryCloudRecover = async (
       ? { generation: options.generation }
       : {}),
   });
-  await recordRollbackTombstones(deps, await foldAfterRecover(deps.stackHome, before), result.generation, cloudLatest);
+  const recoverFold = await foldAfterRecover(deps.stackHome, before);
+  await recordRollbackTombstones(deps, recoverFold.before, result.generation, cloudLatest);
   // Recovery already succeeded; enrolling this device is best-effort and must not
   // persist insecure key material (enrollDeviceSafe fails closed internally).
   if (unlockedViaRecoveryKey) await enrollDeviceSafe(deps.localKeyStore, mmk);
@@ -1043,6 +1053,7 @@ export const runMemoryCloudRecover = async (
   await seedRecoveredProjectNames(deps);
   return {
     status: 'recovered',
+    ...(recoverFold.notes.length > 0 ? { folded: recoverFold.notes } : {}),
     privacyMode: 'protected',
     objects: result.objects,
     files: await recoveredFileCount(deps.stackHome),
@@ -1564,7 +1575,8 @@ export const runPasskeyRecover = async (
       ? { generation: options.generation }
       : {}),
   });
-  await recordRollbackTombstones(deps, await foldAfterRecover(deps.stackHome, before), result.generation, cloudLatest);
+  const recoverFold = await foldAfterRecover(deps.stackHome, before);
+  await recordRollbackTombstones(deps, recoverFold.before, result.generation, cloudLatest);
   // Recovery already succeeded; enroll best-effort (never persists insecure state).
   await enrollDeviceSafe(deps.localKeyStore, mmk);
   await writeLocalRecoveryState(deps.stackHome, {
@@ -1579,6 +1591,7 @@ export const runPasskeyRecover = async (
   await seedRecoveredProjectNames(deps);
   return {
     status: 'recovered',
+    ...(recoverFold.notes.length > 0 ? { folded: recoverFold.notes } : {}),
     objects: result.objects,
     files: await recoveredFileCount(deps.stackHome),
     generation: result.generation,
