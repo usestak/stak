@@ -96,6 +96,43 @@ file independently end up with the same document automatically. **Renames** coun
 as "delete the old path, add the new one". A later version may detect renames, and
 that won't change this identity model.
 
+### 4.2.1 When two Project IDs turn out to be the same project (addition, 2026-10-26)
+
+Two machines can each create a Project ID for the same repository before they
+sync. STAK Cloud then reports that the repository is already known under another ID
+(its Git-based reconciliation), and the machine adopts that ID. When this happens,
+STAK **merges the two projects into one**: the ID Cloud uses (the *surviving* ID)
+keeps everything, and the other ID (the *former* ID) becomes an alias of it.
+
+What every machine does, in the same way:
+
+- **It remembers the alias.** The surviving project's record lists its former IDs.
+  Former IDs travel in the registry snapshot, so every machine learns them, including
+  machines that never got the reconciliation from Cloud themselves.
+- **It folds Memory filed under a former ID into the surviving ID** before any sync
+  decision. It does this in its own Memory, in its merge base, in any pending merge,
+  in its projection, and in every Cloud version it reads. Because all three sides of
+  every merge are folded first, the rename never looks like a deletion.
+- **The fold rules** are deterministic, so every machine gets the same result:
+  - A document only the former ID has moves to the surviving ID at the same path.
+  - The same path with the same content becomes one document.
+  - The same path with different content keeps the surviving ID's version at the
+    path and the former ID's version at the keep-both path
+    (`<stem>.conflict-<hash>.<ext>`, as in §8.3). Nothing is lost, and the user is
+    told.
+  - A present document beats a deletion of the same path, so a fold never deletes
+    content.
+  - Afterwards the former ID holds nothing.
+- **Agent files are never deleted or rewritten by a fold.** Both IDs point at the
+  same project folder, so only STAK's bookkeeping changes; the files on disk stay as
+  they are.
+- **Chains resolve.** If A became B and B became C, everything ends up under C.
+- **The user sees one line**, for example: "Merged project prj_rvznx… into prj_4f68…
+  (same repository); 1 file kept both."
+
+The same fold applies when a project's identity strengthens from a local folder to a
+Git repository (an older local-only ID adopted into the Git-identified one).
+
 ### 4.3 Agent files are a working copy
 
 This works like Git:
