@@ -15,6 +15,7 @@ import { randomUUID } from 'node:crypto';
 
 import { hashBytes, readMemoryManifest, writeMemoryManifest } from '../store.js';
 import type { CanonicalMainManifest } from '../canonical/domain.js';
+import type { PortableRegistrySnapshot } from '../project/registry.js';
 import { convertV1BundleForRecover } from '../canonical/convert-v1.js';
 import { isLocalStoreMigrated } from '../canonical/migrate.js';
 import { writeCanonicalMain } from '../canonical/store.js';
@@ -85,6 +86,9 @@ export const standardCloudBackup = async (options: {
   /** Bundle this canonical Memory instead of whatever's on disk (Task 13
    * Important-4 fix) — see `bundleFromStore`'s identical option. */
   canonicalMainOverride?: CanonicalMainManifest;
+  /** Bundle this registry snapshot instead of the store's file — see
+   * `bundleFromStore`'s identical option. */
+  registrySnapshotOverride?: PortableRegistrySnapshot;
   /**
    * The EXACT `expectedParent` to publish against (Task 13 fix round 2,
    * Critical-1: lost update). When provided (including explicitly `null`, for
@@ -102,7 +106,10 @@ export const standardCloudBackup = async (options: {
   await options.backend.ensureProfile(REMOTE_FORMAT_VERSION);
   const { bundle, bytes } = await bundleFromStore(
     options.stackHome,
-    options.canonicalMainOverride ? { canonicalMainOverride: options.canonicalMainOverride } : {},
+    {
+      ...(options.canonicalMainOverride ? { canonicalMainOverride: options.canonicalMainOverride } : {}),
+      ...(options.registrySnapshotOverride ? { registrySnapshotOverride: options.registrySnapshotOverride } : {}),
+    },
   );
   const expectedParent =
     options.expectedParent !== undefined
@@ -132,6 +139,9 @@ export const protectedCloudBackup = async (options: {
   /** Bundle this canonical Memory instead of whatever's on disk (Task 13
    * Important-4 fix) — see `bundleFromStore`'s identical option. */
   canonicalMainOverride?: CanonicalMainManifest;
+  /** Bundle this registry snapshot instead of the store's file — see
+   * `bundleFromStore`'s identical option. */
+  registrySnapshotOverride?: PortableRegistrySnapshot;
   /** The EXACT `expectedParent` to publish against — see
    * `standardCloudBackup`'s identical option for why `getLatest()` must never
    * be re-read here once the canonical push engine already fetched remote. */
@@ -139,7 +149,10 @@ export const protectedCloudBackup = async (options: {
 }): Promise<CloudBackupResult> => {
   const { bundle, bytes: bundleBytes } = await bundleFromStore(
     options.stackHome,
-    options.canonicalMainOverride ? { canonicalMainOverride: options.canonicalMainOverride } : {},
+    {
+      ...(options.canonicalMainOverride ? { canonicalMainOverride: options.canonicalMainOverride } : {}),
+      ...(options.registrySnapshotOverride ? { registrySnapshotOverride: options.registrySnapshotOverride } : {}),
+    },
   );
   const backupId = randomUUID();
   const dek = randomKey();

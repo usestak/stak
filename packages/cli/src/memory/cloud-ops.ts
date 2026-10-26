@@ -51,6 +51,9 @@ import {
   readCanonicalMain,
   readLocalRegistry,
   refreshPortableSnapshot,
+  composeBundleSnapshot,
+  type BundleSnapshotConflict,
+  type PortableRegistrySnapshot,
   resolveProjectForIdentity,
   standardCloudBackup,
   unwrapWithRecoveryKey,
@@ -347,16 +350,18 @@ export const hasNothingToPush = async (deps: MemoryCloudDeps): Promise<boolean> 
  * `canonicalMainOverride` bundles THAT canonical Memory instead of whatever's on
  * disk (see `bundleFromStore`'s identical option) — so this digest reflects
  * exactly what a publish is about to upload, never a stale on-disk value.
+ * `registrySnapshotOverride` does the same for the bundled registry snapshot.
  */
 const computeSemanticDigest = async (
   stackHome: string,
   canonicalMainOverride?: CanonicalMainManifest,
+  registrySnapshotOverride?: PortableRegistrySnapshot,
 ): Promise<string | null> => {
   try {
-    const { bytes } = await bundleFromStore(
-      stackHome,
-      canonicalMainOverride ? { canonicalMainOverride } : {},
-    );
+    const { bytes } = await bundleFromStore(stackHome, {
+      ...(canonicalMainOverride ? { canonicalMainOverride } : {}),
+      ...(registrySnapshotOverride ? { registrySnapshotOverride } : {}),
+    });
     return hashBytes(bytes);
   } catch (error) {
     if (error instanceof BundleError && error.code === 'no-backup') return null;
@@ -475,7 +480,19 @@ export const publishCanonicalGeneration = async (
    * wrong parent and overwrite that machine's change instead of conflicting.
    */
   expectedParent: number | null,
-): Promise<{ generation: number; privacyMode: 'standard' | 'protected' }> => {
+  /**
+   * The portable registry snapshot of the Cloud generation the canonical engine
+   * fetched (and is publishing on top of). Records for projects in `main` that
+   * this machine has no record of are carried into the bundle, read-only — see
+   * `composeBundleSnapshot`. Omitted when nothing was fetched.
+   */
+  remoteSnapshot?: PortableRegistrySnapshot,
+): Promise<{
+  generation: number;
+  privacyMode: 'standard' | 'protected';
+  /** Local/remote snapshot disagreements resolved in favor of the local record. */
+  snapshotConflicts: BundleSnapshotConflict[];
+}> => {
   if (!deps.backend) throw new Error('No Cloud backend configured.');
   // Task 13 fix round 6: the canonical engine publishes with `expectedParent:
   // null` whenever Cloud has NO committed generation. On an account that has
@@ -489,9 +506,18 @@ export const publishCanonicalGeneration = async (
   // from the registry AS IT IS NOW. Canonical staging mints Project IDs after the
   // legacy staging step last wrote the snapshot, so without this a fresh machine
   // receives an empty snapshot and cannot locate the project by its Git claim.
-  // Written before the digest so the digest matches the uploaded bundle.
+  // The local snapshot FILE stays this machine's own (local registry only).
   await refreshPortableSnapshot(deps.stackHome);
-  const semanticDigest = await computeSemanticDigest(deps.stackHome, main);
+  // The BUNDLED snapshot additionally carries, read-only and in memory only, the
+  // remote generation's records for projects in `main` this machine has no
+  // record of. Otherwise a machine that never located a project would strip
+  // that project's identity from Cloud on every push.
+  const { snapshot, conflicts: snapshotConflicts } = composeBundleSnapshot(
+    await readLocalRegistry(deps.stackHome),
+    remoteSnapshot,
+    main.projects.map((p) => p.projectId),
+  );
+  const semanticDigest = await computeSemanticDigest(deps.stackHome, main, snapshot);
   const profile = await deps.backend.getProfile();
   const mode = profile?.privacyMode ?? 'standard';
   if (mode === 'protected') {
@@ -502,6 +528,7 @@ export const publishCanonicalGeneration = async (
       backend: deps.backend,
       mmk,
       canonicalMainOverride: main,
+      registrySnapshotOverride: snapshot,
       expectedParent,
       ...(deps.now ? { now: deps.now } : {}),
     });
@@ -511,12 +538,13 @@ export const publishCanonicalGeneration = async (
       cloudLatest: result.generation,
       ...(semanticDigest ? { semanticDigest } : {}),
     });
-    return { generation: result.generation, privacyMode: 'protected' };
+    return { generation: result.generation, privacyMode: 'protected', snapshotConflicts };
   }
   const result = await standardCloudBackup({
     stackHome: deps.stackHome,
     backend: deps.backend,
     canonicalMainOverride: main,
+    registrySnapshotOverride: snapshot,
     expectedParent,
     ...(deps.now ? { now: deps.now } : {}),
   });
@@ -526,7 +554,7 @@ export const publishCanonicalGeneration = async (
     cloudLatest: result.generation,
     ...(semanticDigest ? { semanticDigest } : {}),
   });
-  return { generation: result.generation, privacyMode: 'standard' };
+  return { generation: result.generation, privacyMode: 'standard', snapshotConflicts };
 };
 
 export type MemoryPushState =
@@ -691,7 +719,11 @@ export const runMemoryCloudBackup = async (
     // machine's local content store (same fix as `canonical-ops.ts`'s
     // `remoteOf` — a materialize/merge elsewhere needs the actual bytes, not
     // just the manifest metadata).
+    // The fetched generation's registry snapshot, carried into the publish
+    // (see `publishCanonicalGeneration`'s `remoteSnapshot`).
+    let remoteSnapshot: PortableRegistrySnapshot | undefined;
     const fetchRemote = async () => {
+      remoteSnapshot = undefined;
       if (!deps.backend) return null;
       const result = await fetchRemoteCanonical({
         backend: deps.backend,
@@ -699,6 +731,7 @@ export const runMemoryCloudBackup = async (
         localRegistry: await readLocalRegistry(deps.stackHome),
       });
       if (!result) return null;
+      remoteSnapshot = result.registrySnapshot;
       for (const object of result.objects)
         await writeMemoryObject({ stackHome: deps.stackHome, contentHash: object.contentHash, bytes: object.bytes });
       return {
@@ -738,7 +771,7 @@ export const runMemoryCloudBackup = async (
       setBase: (base) => writeCanonicalBase(deps.stackHome, base),
       fetchRemote,
       publish: async (nextMain, expectedParent) => {
-        const result = await publishCanonicalGeneration(deps, nextMain, expectedParent);
+        const result = await publishCanonicalGeneration(deps, nextMain, expectedParent, remoteSnapshot);
         return { generation: result.generation };
       },
       savePendingMerge: (pending) => writePendingMerge(deps.stackHome, pending),

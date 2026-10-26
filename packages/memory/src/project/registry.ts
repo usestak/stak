@@ -328,6 +328,74 @@ export const toPortableSnapshot = (
     .sort((a, b) => (a.projectId < b.projectId ? -1 : 1)),
 });
 
+export type BundleSnapshotConflict =
+  /** Same Project ID locally and remotely with different claims; local kept. */
+  | { kind: 'claims-differ'; projectId: string }
+  /** A remote record's claim is already held locally by a DIFFERENT Project ID;
+   * the remote record is not carried (local stays authoritative). */
+  | { kind: 'claim-held-locally'; projectId: string; heldBy: string };
+
+/**
+ * The portable snapshot a publish should bundle: this machine's own snapshot
+ * (`toPortableSnapshot(local)`), plus — carried read-only — every record from the
+ * fetched remote generation's snapshot whose Project ID appears in the published
+ * `main` (`publishedProjectIds`) but has no local record. Without the carry, a
+ * machine that has a project's documents but never located the project would
+ * publish a snapshot without that project's claim, and every later fresh machine
+ * could no longer locate it.
+ *
+ * Pure: never touches the local registry, never creates a binding, and only
+ * portable records (claims + lifecycle, no paths) are carried. A Project ID known
+ * locally always keeps its local record. A remote record whose claim a different
+ * local Project already holds is not carried. Both cases are returned as
+ * `conflicts` for the caller to report; neither fails the publish.
+ */
+export const composeBundleSnapshot = (
+  local: LocalRegistry,
+  remote: PortableRegistrySnapshot | undefined,
+  publishedProjectIds: Iterable<string>,
+): { snapshot: PortableRegistrySnapshot; carried: string[]; conflicts: BundleSnapshotConflict[] } => {
+  const own = toPortableSnapshot(local);
+  if (!remote) return { snapshot: own, carried: [], conflicts: [] };
+  const published = new Set(publishedProjectIds);
+  const localById = new Map(local.projects.map((p) => [p.projectId, p]));
+  const localClaimOwner = new Map<string, string>();
+  for (const record of local.projects)
+    for (const claim of record.claims) localClaimOwner.set(claimKey(claim), record.projectId);
+  const carried: PortableProjectRecord[] = [];
+  const conflicts: BundleSnapshotConflict[] = [];
+  for (const record of remote.projects) {
+    if (!published.has(record.projectId)) continue;
+    const mine = localById.get(record.projectId);
+    if (mine) {
+      const a = mine.claims.map(claimKey).sort().join('|');
+      const b = record.claims.map(claimKey).sort().join('|');
+      if (a !== b) conflicts.push({ kind: 'claims-differ', projectId: record.projectId });
+      continue;
+    }
+    const heldBy = record.claims
+      .map((claim) => localClaimOwner.get(claimKey(claim)))
+      .find((owner): owner is string => owner !== undefined);
+    if (heldBy) {
+      conflicts.push({ kind: 'claim-held-locally', projectId: record.projectId, heldBy });
+      continue;
+    }
+    carried.push({
+      projectId: record.projectId,
+      claims: [...record.claims].sort((x, y) => (claimKey(x) < claimKey(y) ? -1 : 1)),
+      lifecycle: lifecycleOf(record),
+    });
+  }
+  return {
+    snapshot: {
+      snapshotVersion: PROJECT_REGISTRY_SNAPSHOT_VERSION,
+      projects: [...own.projects, ...carried].sort((a, b) => (a.projectId < b.projectId ? -1 : 1)),
+    },
+    carried: carried.map((r) => r.projectId),
+    conflicts,
+  };
+};
+
 /** Set a project's lifecycle (no-op-safe); returns a new registry. */
 export const setLifecycle = (
   registry: LocalRegistry,

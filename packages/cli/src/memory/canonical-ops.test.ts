@@ -833,6 +833,51 @@ describe('pushMemoryViaCanonical / pullMemoryViaCanonical (Task 13)', () => {
       }
       expect(raw).not.toContain(path.basename(root));
     });
+
+    it("a machine that has A's project in `main` but no local record of it does not strip that project's identity from Cloud when it pushes", async () => {
+      const { backend, projectId } = await setUpMachineA();
+
+      // Machine C: established, with its OWN Git project, never had A's project
+      // locally and never recovered (so its local registry never learns A's claim).
+      const stackHomeC = path.join(root, 'c-stack');
+      const claudeHomeC = path.join(root, 'c-claude');
+      const projectDirC = path.join(root, 'machine-c', 'c-only');
+      await mkdir(projectDirC, { recursive: true });
+      await writeAutoMemoryAt(claudeHomeC, encodeClaudeProjectKey(path.resolve(projectDirC)), 'MEMORY.md', 'notes from C');
+      const discoveryC = {
+        claudeHome: claudeHomeC,
+        projects: [{ dir: projectDirC, gitRemote: 'https://github.com/example/c-only.git' }],
+      };
+      await stageAllMemory({ stackHome: stackHomeC, ...discoveryC });
+      const pushC = await pushMemoryViaCanonical(deps(stackHomeC, backend, path.join(root, 'c-keys')), discoveryC);
+      expect(pushC.status).toBe('pushed');
+      // Precondition: C's published `main` carries A's project, C's registry does not.
+      expect((await readCanonicalMain(stackHomeC)).projects.map((p) => p.projectId)).toContain(projectId);
+      expect(recordFor(await readLocalRegistry(stackHomeC), projectId)).toBeUndefined();
+
+      // Fresh machine D recovers C's generation and still locates A's project by Git claim.
+      const stackHomeD = path.join(root, 'd-stack');
+      const claudeHomeD = path.join(root, 'd-claude');
+      const projectDirD = path.join(root, 'machine-d', 'stak-2m-demo');
+      await mkdir(projectDirD, { recursive: true });
+      const keysD = path.join(root, 'd-keys');
+      expect((await runMemoryCloudRecover(deps(stackHomeD, backend, keysD))).status).toBe('recovered');
+      const pullD = await pullMemoryViaCanonical(deps(stackHomeD, backend, keysD), {
+        claudeHome: claudeHomeD,
+        projects: [{ dir: projectDirD, gitRemote }],
+      });
+      expect((pullD.unavailable ?? []).map((p) => p.projectId)).not.toContain(projectId);
+      expect(
+        await readFile(
+          path.join(claudeHomeD, 'projects', encodeClaudeProjectKey(path.resolve(projectDirD)), 'memory', 'MEMORY.md'),
+          'utf8',
+        ),
+      ).toBe('notes from A');
+      expect(await readFile(path.join(projectDirD, 'CLAUDE.local.md'), 'utf8')).toBe('private instructions from A');
+
+      // Carried read-only: C's own registry was never given A's record.
+      expect(recordFor(await readLocalRegistry(stackHomeC), projectId)).toBeUndefined();
+    });
   });
 
   it('pushing again with no changes creates no new generation (no-op)', async () => {

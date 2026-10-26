@@ -108,11 +108,12 @@ export const writePortableSnapshot = async (
     ownedRoot: paths.manifests,
     proposedPath: paths.projectRegistrySnapshot,
   });
-  await atomicWriteFile(
-    paths.projectRegistrySnapshot,
-    canonicalJson(portableRegistrySnapshotSchema.parse(snapshot)),
-  );
+  await atomicWriteFile(paths.projectRegistrySnapshot, portableSnapshotBytes(snapshot));
 };
+
+/** The exact bytes `writePortableSnapshot` stores (and a bundle carries) for a snapshot. */
+export const portableSnapshotBytes = (snapshot: PortableRegistrySnapshot): Buffer =>
+  canonicalJson(portableRegistrySnapshotSchema.parse(snapshot));
 
 /**
  * Re-derive the portable snapshot from the CURRENT local registry and write it, so

@@ -1180,7 +1180,9 @@ export const pushMemoryViaCanonical = async (
     setBase: (base) => writeCanonicalBase(deps.stackHome, base),
     fetchRemote: remote.fetch,
     publish: async (main, expectedParent) => {
-      const result = await publishCanonicalGeneration(deps, main, expectedParent);
+      // Carry the fetched generation's registry records for projects in `main`
+      // this machine has no record of (read-only, bundle only).
+      const result = await publishCanonicalGeneration(deps, main, expectedParent, remote.lastRegistrySnapshot());
       return { generation: result.generation };
     },
     savePendingMerge: (pending) => writePendingMerge(deps.stackHome, pending),

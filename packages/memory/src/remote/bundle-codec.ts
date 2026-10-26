@@ -22,6 +22,8 @@ import {
 } from '../store.js';
 import { canonicalMainManifestSchema, type CanonicalMainManifest } from '../canonical/domain.js';
 import { canonicalStorePaths } from '../canonical/store.js';
+import type { PortableRegistrySnapshot } from '../project/registry.js';
+import { portableSnapshotBytes } from '../project/registry-store.js';
 import { atomicWriteFile } from './secure-file.js';
 
 export const BUNDLE_FORMAT = 'stack-mem-bundle-v1' as const;
@@ -150,6 +152,14 @@ export const bundleFromStore = async (
      * disk themselves, only once the publish actually succeeds.
      */
     canonicalMainOverride?: CanonicalMainManifest;
+    /**
+     * Bundle THIS portable registry snapshot instead of the store's snapshot file
+     * (two-machine fix): a canonical publish bundles the local snapshot plus
+     * remote records carried read-only for projects in the published `main`
+     * that this machine has no record of (`composeBundleSnapshot`). Kept in
+     * memory so carried records never land in this machine's own files.
+     */
+    registrySnapshotOverride?: PortableRegistrySnapshot;
   } = {},
 ): Promise<{ bundle: MemoryBackupBundle; bytes: Buffer }> => {
   const manifest = await readMemoryManifest(stackHome);
@@ -182,12 +192,14 @@ export const bundleFromStore = async (
     });
   }
   // Include the portable project-registry snapshot when the store has one.
-  const registryBytes = await readFile(
-    memoryStorePaths(stackHome).projectRegistrySnapshot,
-  ).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT') return undefined;
-    throw error;
-  });
+  const registryBytes = options.registrySnapshotOverride
+    ? portableSnapshotBytes(options.registrySnapshotOverride)
+    : await readFile(memoryStorePaths(stackHome).projectRegistrySnapshot).catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return undefined;
+          throw error;
+        },
+      );
   const bundle: MemoryBackupBundle = {
     bundleFormat: canonicalBytes ? BUNDLE_FORMAT_V2 : BUNDLE_FORMAT,
     provider: 'claude',
