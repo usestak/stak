@@ -181,3 +181,95 @@ describe('snapshot archive', () => {
     expect(result.contentHash).toBe(contentHash);
   });
 });
+
+describe('snapshot archive: crafted symlink layouts', () => {
+  const file = (relativePath: string, text = 'x'): SkillTreeEntry => ({
+    relativePath,
+    type: 'file',
+    content: Buffer.from(text),
+  });
+  const link = (relativePath: string, target: string): SkillTreeEntry => ({
+    relativePath,
+    type: 'symlink',
+    target,
+  });
+
+  /** Packs entries exactly as an attacker would, with a self-consistent content hash. */
+  const extract = async (stackHome: string, entries: SkillTreeEntry[]) => {
+    const archive = packSkillTreeEntries(entries);
+    return extractSnapshotArchiveToStore({
+      stackHome,
+      contentHash: hashSkillTreeEntries(entries),
+      archiveHash: archive.archiveHash,
+      bytes: archive.bytes,
+    });
+  };
+
+  it('rejects a symlink chain that would write a file outside the store (regression)', async () => {
+    // `x -> .` then `x/x/x/y -> ../../..` each look in-tree on their own, but writing
+    // `x/x/x/y/pwn` follows both links and lands three levels above the staging root.
+    const root = await temp();
+    const stackHome = path.join(root, 'a', 'b', 'c', 'stack');
+    await mkdir(stackHome, { recursive: true });
+    await expect(
+      extract(stackHome, [
+        link('x', '.'),
+        link('x/x/x/y', '../../..'),
+        file('x/x/x/y/pwn', 'owned'),
+      ]),
+    ).rejects.toBeInstanceOf(ArchivePathError);
+    const escaped = await enumerateSkillTree(root).catch(() => []);
+    expect(escaped.map((entry) => entry.relativePath)).not.toContainEqual(
+      expect.stringMatching(/(^|\/)pwn$/),
+    );
+  });
+
+  it('rejects any entry nested beneath a symlink entry', () => {
+    const archive = packSkillTreeEntries([
+      link('docs', 'real'),
+      file('docs/SKILL.md'),
+      file('real/keep.md'),
+    ]);
+    expect(() => unpackSkillTreeEntries(archive.bytes)).toThrow(
+      ArchivePathError,
+    );
+  });
+
+  it('rejects a symlink target that resolves through another symlink', () => {
+    // Lexically `d/s/../victim` is `d/victim`, but the OS follows `d/s` (-> the tree
+    // root) before applying `..`, which leaves the tree.
+    const archive = packSkillTreeEntries([
+      link('d/s', '..'),
+      link('e', 'd/s/../victim'),
+      file('SKILL.md'),
+    ]);
+    expect(() => unpackSkillTreeEntries(archive.bytes)).toThrow(
+      ArchivePathError,
+    );
+  });
+
+  it('rejects two entries naming the same path on case-insensitive filesystems', () => {
+    const archive = packSkillTreeEntries([
+      link('Notes', 'SKILL.md'),
+      file('notes', 'overwrite through the link'),
+      file('SKILL.md'),
+    ]);
+    expect(() => unpackSkillTreeEntries(archive.bytes)).toThrow(
+      ArchivePathError,
+    );
+  });
+
+  it('still accepts ordinary in-tree symlinks, including a link to a link', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const entries = [
+      file('SKILL.md', '---\nname: demo\ndescription: demo\n---\nbody\n'),
+      file('docs/guide.md', 'guide'),
+      link('guide', 'docs/guide.md'),
+      link('alias', 'guide'),
+      link('docs/up', '../SKILL.md'),
+    ];
+    const result = await extract(stackHome, entries);
+    expect(result.contentHash).toBe(hashSkillTreeEntries(entries));
+  });
+});

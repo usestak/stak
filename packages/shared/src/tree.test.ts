@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   UnsafeTreePathError,
   copySkillTree,
+  copySkillTreeEntries,
   hashSkillDirectory,
   validateTreePath,
 } from './tree.js';
@@ -104,4 +105,80 @@ describe('canonical Skill tree', () => {
       expect(() => validateTreePath(unsafe)).toThrow(UnsafeTreePathError);
     },
   );
+});
+
+describe('copySkillTreeEntries containment', () => {
+  const made: string[] = [];
+  afterEach(async () =>
+    Promise.all(
+      made.splice(0).map((r) => rm(r, { recursive: true, force: true })),
+    ),
+  );
+  const tempRoot = async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'stack-tree-copy-'));
+    made.push(root);
+    return root;
+  };
+
+  it('refuses a symlink chain instead of writing outside the target (regression)', async () => {
+    const root = await tempRoot();
+    const target = path.join(root, 'a', 'b', 'c', 'target');
+    await expect(
+      copySkillTreeEntries(
+        [
+          { relativePath: 'x', type: 'symlink', target: '.' },
+          { relativePath: 'x/x/x/y', type: 'symlink', target: '../../..' },
+          {
+            relativePath: 'x/x/x/y/pwn',
+            type: 'file',
+            content: Buffer.from('owned'),
+          },
+        ],
+        target,
+      ),
+    ).rejects.toBeInstanceOf(UnsafeTreePathError);
+    await expect(readFile(path.join(root, 'a', 'pwn'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('never writes over a path that already exists in the target', async () => {
+    const root = await tempRoot();
+    const target = path.join(root, 'target');
+    await mkdir(target, { recursive: true });
+    await writeFile(path.join(target, 'SKILL.md'), 'original');
+    await expect(
+      copySkillTreeEntries(
+        [{ relativePath: 'SKILL.md', type: 'file', content: Buffer.from('x') }],
+        target,
+      ),
+    ).rejects.toMatchObject({ code: 'EEXIST' });
+    expect(await readFile(path.join(target, 'SKILL.md'), 'utf8')).toBe(
+      'original',
+    );
+  });
+
+  it('refuses to write through a pre-existing link in the target', async () => {
+    const root = await tempRoot();
+    const outside = path.join(root, 'outside');
+    const target = path.join(root, 'target');
+    await mkdir(outside, { recursive: true });
+    await mkdir(target, { recursive: true });
+    await symlink(outside, path.join(target, 'docs'), 'dir');
+    await expect(
+      copySkillTreeEntries(
+        [
+          {
+            relativePath: 'docs/guide.md',
+            type: 'file',
+            content: Buffer.from('x'),
+          },
+        ],
+        target,
+      ),
+    ).rejects.toBeInstanceOf(UnsafeTreePathError);
+    await expect(
+      readFile(path.join(outside, 'guide.md')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
 });

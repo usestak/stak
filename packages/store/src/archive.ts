@@ -1,11 +1,13 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  assertSafeTreeLayout,
   copySkillTreeEntries,
   enumerateSkillTree,
   hashSkillTreeEntries,
+  UnsafeTreePathError,
   validateTreePath,
 } from '@stack/shared';
 import type { SkillTreeEntry } from '@stack/shared';
@@ -199,7 +201,6 @@ export const unpackSkillTreeEntries = (bytes: Uint8Array): SkillTreeEntry[] => {
     }
     if (typeFlag === '2') {
       const target = readField(block, 157, 100);
-      assertSafeSymlinkTarget(relativePath, target);
       entries.push({ relativePath, type: 'symlink', target });
     } else if (typeFlag === '0' || typeFlag === '\0' || typeFlag === '') {
       const content = Buffer.from(bytes.subarray(offset, offset + size));
@@ -213,10 +214,43 @@ export const unpackSkillTreeEntries = (bytes: Uint8Array): SkillTreeEntry[] => {
       );
     }
   }
+  // Archives are untrusted: check the whole entry set, not each entry in isolation.
+  try {
+    assertSafeTreeLayout(entries);
+  } catch (error) {
+    if (error instanceof UnsafeTreePathError)
+      throw new ArchivePathError(error.relativePath, {
+        cause: error,
+      } as ErrorOptions);
+    throw error;
+  }
+  const symlinkKeys = new Set(
+    entries
+      .filter((entry) => entry.type === 'symlink')
+      .map((entry) => archivePathKey(entry.relativePath)),
+  );
+  for (const entry of entries)
+    if (entry.type === 'symlink')
+      assertSafeSymlinkTarget(entry.relativePath, entry.target, symlinkKeys);
   return entries;
 };
 
-const assertSafeSymlinkTarget = (relativePath: string, target: string) => {
+const archivePathKey = (relativePath: string): string =>
+  relativePath.normalize('NFC').toLowerCase();
+
+/**
+ * A symlink target must resolve inside the tree by walking it one segment at a time from
+ * the link's own directory, the way the OS does — not just after lexical normalization.
+ * `d/s/../victim` normalizes to `d/victim`, but if `d/s` is itself a symlink the OS follows
+ * it before applying `..`, landing wherever `d/s` points. So the walk may not pass THROUGH
+ * any symlink in the archive (pointing AT one is fine: that link's own target is checked
+ * the same way).
+ */
+const assertSafeSymlinkTarget = (
+  relativePath: string,
+  target: string,
+  symlinkKeys: ReadonlySet<string>,
+) => {
   const normalized = target.replaceAll('\\', '/');
   if (
     normalized.length === 0 ||
@@ -224,11 +258,19 @@ const assertSafeSymlinkTarget = (relativePath: string, target: string) => {
     /^[A-Za-z]:\//.test(normalized)
   )
     throw new ArchivePathError(relativePath);
-  const resolved = path.posix.normalize(
-    path.posix.join(path.posix.dirname(relativePath), normalized),
-  );
-  if (resolved.startsWith('..') || resolved === '..')
-    throw new ArchivePathError(relativePath);
+  const resolved = relativePath.split('/').slice(0, -1);
+  const segments = normalized.split('/').filter((s) => s !== '' && s !== '.');
+  for (const [index, segment] of segments.entries()) {
+    if (segment === '..') {
+      if (resolved.length === 0) throw new ArchivePathError(relativePath);
+      resolved.pop();
+      continue;
+    }
+    resolved.push(segment);
+    const isLast = index === segments.length - 1;
+    if (!isLast && symlinkKeys.has(archivePathKey(resolved.join('/'))))
+      throw new ArchivePathError(relativePath);
+  }
 };
 
 export type PackStoreObjectOptions = { stackHome: string; contentHash: string };
@@ -272,7 +314,9 @@ export const extractSnapshotArchiveToStore = async (
   if (treeHash !== options.contentHash)
     throw new ArchiveIntegrityError(options.contentHash, treeHash);
   const paths = contentObjectPaths(options.stackHome, options.contentHash);
-  const staging = `${paths.objectDirectory}.extract.${treeHash.slice(7, 23)}.tmp`;
+  // Unique per call: concurrent pulls of the same Skill must not share (and delete) one
+  // staging directory, and a leftover from a crash must not block extraction.
+  const staging = `${paths.objectDirectory}.extract.${randomUUID()}.tmp`;
   try {
     await mkdir(path.dirname(paths.objectDirectory), { recursive: true });
     await copySkillTreeEntries(entries, staging);
