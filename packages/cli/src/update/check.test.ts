@@ -145,20 +145,77 @@ describe('update reminder — when it checks and reuses the cache', () => {
     );
   });
 
-  it('is silent on a network failure and writes no cache', async () => {
+  it('is silent on a network failure and records only the failed attempt', async () => {
     const fetch = vi.fn<FetchLike>(async () => {
       throw new TypeError('fetch failed');
     });
     const { errors } = await run({ fetch });
     expect(errors).toEqual([]);
-    expect(await readUpdateCache(cachePath)).toBeUndefined();
+    expect(await readUpdateCache(cachePath)).toEqual({
+      channel: 'beta',
+      failedAt: T0,
+    });
   });
 
   it('is silent on a registry 404 or a missing dist-tag', async () => {
     expect((await run({ fetch: registry({}, 404) })).errors).toEqual([]);
+    expect((await readUpdateCache(cachePath))?.failedAt).toBe(T0);
+    await rm(cachePath, { force: true });
     expect(
       (await run({ fetch: registry({ latest: '9.9.9' }) })).errors,
     ).toEqual([]);
+    expect((await readUpdateCache(cachePath))?.failedAt).toBe(T0);
+  });
+
+  it('backs off for 1 h after a failure, then retries', async () => {
+    const down = registry({}, 404);
+    await run({ fetch: down });
+    expect(down).toHaveBeenCalledOnce();
+
+    // Within the hour: no network call at all, so no ~1 s wait per command.
+    const during = registry({ beta: '0.2.0-beta.4' });
+    expect(
+      (await run({ fetch: during, now: () => T0 + 59 * 60 * 1000 })).errors,
+    ).toEqual([]);
+    expect(during).not.toHaveBeenCalled();
+
+    // After the hour: retries, succeeds, clears the failure, and resumes the 24 h cadence.
+    const after = registry({ beta: '0.2.0-beta.4' });
+    const { errors } = await run({ fetch: after, now: () => T0 + HOUR });
+    expect(after).toHaveBeenCalledOnce();
+    expect(errors).toHaveLength(1);
+    const cache = await readUpdateCache(cachePath);
+    expect(cache).toMatchObject({
+      latest: '0.2.0-beta.4',
+      checkedAt: T0 + HOUR,
+    });
+    expect(cache?.failedAt).toBeUndefined();
+    const later = registry({ beta: '0.2.0-beta.5' });
+    await run({ fetch: later, now: () => T0 + 23 * HOUR });
+    expect(later).not.toHaveBeenCalled();
+  });
+
+  it('keeps the last known version during a backoff and still reminds from it', async () => {
+    await seedCache({
+      channel: 'beta',
+      latest: '0.2.0-beta.4',
+      checkedAt: T0 - 25 * HOUR,
+    });
+    const down = vi.fn<FetchLike>(async () => {
+      throw new TypeError('fetch failed');
+    });
+    expect((await run({ fetch: down })).errors).toEqual([]);
+    expect(await readUpdateCache(cachePath)).toMatchObject({
+      latest: '0.2.0-beta.4',
+      failedAt: T0,
+    });
+    const idle = registry({ beta: '0.2.0-beta.4' });
+    const { errors } = await run({
+      fetch: idle,
+      now: () => T0 + 10 * 60 * 1000,
+    });
+    expect(idle).not.toHaveBeenCalled();
+    expect(errors).toHaveLength(1);
   });
 
   it('still reminds (and never throws) when the cache cannot be written', async () => {

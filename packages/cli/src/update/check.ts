@@ -16,6 +16,8 @@ export const PACKAGE_NAME = '@memstk/cli';
 export const DEFAULT_REGISTRY = 'https://registry.npmjs.org';
 export const UPDATE_CHECK_FILE = 'update-check.json';
 export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/** After a failed lookup (network error, 404, no dist-tag), wait this long before retrying. */
+export const FAILURE_BACKOFF_MS = 60 * 60 * 1000;
 /** How long a finished command waits for an in-flight lookup before giving up silently. */
 export const DEFAULT_WAIT_CAP_MS = 1_000;
 /** Hard ceiling on the background lookup, so a hung registry never holds the process open. */
@@ -30,10 +32,12 @@ export type Env = Readonly<Record<string, string | undefined>>;
 
 export type UpdateCheckCache = {
   channel: ReleaseChannel;
-  /** Newest version on `channel` at the last successful check. */
-  latest: string;
+  /** Newest version on `channel` at the last successful check (absent if none succeeded). */
+  latest?: string;
   /** Epoch ms of the last successful registry check. */
-  checkedAt: number;
+  checkedAt?: number;
+  /** Epoch ms of the last failed lookup; starts a 1 h backoff. Cleared by a success. */
+  failedAt?: number;
   /** The version last announced, and when — so a version is announced at most once a day. */
   notifiedVersion?: string;
   notifiedAt?: number;
@@ -78,9 +82,13 @@ const isCache = (value: unknown): value is UpdateCheckCache => {
   const record = value as Record<string, unknown>;
   return (
     (record.channel === 'latest' || record.channel === 'beta') &&
-    typeof record.latest === 'string' &&
-    typeof record.checkedAt === 'number' &&
-    Number.isFinite(record.checkedAt) &&
+    (record.latest === undefined || typeof record.latest === 'string') &&
+    (record.checkedAt === undefined ||
+      (typeof record.checkedAt === 'number' &&
+        Number.isFinite(record.checkedAt))) &&
+    (record.failedAt === undefined ||
+      (typeof record.failedAt === 'number' &&
+        Number.isFinite(record.failedAt))) &&
     (record.notifiedVersion === undefined ||
       typeof record.notifiedVersion === 'string') &&
     (record.notifiedAt === undefined || typeof record.notifiedAt === 'number')
@@ -214,29 +222,46 @@ export const startUpdateReminder = (
   ceiling.unref?.();
 
   const lookup: Promise<UpdateCheckCache | undefined> = (async () => {
-    const cached = await readUpdateCache(dependencies.cachePath);
-    const age = cached ? dependencies.now() - cached.checkedAt : Infinity;
+    const loaded = await readUpdateCache(dependencies.cachePath);
+    const cached = loaded?.channel === channel ? loaded : undefined;
+    const now = dependencies.now();
+    const within = (at: number | undefined, interval: number): boolean =>
+      at !== undefined && now - at >= 0 && now - at < interval;
+    // A successful check is reused for 24 h; a failed one backs off for 1 h, so commands
+    // don't each pay the ~1 s wait while the registry is down. Either way: no network call.
     if (
       cached &&
-      cached.channel === channel &&
-      age >= 0 &&
-      age < CHECK_INTERVAL_MS
+      ((cached.latest !== undefined &&
+        within(cached.checkedAt, CHECK_INTERVAL_MS)) ||
+        within(cached.failedAt, FAILURE_BACKOFF_MS))
     )
       return cached;
-    const latest = await fetchLatestVersion({
-      fetch: dependencies.fetch,
-      env: dependencies.env,
-      channel,
-      signal: controller.signal,
-    });
+    let latest: string;
+    try {
+      latest = await fetchLatestVersion({
+        fetch: dependencies.fetch,
+        env: dependencies.env,
+        channel,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      // Our own abort (the wait cap, the hard ceiling, or a failed command) is not a
+      // registry failure: just try again next time.
+      if (!controller.signal.aborted)
+        await writeUpdateCache(dependencies.cachePath, {
+          ...(cached ?? { channel }),
+          failedAt: now,
+        }).catch(() => undefined);
+      throw error;
+    }
     const next: UpdateCheckCache = {
       channel,
       latest,
       checkedAt: dependencies.now(),
-      ...(cached?.channel === channel && cached.notifiedVersion !== undefined
+      ...(cached?.notifiedVersion !== undefined
         ? { notifiedVersion: cached.notifiedVersion }
         : {}),
-      ...(cached?.channel === channel && cached.notifiedAt !== undefined
+      ...(cached?.notifiedAt !== undefined
         ? { notifiedAt: cached.notifiedAt }
         : {}),
     };
@@ -276,7 +301,7 @@ export const startUpdateReminder = (
           controller.abort();
           return;
         }
-        if (!result || !isNewerVersion(result.latest, current)) return;
+        if (!result?.latest || !isNewerVersion(result.latest, current)) return;
         const now = dependencies.now();
         if (
           result.notifiedVersion === result.latest &&

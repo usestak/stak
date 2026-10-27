@@ -18,6 +18,8 @@ npm install -g @memstk/cli@beta
 The package installs a single self-contained `stak` command (no runtime
 dependencies).
 
+The CLI tells you when an update is available, and `stak upgrade` installs it.
+
 ## The everyday workflow
 
 STAK works like Git:
