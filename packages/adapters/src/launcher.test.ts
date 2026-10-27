@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   stat,
   writeFile,
@@ -87,7 +88,9 @@ describe('shim-safe launcher', () => {
     const result = await spawnShimSafe(shim, [], launchOptions(cwd, out));
     expect(result.exitCode).toBe(0);
     const record = JSON.parse(await readFile(out, 'utf8'));
-    expect(path.resolve(record.cwd)).toBe(path.resolve(cwd));
+    // macOS's tmpdir() sits behind a symlink (/var -> /private/var) and the child's
+    // process.cwd() reports the resolved path, so compare canonical paths.
+    expect(await realpath(record.cwd)).toBe(await realpath(cwd));
     expect(record.marker).toBe('marker-value');
   });
 
