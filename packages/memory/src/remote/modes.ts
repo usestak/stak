@@ -13,13 +13,20 @@
  */
 import { randomUUID } from 'node:crypto';
 
-import { hashBytes, readMemoryManifest, writeMemoryManifest } from '../store.js';
+import {
+  hashBytes,
+  readMemoryManifest,
+  writeMemoryManifest,
+} from '../store.js';
 import type { CanonicalMainManifest } from '../canonical/domain.js';
 import type { PortableRegistrySnapshot } from '../project/registry.js';
 import { convertV1BundleForRecover } from '../canonical/convert-v1.js';
 import { isLocalStoreMigrated } from '../canonical/migrate.js';
 import { writeCanonicalMain } from '../canonical/store.js';
-import { readLocalRegistry, writeLocalRegistry } from '../project/registry-store.js';
+import {
+  readLocalRegistry,
+  writeLocalRegistry,
+} from '../project/registry-store.js';
 import {
   bundleFromStore,
   parseBundle,
@@ -104,13 +111,14 @@ export const standardCloudBackup = async (options: {
   expectedParent?: number | null;
 }): Promise<CloudBackupResult> => {
   await options.backend.ensureProfile(REMOTE_FORMAT_VERSION);
-  const { bundle, bytes } = await bundleFromStore(
-    options.stackHome,
-    {
-      ...(options.canonicalMainOverride ? { canonicalMainOverride: options.canonicalMainOverride } : {}),
-      ...(options.registrySnapshotOverride ? { registrySnapshotOverride: options.registrySnapshotOverride } : {}),
-    },
-  );
+  const { bundle, bytes } = await bundleFromStore(options.stackHome, {
+    ...(options.canonicalMainOverride
+      ? { canonicalMainOverride: options.canonicalMainOverride }
+      : {}),
+    ...(options.registrySnapshotOverride
+      ? { registrySnapshotOverride: options.registrySnapshotOverride }
+      : {}),
+  });
   const expectedParent =
     options.expectedParent !== undefined
       ? options.expectedParent
@@ -150,8 +158,12 @@ export const protectedCloudBackup = async (options: {
   const { bundle, bytes: bundleBytes } = await bundleFromStore(
     options.stackHome,
     {
-      ...(options.canonicalMainOverride ? { canonicalMainOverride: options.canonicalMainOverride } : {}),
-      ...(options.registrySnapshotOverride ? { registrySnapshotOverride: options.registrySnapshotOverride } : {}),
+      ...(options.canonicalMainOverride
+        ? { canonicalMainOverride: options.canonicalMainOverride }
+        : {}),
+      ...(options.registrySnapshotOverride
+        ? { registrySnapshotOverride: options.registrySnapshotOverride }
+        : {}),
     },
   );
   const backupId = randomUUID();
@@ -227,7 +239,8 @@ export const cloudRecover = async (options: {
   // A dry-run conversion runs FIRST: an identity conflict fails closed here,
   // before anything is written (never a partial recover).
   const bundle = parseBundle(bundleBytes);
-  const convertV1 = !bundle.canonicalB64 && (await isLocalStoreMigrated(options.stackHome));
+  const convertV1 =
+    !bundle.canonicalB64 && (await isLocalStoreMigrated(options.stackHome));
   if (convertV1)
     convertV1BundleForRecover(bundle, {
       localRegistry: await readLocalRegistry(options.stackHome),
@@ -254,7 +267,10 @@ export const cloudRecover = async (options: {
     if (manifest)
       await writeMemoryManifest({
         stackHome: options.stackHome,
-        manifest: { ...manifest, items: manifest.items.filter((item) => item.scope === 'global') },
+        manifest: {
+          ...manifest,
+          items: manifest.items.filter((item) => item.scope === 'global'),
+        },
       });
   }
   return {
@@ -311,7 +327,9 @@ export const ALREADY_PROTECTED_MESSAGE = `Your Cloud Memory is already Protected
  * NEW Memory key over the device's real one, which the account's generations
  * can't be opened with. Call before generating, enrolling or wrapping any key.
  */
-export const assertNotAlreadyProtected = async (backend: RemoteMemoryBackend): Promise<void> => {
+export const assertNotAlreadyProtected = async (
+  backend: RemoteMemoryBackend,
+): Promise<void> => {
   if ((await backend.getProfile())?.privacyMode === 'protected')
     throw new RemoteMemoryError('already-protected', ALREADY_PROTECTED_MESSAGE);
 };
@@ -327,15 +345,26 @@ export const replicasNeedingOriginalKey = async (
 ): Promise<MemoryGenerationMeta[]> => {
   const out: MemoryGenerationMeta[] = [];
   for (const generation of await backend.listGenerations()) {
-    if (generation.privacyMode !== 'protected' || typeof generation.replicaOf !== 'string') continue;
+    if (
+      generation.privacyMode !== 'protected' ||
+      typeof generation.replicaOf !== 'string'
+    )
+      continue;
     const original = await backend.getGenerationById(generation.replicaOf);
-    if (!original || original.state !== 'committed' || original.privacyMode !== 'standard') out.push(generation);
+    if (
+      !original ||
+      original.state !== 'committed' ||
+      original.privacyMode !== 'standard'
+    )
+      out.push(generation);
   }
   return out;
 };
 
 /** The accurate fail-closed message for an interrupted protect. */
-export const protectInProgressMessage = async (backend: RemoteMemoryBackend): Promise<string> =>
+export const protectInProgressMessage = async (
+  backend: RemoteMemoryBackend,
+): Promise<string> =>
   (await replicasNeedingOriginalKey(backend)).length > 0
     ? PROTECT_NEEDS_ORIGINAL_KEY_MESSAGE
     : PROTECT_IN_PROGRESS_MESSAGE;
@@ -357,7 +386,11 @@ const verifyReplica = (
   let roundTrip: Uint8Array;
   try {
     const dek = unwrapDekWithMmk(wrappedDek, mmk, replicaBackupId);
-    roundTrip = open(splitPayload(replicaPayload), dek, protectedBundleAad(replicaBackupId));
+    roundTrip = open(
+      splitPayload(replicaPayload),
+      dek,
+      protectedBundleAad(replicaBackupId),
+    );
   } catch {
     throw new RemoteMemoryError(
       'integrity',
@@ -419,7 +452,10 @@ export const migrateStandardToProtected = async (options: {
     .sort((a, b) => a.generation - b.generation);
   const replicaByOriginal = new Map<string, MemoryGenerationMeta>();
   for (const generation of generations)
-    if (generation.privacyMode === 'protected' && typeof generation.replicaOf === 'string')
+    if (
+      generation.privacyMode === 'protected' &&
+      typeof generation.replicaOf === 'string'
+    )
       replicaByOriginal.set(generation.replicaOf, generation);
 
   // Phase 0: replicas whose original is already retired (protect was
@@ -428,16 +464,27 @@ export const migrateStandardToProtected = async (options: {
   // changed).
   const standardIds = new Set(standards.map((g) => g.backupId));
   for (const generation of generations) {
-    if (generation.privacyMode !== 'protected' || typeof generation.replicaOf !== 'string') continue;
+    if (
+      generation.privacyMode !== 'protected' ||
+      typeof generation.replicaOf !== 'string'
+    )
+      continue;
     if (standardIds.has(generation.replicaOf)) continue;
     try {
       const payload = await options.backend.getPayload(generation.backupId);
       verifyPayload(payload, generation.payloadSha256);
       if (!generation.wrappedDek) throw new Error('missing wrapped key');
-      const dek = unwrapDekWithMmk(generation.wrappedDek, options.mmk, generation.backupId);
+      const dek = unwrapDekWithMmk(
+        generation.wrappedDek,
+        options.mmk,
+        generation.backupId,
+      );
       open(splitPayload(payload), dek, protectedBundleAad(generation.backupId));
     } catch {
-      throw new RemoteMemoryError('protect-in-progress', PROTECT_NEEDS_ORIGINAL_KEY_MESSAGE);
+      throw new RemoteMemoryError(
+        'protect-in-progress',
+        PROTECT_NEEDS_ORIGINAL_KEY_MESSAGE,
+      );
     }
   }
 
@@ -452,9 +499,17 @@ export const migrateStandardToProtected = async (options: {
     const existing = replicaByOriginal.get(standard.backupId);
     if (!existing) continue;
     try {
-      const replicaPayload = await options.backend.getPayload(existing.backupId);
+      const replicaPayload = await options.backend.getPayload(
+        existing.backupId,
+      );
       verifyPayload(replicaPayload, existing.payloadSha256);
-      verifyReplica(replicaPayload, existing.backupId, existing.wrappedDek, options.mmk, standard.payloadSha256);
+      verifyReplica(
+        replicaPayload,
+        existing.backupId,
+        existing.wrappedDek,
+        options.mmk,
+        standard.payloadSha256,
+      );
       verified.add(standard.backupId);
     } catch {
       orphaned = true;
@@ -471,8 +526,14 @@ export const migrateStandardToProtected = async (options: {
         'Existing Protected copies cannot be opened with this key, and the account is no longer Standard; nothing was changed.',
       );
     for (const standard of standards) {
-      const current = await options.backend.getGenerationById(standard.backupId);
-      if (!current || current.state !== 'committed' || current.privacyMode !== 'standard')
+      const current = await options.backend.getGenerationById(
+        standard.backupId,
+      );
+      if (
+        !current ||
+        current.state !== 'committed' ||
+        current.privacyMode !== 'standard'
+      )
         throw new RemoteMemoryError(
           'integrity',
           'An original Standard backup changed during protect; nothing was retired. Run `stak memory protect` again.',
@@ -481,7 +542,9 @@ export const migrateStandardToProtected = async (options: {
     for (const standard of standards) {
       const existing = replicaByOriginal.get(standard.backupId);
       if (!existing) continue;
-      await options.backend.retireGeneration(existing.backupId, options.now, { guarded: true });
+      await options.backend.retireGeneration(existing.backupId, options.now, {
+        guarded: true,
+      });
       retiredReplicas += 1;
     }
     verified.clear();
@@ -497,7 +560,14 @@ export const migrateStandardToProtected = async (options: {
   const replicaFor = new Map<string, string>();
   for (const standard of standards) {
     if (verified.has(standard.backupId)) {
-      replicaFor.set(standard.backupId, replicaByOriginal.get(standard.backupId)!.backupId);
+      // verified only ever gains an id after replicaByOriginal.get(id) was
+      // accessed and found defined (above), so it is guaranteed here too.
+      const existingReplica = replicaByOriginal.get(standard.backupId);
+      if (!existingReplica)
+        throw new Error(
+          `unreachable: no replica recorded for verified ${standard.backupId}`,
+        );
+      replicaFor.set(standard.backupId, existingReplica.backupId);
       resumed += 1;
       continue;
     }
@@ -513,7 +583,13 @@ export const migrateStandardToProtected = async (options: {
     ]);
     const wrappedDek = wrapDekWithMmk(dek, options.mmk, backupId);
     // Verify the replica decrypts back to the ORIGINAL bytes before uploading it.
-    verifyReplica(payload, backupId, wrappedDek, options.mmk, standard.payloadSha256);
+    verifyReplica(
+      payload,
+      backupId,
+      wrappedDek,
+      options.mmk,
+      standard.payloadSha256,
+    );
     const meta = await options.backend.createGeneration({
       backupId,
       expectedParent,
@@ -541,7 +617,10 @@ export const migrateStandardToProtected = async (options: {
   // create (or its initial read, when every copy was resumed). Checked before
   // retiring ANY original, so a push that landed after the last copy is never
   // stranded as Standard in a "Protected" account.
-  if (((await options.backend.getProfile())?.latestGeneration ?? null) !== expectedParent)
+  if (
+    ((await options.backend.getProfile())?.latestGeneration ?? null) !==
+    expectedParent
+  )
     throw new RemoteMemoryError(
       'protect-in-progress',
       'Your Cloud Memory changed while protect was running (another machine pushed), so nothing was retired. Run `stak memory protect` again.',
@@ -549,19 +628,27 @@ export const migrateStandardToProtected = async (options: {
   let retiredStandard = 0;
   for (const standard of standards) {
     const replicaId = replicaFor.get(standard.backupId);
-    const replica = replicaId ? await options.backend.getGenerationById(replicaId) : null;
+    const replica = replicaId
+      ? await options.backend.getGenerationById(replicaId)
+      : null;
     if (!replica || replica.state !== 'committed')
       throw new RemoteMemoryError(
         'protect-in-progress',
         'Another device changed the protected copies while protect was finishing; nothing more was retired. Run `stak memory protect` again.',
       );
-    await options.backend.retireGeneration(standard.backupId, options.now, { guarded: true });
+    await options.backend.retireGeneration(standard.backupId, options.now, {
+      guarded: true,
+    });
     retiredStandard += 1;
   }
   // Final review I5: last line of defence before finalizing — no committed
   // Standard generation may remain (one landing during the retires above).
   // Re-running protect on this machine copies it and finishes.
-  if ((await options.backend.listGenerations()).some((g) => g.privacyMode === 'standard'))
+  if (
+    (await options.backend.listGenerations()).some(
+      (g) => g.privacyMode === 'standard',
+    )
+  )
     throw new RemoteMemoryError(
       'protect-in-progress',
       'Your Cloud Memory changed while protect was finishing (another machine pushed). Run `stak memory protect` again on this machine to finish.',

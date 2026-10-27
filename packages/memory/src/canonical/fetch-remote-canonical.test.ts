@@ -11,8 +11,12 @@ import { writeSyntheticStore } from '../remote/store.fixtures.js';
 import { emptyRegistry, type LocalRegistry } from '../project/registry.js';
 import { mintProjectId } from '../project/project-id.js';
 import { writeCanonicalMain } from './store.js';
-import { CANONICAL_MAIN_SCHEMA_VERSION, type CanonicalMainManifest } from './domain.js';
+import {
+  CANONICAL_MAIN_SCHEMA_VERSION,
+  type CanonicalMainManifest,
+} from './domain.js';
 import { fetchRemoteCanonical } from './fetch-remote-canonical.js';
+import { defined } from '../test-support.js';
 
 // Follows the exact InMemoryRemoteMemoryStore/backend construction pattern used in
 // packages/memory/src/remote/modes.test.ts.
@@ -34,7 +38,10 @@ describe('fetchRemoteCanonical', () => {
   });
 
   it('reads the canonical manifest directly from a v2 generation', async () => {
-    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 1 });
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
     const projectId = mintProjectId();
     const canonicalMain: CanonicalMainManifest = {
       schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
@@ -45,7 +52,7 @@ describe('fetchRemoteCanonical', () => {
             {
               path: 'notes/f0.md',
               state: 'present',
-              contentHash: source.hashes[0]!,
+              contentHash: defined(source.hashes[0]),
               importedFrom: 'claude',
               importedAt: '2026-09-25T12:00:00.000Z',
             },
@@ -71,13 +78,16 @@ describe('fetchRemoteCanonical', () => {
   });
 
   it('folds a former Project ID into its surviving one, using the local registry (spec §4.2.1)', async () => {
-    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 1 });
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
     const formerId = mintProjectId();
     const survivingId = mintProjectId();
     const doc = {
       path: 'notes/f0.md',
       state: 'present' as const,
-      contentHash: source.hashes[0]!,
+      contentHash: defined(source.hashes[0]),
       importedFrom: 'claude' as const,
       importedAt: '2026-09-25T12:00:00.000Z',
     };
@@ -90,15 +100,26 @@ describe('fetchRemoteCanonical', () => {
 
     const localRegistry: LocalRegistry = {
       ...emptyRegistry(),
-      projects: [{ projectId: survivingId, claims: [{ type: 'git', canonical: 'github.com/a/b' }], formerIds: [formerId] }],
+      projects: [
+        {
+          projectId: survivingId,
+          claims: [{ type: 'git', canonical: 'github.com/a/b' }],
+          formerIds: [formerId],
+        },
+      ],
     };
     const result = await fetchRemoteCanonical({ backend, localRegistry });
-    expect(result?.main.projects).toEqual([{ projectId: survivingId, documents: [doc] }]);
+    expect(result?.main.projects).toEqual([
+      { projectId: survivingId, documents: [doc] },
+    ]);
   });
 
   it('falls back to convertV1Bundle for a v1 generation, using the provided localRegistry', async () => {
     // No canonical/main.json written — bundleFromStore produces a v1 bundle.
-    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 2 });
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 2,
+    });
     const projectId = mintProjectId();
     const localRegistry: LocalRegistry = {
       ...emptyRegistry(),
@@ -141,7 +162,10 @@ describe('fetchRemoteCanonical', () => {
   });
 
   it('decrypts a Protected v1 generation with the MMK before converting', async () => {
-    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 1 });
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
     const projectId = mintProjectId();
     const localRegistry: LocalRegistry = {
       ...emptyRegistry(),
@@ -171,7 +195,10 @@ describe('fetchRemoteCanonical', () => {
   });
 
   it('fails closed for Protected recovery without an MMK', async () => {
-    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 1 });
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
     const { backend } = backendFor('user-a');
     await protectedCloudBackup({
       stackHome: source.stackHome,

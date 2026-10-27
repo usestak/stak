@@ -5,11 +5,20 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { memoryManifestSchema } from '../domain.js';
-import { writeMemoryManifest, writeMemoryObject, hashBytes, readMemoryManifest } from '../store.js';
-import { v1ManifestFingerprint, writeLocalRecoveryState } from '../local-recovery-state.js';
+import {
+  writeMemoryManifest,
+  writeMemoryObject,
+  hashBytes,
+  readMemoryManifest,
+} from '../store.js';
+import {
+  v1ManifestFingerprint,
+  writeLocalRecoveryState,
+} from '../local-recovery-state.js';
 import { claudeNativeTargetOf } from './claude-project-adapter.js';
 import { readCanonicalMain } from './store.js';
 import { migrateLocalStore } from './migrate.js';
+import { defined } from '../test-support.js';
 
 let stackHome: string;
 beforeEach(async () => {
@@ -39,9 +48,18 @@ describe('migrateLocalStore', () => {
             kind: 'auto-memory',
             scope: 'project',
             logicalId: 'claude/auto-memory/github.com/acme/widgets/MEMORY.md',
-            project: { kind: 'git', canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' },
+            project: {
+              kind: 'git',
+              canonical: 'github.com/acme/widgets',
+              host: 'github.com',
+              owner: 'acme',
+              repo: 'widgets',
+            },
             contentHash: autoHash,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'MEMORY.md' },
+            restoreTarget: {
+              base: 'claude-project-memory',
+              relativePath: 'MEMORY.md',
+            },
             capturedAt: '2026-10-20T00:00:00.000Z',
             sensitivity: 'private',
           },
@@ -64,17 +82,29 @@ describe('migrateLocalStore', () => {
     expect(summary.migratedDocuments).toBe(1);
 
     const main = await readCanonicalMain(stackHome);
-    const doc = main.projects[0]?.documents.find((d) => d.path === 'notes/MEMORY.md');
+    const doc = main.projects[0]?.documents.find(
+      (d) => d.path === 'notes/MEMORY.md',
+    );
     expect(doc).toMatchObject({ state: 'present', contentHash: autoHash });
 
     const current = memoryManifestSchema.parse(
-      JSON.parse(await readFile(path.join(stackHome, 'memory', 'manifests', 'current.json'), 'utf8')),
+      JSON.parse(
+        await readFile(
+          path.join(stackHome, 'memory', 'manifests', 'current.json'),
+          'utf8',
+        ),
+      ),
     );
     expect(current.items).toHaveLength(1);
     expect(current.items[0]?.kind).toBe('user-instructions');
 
     const backupRaw = await readFile(
-      path.join(stackHome, 'memory', 'manifests', 'current.v1-premigration.json'),
+      path.join(
+        stackHome,
+        'memory',
+        'manifests',
+        'current.v1-premigration.json',
+      ),
       'utf8',
     );
     expect(JSON.parse(backupRaw).items).toHaveLength(2);
@@ -93,8 +123,15 @@ describe('migrateLocalStore', () => {
             provider: 'claude',
             kind: 'project-private-instructions',
             scope: 'project',
-            logicalId: 'claude/project-private/github.com/acme/widgets/CLAUDE.local.md',
-            project: { kind: 'git', canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' },
+            logicalId:
+              'claude/project-private/github.com/acme/widgets/CLAUDE.local.md',
+            project: {
+              kind: 'git',
+              canonical: 'github.com/acme/widgets',
+              host: 'github.com',
+              owner: 'acme',
+              repo: 'widgets',
+            },
             contentHash: hash,
             restoreTarget: { base: 'project', relativePath: 'CLAUDE.local.md' },
             capturedAt: '2026-10-20T00:00:00.000Z',
@@ -106,13 +143,23 @@ describe('migrateLocalStore', () => {
 
     const first = await migrateLocalStore(stackHome);
     const backupBefore = await readFile(
-      path.join(stackHome, 'memory', 'manifests', 'current.v1-premigration.json'),
+      path.join(
+        stackHome,
+        'memory',
+        'manifests',
+        'current.v1-premigration.json',
+      ),
       'utf8',
     );
     const second = await migrateLocalStore(stackHome);
     expect(second.alreadyMigrated).toBe(true);
     const backupAfter = await readFile(
-      path.join(stackHome, 'memory', 'manifests', 'current.v1-premigration.json'),
+      path.join(
+        stackHome,
+        'memory',
+        'manifests',
+        'current.v1-premigration.json',
+      ),
       'utf8',
     );
     expect(backupAfter).toBe(backupBefore);
@@ -130,9 +177,18 @@ describe('migrateLocalStore', () => {
       kind: 'auto-memory' as const,
       scope: 'project' as const,
       logicalId: `claude/auto-memory/github.com/acme/widgets/${name}`,
-      project: { kind: 'git' as const, canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' },
+      project: {
+        kind: 'git' as const,
+        canonical: 'github.com/acme/widgets',
+        host: 'github.com',
+        owner: 'acme',
+        repo: 'widgets',
+      },
       contentHash,
-      restoreTarget: { base: 'claude-project-memory' as const, relativePath: name },
+      restoreTarget: {
+        base: 'claude-project-memory' as const,
+        relativePath: name,
+      },
       capturedAt: '2026-10-20T00:00:00.000Z',
       sensitivity: 'private' as const,
     });
@@ -142,7 +198,11 @@ describe('migrateLocalStore', () => {
         schemaVersion: 1,
         provider: 'claude',
         createdAt: '2026-10-20T00:00:00.000Z',
-        items: [item('a.md', hashA), item('b.md', hashBOriginal), item('c.md', hashA)],
+        items: [
+          item('a.md', hashA),
+          item('b.md', hashBOriginal),
+          item('c.md', hashA),
+        ],
       },
     });
     // Native files: a.md matches, b.md is absent, c.md holds DIFFERENT content.
@@ -152,10 +212,18 @@ describe('migrateLocalStore', () => {
     await mkdir(projectDir, { recursive: true });
     const claudeHome = path.join(stackHome, 'claude-home');
     const dummyProjectId = 'prj_' + 'a'.repeat(26);
-    const targetA = claudeNativeTargetOf({ projectId: dummyProjectId, dir: projectDir }, 'notes/a.md', claudeHome);
+    const targetA = claudeNativeTargetOf(
+      { projectId: dummyProjectId, dir: projectDir },
+      'notes/a.md',
+      claudeHome,
+    );
     await mkdir(path.dirname(targetA), { recursive: true });
     await writeFile(targetA, bodyA);
-    const targetC = claudeNativeTargetOf({ projectId: dummyProjectId, dir: projectDir }, 'notes/c.md', claudeHome);
+    const targetC = claudeNativeTargetOf(
+      { projectId: dummyProjectId, dir: projectDir },
+      'notes/c.md',
+      claudeHome,
+    );
     await writeFile(targetC, Buffer.from('edited since backup'));
     return { hashA, hashBOriginal, projectDir, claudeHome };
   };
@@ -178,12 +246,15 @@ describe('migrateLocalStore', () => {
     const { readProjection } = await import('./store.js');
     const projection = await readProjection(stackHome, 'claude');
     const main = await readCanonicalMain(stackHome);
-    return projection.projects[main.projects[0]!.projectId];
+    return projection.projects[defined(main.projects[0]).projectId];
   };
 
   it('a LOCALLY produced manifest seeds P = C for every native file that EXISTS (edited or not); an ABSENT one is not seeded and is counted as restored (Task 13 fix round 4)', async () => {
     const { hashA, projectDir, claudeHome } = await writeAbcManifest();
-    const summary = await migrateLocalStore(stackHome, { locateProjectDir: async () => projectDir, claudeHome });
+    const summary = await migrateLocalStore(stackHome, {
+      locateProjectDir: async () => projectDir,
+      claudeHome,
+    });
     const seeded = await projectionFor();
     expect(seeded?.['notes/a.md']).toBe(hashA); // exists, unchanged
     expect(seeded?.['notes/c.md']).toBe(hashA); // exists, edited since -> later an import-edit
@@ -196,7 +267,10 @@ describe('migrateLocalStore', () => {
   it('a manifest last touched by a PUSH (provenance without a recover fingerprint) is local: an edited native file is seeded', async () => {
     const { hashA, projectDir, claudeHome } = await writeAbcManifest();
     await recordRecover({ withFingerprint: false });
-    await migrateLocalStore(stackHome, { locateProjectDir: async () => projectDir, claudeHome });
+    await migrateLocalStore(stackHome, {
+      locateProjectDir: async () => projectDir,
+      claudeHome,
+    });
     expect((await projectionFor())?.['notes/c.md']).toBe(hashA);
     expect((await projectionFor())?.['notes/b.md']).toBeUndefined();
   });
@@ -204,7 +278,10 @@ describe('migrateLocalStore', () => {
   it('a manifest restored by a Cloud recover seeds ONLY native files that exist with matching content (fresh machine; Task 13 fix round 2, finding 5)', async () => {
     const { hashA, projectDir, claudeHome } = await writeAbcManifest();
     await recordRecover({ withFingerprint: true });
-    const summary = await migrateLocalStore(stackHome, { locateProjectDir: async () => projectDir, claudeHome });
+    const summary = await migrateLocalStore(stackHome, {
+      locateProjectDir: async () => projectDir,
+      claudeHome,
+    });
     const seeded = await projectionFor();
     expect(seeded?.['notes/a.md']).toBe(hashA); // exists, matches -> seeded
     expect(seeded?.['notes/b.md']).toBeUndefined(); // absent -> NOT seeded (materialized later)
@@ -223,8 +300,14 @@ describe('migrateLocalStore', () => {
     await recordRecover({ withFingerprint: true });
     // A local v1 `stak add` since the recover rewrote the manifest.
     const manifest = await readMemoryManifest(stackHome);
-    await writeMemoryManifest({ stackHome, manifest: { ...manifest!, createdAt: '2026-10-22T00:00:00.000Z' } });
-    await migrateLocalStore(stackHome, { locateProjectDir: async () => projectDir, claudeHome });
+    await writeMemoryManifest({
+      stackHome,
+      manifest: { ...defined(manifest), createdAt: '2026-10-22T00:00:00.000Z' },
+    });
+    await migrateLocalStore(stackHome, {
+      locateProjectDir: async () => projectDir,
+      claudeHome,
+    });
     expect((await projectionFor())?.['notes/c.md']).toBe(hashA);
   });
 
@@ -236,14 +319,17 @@ describe('migrateLocalStore', () => {
       locateProjectDir: async (projectId) => {
         asked.push(projectId);
         // The registry already holds the freshly minted ID by now.
-        const { readLocalRegistry } = await import('../project/registry-store.js');
+        const { readLocalRegistry } =
+          await import('../project/registry-store.js');
         const registry = await readLocalRegistry(stackHome);
-        return registry.projects.some((p) => p.projectId === projectId) ? projectDir : undefined;
+        return registry.projects.some((p) => p.projectId === projectId)
+          ? projectDir
+          : undefined;
       },
       claudeHome,
     });
     const main = await readCanonicalMain(stackHome);
-    expect(asked).toEqual([main.projects[0]!.projectId]);
+    expect(asked).toEqual([defined(main.projects[0]).projectId]);
     expect((await projectionFor())?.['notes/a.md']).toBeDefined();
   });
 
@@ -259,9 +345,18 @@ describe('migrateLocalStore', () => {
           kind: 'auto-memory' as const,
           scope: 'project' as const,
           logicalId: 'claude/auto-memory/github.com/acme/widgets/a.md',
-          project: { kind: 'git' as const, canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' },
+          project: {
+            kind: 'git' as const,
+            canonical: 'github.com/acme/widgets',
+            host: 'github.com',
+            owner: 'acme',
+            repo: 'widgets',
+          },
           contentHash: hash,
-          restoreTarget: { base: 'claude-project-memory' as const, relativePath: 'a.md' },
+          restoreTarget: {
+            base: 'claude-project-memory' as const,
+            relativePath: 'a.md',
+          },
           capturedAt: '2026-10-20T00:00:00.000Z',
           sensitivity: 'private' as const,
         },
@@ -271,7 +366,12 @@ describe('migrateLocalStore', () => {
     // Simulate "crashed after backup, before main.json": write the backup file by
     // hand exactly as migrateLocalStore's first step would, then call migrate.
     await writeFile(
-      path.join(stackHome, 'memory', 'manifests', 'current.v1-premigration.json'),
+      path.join(
+        stackHome,
+        'memory',
+        'manifests',
+        'current.v1-premigration.json',
+      ),
       `${JSON.stringify(manifest, null, 2)}\n`,
       { flag: 'wx' },
     );
@@ -310,7 +410,10 @@ describe('migrateLocalStore', () => {
             logicalId: 'claude/auto-memory/github.com/acme/widgets/a.md#old',
             project: identity,
             contentHash: hashOld,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
+            restoreTarget: {
+              base: 'claude-project-memory',
+              relativePath: 'a.md',
+            },
             capturedAt: '2026-10-19T00:00:00.000Z',
             sensitivity: 'private',
           },
@@ -321,7 +424,10 @@ describe('migrateLocalStore', () => {
             logicalId: 'claude/auto-memory/github.com/acme/widgets/a.md#new',
             project: identity,
             contentHash: hashNew,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
+            restoreTarget: {
+              base: 'claude-project-memory',
+              relativePath: 'a.md',
+            },
             capturedAt: '2026-10-21T00:00:00.000Z',
             sensitivity: 'private',
           },
@@ -332,7 +438,7 @@ describe('migrateLocalStore', () => {
     expect(summary.keptBothDuplicates).toBe(1);
     const main = await readCanonicalMain(stackHome);
     expect(main.projects).toHaveLength(1); // one real project, not two
-    const paths = main.projects[0]!.documents.map((d) => d.path);
+    const paths = defined(main.projects[0]).documents.map((d) => d.path);
     expect(paths).toContain('notes/a.md'); // latest capturedAt keeps the original path
     expect(paths.some((p) => p.startsWith('notes/a.conflict-'))).toBe(true);
   });
@@ -370,10 +476,14 @@ describe('migrateLocalStore', () => {
             provider: 'claude',
             kind: 'auto-memory',
             scope: 'project',
-            logicalId: 'claude/auto-memory/github.com/acme/widgets/a.md#shared-old',
+            logicalId:
+              'claude/auto-memory/github.com/acme/widgets/a.md#shared-old',
             project: identity,
             contentHash: hashShared,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
+            restoreTarget: {
+              base: 'claude-project-memory',
+              relativePath: 'a.md',
+            },
             capturedAt: '2026-10-18T00:00:00.000Z', // oldest of the shared-hash pair
             sensitivity: 'private',
           },
@@ -384,7 +494,10 @@ describe('migrateLocalStore', () => {
             logicalId: 'claude/auto-memory/github.com/acme/widgets/a.md#diff',
             project: identity,
             contentHash: hashDiff,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
+            restoreTarget: {
+              base: 'claude-project-memory',
+              relativePath: 'a.md',
+            },
             capturedAt: '2026-10-20T00:00:00.000Z', // strictly between the shared-hash pair
             sensitivity: 'private',
           },
@@ -392,10 +505,14 @@ describe('migrateLocalStore', () => {
             provider: 'claude',
             kind: 'auto-memory',
             scope: 'project',
-            logicalId: 'claude/auto-memory/github.com/acme/widgets/a.md#shared-new',
+            logicalId:
+              'claude/auto-memory/github.com/acme/widgets/a.md#shared-new',
             project: identity,
             contentHash: hashShared,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
+            restoreTarget: {
+              base: 'claude-project-memory',
+              relativePath: 'a.md',
+            },
             capturedAt: '2026-10-22T00:00:00.000Z', // newest of the shared-hash pair, LAST in array
             sensitivity: 'private',
           },
@@ -407,14 +524,17 @@ describe('migrateLocalStore', () => {
     expect(summary.keptBothDuplicates).toBe(1);
     const main = await readCanonicalMain(stackHome);
     expect(main.projects).toHaveLength(1);
-    const docs = main.projects[0]!.documents;
+    const docs = defined(main.projects[0]).documents;
     const primary = docs.find((d) => d.path === 'notes/a.md');
     expect(primary).toMatchObject({
       contentHash: hashShared,
       importedAt: '2026-10-22T00:00:00.000Z', // the NEWEST shared-hash copy, not the first-seen one
     });
     const conflict = docs.find((d) => d.path !== 'notes/a.md');
-    expect(conflict).toMatchObject({ contentHash: hashDiff, importedAt: '2026-10-20T00:00:00.000Z' });
+    expect(conflict).toMatchObject({
+      contentHash: hashDiff,
+      importedAt: '2026-10-20T00:00:00.000Z',
+    });
   });
 
   it('does NOT merge two UNRELATED local (non-Git) projects that happen to share a relative path', async () => {
@@ -442,7 +562,10 @@ describe('migrateLocalStore', () => {
             logicalId: 'claude/auto-memory/local:key-foo/MEMORY.md',
             project: { kind: 'local', vendorKey: 'key-foo' },
             contentHash: hashA,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'MEMORY.md' },
+            restoreTarget: {
+              base: 'claude-project-memory',
+              relativePath: 'MEMORY.md',
+            },
             capturedAt: '2026-10-19T00:00:00.000Z',
             sensitivity: 'private',
           },
@@ -453,7 +576,10 @@ describe('migrateLocalStore', () => {
             logicalId: 'claude/auto-memory/local:key-bar/MEMORY.md',
             project: { kind: 'local', vendorKey: 'key-bar' },
             contentHash: hashB,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'MEMORY.md' },
+            restoreTarget: {
+              base: 'claude-project-memory',
+              relativePath: 'MEMORY.md',
+            },
             capturedAt: '2026-10-21T00:00:00.000Z',
             sensitivity: 'private',
           },
@@ -466,9 +592,11 @@ describe('migrateLocalStore', () => {
     expect(main.projects).toHaveLength(2); // two separate projects, never merged
     for (const project of main.projects) {
       expect(project.documents).toHaveLength(1);
-      expect(project.documents[0]!.path).toBe('notes/MEMORY.md'); // each keeps its own, unsuffixed
+      expect(defined(project.documents[0]).path).toBe('notes/MEMORY.md'); // each keeps its own, unsuffixed
     }
-    const hashes = main.projects.map((p) => (p.documents[0] as { contentHash: string }).contentHash).sort();
+    const hashes = main.projects
+      .map((p) => (p.documents[0] as { contentHash: string }).contentHash)
+      .sort();
     expect(hashes).toEqual([hashA, hashB].sort());
   });
 
@@ -499,7 +627,8 @@ describe('migrateLocalStore', () => {
             provider: 'claude',
             kind: 'user-instructions',
             scope: 'project',
-            logicalId: 'claude/user-instructions/github.com/acme/orphan/CLAUDE.md',
+            logicalId:
+              'claude/user-instructions/github.com/acme/orphan/CLAUDE.md',
             project: identity,
             contentHash: hash,
             restoreTarget: { base: 'claude-home', relativePath: 'CLAUDE.md' },
@@ -532,16 +661,27 @@ describe('migrateLocalStore', () => {
             kind: 'auto-memory',
             scope: 'project',
             logicalId: 'claude/auto-memory/github.com/acme/widgets/broken.md',
-            project: { kind: 'git', canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' },
+            project: {
+              kind: 'git',
+              canonical: 'github.com/acme/widgets',
+              host: 'github.com',
+              owner: 'acme',
+              repo: 'widgets',
+            },
             contentHash: missingHash,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'broken.md' },
+            restoreTarget: {
+              base: 'claude-project-memory',
+              relativePath: 'broken.md',
+            },
             capturedAt: '2026-10-20T00:00:00.000Z',
             sensitivity: 'private',
           },
         ],
       },
     });
-    await expect(migrateLocalStore(stackHome)).rejects.toMatchObject({ code: 'migration-invalid' });
+    await expect(migrateLocalStore(stackHome)).rejects.toMatchObject({
+      code: 'migration-invalid',
+    });
     // Fails BEFORE any mutation: no backup side effect beyond the (harmless,
     // always-written) pre-migration backup file itself, and no canonical main.
     const main = await readCanonicalMain(stackHome);
@@ -610,7 +750,12 @@ describe('migrateLocalStore', () => {
     await migrateLocalStore(stackHome); // must NOT revert the above
 
     const current = memoryManifestSchema.parse(
-      JSON.parse(await readFile(path.join(stackHome, 'memory', 'manifests', 'current.json'), 'utf8')),
+      JSON.parse(
+        await readFile(
+          path.join(stackHome, 'memory', 'manifests', 'current.json'),
+          'utf8',
+        ),
+      ),
     );
     expect(current.items[0]?.contentHash).toBe(newHash); // not reverted to the old hash
   });

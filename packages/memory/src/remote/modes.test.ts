@@ -9,11 +9,17 @@ import { memoryStorePaths, readMemoryManifest } from '../store.js';
 import { readMemoryObject } from '../store.js';
 import { CANONICAL_MAIN_SCHEMA_VERSION } from '../canonical/domain.js';
 import { V1ConversionError } from '../canonical/convert-v1.js';
-import { isLocalStoreMigrated, migrateLocalStore } from '../canonical/migrate.js';
+import {
+  isLocalStoreMigrated,
+  migrateLocalStore,
+} from '../canonical/migrate.js';
 import { readCanonicalMain, writeCanonicalMain } from '../canonical/store.js';
 import { mintProjectId } from '../project/project-id.js';
 import { emptyRegistry, identityClaim } from '../project/registry.js';
-import { readLocalRegistry, writeLocalRegistry } from '../project/registry-store.js';
+import {
+  readLocalRegistry,
+  writeLocalRegistry,
+} from '../project/registry-store.js';
 import {
   InMemoryRemoteMemoryStore,
   RemoteMemoryError,
@@ -29,6 +35,7 @@ import {
   standardCloudBackup,
 } from './modes.js';
 import { SECRET_MARKER, writeSyntheticStore } from './store.fixtures.js';
+import { defined } from '../test-support.js';
 
 const roots: string[] = [];
 const freshStore = async (): Promise<string> => {
@@ -352,7 +359,10 @@ describe('Standard → Protected migration', () => {
     const { backend } = backendFor('user-a');
 
     // Generation 0: v1 (no canonical Memory yet).
-    const v1 = await standardCloudBackup({ stackHome: source.stackHome, backend });
+    const v1 = await standardCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+    });
     expect(v1.generation).toBe(0);
 
     // Generation 1: v2 (canonical Memory now exists on disk).
@@ -360,7 +370,10 @@ describe('Standard → Protected migration', () => {
       schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
       projects: [],
     });
-    const v2 = await standardCloudBackup({ stackHome: source.stackHome, backend });
+    const v2 = await standardCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+    });
     expect(v2.generation).toBe(1);
 
     const mmk = generateMmk();
@@ -377,10 +390,16 @@ describe('Standard → Protected migration', () => {
     // The v2 copy must be the highest generation number — oldest-first
     // copying means it was created LAST.
     const generations = await backend.listGenerations();
-    const protectedOnly = generations.filter((g) => g.privacyMode === 'protected');
+    const protectedOnly = generations.filter(
+      (g) => g.privacyMode === 'protected',
+    );
     expect(protectedOnly).toHaveLength(2);
-    const v2Copy = protectedOnly.find((g) => g.bundleFormatVersion === 'stack-mem-bundle-v2');
-    const v1Copy = protectedOnly.find((g) => g.bundleFormatVersion === 'stack-mem-bundle-v1');
+    const v2Copy = protectedOnly.find(
+      (g) => g.bundleFormatVersion === 'stack-mem-bundle-v2',
+    );
+    const v1Copy = protectedOnly.find(
+      (g) => g.bundleFormatVersion === 'stack-mem-bundle-v1',
+    );
     expect(v2Copy?.generation).toBeGreaterThan(v1Copy?.generation ?? -1);
     expect(latest?.generation).toBe(v2Copy?.generation);
   });
@@ -392,21 +411,39 @@ describe('protect replicas and the sticky v1-after-v2 gate (Task 13 fix round 3,
 
   /** g0: v1 Standard, g1: v2 Standard (a real mixed-history account). */
   const mixedHistory = async () => {
-    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 1 });
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
     roots.push(source.stackHome);
     const { store, backend } = backendFor('user-a');
-    const v1 = await standardCloudBackup({ stackHome: source.stackHome, backend });
-    await writeCanonicalMain(source.stackHome, { schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION, projects: [] });
-    const v2 = await standardCloudBackup({ stackHome: source.stackHome, backend });
-    const original = (await backend.getGenerationById(v1.backupId))!;
+    const v1 = await standardCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+    });
+    await writeCanonicalMain(source.stackHome, {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [],
+    });
+    const v2 = await standardCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+    });
+    const original = defined(await backend.getGenerationById(v1.backupId));
     return { source, store, backend, v1, v2, original };
   };
 
-  const parentOf = async (backend: RemoteMemoryBackend) => (await backend.getLatest())?.generation ?? null;
+  const parentOf = async (backend: RemoteMemoryBackend) =>
+    (await backend.getLatest())?.generation ?? null;
 
   const create = async (
     backend: RemoteMemoryBackend,
-    input: { bundleFormatVersion: string; privacyMode: 'standard' | 'protected'; bytes: number; replicaOf?: string },
+    input: {
+      bundleFormatVersion: string;
+      privacyMode: 'standard' | 'protected';
+      bytes: number;
+      replicaOf?: string;
+    },
   ) =>
     backend.createGeneration({
       backupId: randomUUID(),
@@ -429,53 +466,107 @@ describe('protect replicas and the sticky v1-after-v2 gate (Task 13 fix round 3,
     expect((await backend.getLatest())?.backupId).toBe(replica.backupId);
     expect((await backend.getLatest())?.bundleFormatVersion).toBe(V1);
     // An old CLI's v1 Standard push is still refused, with the exact message.
-    await expect(create(backend, { bundleFormatVersion: V1, privacyMode: 'standard', bytes: 10 })).rejects.toMatchObject({
+    await expect(
+      create(backend, {
+        bundleFormatVersion: V1,
+        privacyMode: 'standard',
+        bytes: 10,
+      }),
+    ).rejects.toMatchObject({
       code: 'incompatible-format',
-      message: "This account's Memory was upgraded by a newer STAK CLI. Update with `npm i -g @memstk/cli@beta`.",
+      message:
+        "This account's Memory was upgraded by a newer STAK CLI. Update with `npm i -g @memstk/cli@beta`.",
     });
     expect((await backend.getLatest())?.backupId).toBe(replica.backupId);
   });
 
   it('refuses forged replicas: unknown original, wrong format, wrong length, Standard replica, second replica, after finalize', async () => {
     const { backend, original, v2 } = await mixedHistory();
-    const ok = { bundleFormatVersion: V1, privacyMode: 'protected' as const, bytes: original.payloadBytes + 28 };
-    await expect(create(backend, { ...ok, replicaOf: randomUUID() })).rejects.toMatchObject({ code: 'invalid-replica' });
-    await expect(create(backend, { ...ok, bundleFormatVersion: V2, replicaOf: original.backupId })).rejects.toMatchObject({
+    const ok = {
+      bundleFormatVersion: V1,
+      privacyMode: 'protected' as const,
+      bytes: original.payloadBytes + 28,
+    };
+    await expect(
+      create(backend, { ...ok, replicaOf: randomUUID() }),
+    ).rejects.toMatchObject({ code: 'invalid-replica' });
+    await expect(
+      create(backend, {
+        ...ok,
+        bundleFormatVersion: V2,
+        replicaOf: original.backupId,
+      }),
+    ).rejects.toMatchObject({
       code: 'invalid-replica',
     });
-    await expect(create(backend, { ...ok, bytes: original.payloadBytes + 27, replicaOf: original.backupId })).rejects.toMatchObject({
+    await expect(
+      create(backend, {
+        ...ok,
+        bytes: original.payloadBytes + 27,
+        replicaOf: original.backupId,
+      }),
+    ).rejects.toMatchObject({
       code: 'invalid-replica',
     });
-    await expect(create(backend, { ...ok, privacyMode: 'standard', replicaOf: original.backupId })).rejects.toMatchObject({
+    await expect(
+      create(backend, {
+        ...ok,
+        privacyMode: 'standard',
+        replicaOf: original.backupId,
+      }),
+    ).rejects.toMatchObject({
       code: 'invalid-replica',
     });
     // A replica can't name another replica (originals must be Standard).
-    const first = await create(backend, { ...ok, replicaOf: original.backupId });
-    await expect(create(backend, { ...ok, replicaOf: original.backupId })).rejects.toMatchObject({ code: 'invalid-replica' });
+    const first = await create(backend, {
+      ...ok,
+      replicaOf: original.backupId,
+    });
     await expect(
-      create(backend, { ...ok, bytes: first.payloadBytes + 28, replicaOf: first.backupId }),
+      create(backend, { ...ok, replicaOf: original.backupId }),
+    ).rejects.toMatchObject({ code: 'invalid-replica' });
+    await expect(
+      create(backend, {
+        ...ok,
+        bytes: first.payloadBytes + 28,
+        replicaOf: first.backupId,
+      }),
     ).rejects.toMatchObject({ code: 'invalid-replica' });
     // Once the account is Protected, no replica exemption exists any more.
-    const v2Meta = (await backend.getGenerationById(v2.backupId))!;
+    const v2Meta = defined(await backend.getGenerationById(v2.backupId));
     await backend.setPrivacyMode('protected');
     await expect(
-      create(backend, { bundleFormatVersion: V2, privacyMode: 'protected', bytes: v2Meta.payloadBytes + 28, replicaOf: v2.backupId }),
+      create(backend, {
+        bundleFormatVersion: V2,
+        privacyMode: 'protected',
+        bytes: v2Meta.payloadBytes + 28,
+        replicaOf: v2.backupId,
+      }),
     ).rejects.toMatchObject({ code: 'invalid-replica' });
     // Nothing forged was committed.
-    expect((await backend.listGenerations()).filter((g) => g.replicaOf)).toHaveLength(1);
+    expect(
+      (await backend.listGenerations()).filter((g) => g.replicaOf),
+    ).toHaveLength(1);
   });
 
   it('protects a v1 -> v2 mixed-history account: every replica names its original, latest is the v2 replica', async () => {
     const { source, backend, v1, v2 } = await mixedHistory();
     const mmk = generateMmk();
     const result = await migrateStandardToProtected({ backend, mmk });
-    expect(result).toMatchObject({ finalized: true, migrated: 2, resumed: 0, retiredStandard: 2 });
-    const latest = (await backend.getLatest())!;
+    expect(result).toMatchObject({
+      finalized: true,
+      migrated: 2,
+      resumed: 0,
+      retiredStandard: 2,
+    });
+    const latest = defined(await backend.getLatest());
     expect(latest.privacyMode).toBe('protected');
     expect(latest.bundleFormatVersion).toBe(V2);
     expect(latest.replicaOf).toBe(v2.backupId);
     const replicas = await backend.listGenerations();
-    expect(replicas.map((g) => g.replicaOf).sort()).toEqual([v1.backupId, v2.backupId].sort());
+    expect(replicas.map((g) => g.replicaOf).sort()).toEqual(
+      [v1.backupId, v2.backupId].sort(),
+    );
     const dest = await freshStore();
     await cloudRecover({ stackHome: dest, backend, mmk });
     await assertByteExact(source.stackHome, dest, source.hashes);
@@ -492,16 +583,28 @@ describe('protect replicas and the sticky v1-after-v2 gate (Task 13 fix round 3,
       if (creates === 2) throw new Error('network dropped');
       return backend.createGeneration(input);
     };
-    await expect(migrateStandardToProtected({ backend: flaky, mmk })).rejects.toThrow('network dropped');
+    await expect(
+      migrateStandardToProtected({ backend: flaky, mmk }),
+    ).rejects.toThrow('network dropped');
     expect((await backend.getProfile())?.privacyMode).toBe('standard');
     expect(await isProtectInProgress(backend)).toBe(true);
     expect((await backend.getLatest())?.replicaOf).toBe(v1.backupId);
 
     const resumed = await migrateStandardToProtected({ backend, mmk });
-    expect(resumed).toMatchObject({ finalized: true, migrated: 1, resumed: 1, retiredReplicas: 0, retiredStandard: 2 });
+    expect(resumed).toMatchObject({
+      finalized: true,
+      migrated: 1,
+      resumed: 1,
+      retiredReplicas: 0,
+      retiredStandard: 2,
+    });
     expect(await isProtectInProgress(backend)).toBe(false);
     expect((await backend.getLatest())?.replicaOf).toBe(v2.backupId);
-    expect((await backend.listGenerations()).filter((g) => g.replicaOf === v1.backupId)).toHaveLength(1);
+    expect(
+      (await backend.listGenerations()).filter(
+        (g) => g.replicaOf === v1.backupId,
+      ),
+    ).toHaveLength(1);
   });
 
   it('a concurrent push during protect aborts the migration (chained expectedParent) instead of stranding it as Standard', async () => {
@@ -527,11 +630,17 @@ describe('protect replicas and the sticky v1-after-v2 gate (Task 13 fix round 3,
       }
       return meta;
     };
-    await expect(migrateStandardToProtected({ backend: racing, mmk })).rejects.toMatchObject({ code: 'conflict' });
+    await expect(
+      migrateStandardToProtected({ backend: racing, mmk }),
+    ).rejects.toMatchObject({ code: 'conflict' });
     expect((await backend.getProfile())?.privacyMode).toBe('standard');
     // Nothing retired: the other machine's Standard push is intact and still latest.
     expect((await backend.getLatest())?.backupId).toBe(concurrentBackupId);
-    expect((await backend.listGenerations()).filter((g) => g.privacyMode === 'standard')).toHaveLength(3);
+    expect(
+      (await backend.listGenerations()).filter(
+        (g) => g.privacyMode === 'standard',
+      ),
+    ).toHaveLength(3);
     void source;
   });
 
@@ -552,10 +661,16 @@ describe('protect replicas and the sticky v1-after-v2 gate (Task 13 fix round 3,
       if (!pushed) pushed = (await otherMachinePush(backend)).backupId;
       return backend.getPayload(backupId);
     };
-    await expect(migrateStandardToProtected({ backend: racing, mmk: generateMmk() })).rejects.toMatchObject({ code: 'conflict' });
+    await expect(
+      migrateStandardToProtected({ backend: racing, mmk: generateMmk() }),
+    ).rejects.toMatchObject({ code: 'conflict' });
     expect((await backend.getProfile())?.privacyMode).toBe('standard');
     expect((await backend.getLatest())?.backupId).toBe(pushed);
-    expect((await backend.listGenerations()).every((g) => g.privacyMode === 'standard')).toBe(true);
+    expect(
+      (await backend.listGenerations()).every(
+        (g) => g.privacyMode === 'standard',
+      ),
+    ).toBe(true);
     expect(await isProtectInProgress(backend)).toBe(false);
   });
 
@@ -565,17 +680,28 @@ describe('protect replicas and the sticky v1-after-v2 gate (Task 13 fix round 3,
     const racing: RemoteMemoryBackend = Object.create(backend);
     racing.getProfile = async () => {
       // Both copies exist and nothing is retired yet: another machine pushes now.
-      if (!pushed && (await backend.listGenerations()).filter((g) => g.privacyMode === 'protected').length === 2)
+      if (
+        !pushed &&
+        (await backend.listGenerations()).filter(
+          (g) => g.privacyMode === 'protected',
+        ).length === 2
+      )
         pushed = (await otherMachinePush(backend)).backupId;
       return backend.getProfile();
     };
-    await expect(migrateStandardToProtected({ backend: racing, mmk: generateMmk() })).rejects.toMatchObject({
+    await expect(
+      migrateStandardToProtected({ backend: racing, mmk: generateMmk() }),
+    ).rejects.toMatchObject({
       code: 'protect-in-progress',
     });
     expect(pushed).toBeDefined();
     expect((await backend.getProfile())?.privacyMode).toBe('standard');
     // No original was retired: every Standard generation (the 2 originals + the push) is still committed.
-    expect((await backend.listGenerations()).filter((g) => g.privacyMode === 'standard')).toHaveLength(3);
+    expect(
+      (await backend.listGenerations()).filter(
+        (g) => g.privacyMode === 'standard',
+      ),
+    ).toHaveLength(3);
   });
 
   it('final review I5: a push landing while originals are being retired never finalizes; re-running protect copies it and finishes', async () => {
@@ -587,26 +713,48 @@ describe('protect replicas and the sticky v1-after-v2 gate (Task 13 fix round 3,
       await backend.retireGeneration(...args);
       if (!pushed) pushed = (await otherMachinePush(backend)).backupId;
     };
-    await expect(migrateStandardToProtected({ backend: racing, mmk })).rejects.toMatchObject({ code: 'protect-in-progress' });
+    await expect(
+      migrateStandardToProtected({ backend: racing, mmk }),
+    ).rejects.toMatchObject({ code: 'protect-in-progress' });
     expect((await backend.getProfile())?.privacyMode).toBe('standard');
-    expect((await backend.getGenerationById(pushed as string))?.state).toBe('committed');
+    expect((await backend.getGenerationById(pushed as string))?.state).toBe(
+      'committed',
+    );
 
     const finished = await migrateStandardToProtected({ backend, mmk });
     expect(finished.finalized).toBe(true);
     expect((await backend.getProfile())?.privacyMode).toBe('protected');
-    expect((await backend.listGenerations()).some((g) => g.privacyMode === 'standard')).toBe(false);
-    expect((await backend.listGenerations()).some((g) => g.replicaOf === pushed)).toBe(true);
+    expect(
+      (await backend.listGenerations()).some(
+        (g) => g.privacyMode === 'standard',
+      ),
+    ).toBe(false);
+    expect(
+      (await backend.listGenerations()).some((g) => g.replicaOf === pushed),
+    ).toBe(true);
   });
 });
 
-describe('protect resume from a device WITHOUT the interrupted run\'s key (Task 13 fix round 4)', () => {
-  it('retires the orphaned replicas, re-replicates with the new key, and finalizes with the newest original\'s replica as latest', async () => {
-    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 1 });
+describe("protect resume from a device WITHOUT the interrupted run's key (Task 13 fix round 4)", () => {
+  it("retires the orphaned replicas, re-replicates with the new key, and finalizes with the newest original's replica as latest", async () => {
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
     roots.push(source.stackHome);
     const { store, backend } = backendFor('user-a');
-    const v1 = await standardCloudBackup({ stackHome: source.stackHome, backend });
-    await writeCanonicalMain(source.stackHome, { schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION, projects: [] });
-    const v2 = await standardCloudBackup({ stackHome: source.stackHome, backend });
+    const v1 = await standardCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+    });
+    await writeCanonicalMain(source.stackHome, {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [],
+    });
+    const v2 = await standardCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+    });
 
     // Device 1 replicates the v1 original, then is interrupted.
     const oldKey = generateMmk();
@@ -617,37 +765,58 @@ describe('protect resume from a device WITHOUT the interrupted run\'s key (Task 
       if (creates === 2) throw new Error('laptop closed');
       return backend.createGeneration(input);
     };
-    await expect(migrateStandardToProtected({ backend: flaky, mmk: oldKey })).rejects.toThrow('laptop closed');
-    const orphan = (await backend.listGenerations()).find((g) => g.replicaOf === v1.backupId)!;
+    await expect(
+      migrateStandardToProtected({ backend: flaky, mmk: oldKey }),
+    ).rejects.toThrow('laptop closed');
+    const orphan = defined(
+      (await backend.listGenerations()).find(
+        (g) => g.replicaOf === v1.backupId,
+      ),
+    );
     expect(orphan).toBeDefined();
 
     // Device 2 never had that key.
     const newKey = generateMmk();
     const result = await migrateStandardToProtected({ backend, mmk: newKey });
-    expect(result).toMatchObject({ finalized: true, migrated: 2, resumed: 0, retiredReplicas: 1, retiredStandard: 2 });
+    expect(result).toMatchObject({
+      finalized: true,
+      migrated: 2,
+      resumed: 0,
+      retiredReplicas: 1,
+      retiredStandard: 2,
+    });
     expect((await backend.getProfile())?.privacyMode).toBe('protected');
     expect(store.hasPayload(`mem/user-a/${orphan.backupId}`)).toBe(false); // orphan retired + purged
     const committed = await backend.listGenerations();
     expect(committed.every((g) => g.privacyMode === 'protected')).toBe(true);
-    expect(committed.map((g) => g.replicaOf).sort()).toEqual([v1.backupId, v2.backupId].sort());
-    const latest = (await backend.getLatest())!;
+    expect(committed.map((g) => g.replicaOf).sort()).toEqual(
+      [v1.backupId, v2.backupId].sort(),
+    );
+    const latest = defined(await backend.getLatest());
     expect(latest.replicaOf).toBe(v2.backupId);
     // Numbers are never reused after a retire (profile-based numbering, like production).
-    expect(new Set((store.generations.get('user-a') ?? []).map((g) => g.generation)).size).toBe(
-      (store.generations.get('user-a') ?? []).length,
-    );
+    expect(
+      new Set((store.generations.get('user-a') ?? []).map((g) => g.generation))
+        .size,
+    ).toBe((store.generations.get('user-a') ?? []).length);
     // Everything opens with the NEW key.
     const dest = await freshStore();
     await cloudRecover({ stackHome: dest, backend, mmk: newKey });
     await assertByteExact(source.stackHome, dest, source.hashes);
   });
 
-  it('uniqueness counts only COMMITTED replicas (matches the SQL partial index `where replica_of is not null and state = \'committed\'`)', async () => {
-    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 1 });
+  it("uniqueness counts only COMMITTED replicas (matches the SQL partial index `where replica_of is not null and state = 'committed'`)", async () => {
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
     roots.push(source.stackHome);
     const { backend } = backendFor('user-a');
-    const std = await standardCloudBackup({ stackHome: source.stackHome, backend });
-    const original = (await backend.getGenerationById(std.backupId))!;
+    const std = await standardCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+    });
+    const original = defined(await backend.getGenerationById(std.backupId));
     const replica = async () =>
       backend.createGeneration({
         backupId: randomUUID(),
@@ -670,27 +839,45 @@ describe('guarded retire: two devices running protect at once (Task 13 fix round
   /** Two Standard originals, both already replicated by device 1 (key1), whose
    * first run was interrupted at finalize before retiring anything. */
   const replicatedByDevice1 = async () => {
-    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 1 });
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
     roots.push(source.stackHome);
     const { backend } = backendFor('user-a');
-    const a = await standardCloudBackup({ stackHome: source.stackHome, backend });
-    await writeCanonicalMain(source.stackHome, { schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION, projects: [] });
-    const b = await standardCloudBackup({ stackHome: source.stackHome, backend });
+    const a = await standardCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+    });
+    await writeCanonicalMain(source.stackHome, {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [],
+    });
+    const b = await standardCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+    });
     const key1 = generateMmk();
     const stopAtFinalize: RemoteMemoryBackend = Object.create(backend);
-    stopAtFinalize.retireGeneration = () => Promise.reject(new Error('device 1 went to sleep'));
-    await expect(migrateStandardToProtected({ backend: stopAtFinalize, mmk: key1 })).rejects.toThrow('device 1 went to sleep');
-    expect((await backend.listGenerations()).filter((g) => g.replicaOf)).toHaveLength(2);
+    stopAtFinalize.retireGeneration = () =>
+      Promise.reject(new Error('device 1 went to sleep'));
+    await expect(
+      migrateStandardToProtected({ backend: stopAtFinalize, mmk: key1 }),
+    ).rejects.toThrow('device 1 went to sleep');
+    expect(
+      (await backend.listGenerations()).filter((g) => g.replicaOf),
+    ).toHaveLength(2);
     return { backend, key1, a, b };
   };
 
-  it('device 2 retiring device 1\'s replicas during device 1\'s finalize never empties the account and never finalizes to Protected', async () => {
+  it("device 2 retiring device 1's replicas during device 1's finalize never empties the account and never finalizes to Protected", async () => {
     const { backend, key1, a, b } = await replicatedByDevice1();
     const key2 = generateMmk();
     // Device 2: runs Phase 1b (retires the replicas it can't open), then dies
     // before re-creating anything.
     const device2: RemoteMemoryBackend = Object.create(backend);
-    device2.createGeneration = () => Promise.reject(new Error('device 2 crashed'));
+    device2.createGeneration = () =>
+      Promise.reject(new Error('device 2 crashed'));
     // Device 1 resumes; its finalize is interleaved with device 2's Phase 1b
     // right after device 1's own re-check of the first original's replica.
     let interleaved = false;
@@ -698,35 +885,59 @@ describe('guarded retire: two devices running protect at once (Task 13 fix round
     device1.retireGeneration = async (backupId, now, options) => {
       if (!interleaved) {
         interleaved = true;
-        await expect(migrateStandardToProtected({ backend: device2, mmk: key2 })).rejects.toThrow('device 2 crashed');
+        await expect(
+          migrateStandardToProtected({ backend: device2, mmk: key2 }),
+        ).rejects.toThrow('device 2 crashed');
       }
       return backend.retireGeneration(backupId, now, options);
     };
-    await expect(migrateStandardToProtected({ backend: device1, mmk: key1 })).rejects.toMatchObject({ code: 'retire-refused' });
+    await expect(
+      migrateStandardToProtected({ backend: device1, mmk: key1 }),
+    ).rejects.toMatchObject({ code: 'retire-refused' });
 
-    expect((await backend.getProfile())?.privacyMode ?? 'standard').toBe('standard');
+    expect((await backend.getProfile())?.privacyMode ?? 'standard').toBe(
+      'standard',
+    );
     const committed = await backend.listGenerations();
     expect(committed.length).toBeGreaterThanOrEqual(1);
     // Both originals are still committed: no content was lost.
-    expect(committed.map((g) => g.backupId).sort()).toEqual(expect.arrayContaining([a.backupId, b.backupId]));
+    expect(committed.map((g) => g.backupId).sort()).toEqual(
+      expect.arrayContaining([a.backupId, b.backupId]),
+    );
   });
 
-  it('the reverse interleaving: once device 1 retired an original, device 2 can\'t retire that original\'s replica', async () => {
+  it("the reverse interleaving: once device 1 retired an original, device 2 can't retire that original's replica", async () => {
     const { backend, a } = await replicatedByDevice1();
-    const replicaOfA = (await backend.listGenerations()).find((g) => g.replicaOf === a.backupId)!;
+    const replicaOfA = defined(
+      (await backend.listGenerations()).find((g) => g.replicaOf === a.backupId),
+    );
     await backend.retireGeneration(a.backupId, undefined, { guarded: true }); // allowed: replica committed
-    await expect(backend.retireGeneration(replicaOfA.backupId, undefined, { guarded: true })).rejects.toMatchObject({
+    await expect(
+      backend.retireGeneration(replicaOfA.backupId, undefined, {
+        guarded: true,
+      }),
+    ).rejects.toMatchObject({
       code: 'retire-refused',
     });
-    expect((await backend.getGenerationById(replicaOfA.backupId))?.state).toBe('committed');
+    expect((await backend.getGenerationById(replicaOfA.backupId))?.state).toBe(
+      'committed',
+    );
   });
 
   it('guarded retire refuses a Standard original with no committed replica; the unguarded (Delete Cloud Memory) path is unchanged', async () => {
-    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 1 });
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
     roots.push(source.stackHome);
     const { backend } = backendFor('user-a');
-    const std = await standardCloudBackup({ stackHome: source.stackHome, backend });
-    await expect(backend.retireGeneration(std.backupId, undefined, { guarded: true })).rejects.toMatchObject({
+    const std = await standardCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+    });
+    await expect(
+      backend.retireGeneration(std.backupId, undefined, { guarded: true }),
+    ).rejects.toMatchObject({
       code: 'retire-refused',
     });
     expect(await backend.getLatest()).not.toBeNull();
@@ -745,31 +956,50 @@ describe('recovering an old-format (v1) generation onto an upgraded store (spec 
   };
 
   it('Protected: converted into canonical Memory; current.json keeps only global items', async () => {
-    const source = await writeSyntheticStore({ projects: 2, filesPerProject: 2 });
+    const source = await writeSyntheticStore({
+      projects: 2,
+      filesPerProject: 2,
+    });
     roots.push(source.stackHome);
     const { backend } = backendFor('user-v1');
     const mmk = generateMmk();
     await protectedCloudBackup({ stackHome: source.stackHome, backend, mmk });
-    expect((await backend.getLatest())?.bundleFormatVersion).toBe('stack-mem-bundle-v1');
+    expect((await backend.getLatest())?.bundleFormatVersion).toBe(
+      'stack-mem-bundle-v1',
+    );
 
     const dest = await upgradedStore();
     await cloudRecover({ stackHome: dest, backend, mmk });
     const main = await readCanonicalMain(dest);
     expect(main.projects).toHaveLength(2);
-    expect(main.projects.flatMap((p) => p.documents.map((d) => d.path)).sort()).toEqual(
-      ['notes/f0.md', 'notes/f0.md', 'notes/f1.md', 'notes/f1.md'],
-    );
-    expect(new Set(main.projects.flatMap((p) => p.documents.map((d) => (d.state === 'present' ? d.contentHash : '')))))
-      .toEqual(new Set(source.hashes));
-    expect((await readMemoryManifest(dest))?.items.filter((i) => i.scope === 'project')).toEqual([]);
+    expect(
+      main.projects.flatMap((p) => p.documents.map((d) => d.path)).sort(),
+    ).toEqual(['notes/f0.md', 'notes/f0.md', 'notes/f1.md', 'notes/f1.md']);
+    expect(
+      new Set(
+        main.projects.flatMap((p) =>
+          p.documents.map((d) => (d.state === 'present' ? d.contentHash : '')),
+        ),
+      ),
+    ).toEqual(new Set(source.hashes));
+    expect(
+      (await readMemoryManifest(dest))?.items.filter(
+        (i) => i.scope === 'project',
+      ),
+    ).toEqual([]);
     // Every Project ID is recorded in the local registry.
     const registry = await readLocalRegistry(dest);
     for (const project of main.projects)
-      expect(registry.projects.some((r) => r.projectId === project.projectId)).toBe(true);
+      expect(
+        registry.projects.some((r) => r.projectId === project.projectId),
+      ).toBe(true);
   });
 
   it('an identity matching two Project IDs here fails closed: nothing is recovered or changed', async () => {
-    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 1 });
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
     roots.push(source.stackHome);
     const { backend } = backendFor('user-v1-conflict');
     await standardCloudBackup({ stackHome: source.stackHome, backend });
@@ -789,17 +1019,32 @@ describe('recovering an old-format (v1) generation onto an upgraded store (spec 
         { projectId: mintProjectId(), claims: [claim], lifecycle: 'active' },
       ],
     });
-    const manifestBefore = await readFile(memoryStorePaths(dest).currentManifest, 'utf8');
+    const manifestBefore = await readFile(
+      memoryStorePaths(dest).currentManifest,
+      'utf8',
+    );
     const mainBefore = await readCanonicalMain(dest);
 
-    await expect(cloudRecover({ stackHome: dest, backend })).rejects.toBeInstanceOf(V1ConversionError);
-    expect(await readFile(memoryStorePaths(dest).currentManifest, 'utf8')).toBe(manifestBefore);
+    await expect(
+      cloudRecover({ stackHome: dest, backend }),
+    ).rejects.toBeInstanceOf(V1ConversionError);
+    expect(await readFile(memoryStorePaths(dest).currentManifest, 'utf8')).toBe(
+      manifestBefore,
+    );
     expect(await readCanonicalMain(dest)).toEqual(mainBefore);
-    await expect(readMemoryObject({ stackHome: dest, contentHash: source.hashes[0] as string })).rejects.toThrow();
+    await expect(
+      readMemoryObject({
+        stackHome: dest,
+        contentHash: source.hashes[0] as string,
+      }),
+    ).rejects.toThrow();
   });
 
   it('a store that is NOT upgraded restores the v1 bundle exactly as before', async () => {
-    const source = await writeSyntheticStore({ projects: 1, filesPerProject: 1 });
+    const source = await writeSyntheticStore({
+      projects: 1,
+      filesPerProject: 1,
+    });
     roots.push(source.stackHome);
     const { backend } = backendFor('user-v1-fresh');
     await standardCloudBackup({ stackHome: source.stackHome, backend });

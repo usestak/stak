@@ -14,9 +14,16 @@ import { atomicWriteFile } from '../remote/secure-file.js';
 import { encodeClaudeProjectKey } from '../project-identity.js';
 import { namespaceOf, validateCanonicalPath } from './paths.js';
 
-export type BoundProject = { projectId: string; dir: string; gitRemote?: string };
+export type BoundProject = {
+  projectId: string;
+  dir: string;
+  gitRemote?: string;
+};
 
-export type NativeRoots = { projectDirExists: boolean; notesRootExists: boolean };
+export type NativeRoots = {
+  projectDirExists: boolean;
+  notesRootExists: boolean;
+};
 
 const isDir = async (candidate: string): Promise<boolean> => {
   try {
@@ -68,13 +75,21 @@ export const nativeRootsExist = async (
   const keyFolderIsRealDir = await isDirNoSymlink(keyDir);
   return {
     projectDirExists: await isDir(project.dir),
-    notesRootExists: keyFolderIsRealDir && (await isDir(path.join(keyDir, 'memory'))),
+    notesRootExists:
+      keyFolderIsRealDir && (await isDir(path.join(keyDir, 'memory'))),
   };
 };
 
-export type NativeDoc = { canonicalPath: string; contentHash: string; bytes: Uint8Array };
+export type NativeDoc = {
+  canonicalPath: string;
+  contentHash: string;
+  bytes: Uint8Array;
+};
 export type SourceConflict = { canonicalPath: string };
-export type ScanResult = { docs: NativeDoc[]; sourceConflicts: SourceConflict[] };
+export type ScanResult = {
+  docs: NativeDoc[];
+  sourceConflicts: SourceConflict[];
+};
 
 export type MaterializeOp =
   | { kind: 'write'; canonicalPath: string; bytes: Uint8Array }
@@ -89,9 +104,14 @@ export type WriteResult = { written: string[]; deleted: string[] };
  * A segment that does not exist yet (nothing created there so far) is not a
  * symlink and is safe to pass through.
  */
-const assertRootHasNoSymlinkSegments = async (anchor: string, root: string): Promise<void> => {
+const assertRootHasNoSymlinkSegments = async (
+  anchor: string,
+  root: string,
+): Promise<void> => {
   const relative = path.relative(anchor, root);
-  const segments = relative.split(path.sep).filter((segment) => segment.length > 0);
+  const segments = relative
+    .split(path.sep)
+    .filter((segment) => segment.length > 0);
   let current = anchor;
   for (const segment of segments) {
     current = path.join(current, segment);
@@ -110,7 +130,10 @@ const assertRootHasNoSymlinkSegments = async (anchor: string, root: string): Pro
  * (global items — `user-instructions` and global `agent-memory` — stay in the v1
  * store per spec section 3). */
 export const claudeCanonicalPathOf = (
-  item: Pick<DiscoveredMemoryItem | ManifestItem, 'scope' | 'kind' | 'restoreTarget'>,
+  item: Pick<
+    DiscoveredMemoryItem | ManifestItem,
+    'scope' | 'kind' | 'restoreTarget'
+  >,
 ): string | null => {
   if (item.scope !== 'project') return null;
   switch (item.kind) {
@@ -138,15 +161,22 @@ export const claudeNativeTargetOf = (
 ): string => {
   const validated = validateCanonicalPath(canonicalPath);
   const namespace = namespaceOf(validated);
-  const rest = validated.slice(namespace!.length + 1);
+  if (!namespace)
+    throw new Error(
+      `No native Claude target for canonical path: ${canonicalPath}`,
+    );
+  const rest = validated.slice(namespace.length + 1);
   if (namespace === 'notes') {
     const key = encodeClaudeProjectKey(path.resolve(project.dir));
     return path.join(claudeHome, 'projects', key, 'memory', rest);
   }
-  if (namespace === 'agents') return path.join(project.dir, '.claude', 'agent-memory', rest);
+  if (namespace === 'agents')
+    return path.join(project.dir, '.claude', 'agent-memory', rest);
   if (namespace === 'instructions' && rest === 'private.md')
     return path.join(project.dir, 'CLAUDE.local.md');
-  throw new Error(`No native Claude target for canonical path: ${canonicalPath}`);
+  throw new Error(
+    `No native Claude target for canonical path: ${canonicalPath}`,
+  );
 };
 
 /**
@@ -163,7 +193,9 @@ export const scanClaudeProject = async (
   },
 ): Promise<ScanResult> => {
   const items = await discoverClaudeMemory(options);
-  const matched = items.filter((item) => options.resolveProjectId(item) === project.projectId);
+  const matched = items.filter(
+    (item) => options.resolveProjectId(item) === project.projectId,
+  );
 
   const byPath = new Map<string, DiscoveredMemoryItem[]>();
   for (const item of matched) {
@@ -182,13 +214,16 @@ export const scanClaudeProject = async (
       sourceConflicts.push({ canonicalPath });
       continue;
     }
-    const chosen = group[0]!;
+    const [chosen] = group;
+    if (!chosen) continue;
     const bytes = await readFile(chosen.source.path);
     docs.push({ canonicalPath, contentHash: hashBytes(bytes), bytes });
   }
   return {
     docs,
-    sourceConflicts: sourceConflicts.sort((a, b) => (a.canonicalPath < b.canonicalPath ? -1 : 1)),
+    sourceConflicts: sourceConflicts.sort((a, b) =>
+      a.canonicalPath < b.canonicalPath ? -1 : 1,
+    ),
   };
 };
 
@@ -226,9 +261,15 @@ export const writeClaudeProject = async (
         : namespace === 'agents'
           ? path.join(project.dir, '.claude', 'agent-memory')
           : project.dir;
-    if (namespace === 'notes') await assertRootHasNoSymlinkSegments(claudeHome, ownedRoot);
-    else if (namespace === 'agents') await assertRootHasNoSymlinkSegments(project.dir, ownedRoot);
-    await assertPathWithin({ ownedRoot, proposedPath: target, allowRoot: true });
+    if (namespace === 'notes')
+      await assertRootHasNoSymlinkSegments(claudeHome, ownedRoot);
+    else if (namespace === 'agents')
+      await assertRootHasNoSymlinkSegments(project.dir, ownedRoot);
+    await assertPathWithin({
+      ownedRoot,
+      proposedPath: target,
+      allowRoot: true,
+    });
     if (op.kind === 'write') {
       await atomicWriteFile(target, op.bytes);
       written.push(op.canonicalPath);

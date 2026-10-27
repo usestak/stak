@@ -8,7 +8,6 @@ import { PathFenceError } from '@stack/shared';
 
 import { encodeClaudeProjectKey } from '../project-identity.js';
 import {
-  claudeCanonicalPathOf,
   claudeNativeTargetOf,
   scanClaudeProject,
   writeClaudeProject,
@@ -21,7 +20,9 @@ const temp = async () => {
   return root;
 };
 afterEach(async () =>
-  Promise.all(roots.splice(0).map((r) => rm(r, { recursive: true, force: true }))),
+  Promise.all(
+    roots.splice(0).map((r) => rm(r, { recursive: true, force: true })),
+  ),
 );
 
 const write = async (file: string, body: string) => {
@@ -35,7 +36,10 @@ describe('scanClaudeProject', () => {
     const claudeHome = path.join(root, '.claude');
     const projectDir = path.join(root, 'proj');
     const key = 'D--proj'; // simplified encoding for this fixture
-    await write(path.join(claudeHome, 'projects', key, 'memory', 'MEMORY.md'), 'hello');
+    await write(
+      path.join(claudeHome, 'projects', key, 'memory', 'MEMORY.md'),
+      'hello',
+    );
     await write(
       path.join(projectDir, '.claude', 'agent-memory', 'reviewer', 'notes.md'),
       'agent notes',
@@ -54,8 +58,12 @@ describe('scanClaudeProject', () => {
     expect(result.sourceConflicts).toEqual([]);
     const byPath = new Map(result.docs.map((d) => [d.canonicalPath, d]));
     expect(byPath.get('notes/MEMORY.md')?.bytes.toString()).toBe('hello');
-    expect(byPath.get('agents/reviewer/notes.md')?.bytes.toString()).toBe('agent notes');
-    expect(byPath.get('instructions/private.md')?.bytes.toString()).toBe('private');
+    expect(byPath.get('agents/reviewer/notes.md')?.bytes.toString()).toBe(
+      'agent notes',
+    );
+    expect(byPath.get('instructions/private.md')?.bytes.toString()).toBe(
+      'private',
+    );
   });
 
   it('omits items whose resolved project id does not match', async () => {
@@ -91,27 +99,40 @@ describe('scanClaudeProject', () => {
     // of identity. Both land on canonical path `notes/a.md` with different content
     // hashes, which is what exercises `scanClaudeProject`'s dedup-by-hash conflict
     // detection.
-    await write(path.join(claudeHome, 'projects', 'key-old', 'memory', 'a.md'), 'old');
-    await write(path.join(claudeHome, 'projects', 'key-new', 'memory', 'a.md'), 'new');
+    await write(
+      path.join(claudeHome, 'projects', 'key-old', 'memory', 'a.md'),
+      'old',
+    );
+    await write(
+      path.join(claudeHome, 'projects', 'key-new', 'memory', 'a.md'),
+      'new',
+    );
 
     const result = await scanClaudeProject(
       { projectId: 'prj_x', dir: projectDir },
       {
         claudeHome,
-        projects: [{ dir: projectDir, gitRemote: 'git@github.com:acme/widgets.git' }],
+        projects: [
+          { dir: projectDir, gitRemote: 'git@github.com:acme/widgets.git' },
+        ],
         gitRemoteOf: async () => 'git@github.com:acme/widgets.git',
         isDirectory: async () => true,
         resolveProjectId: () => 'prj_x',
       },
     );
     expect(result.sourceConflicts).toEqual([{ canonicalPath: 'notes/a.md' }]);
-    expect(result.docs.find((d) => d.canonicalPath === 'notes/a.md')).toBeUndefined();
+    expect(
+      result.docs.find((d) => d.canonicalPath === 'notes/a.md'),
+    ).toBeUndefined();
   });
 });
 
 describe('path mapping', () => {
   it('maps canonical paths to Claude native targets and back', () => {
-    const project = { projectId: 'prj_x', dir: path.join('C:', 'work', 'proj') };
+    const project = {
+      projectId: 'prj_x',
+      dir: path.join('C:', 'work', 'proj'),
+    };
     expect(claudeNativeTargetOf(project, 'instructions/private.md')).toBe(
       path.join(project.dir, 'CLAUDE.local.md'),
     );
@@ -121,7 +142,9 @@ describe('path mapping', () => {
   });
 
   it('rejects an out-of-namespace canonical path', () => {
-    expect(() => claudeNativeTargetOf({ projectId: 'prj_x', dir: '/x' }, 'other/a.md')).toThrow();
+    expect(() =>
+      claudeNativeTargetOf({ projectId: 'prj_x', dir: '/x' }, 'other/a.md'),
+    ).toThrow();
   });
 });
 
@@ -140,7 +163,11 @@ describe('writeClaudeProject', () => {
     await writeClaudeProject(
       { projectId: 'prj_x', dir: projectDir },
       [
-        { kind: 'write', canonicalPath: 'instructions/private.md', bytes: Buffer.from('p') },
+        {
+          kind: 'write',
+          canonicalPath: 'instructions/private.md',
+          bytes: Buffer.from('p'),
+        },
         { kind: 'write', canonicalPath: 'notes/a.md', bytes: Buffer.from('n') },
         {
           kind: 'write',
@@ -151,7 +178,9 @@ describe('writeClaudeProject', () => {
       claudeHome,
     );
     const { readFile } = await import('node:fs/promises');
-    expect(await readFile(path.join(projectDir, 'CLAUDE.local.md'), 'utf8')).toBe('p');
+    expect(
+      await readFile(path.join(projectDir, 'CLAUDE.local.md'), 'utf8'),
+    ).toBe('p');
     expect(
       await readFile(
         path.join(
@@ -168,7 +197,13 @@ describe('writeClaudeProject', () => {
     // (not only in the symlink-rejection tests below).
     expect(
       await readFile(
-        path.join(projectDir, '.claude', 'agent-memory', 'reviewer', 'notes.md'),
+        path.join(
+          projectDir,
+          '.claude',
+          'agent-memory',
+          'reviewer',
+          'notes.md',
+        ),
         'utf8',
       ),
     ).toBe('agent notes');
@@ -178,7 +213,9 @@ describe('writeClaudeProject', () => {
       [{ kind: 'delete', canonicalPath: 'instructions/private.md' }],
       claudeHome,
     );
-    await expect(readFile(path.join(projectDir, 'CLAUDE.local.md'), 'utf8')).rejects.toThrow();
+    await expect(
+      readFile(path.join(projectDir, 'CLAUDE.local.md'), 'utf8'),
+    ).rejects.toThrow();
   });
 
   it('refuses to write through a symlink planted at the agent directory', async (context) => {
@@ -193,20 +230,27 @@ describe('writeClaudeProject', () => {
     // would still see this as "within project.dir" and allow the write.
     const escapeTarget = path.join(projectDir, 'escape-target');
     await mkdir(escapeTarget, { recursive: true });
-    await mkdir(path.join(projectDir, '.claude', 'agent-memory'), { recursive: true });
+    await mkdir(path.join(projectDir, '.claude', 'agent-memory'), {
+      recursive: true,
+    });
     try {
       await symlink(
         escapeTarget,
         path.join(projectDir, '.claude', 'agent-memory', 'reviewer'),
       );
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EPERM') return context.skip();
+      if ((error as NodeJS.ErrnoException).code === 'EPERM')
+        return context.skip();
       throw error;
     }
 
     await expect(
       writeClaudeProject({ projectId: 'prj_x', dir: projectDir }, [
-        { kind: 'write', canonicalPath: 'agents/reviewer/notes.md', bytes: Buffer.from('pwned') },
+        {
+          kind: 'write',
+          canonicalPath: 'agents/reviewer/notes.md',
+          bytes: Buffer.from('pwned'),
+        },
       ]),
     ).rejects.toBeInstanceOf(PathFenceError);
 
@@ -231,15 +275,23 @@ describe('writeClaudeProject', () => {
     await mkdir(escapeTarget, { recursive: true });
     await mkdir(path.join(projectDir, '.claude'), { recursive: true });
     try {
-      await symlink(escapeTarget, path.join(projectDir, '.claude', 'agent-memory'));
+      await symlink(
+        escapeTarget,
+        path.join(projectDir, '.claude', 'agent-memory'),
+      );
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EPERM') return context.skip();
+      if ((error as NodeJS.ErrnoException).code === 'EPERM')
+        return context.skip();
       throw error;
     }
 
     await expect(
       writeClaudeProject({ projectId: 'prj_x', dir: projectDir }, [
-        { kind: 'write', canonicalPath: 'agents/reviewer/notes.md', bytes: Buffer.from('pwned') },
+        {
+          kind: 'write',
+          canonicalPath: 'agents/reviewer/notes.md',
+          bytes: Buffer.from('pwned'),
+        },
       ]),
     ).rejects.toBeInstanceOf(PathFenceError);
 

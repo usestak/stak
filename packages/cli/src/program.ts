@@ -122,7 +122,10 @@ import {
   type CanonicalPullOutcome,
   type UnlocatableProject,
 } from './memory/canonical-ops.js';
-import { mergePendingMessage, MemorySyncError } from './memory/pending-merge.js';
+import {
+  mergePendingMessage,
+  MemorySyncError,
+} from './memory/pending-merge.js';
 import { applyCheckinReconciliation } from './memory/project-fold.js';
 import { projectFoldNotes } from './ui/cloud.js';
 import {
@@ -374,10 +377,18 @@ export type ProgramDependencies = {
     generation?: number;
   }): Promise<PasskeyRecoverResult>;
   memoryCloudStatus(): Promise<MemoryCloudStatus>;
-  memoryListConflicts?: NonNullable<MemoryCommandDependencies['memoryListConflicts']>;
-  memoryResolveConflict?: NonNullable<MemoryCommandDependencies['memoryResolveConflict']>;
-  memoryDiffConflict?: NonNullable<MemoryCommandDependencies['memoryDiffConflict']>;
-  memoryMaterialize?: NonNullable<MemoryCommandDependencies['memoryMaterialize']>;
+  memoryListConflicts?: NonNullable<
+    MemoryCommandDependencies['memoryListConflicts']
+  >;
+  memoryResolveConflict?: NonNullable<
+    MemoryCommandDependencies['memoryResolveConflict']
+  >;
+  memoryDiffConflict?: NonNullable<
+    MemoryCommandDependencies['memoryDiffConflict']
+  >;
+  memoryMaterialize?: NonNullable<
+    MemoryCommandDependencies['memoryMaterialize']
+  >;
   unlockMemory?: NonNullable<MemoryCommandDependencies['unlockMemory']>;
   projectList(): Promise<ProjectListRow[]>;
   projectMap(options: {
@@ -751,7 +762,11 @@ const defaultDependencies: ProgramDependencies = {
       (item) => item.scope === 'global',
     );
     const registry = await readLocalRegistry(stackHome);
-    const status = await computeMemoryWorkingTreeStatus({ stackHome, nativeItems, registry });
+    const status = await computeMemoryWorkingTreeStatus({
+      stackHome,
+      nativeItems,
+      registry,
+    });
     // Canonical (Project) Memory status, additive to the MACHINE-vs-MAIN check above.
     // Never let a canonical status failure break `stak status` — same defensive
     // wrapping convention as `checkCloud`/`checkMemoryCloud` just above.
@@ -783,7 +798,9 @@ const defaultDependencies: ProgramDependencies = {
     try {
       const status = await readMemoryCloudStatus(await buildMemoryCloudDeps());
       if (!status.authenticated || status.latestGeneration === null)
-        return status.authenticated ? { status: 'no-backup' } : { status: 'not-checked' };
+        return status.authenticated
+          ? { status: 'no-backup' }
+          : { status: 'not-checked' };
       return {
         status: 'backed-up',
         generation: status.latestGeneration,
@@ -805,7 +822,9 @@ const defaultDependencies: ProgramDependencies = {
   // never creates a second manifest record for Memory that already has one.
   stageMemory: async () => {
     // Final review I3: `stageAllMemory` migrates before the v1 staging.
-    const { legacy, canonical } = await stageAllMemory(await memoryDiscoveryOptions());
+    const { legacy, canonical } = await stageAllMemory(
+      await memoryDiscoveryOptions(),
+    );
     return {
       files: legacy.files,
       projects: legacy.projects,
@@ -872,12 +891,10 @@ const defaultDependencies: ProgramDependencies = {
     } catch (error) {
       // Fall back to a direct Skill only when no STAK layer matches at all — any other
       // error (ambiguous layer match, etc.) must surface as-is, never masked.
-      if (
-        !(
-          error instanceof StackCompositionError &&
-          error.code === 'stack-layer-not-found'
-        )
-      )
+      if (!(
+        error instanceof StackCompositionError &&
+        error.code === 'stack-layer-not-found'
+      ))
         throw error;
       return prepareSkillRemove({ stackHome, selector: identifier });
     }
@@ -983,7 +1000,8 @@ const defaultDependencies: ProgramDependencies = {
   // generation itself and silently discard the rollback, so that case stays
   // blocked.
   // Final review T15-4: the block message is shared with `stak memory backup`.
-  memoryPushPreflight: async () => resolveMemoryPushPreflight(await buildMemoryCloudDeps()),
+  memoryPushPreflight: async () =>
+    resolveMemoryPushPreflight(await buildMemoryCloudDeps()),
   // `stak push` means "synchronize MAIN to Cloud" — if staged MAIN already equals the
   // latest Cloud generation, this must be a no-op: it never creates another immutable
   // generation containing identical state (unlike the explicit `stak memory backup`,
@@ -994,26 +1012,36 @@ const defaultDependencies: ProgramDependencies = {
   // v1 manifest and canonical Project Memory together in a single v2 bundle.
   applyMemoryPush: async () => {
     const deps = await buildMemoryCloudDeps();
-    const outcome = await pushMemoryViaCanonical(deps, await memoryDiscoveryOptions());
+    const outcome = await pushMemoryViaCanonical(
+      deps,
+      await memoryDiscoveryOptions(),
+    );
     // Spec A.6 / §10 `merge-pending` (Task 14 fix round 1): a fresh merge
     // conflict and a still-pending one (thrown by the gate inside
     // `pushMemoryViaCanonical`) surface under the same code and message.
     if (outcome.status === 'conflict')
-      throw new MemorySyncError('merge-pending', mergePendingMessage(outcome.conflicts ?? []));
+      throw new MemorySyncError(
+        'merge-pending',
+        mergePendingMessage(outcome.conflicts ?? []),
+      );
     if (outcome.status === 'retry-exhausted')
       throw new StackCompositionError(
         'memory-push-retry-exhausted',
         'STAK Cloud kept moving while pushing Memory. Try again.',
       );
-    if (outcome.status === 'protected-locked') return { status: 'protected-locked' };
-    if (outcome.status === 'nothing-staged') return { status: 'nothing-staged' };
+    if (outcome.status === 'protected-locked')
+      return { status: 'protected-locked' };
+    if (outcome.status === 'nothing-staged')
+      return { status: 'nothing-staged' };
     if (outcome.status === 'skipped') return { status: 'skipped' };
     // Task 13 Important-5: never silently drop unlocatable projects or native
     // materialize conflicts the canonical engine already surfaced.
     const extras = {
       ...(outcome.unavailable ? { unavailable: outcome.unavailable } : {}),
       ...(outcome.conflicts ? { materializeConflicts: outcome.conflicts } : {}),
-      ...(outcome.restoredFromStak ? { restoredFromStak: outcome.restoredFromStak } : {}),
+      ...(outcome.restoredFromStak
+        ? { restoredFromStak: outcome.restoredFromStak }
+        : {}),
       ...(outcome.folded ? { folded: outcome.folded } : {}),
     };
     return outcome.status === 'up-to-date'
@@ -1030,7 +1058,8 @@ const defaultDependencies: ProgramDependencies = {
           reason: 'Local Memory already exists on this machine.',
         }
       : { eligible: true },
-  applyMemoryPull: async () => runMemoryCloudRecover(await buildMemoryCloudDeps()),
+  applyMemoryPull: async () =>
+    runMemoryCloudRecover(await buildMemoryCloudDeps()),
   // Task 13: canonical (Project) Memory's own pull — additive, runs on every `stak
   // pull` regardless of `memoryPullPreflight` (which only gates the legacy
   // fresh-machine full-recover path above). Never publishes.
@@ -1038,9 +1067,13 @@ const defaultDependencies: ProgramDependencies = {
   // other pull conflict: "run `stak memory resolve`", never as a failure.
   applyCanonicalPull: async () => {
     try {
-      return await pullMemoryViaCanonical(await buildMemoryCloudDeps(), await memoryDiscoveryOptions());
+      return await pullMemoryViaCanonical(
+        await buildMemoryCloudDeps(),
+        await memoryDiscoveryOptions(),
+      );
     } catch (error) {
-      if (error instanceof MemorySyncError) return { status: 'conflict', conflicts: error.conflicts };
+      if (error instanceof MemorySyncError)
+        return { status: 'conflict', conflicts: error.conflicts };
       throw error;
     }
   },
@@ -1087,7 +1120,9 @@ const defaultDependencies: ProgramDependencies = {
     runMemoryCloudRecover(await buildMemoryCloudDeps(), {
       ...(generation !== undefined ? { generation } : {}),
       // Final review follow-up: actually read `--recovery-file`.
-      ...(recoveryFile ? { recoveryKey: await readRecoveryKeyFile(recoveryFile) } : {}),
+      ...(recoveryFile
+        ? { recoveryKey: await readRecoveryKeyFile(recoveryFile) }
+        : {}),
     }),
   memoryGenerations: async () =>
     runMemoryGenerations(await buildMemoryCloudDeps()),
@@ -1134,6 +1169,7 @@ const defaultDependencies: ProgramDependencies = {
               code === 'EEXIST'
                 ? `A file already exists at ${recoveryFilePath}. Choose another path with --recovery-file. Nothing was changed in Cloud.`
                 : `Couldn't write the recovery file at ${recoveryFilePath}${code ? ` (${code})` : ''}. Nothing was changed in Cloud.`,
+              { cause: error },
             );
           }
         },
@@ -1331,7 +1367,8 @@ const defaultDependencies: ProgramDependencies = {
   // one-line leftover-lock note goes to stderr so it never corrupts `--json` stdout.
   withMemoryLock: (command, fn) =>
     withMemoryLock(stackHome, command, fn, {
-      onLeftoverCleared: (holder) => process.stderr.write(`${leftoverClearedMessage(holder)}\n`),
+      onLeftoverCleared: (holder) =>
+        process.stderr.write(`${leftoverClearedMessage(holder)}\n`),
     }),
   // `stak memory unlock` — deliberately NOT wrapped in withMemoryLock.
   unlockMemory: (options) => unlockMemory(stackHome, options),

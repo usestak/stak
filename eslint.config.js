@@ -19,6 +19,18 @@ export default tseslint.config(
     },
   },
   {
+    // Node-run test helper scripts (spawned as child processes, not imported
+    // by the package itself), evaluated against Node's global scope.
+    files: ['packages/*/src/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        process: 'readonly',
+        setInterval: 'readonly',
+        setTimeout: 'readonly',
+      },
+    },
+  },
+  {
     files: [
       'packages/core/**/*.ts',
       'packages/scanner/**/*.ts',

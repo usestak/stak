@@ -13,7 +13,8 @@ import {
 
 export class CanonicalStoreError extends Error {
   constructor(
-    public readonly code: 'main-corrupt' | 'base-corrupt' | 'merge-corrupt' | 'projection-corrupt',
+    public readonly code:
+      'main-corrupt' | 'base-corrupt' | 'merge-corrupt' | 'projection-corrupt',
     message: string,
     options?: ErrorOptions,
   ) {
@@ -24,18 +25,22 @@ export class CanonicalStoreError extends Error {
 
 export const canonicalStorePaths = (stackHome: string) => {
   const root = path.join(memoryStorePaths(stackHome).root, 'canonical');
-  const projectionsRoot = path.join(memoryStorePaths(stackHome).root, 'projections');
+  const projectionsRoot = path.join(
+    memoryStorePaths(stackHome).root,
+    'projections',
+  );
   return {
     root,
     main: path.join(root, 'main.json'),
     base: path.join(root, 'base.json'),
     merge: path.join(root, 'merge.json'),
     projectionsRoot,
-    projections: (adapterId: string) => path.join(projectionsRoot, `${adapterId}.json`),
+    projections: (adapterId: string) =>
+      path.join(projectionsRoot, `${adapterId}.json`),
   };
 };
 
-const readJson = async <T>(file: string): Promise<unknown | undefined> => {
+const readJson = async (file: string): Promise<unknown | undefined> => {
   let raw: string;
   try {
     raw = await readFile(file, 'utf8');
@@ -47,7 +52,10 @@ const readJson = async <T>(file: string): Promise<unknown | undefined> => {
 };
 
 const writeJson = async (file: string, value: unknown): Promise<void> => {
-  await atomicWriteFile(file, Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8'));
+  await atomicWriteFile(
+    file,
+    Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8'),
+  );
 };
 
 export const readCanonicalMain = async (
@@ -70,7 +78,10 @@ export const writeCanonicalMain = async (
   stackHome: string,
   main: CanonicalMainManifest,
 ): Promise<void> =>
-  writeJson(canonicalStorePaths(stackHome).main, canonicalMainManifestSchema.parse(main));
+  writeJson(
+    canonicalStorePaths(stackHome).main,
+    canonicalMainManifestSchema.parse(main),
+  );
 
 export type CanonicalBase = {
   generation: number;
@@ -98,9 +109,13 @@ export const readCanonicalBase = async (
     const { globalDigest, ...rest } = canonicalBaseSchema.parse(raw);
     return globalDigest !== undefined ? { ...rest, globalDigest } : rest;
   } catch (error) {
-    throw new CanonicalStoreError('base-corrupt', 'Canonical Memory base is malformed.', {
-      cause: error,
-    });
+    throw new CanonicalStoreError(
+      'base-corrupt',
+      'Canonical Memory base is malformed.',
+      {
+        cause: error,
+      },
+    );
   }
 };
 
@@ -108,7 +123,10 @@ export const writeCanonicalBase = async (
   stackHome: string,
   base: CanonicalBase,
 ): Promise<void> =>
-  writeJson(canonicalStorePaths(stackHome).base, canonicalBaseSchema.parse(base));
+  writeJson(
+    canonicalStorePaths(stackHome).base,
+    canonicalBaseSchema.parse(base),
+  );
 
 export const readPendingMerge = async <T>(
   stackHome: string,
@@ -156,7 +174,9 @@ export const readProjection = async (
   stackHome: string,
   adapterId: string,
 ): Promise<ProjectionFile> => {
-  const raw = await readJson(canonicalStorePaths(stackHome).projections(adapterId));
+  const raw = await readJson(
+    canonicalStorePaths(stackHome).projections(adapterId),
+  );
   if (raw === undefined) return emptyProjectionFile();
   try {
     return projectionFileSchema.parse(raw);
