@@ -7,11 +7,14 @@ import type {
   StackOwnedUseProposal,
   StackRemoteUseProposal,
 } from '@stack/core';
+import { shortProjectId } from '@stack/memory';
 import type { PublishPublicStackVersionResponse } from '@stack/spec';
 import type {
   CloudBackupOutcome,
   CloudRecoverOutcome,
 } from '../memory/cloud-ops.js';
+import type { CanonicalPullOutcome } from '../memory/canonical-ops.js';
+import type { ProjectFoldNote } from '../memory/project-fold.js';
 
 import { block, renamedNote, skills } from './format.js';
 
@@ -303,7 +306,10 @@ export const renderRemoteStackUse = (
     row('New desired Skills', proposal.summary.newSkills).trimEnd(),
     row('References to restore', proposal.summary.references).trimEnd(),
     row('Hard conflicts', proposal.summary.hardConflicts).trimEnd(),
-    row('Renamed (same name, different content)', proposal.summary.renamed).trimEnd(),
+    row(
+      'Renamed (same name, different content)',
+      proposal.summary.renamed,
+    ).trimEnd(),
     '',
     'main will become:',
     row('STAK layers', proposal.summary.stackLayers).trimEnd(),
@@ -343,7 +349,10 @@ export const renderOwnedStackUse = (
     row('New desired Skills', proposal.summary.newSkills).trimEnd(),
     row('References to restore', proposal.summary.references).trimEnd(),
     row('Hard conflicts', proposal.summary.hardConflicts).trimEnd(),
-    row('Renamed (same name, different content)', proposal.summary.renamed).trimEnd(),
+    row(
+      'Renamed (same name, different content)',
+      proposal.summary.renamed,
+    ).trimEnd(),
     '',
     'main will become:',
     row('STAK layers', proposal.summary.stackLayers).trimEnd(),
@@ -378,11 +387,7 @@ export type PushSkillOutcome =
  * (no local Memory manifest — `stak add .` has never run) — distinct from `skipped`
  * (not signed in), since the fix is different (`stak add .` vs. `stak login`). */
 export type MemoryPushOutcome =
-  | CloudBackupOutcome
-  | { status: 'nothing-staged' }
-  /** Staged MAIN already equals the latest Cloud generation — no generation was
-   * created. `stak push` is a sync operation, not "always make another backup". */
-  | { status: 'up-to-date'; generation: number };
+  CloudBackupOutcome | { status: 'nothing-staged' };
 
 export type PushMemoryOutcome =
   | { status: 'not-attempted' }
@@ -433,18 +438,50 @@ export const renderCombinedPushResult = (
   else {
     const outcome = memory.outcome;
     if (outcome.status === 'nothing-staged')
-      lines.push('  nothing staged yet — run `stak add .` to stage Memory changes.');
-    else if (outcome.status === 'up-to-date')
-      lines.push(`  already up to date (generation ${outcome.generation}).`);
-    else if (outcome.status === 'skipped')
+      lines.push(
+        '  nothing staged yet — run `stak add .` to stage Memory changes.',
+      );
+    else if (outcome.status === 'up-to-date') {
+      const notes = canonicalExtraNotes({
+        unavailable: outcome.unavailable,
+        conflicts: outcome.materializeConflicts,
+        restoredFromStak: outcome.restoredFromStak,
+        folded: outcome.folded,
+      });
+      lines.push(
+        notes.length > 0
+          ? `  already up to date (generation ${outcome.generation}); ${notes.join('; ')}.`
+          : `  already up to date (generation ${outcome.generation}).`,
+      );
+    } else if (outcome.status === 'skipped')
       lines.push('  staged locally (sign in to sync Memory to Cloud).');
     else if (outcome.status === 'protected-locked')
       lines.push(
-        '  staged locally; Cloud sync needs this device unlocked (`stak memory protect`).',
+        '  staged locally; Cloud sync needs this device unlocked (`stak memory recover --passkey` or `--recovery-file <path>`).',
       );
     else if (outcome.status === 'failed')
       lines.push(`  staged locally; Cloud sync FAILED: ${outcome.message}`);
-    else lines.push(`  synced to Cloud (generation ${outcome.generation}).`);
+    // 'conflict' is unreachable in practice here — `applyMemoryPush` (program.ts)
+    // throws before ever returning it as part of this outcome — but handled for
+    // type completeness since `CloudBackupOutcome` (shared with `stak memory
+    // backup`) now includes it.
+    else if (outcome.status === 'conflict')
+      lines.push(
+        `  ${outcome.conflicts.length} unresolved conflict(s) with Cloud.`,
+      );
+    else {
+      const notes = canonicalExtraNotes({
+        unavailable: outcome.unavailable,
+        conflicts: outcome.materializeConflicts,
+        restoredFromStak: outcome.restoredFromStak,
+        folded: outcome.folded,
+      });
+      lines.push(
+        notes.length > 0
+          ? `  synced to Cloud (generation ${outcome.generation}); ${notes.join('; ')}.`
+          : `  synced to Cloud (generation ${outcome.generation}).`,
+      );
+    }
   }
   lines.push(
     '',
@@ -468,17 +505,136 @@ export type PullMemoryOutcome =
   | { status: 'applied'; outcome: CloudRecoverOutcome }
   | { status: 'failed'; error: string };
 
+/**
+ * True when any part of the pull did not fully succeed. A fresh-machine Memory
+ * recover that returned a status (rather than throwing) is NOT a failure:
+ * - `no-backup`: the account has no Memory in Cloud yet (e.g. Skills-only).
+ *   There is nothing to recover; reported as "no Cloud Memory backup exists yet."
+ * - `needs-recovery-method`: Protected Memory is locked on this device. A
+ *   friendly, actionable status, the same as push's `protected-locked`.
+ * - `not-authenticated`: no Cloud session, the same as push's `skipped`.
+ * Genuine errors (a thrown recover, a busy Memory lock) arrive as
+ * `memory.status === 'failed'` and still fail the pull.
+ */
 export const pullFailed = (
   skill: PullSkillOutcome,
   memory: PullMemoryOutcome,
-): boolean =>
-  skill.status === 'failed' ||
-  memory.status === 'failed' ||
-  (memory.status === 'applied' && memory.outcome.status !== 'recovered');
+): boolean => skill.status === 'failed' || memory.status === 'failed';
+
+/** `stak pull`'s canonical (Project) Memory half (Task 13) — an ADDITIVE operation
+ * alongside the legacy fresh-machine `PullMemoryOutcome` above; it runs on every
+ * pull, not only a fresh machine, and never publishes. Deliberately excluded from
+ * `pullFailed`: a canonical sync failure is reported on its own line but does not
+ * (by itself) make the whole `stak pull` command report failure. */
+export type PullCanonicalOutcome =
+  | { status: 'not-attempted' }
+  | { status: 'applied'; outcome: CanonicalPullOutcome }
+  | { status: 'failed'; error: string };
+
+/** Spec §4.2.1's one line per folded project, e.g. "Merged project prj_rvznx…
+ * into prj_4f68… (same repository); 1 file kept both". */
+export const projectFoldNotes = (
+  folded: readonly ProjectFoldNote[] | undefined,
+): string[] =>
+  (folded ?? []).map(
+    (note) =>
+      `Merged project ${shortProjectId(note.fromProjectId)} into ${shortProjectId(note.toProjectId)} (same repository)` +
+      (note.keptBoth > 0
+        ? `; ${note.keptBoth} file${note.keptBoth === 1 ? '' : 's'} kept both`
+        : ''),
+  );
+
+/** A short, terse line for a non-`up-to-date` canonical outcome — `null` when
+ * there is nothing worth saying (not attempted, or already up to date). */
+/** Unavailable-project and native-conflict notes shared by push's and pull's
+ * canonical rendering (Task 13 Important-5) — never silently dropped. */
+export const canonicalExtraNotes = (outcome: {
+  unavailable?: { projectId: string; name: string }[] | undefined;
+  conflicts?: { projectId: string; path: string; reason: string }[] | undefined;
+  restoredFromStak?: number | undefined;
+  folded?: ProjectFoldNote[] | undefined;
+}): string[] => {
+  // Spec §4.2.1: one line per merged project, first — it explains the rest.
+  const notes: string[] = projectFoldNotes(outcome.folded);
+  // Task 13 fix round 4: files the upgrade found missing natively and wrote
+  // back from STAK (never silently recorded as deletions).
+  if (outcome.restoredFromStak && outcome.restoredFromStak > 0)
+    notes.push(
+      `${outcome.restoredFromStak} Memory file(s) will be restored from STAK`,
+    );
+  if (outcome.unavailable && outcome.unavailable.length > 0)
+    notes.push(
+      `${outcome.unavailable.length} project(s) not available on this machine (${outcome.unavailable
+        .map((p) => p.name)
+        .join(', ')})`,
+    );
+  if (outcome.conflicts && outcome.conflicts.length > 0) {
+    // Task 13 fix round 2 (Minor): a materialize EXCEPTION (marked by the
+    // empty `path` `materializeCanonicalProjects` uses for it — see its own
+    // doc comment) is a warning with its own message, never folded into the
+    // generic "N native conflict(s)" count meant for ordinary sync conflicts.
+    const materializeErrors = outcome.conflicts.filter((c) => c.path === '');
+    const syncConflicts = outcome.conflicts.filter((c) => c.path !== '');
+    for (const error of materializeErrors)
+      notes.push(`materialize warning: ${error.reason}`);
+    // Final review I4: these are local agent-vs-STAK conflicts (`stak add .`
+    // alone doesn't clear them); `stak status` gives the fix for each.
+    if (syncConflicts.length > 0)
+      notes.push(
+        `${syncConflicts.length} agent file(s) differ from STAK and weren't overwritten (${syncConflicts
+          .map((c) => c.path)
+          .join(', ')}) — run \`stak status\` for how to fix each`,
+      );
+  }
+  return notes;
+};
+
+const canonicalPullLine = (canonical: PullCanonicalOutcome): string | null => {
+  if (canonical.status === 'not-attempted') return null;
+  if (canonical.status === 'failed')
+    return `  Project Memory sync FAILED: ${canonical.error}`;
+  const outcome = canonical.outcome;
+  if (outcome.status === 'conflict')
+    return `  Project Memory has ${outcome.conflicts?.length ?? 0} unresolved conflict(s) — run \`stak memory resolve\`.`;
+  if (outcome.status === 'protected-locked')
+    return '  Project Memory sync needs this device unlocked (`stak memory recover --passkey` or `--recovery-file <path>`).';
+  const notes = canonicalExtraNotes(outcome);
+  if (outcome.status === 'up-to-date' && notes.length === 0) return null;
+  const head =
+    outcome.status === 'up-to-date'
+      ? 'Project Memory up to date'
+      : 'Project Memory synced';
+  return notes.length > 0 ? `  ${head}; ${notes.join('; ')}.` : `  ${head}.`;
+};
+
+/**
+ * `stak pull` with no Skills changes on an established machine: only Project Memory
+ * is synced. A sync that changes nothing reads exactly like the plain no-op pull.
+ * `lockError` is a busy Memory lock, which is a Memory failure (like any other).
+ */
+export const renderProjectMemoryOnlyPull = (
+  canonical: PullCanonicalOutcome,
+  lockError?: string,
+): string => {
+  const line = lockError
+    ? `  FAILED: ${lockError}`
+    : canonicalPullLine(canonical);
+  if (line === null) return block(['Everything is already up to date.']);
+  return block([
+    'Skills',
+    '  already up to date with main.',
+    '',
+    'Memory',
+    line,
+    '',
+    lockError ? 'Pull did not fully succeed.' : 'Pull complete.',
+  ]);
+};
 
 export const renderCombinedPullResult = (
   skill: PullSkillOutcome,
   memory: PullMemoryOutcome,
+  canonical?: PullCanonicalOutcome,
 ): string => {
   const lines: string[] = ['Skills'];
   if (skill.status === 'noop') lines.push('  already up to date with main.');
@@ -510,9 +666,15 @@ export const renderCombinedPullResult = (
         '  this device needs a recovery method to unlock Protected Memory (`stak memory recover`).',
       );
   }
+  if (canonical) {
+    const line = canonicalPullLine(canonical);
+    if (line) lines.push(line);
+  }
   lines.push(
     '',
-    pullFailed(skill, memory) ? 'Pull did not fully succeed.' : 'Pull complete.',
+    pullFailed(skill, memory)
+      ? 'Pull did not fully succeed.'
+      : 'Pull complete.',
   );
   if (
     !pullFailed(skill, memory) &&

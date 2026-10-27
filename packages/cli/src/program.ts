@@ -70,14 +70,15 @@ import type {
   TrialStackResolution,
 } from '@stack/core';
 import {
-  adoptReconciledProjectId,
   createClaudeMemoryAdapter,
   fileLocalMemoryKeyStore,
   generateRecoveryKey,
+  leftoverClearedMessage,
+  unlockMemory,
+  withMemoryLock,
   readLocalRegistry,
   readMemoryManifest,
   readMemoryStatus,
-  writeLocalRegistry,
   type BackupResult,
   type DiscoveredMemoryItem,
   type MemoryStatus,
@@ -107,13 +108,32 @@ import {
 } from './cloud/config.js';
 import { registerOpenCommand } from './commands/open.js';
 import { stackCloudRemoteMemoryBackend } from './memory/cloud-backend.js';
-import { stageMemoryWithProjectDedup } from './memory/stage-memory.js';
+import {
+  canonicalMemoryStatus,
+  diffPendingConflict,
+  listPendingConflicts,
+  materializeMemory,
+  migrateWithProjectionSeed,
+  resolvePendingConflict,
+  pullMemoryViaCanonical,
+  pushMemoryViaCanonical,
+  stageAllMemory,
+  type CanonicalProjectSummary,
+  type CanonicalPullOutcome,
+  type UnlocatableProject,
+} from './memory/canonical-ops.js';
+import {
+  mergePendingMessage,
+  MemorySyncError,
+} from './memory/pending-merge.js';
+import { applyCheckinReconciliation } from './memory/project-fold.js';
+import { projectFoldNotes } from './ui/cloud.js';
 import {
   freshRegistryRisksDuplication,
-  pushStagedMemory,
+  resolveMemoryPushPreflight,
   readBackupSupersession,
   readMemoryCloudStatus,
-  resolveMemoryPushState,
+  readRecoveryKeyFile,
   runMemoryCloudBackup,
   runMemoryCloudProtect,
   runMemoryCloudRecover,
@@ -130,7 +150,10 @@ import {
   type PasskeyRecoverResult,
 } from './memory/cloud-ops.js';
 import { defaultOpenBrowser } from './cloud/operations.js';
-import type { MemoryProtectCommandResult } from './commands/memory.js';
+import type {
+  MemoryCommandDependencies,
+  MemoryProtectCommandResult,
+} from './commands/memory.js';
 import type { MemoryBackupPreview } from './ui/memory.js';
 import { resolveScanRoots, scanSkills } from '@stack/scanner';
 import { isPublicStackRef } from '@stack/spec';
@@ -327,6 +350,7 @@ export type ProgramDependencies = {
   cloudApplyPull(plan: PullPlan): Promise<ApplyPullResult>;
   memoryPullPreflight?(): Promise<MemoryPullPreflight>;
   applyMemoryPull?(): Promise<CloudRecoverOutcome>;
+  applyCanonicalPull?(): Promise<CanonicalPullOutcome>;
   cloudPreparePublish(options: {
     input: string;
     slug?: string;
@@ -353,6 +377,19 @@ export type ProgramDependencies = {
     generation?: number;
   }): Promise<PasskeyRecoverResult>;
   memoryCloudStatus(): Promise<MemoryCloudStatus>;
+  memoryListConflicts?: NonNullable<
+    MemoryCommandDependencies['memoryListConflicts']
+  >;
+  memoryResolveConflict?: NonNullable<
+    MemoryCommandDependencies['memoryResolveConflict']
+  >;
+  memoryDiffConflict?: NonNullable<
+    MemoryCommandDependencies['memoryDiffConflict']
+  >;
+  memoryMaterialize?: NonNullable<
+    MemoryCommandDependencies['memoryMaterialize']
+  >;
+  unlockMemory?: NonNullable<MemoryCommandDependencies['unlockMemory']>;
   projectList(): Promise<ProjectListRow[]>;
   projectMap(options: {
     project: string;
@@ -373,6 +410,11 @@ export type ProgramDependencies = {
   openBrowser(url: string): Promise<void>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
+  /**
+   * Runs `fn` while holding the cross-process Memory lock (spec 2026-10-25).
+   * Optional so existing tests keep working; when absent, `fn` runs directly.
+   */
+  withMemoryLock?<T>(command: string, fn: () => Promise<T>): Promise<T>;
   /**
    * Phase P1: best-effort machine check-in after a state-changing command succeeds.
    * Optional so the test harness can omit it; the real CLI wires it in
@@ -701,10 +743,53 @@ const defaultDependencies: ProgramDependencies = {
   // call, never mutates. Reuses the same scan `stak memory scan` uses and the same
   // comparison `runMemoryBackup` itself would make; never duplicates scanning/manifest
   // construction.
-  checkMemory: async (): Promise<MemoryWorkingTreeStatus> => {
-    const nativeItems = await (await memoryAdapter()).discover();
+  checkMemory: async (): Promise<
+    MemoryWorkingTreeStatus & {
+      canonicalProjects: CanonicalProjectSummary[];
+      newProjects: number;
+      conflictedProjects: number;
+      unlocatableProjects: UnlocatableProject[];
+      untrackedFolders: number;
+      upgradePending: boolean;
+    }
+  > => {
+    // Project-scope Memory is canonical Memory's job now (Step 1 of this feature) —
+    // the v1 manifest only ever contains global items post-migration, so this
+    // MACHINE-vs-MAIN comparison must only ever compare global items too. Comparing
+    // unfiltered native items here would show every project-scope item as a
+    // permanent, un-clearable "change not added".
+    const nativeItems = (await (await memoryAdapter()).discover()).filter(
+      (item) => item.scope === 'global',
+    );
     const registry = await readLocalRegistry(stackHome);
-    return computeMemoryWorkingTreeStatus({ stackHome, nativeItems, registry });
+    const status = await computeMemoryWorkingTreeStatus({
+      stackHome,
+      nativeItems,
+      registry,
+    });
+    // Canonical (Project) Memory status, additive to the MACHINE-vs-MAIN check above.
+    // Never let a canonical status failure break `stak status` — same defensive
+    // wrapping convention as `checkCloud`/`checkMemoryCloud` just above.
+    const canonicalStatus = await canonicalMemoryStatus(
+      stackHome,
+      await memoryDiscoveryOptions(),
+    ).catch(() => ({
+      projects: [] as CanonicalProjectSummary[],
+      newProjects: 0,
+      conflictedProjects: 0,
+      unlocatableProjects: [] as UnlocatableProject[],
+      untrackedFolders: 0,
+      upgradePending: false,
+    }));
+    return {
+      ...status,
+      canonicalProjects: canonicalStatus.projects,
+      newProjects: canonicalStatus.newProjects,
+      conflictedProjects: canonicalStatus.conflictedProjects,
+      unlocatableProjects: canonicalStatus.unlocatableProjects,
+      untrackedFolders: canonicalStatus.untrackedFolders,
+      upgradePending: canonicalStatus.upgradePending,
+    };
   },
   // Deliberately narrow (see MemoryCloudDisplayState): only "does a Cloud backup exist
   // at all", reusing the existing readMemoryCloudStatus check — never a new subsystem,
@@ -713,7 +798,9 @@ const defaultDependencies: ProgramDependencies = {
     try {
       const status = await readMemoryCloudStatus(await buildMemoryCloudDeps());
       if (!status.authenticated || status.latestGeneration === null)
-        return status.authenticated ? { status: 'no-backup' } : { status: 'not-checked' };
+        return status.authenticated
+          ? { status: 'no-backup' }
+          : { status: 'not-checked' };
       return {
         status: 'backed-up',
         generation: status.latestGeneration,
@@ -734,8 +821,24 @@ const defaultDependencies: ProgramDependencies = {
   // first, so a relocated/re-cloned project's stale-but-still-discovered old directory
   // never creates a second manifest record for Memory that already has one.
   stageMemory: async () => {
-    const result = await stageMemoryWithProjectDedup(await memoryDiscoveryOptions());
-    return { files: result.files, projects: result.projects };
+    // Final review I3: `stageAllMemory` migrates before the v1 staging.
+    const { legacy, canonical } = await stageAllMemory(
+      await memoryDiscoveryOptions(),
+    );
+    return {
+      files: legacy.files,
+      projects: legacy.projects,
+      canonical: canonical.projects.map((p) => ({
+        projectId: p.projectId,
+        imported: p.imported.length,
+        conflicts: p.conflicts.length + p.sourceConflicts.length,
+        guarded: p.guardedPaths.length,
+      })),
+      conflictedProjects: canonical.conflictedProjects,
+      unlocatableProjects: canonical.unlocatableProjects,
+      untrackedFolders: canonical.untrackedFolders,
+      ...(canonical.folded ? { folded: canonical.folded } : {}),
+    };
   },
   prepareUse: async (input, options) => {
     const bootstrap = await bootstrapEmptyMainIfSkillFree({
@@ -788,12 +891,10 @@ const defaultDependencies: ProgramDependencies = {
     } catch (error) {
       // Fall back to a direct Skill only when no STAK layer matches at all — any other
       // error (ambiguous layer match, etc.) must surface as-is, never masked.
-      if (
-        !(
-          error instanceof StackCompositionError &&
-          error.code === 'stack-layer-not-found'
-        )
-      )
+      if (!(
+        error instanceof StackCompositionError &&
+        error.code === 'stack-layer-not-found'
+      ))
         throw error;
       return prepareSkillRemove({ stackHome, selector: identifier });
     }
@@ -890,27 +991,62 @@ const defaultDependencies: ProgramDependencies = {
   // MACHINE -> add -> MAIN -> push -> CLOUD model forbids). Contrast with `stak memory
   // backup` (`memoryCloudBackup` below), which intentionally still does its own local
   // rescan first — that command's own behavior is unchanged.
-  memoryPushPreflight: async () => {
-    const status = await readMemoryCloudStatus(await buildMemoryCloudDeps());
-    return status.historicalRecovery
-      ? {
-          blocked: true,
-          reason:
-            'Local Memory was recovered from an older STAK Cloud generation than the current latest. Run `stak memory recover` to catch up before pushing, or `stak memory backup` to accept the historical state deliberately.',
-        }
-      : { blocked: false };
-  },
+  // Spec §8.5: after `stak memory recover --backup N` the rollback is ordinary
+  // local changes against this machine's sync base, so `stak push` publishes it
+  // through the canonical merge like any other push (announced by `note`).
+  // This preflight dates from the pre-canonical push (e07bda4), which replaced
+  // Cloud wholesale. The one case the merge does NOT cover: no canonical base
+  // yet (a fresh machine). Push would then seed the base from the recovered
+  // generation itself and silently discard the rollback, so that case stays
+  // blocked.
+  // Final review T15-4: the block message is shared with `stak memory backup`.
+  memoryPushPreflight: async () =>
+    resolveMemoryPushPreflight(await buildMemoryCloudDeps()),
   // `stak push` means "synchronize MAIN to Cloud" — if staged MAIN already equals the
   // latest Cloud generation, this must be a no-op: it never creates another immutable
   // generation containing identical state (unlike the explicit `stak memory backup`,
   // which intentionally always creates one — see `memoryCloudBackup` below, unchanged).
+  // Task 13: this REPLACES the old `resolveMemoryPushState`/`pushStagedMemory` call
+  // site with the canonical-Memory engine (`pushMemoryViaCanonical`) — there is
+  // exactly one `createGeneration` call per `stak push` now, carrying both the global
+  // v1 manifest and canonical Project Memory together in a single v2 bundle.
   applyMemoryPush: async () => {
     const deps = await buildMemoryCloudDeps();
-    const state = await resolveMemoryPushState(deps);
-    if (state.status === 'nothing-staged') return { status: 'nothing-staged' };
-    if (state.status === 'already-up-to-date')
-      return { status: 'up-to-date', generation: state.generation };
-    return pushStagedMemory(deps);
+    const outcome = await pushMemoryViaCanonical(
+      deps,
+      await memoryDiscoveryOptions(),
+    );
+    // Spec A.6 / §10 `merge-pending` (Task 14 fix round 1): a fresh merge
+    // conflict and a still-pending one (thrown by the gate inside
+    // `pushMemoryViaCanonical`) surface under the same code and message.
+    if (outcome.status === 'conflict')
+      throw new MemorySyncError(
+        'merge-pending',
+        mergePendingMessage(outcome.conflicts ?? []),
+      );
+    if (outcome.status === 'retry-exhausted')
+      throw new StackCompositionError(
+        'memory-push-retry-exhausted',
+        'STAK Cloud kept moving while pushing Memory. Try again.',
+      );
+    if (outcome.status === 'protected-locked')
+      return { status: 'protected-locked' };
+    if (outcome.status === 'nothing-staged')
+      return { status: 'nothing-staged' };
+    if (outcome.status === 'skipped') return { status: 'skipped' };
+    // Task 13 Important-5: never silently drop unlocatable projects or native
+    // materialize conflicts the canonical engine already surfaced.
+    const extras = {
+      ...(outcome.unavailable ? { unavailable: outcome.unavailable } : {}),
+      ...(outcome.conflicts ? { materializeConflicts: outcome.conflicts } : {}),
+      ...(outcome.restoredFromStak
+        ? { restoredFromStak: outcome.restoredFromStak }
+        : {}),
+      ...(outcome.folded ? { folded: outcome.folded } : {}),
+    };
+    return outcome.status === 'up-to-date'
+      ? { status: 'up-to-date', generation: outcome.generation ?? 0, ...extras }
+      : { status: 'standard', generation: outcome.generation ?? 0, ...extras };
   },
   // Unified pull (P3): Memory only auto-recovers on a genuinely fresh machine (no local
   // manifest yet) — an established machine's Memory is never silently overwritten here;
@@ -922,7 +1058,25 @@ const defaultDependencies: ProgramDependencies = {
           reason: 'Local Memory already exists on this machine.',
         }
       : { eligible: true },
-  applyMemoryPull: async () => runMemoryCloudRecover(await buildMemoryCloudDeps()),
+  applyMemoryPull: async () =>
+    runMemoryCloudRecover(await buildMemoryCloudDeps()),
+  // Task 13: canonical (Project) Memory's own pull — additive, runs on every `stak
+  // pull` regardless of `memoryPullPreflight` (which only gates the legacy
+  // fresh-machine full-recover path above). Never publishes.
+  // A still-pending merge (the `merge-pending` gate) is reported like any
+  // other pull conflict: "run `stak memory resolve`", never as a failure.
+  applyCanonicalPull: async () => {
+    try {
+      return await pullMemoryViaCanonical(
+        await buildMemoryCloudDeps(),
+        await memoryDiscoveryOptions(),
+      );
+    } catch (error) {
+      if (error instanceof MemorySyncError)
+        return { status: 'conflict', conflicts: error.conflicts };
+      throw error;
+    }
+  },
   cloudPreparePublish: (options) => cloudPreparePublish(cloudDeps, options),
   cloudApplyPublish: (plan) => cloudApplyPublish(cloudDeps, plan),
   memoryScan: async () => (await memoryAdapter()).discover(),
@@ -954,30 +1108,75 @@ const defaultDependencies: ProgramDependencies = {
       risksDuplicatingLocalProjects,
     };
   },
-  memoryCloudBackup: async () =>
-    runMemoryCloudBackup(await buildMemoryCloudDeps()),
-  memoryCloudRecover: async (options) =>
-    runMemoryCloudRecover(await buildMemoryCloudDeps(), options),
+  // Task 13 fix round 3 (finding C): migrate with the same projection-seeding
+  // locator push/pull use, so `stak memory backup` run first seeds identically.
+  memoryCloudBackup: async () => {
+    const discovery = await memoryDiscoveryOptions();
+    return runMemoryCloudBackup(await buildMemoryCloudDeps(), {
+      migrate: (home) => migrateWithProjectionSeed(home, discovery),
+    });
+  },
+  memoryCloudRecover: async ({ generation, recoveryFile }) =>
+    runMemoryCloudRecover(await buildMemoryCloudDeps(), {
+      ...(generation !== undefined ? { generation } : {}),
+      // Final review follow-up: actually read `--recovery-file`.
+      ...(recoveryFile
+        ? { recoveryKey: await readRecoveryKeyFile(recoveryFile) }
+        : {}),
+    }),
   memoryGenerations: async () =>
     runMemoryGenerations(await buildMemoryCloudDeps()),
   memoryCloudStatus: async () =>
     readMemoryCloudStatus(await buildMemoryCloudDeps()),
+  // Task 14: `stak memory resolve` / `diff` / `materialize` (spec §5, §8.3).
+  memoryListConflicts: async () => listPendingConflicts(stackHome),
+  memoryResolveConflict: async ({ project, path: docPath, keep }) =>
+    resolvePendingConflict(
+      await buildMemoryCloudDeps(),
+      await memoryDiscoveryOptions(),
+      project,
+      docPath,
+      keep,
+    ),
+  memoryDiffConflict: async ({ project, path: docPath }) =>
+    diffPendingConflict(await buildMemoryCloudDeps(), project, docPath),
+  memoryMaterialize: async ({ project }) =>
+    materializeMemory(
+      stackHome,
+      await memoryDiscoveryOptions(),
+      project !== undefined ? { project } : {},
+    ),
   memoryCloudProtect: async (options) => {
     const deps = await buildMemoryCloudDeps();
     if (!deps.backend) return { status: 'not-authenticated' as const };
     const recoveryKey = generateRecoveryKey();
-    const result = await runMemoryCloudProtect(
-      { ...deps, backend: deps.backend },
-      { recoveryKey },
-    );
-    // Fail closed: if local key storage couldn't be secured, do NOT write the
-    // recovery file and report the insecure-local-key status.
-    if (result.status === 'insecure-local-key')
-      return { status: 'insecure-local-key' as const };
     const recoveryFilePath =
       options.recoveryFile ??
       path.join(process.cwd(), 'stack-memory-recovery.stackkey');
-    await writeRecoveryFile(recoveryFilePath, recoveryKey.file);
+    // Final review I8: the recovery file is written BEFORE anything changes in
+    // Cloud (and only once this device's key is secured — an insecure local
+    // key store returns before it is called).
+    const result = await runMemoryCloudProtect(
+      { ...deps, backend: deps.backend },
+      {
+        recoveryKey,
+        writeRecoveryFile: async () => {
+          try {
+            await writeRecoveryFile(recoveryFilePath, recoveryKey.file);
+          } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            throw new Error(
+              code === 'EEXIST'
+                ? `A file already exists at ${recoveryFilePath}. Choose another path with --recovery-file. Nothing was changed in Cloud.`
+                : `Couldn't write the recovery file at ${recoveryFilePath}${code ? ` (${code})` : ''}. Nothing was changed in Cloud.`,
+              { cause: error },
+            );
+          }
+        },
+      },
+    );
+    if (result.status === 'insecure-local-key')
+      return { status: 'insecure-local-key' as const };
     return { migrated: result.migrated, recoveryFilePath };
   },
   memoryProtectPasskey: async () => runPasskeyProtect(await buildPasskeyDeps()),
@@ -1164,7 +1363,16 @@ const defaultDependencies: ProgramDependencies = {
     }
   },
   writeOut: (value) => process.stdout.write(value),
-  reportMachineCheckin: async () => {
+  // Spec 2026-10-25: every Memory-changing command wraps its Memory work in this. The
+  // one-line leftover-lock note goes to stderr so it never corrupts `--json` stdout.
+  withMemoryLock: (command, fn) =>
+    withMemoryLock(stackHome, command, fn, {
+      onLeftoverCleared: (holder) =>
+        process.stderr.write(`${leftoverClearedMessage(holder)}\n`),
+    }),
+  // `stak memory unlock` — deliberately NOT wrapped in withMemoryLock.
+  unlockMemory: (options) => unlockMemory(stackHome, options),
+  reportMachineCheckin: async (commandName) => {
     // Best-effort check-in; signed out → nothing to report. Connectivity failures are
     // swallowed by reportCheckin; a 401/403 propagates so a revoked machine is explicit.
     const credential = await cloudDeps.credentials.read();
@@ -1192,7 +1400,12 @@ const defaultDependencies: ProgramDependencies = {
       // TRUE only when every current native Memory item is byte-identical in the latest
       // backup manifest (never just "a manifest exists"); conservative false otherwise.
       memoryBackedUp: async () => {
-        const nativeItems = await (await memoryAdapter()).discover();
+        // The v1 manifest only ever holds global items post-migration (project-scope
+        // Memory is canonical Memory's job now) — compare only global native items
+        // against it, or every project item would permanently read as "not backed up".
+        const nativeItems = (await (await memoryAdapter()).discover()).filter(
+          (item) => item.scope === 'global',
+        );
         const manifest = await readMemoryManifest(stackHome);
         return nativeMemoryBackedUp(
           nativeItems.map((i) => ({
@@ -1252,16 +1465,31 @@ const defaultDependencies: ProgramDependencies = {
       // adopt the authoritative projectId locally NOW, in this same invocation, so
       // the next backup/check-in never re-sends the just-retired id and recreates the
       // duplicate Cloud refused to create.
-      if (response?.reconciled && response.reconciled.length > 0) {
-        let registry = await readLocalRegistry(stackHome);
-        for (const { fromProjectId, toProjectId } of response.reconciled)
-          registry = adoptReconciledProjectId(
-            registry,
-            fromProjectId,
-            toProjectId,
-          );
-        await writeLocalRegistry(stackHome, registry);
-      }
+      // The registry lives in the Memory store, so this read-modify-write holds the
+      // Memory lock (spec 2026-10-25). It runs after the command's own lock is released.
+      // Best-effort: a busy lock (short wait) just skips it, like any failure here.
+      const reconciled = response?.reconciled ?? [];
+      if (reconciled.length > 0)
+        await withMemoryLock(
+          stackHome,
+          `stak ${commandName} check-in`,
+          async () => {
+            // Spec §4.2.1: adopt Cloud's ID AND fold this machine's Memory filed
+            // under the retired one into it now — a registry-only adoption split
+            // the project in two on the next `stak add .`.
+            const { merged } = await applyCheckinReconciliation(
+              stackHome,
+              reconciled,
+            );
+            for (const note of projectFoldNotes(merged))
+              process.stderr.write(`${note}.\n`);
+          },
+          {
+            timeoutMs: 2_000,
+            onLeftoverCleared: (holder) =>
+              process.stderr.write(`${leftoverClearedMessage(holder)}\n`),
+          },
+        );
     } catch {
       // Non-fatal: the project registry refreshes on the next successful check-in.
     }

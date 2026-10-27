@@ -104,7 +104,8 @@ export const deriveContentUploadRequirements = (
   importedStackVersions: PortableImportedStackVersion[],
 ): CloudContentUploadRequirement[] => {
   const hashes = new Set<string>();
-  for (const skill of Object.values(resolved.skills)) hashes.add(skill.contentHash);
+  for (const skill of Object.values(resolved.skills))
+    hashes.add(skill.contentHash);
   for (const version of importedStackVersions)
     for (const requirement of version.requirements)
       hashes.add(requirement.contentHash);
@@ -366,6 +367,12 @@ export const cloudErrorCodeSchema = z.enum([
   'memory-session-expired',
   'memory-no-envelope',
   'memory-not-configured',
+  // Task 13 fix round: the server refuses an old-format (`stack-mem-bundle-v1`)
+  // generation once the account's latest is v2 (spec §9.3/A.5).
+  'memory-incompatible-format',
+  // Task 13 fix round 4: a create naming a `replicaOf` that is malformed or
+  // fails the server's verification (`assertCreateGenerationAllowed`).
+  'memory-invalid-replica',
   // P10B named Stacks.
   'user-stack-not-found',
   'user-stack-conflict',

@@ -32,3 +32,23 @@ export const block = (
   lines: Array<string | false | null | undefined>,
 ): string =>
   `${lines.filter((line) => line !== false && line != null).join('\n')}\n`;
+
+/**
+ * Final review I4: how to clear a LOCAL conflict between an agent's Memory file
+ * and STAK's copy (`planSync`'s reasons, plus a moved project's differing
+ * folder copies). `stak memory resolve` only handles conflicts between machines
+ * (a pending Cloud merge), so it is never the answer here. Each action below
+ * was checked against `planSync`'s N/P/C table.
+ */
+export const localMemoryConflictAdvice = (reason: string): string => {
+  switch (reason) {
+    case 'adopt-mismatch':
+      return "the agent file differs from STAK's copy. To keep STAK's: move the file somewhere else, then run `stak memory materialize`. To keep yours: do that, copy your version back, then run `stak add .`";
+    case 'edit-delete':
+      return 'edited here but deleted in STAK. To accept the deletion: delete the file. To keep yours: save it under a new file name, delete the original, then run `stak add .`';
+    case 'source-conflict':
+      return "this project's old and current Claude folders hold different copies. Delete the copy you don't want (old folders are only read), then run `stak add .`";
+    default:
+      return "changed both here and in STAK since the last sync. STAK can't settle this one automatically yet; both versions are kept and nothing was overwritten";
+  }
+};

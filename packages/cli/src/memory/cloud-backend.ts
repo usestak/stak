@@ -5,24 +5,42 @@
  * The domain `modes` functions (standard/protected backup, recover, migrate) run
  * unchanged over this backend.
  */
-import type {
-  AddRecoveryMethodInput,
-  CreateGenerationInput,
-  CreateRecoverySessionInput,
-  MemoryGenerationMeta,
-  MemoryProfile,
-  RecoveryMethodRecord,
-  RecoverySessionRecord,
-  RemoteMemoryBackend,
-  WrappedDek,
+import {
+  RemoteMemoryError,
+  type AddRecoveryMethodInput,
+  type CreateGenerationInput,
+  type CreateRecoverySessionInput,
+  type MemoryGenerationMeta,
+  type MemoryProfile,
+  type RecoveryMethodRecord,
+  type RecoverySessionRecord,
+  type RemoteMemoryBackend,
+  type WrappedDek,
 } from '@stack/memory';
-import type { CloudMemoryClient } from '@stack/cloud-client';
+import { StackCloudError, type CloudMemoryClient } from '@stack/cloud-client';
 import type {
   MemoryGenerationDto,
   MemoryProfileDto,
   MemoryRecoveryMethodDto,
   MemoryRecoverySessionDto,
 } from '@stack/spec';
+
+/**
+ * Task 13 fix round 2, Important-2: the real HTTP client surfaces a conflicting
+ * `createGeneration` as a `StackCloudError` with `code: 'memory-conflict'` (the
+ * server's actual error code — see `packages/cloud-server/src/errors.ts`), not
+ * the domain's own `RemoteMemoryError('conflict', …)` shape. `pushCanonicalMemory`'s
+ * retry loop (`@stack/memory`'s `canonical/push.ts`) only recognizes the latter
+ * (`isConflictError` checks `code === 'conflict'`), so over real HTTP the retry
+ * never fired at all — a 409 just propagated as an opaque failure. Normalized
+ * HERE, at the adapter boundary, so the domain layer never has to know about
+ * HTTP-specific error shapes.
+ */
+const normalizeConflict = (error: unknown): never => {
+  if (error instanceof StackCloudError && error.code === 'memory-conflict')
+    throw new RemoteMemoryError('conflict', error.message);
+  throw error;
+};
 
 const toProfile = (dto: MemoryProfileDto): MemoryProfile => ({
   userId: dto.userId,
@@ -47,6 +65,7 @@ const toGeneration = (dto: MemoryGenerationDto): MemoryGenerationMeta => ({
   ...(dto.wrappedDek ? { wrappedDek: dto.wrappedDek as WrappedDek } : {}),
   state: dto.state,
   softDeletedAt: dto.softDeletedAt ?? null,
+  ...(dto.replicaOf ? { replicaOf: dto.replicaOf } : {}),
 });
 
 const toMethod = (dto: MemoryRecoveryMethodDto): RecoveryMethodRecord => ({
@@ -102,15 +121,20 @@ export const stackCloudRemoteMemoryBackend = (
     return result.generation ? toGeneration(result.generation) : null;
   },
   createGeneration: async (input: CreateGenerationInput) => {
-    const result = await client.memoryCreateGeneration({
-      backupId: input.backupId,
-      expectedParent: input.expectedParent,
-      privacyMode: input.privacyMode,
-      payloadB64: Buffer.from(input.payload).toString('base64'),
-      bundleFormatVersion: input.bundleFormatVersion,
-      ...(input.cryptoVersion ? { cryptoVersion: input.cryptoVersion } : {}),
-      ...(input.wrappedDek ? { wrappedDek: input.wrappedDek } : {}),
-    });
+    const result = await client
+      .memoryCreateGeneration({
+        backupId: input.backupId,
+        expectedParent: input.expectedParent,
+        privacyMode: input.privacyMode,
+        payloadB64: Buffer.from(input.payload).toString('base64'),
+        bundleFormatVersion: input.bundleFormatVersion,
+        ...(input.cryptoVersion ? { cryptoVersion: input.cryptoVersion } : {}),
+        ...(input.wrappedDek ? { wrappedDek: input.wrappedDek } : {}),
+        ...(input.replicaOf !== undefined
+          ? { replicaOf: input.replicaOf }
+          : {}),
+      })
+      .catch(normalizeConflict);
     return toGeneration(result.generation);
   },
   getPayload: async (backupId) => {

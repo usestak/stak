@@ -4,7 +4,11 @@ import {
   LocalEnvironmentConflictError,
   RemoteEnvironmentConflictError,
 } from '@stack/cloud-client';
-import { StackCompositionError, type ApplyPushResult, type PushPlan } from '@stack/core';
+import {
+  StackCompositionError,
+  type ApplyPushResult,
+  type PushPlan,
+} from '@stack/core';
 
 import {
   pushFailed,
@@ -16,7 +20,13 @@ import {
   type PushSkillOutcome,
 } from '../ui/cloud.js';
 
-export type MemoryPushPreflight = { blocked: boolean; reason?: string };
+/** `note`: a one-line notice printed when the push proceeds (spec §8.5: a
+ * rollback published by an ordinary push is announced, never silent). */
+export type MemoryPushPreflight = {
+  blocked: boolean;
+  reason?: string;
+  note?: string;
+};
 
 export type PushCommandDependencies = {
   cloudPreparePush(): Promise<PushPlan>;
@@ -33,9 +43,19 @@ export type PushCommandDependencies = {
    * that's `stak add .`'s job; this is push, not an implicit add).
    */
   applyMemoryPush?(): Promise<MemoryPushOutcome>;
+  /**
+   * Runs `fn` while holding the cross-process Memory lock (spec 2026-10-25).
+   * Optional so existing tests keep working; when absent, `fn` runs directly.
+   */
+  withMemoryLock?<T>(command: string, fn: () => Promise<T>): Promise<T>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
+
+const runDirectly = async <T>(
+  _command: string,
+  fn: () => Promise<T>,
+): Promise<T> => fn();
 
 export const registerPushCommand = (
   program: Command,
@@ -82,6 +102,8 @@ export const registerPushCommand = (
             memoryPreflight.reason ??
               'Memory has a predictable conflict with STAK Cloud. Resolve it before pushing.',
           );
+        if (memoryPreflight.note)
+          dependencies.writeOut(`${memoryPreflight.note}\n`);
         if (options.dryRun) {
           dependencies.writeOut(renderPushPlan(plan, true, { verbose }));
           return;
@@ -100,7 +122,10 @@ export const registerPushCommand = (
         if (plan.noop) skill = { status: 'noop' };
         else
           try {
-            skill = { status: 'applied', result: await dependencies.cloudApplyPush(plan) };
+            skill = {
+              status: 'applied',
+              result: await dependencies.cloudApplyPush(plan),
+            };
           } catch (error) {
             skill = {
               status: 'failed',
@@ -108,11 +133,35 @@ export const registerPushCommand = (
             };
           }
 
+        // The Memory part holds the Memory lock (spec 2026-10-25 §3.2); Skills above run
+        // outside it. The preflight is read again under the lock so the write acts on
+        // the state it checked. A busy lock (MemoryLockError) lands in the catch below
+        // and reports Memory FAILED with the lock message, like any Memory failure.
         let memory: PushMemoryOutcome;
-        if (!dependencies.applyMemoryPush) memory = { status: 'not-attempted' };
+        const applyMemoryPush = dependencies.applyMemoryPush;
+        if (!applyMemoryPush) memory = { status: 'not-attempted' };
         else
           try {
-            memory = { status: 'applied', outcome: await dependencies.applyMemoryPush() };
+            const lock = dependencies.withMemoryLock ?? runDirectly;
+            memory = await lock(
+              'stak push',
+              async (): Promise<PushMemoryOutcome> => {
+                const recheck = dependencies.memoryPushPreflight
+                  ? await dependencies.memoryPushPreflight()
+                  : { blocked: false };
+                if (recheck.blocked)
+                  return {
+                    status: 'failed',
+                    error:
+                      recheck.reason ??
+                      'Memory has a predictable conflict with STAK Cloud. Resolve it before pushing.',
+                  };
+                return {
+                  status: 'applied',
+                  outcome: await applyMemoryPush.call(dependencies),
+                };
+              },
+            );
           } catch (error) {
             memory = {
               status: 'failed',

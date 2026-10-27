@@ -47,8 +47,18 @@ is automatically verified from what requires an owner decision.
 - [ ] Configure DNS/Vercel for the **`www.memstk.com`** domain (canonical
       production origin), plus `memstk.com`, `memorystak.com`, and
       `www.memorystak.com` redirecting permanently to it.
-- [ ] Stand up a **production Supabase** project and apply
-      `supabase/migrations/0001` → `0002` → `0003` in order.
+- [ ] Stand up a **production Supabase** project and apply **every** migration
+      in `supabase/migrations/` in numeric order (`0001` → … → `0018`; there is
+      no `0016`). None may be skipped.
+- [ ] **STAK-native Project Memory deploy order.** If the web app goes first,
+      every Memory upload fails:
+  1. Apply Supabase migration `0018` (after all earlier ones).
+  2. Then run `notify pgrst, 'reload schema'`.
+  3. Then deploy the web app.
+  4. Only **after** the web deploy is live, publish the CLI on npm `@beta`.
+     Against the old server, the new CLI gets no sticky v1-after-v2 gate and no
+     guarded retire, so old CLIs could overwrite upgraded accounts and protect
+     runs unguarded.
 - [ ] **Production web deployment** of `apps/web` with production env vars.
 - [ ] Set server secrets (`SUPABASE_SERVICE_ROLE_KEY`, `STAK_TICKET_SECRET`) in the
       hosting environment — see [env-vars.md](env-vars.md).

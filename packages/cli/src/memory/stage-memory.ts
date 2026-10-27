@@ -1,7 +1,6 @@
 import {
   discoverClaudeMemory,
   planMemoryBackupComposition,
-  projectIdentityKey,
   readLocalRegistry,
   readMemoryManifest,
   runMemoryBackup,
@@ -13,7 +12,10 @@ import {
 
 import { reconcileNativeWithStagedMemory } from './canonical-identity.js';
 
-export type StageMemoryOptions = Omit<ClaudeMemoryAdapterOptions, 'stackHome'> & {
+export type StageMemoryOptions = Omit<
+  ClaudeMemoryAdapterOptions,
+  'stackHome'
+> & {
   stackHome: string;
 };
 
@@ -34,22 +36,21 @@ export const stageMemoryWithProjectDedup = async (
   options: StageMemoryOptions,
 ): Promise<BackupResult> => {
   const nameHints = new Map<string, string>();
-  const nativeItems = await discoverClaudeMemory({
-    ...options,
-    onLocalProjectResolved: (vendorKey, dir) => {
-      const base = safeDirectoryBasename(dir);
-      if (base) nameHints.set(vendorKey, base);
-    },
-  });
-  // Same Bug-B zombie-retirement bookkeeping `adapter.ts`'s backup() does, computed
-  // from the RAW (pre-reconcile) discovery so Local -> Git identity-strengthening is
-  // unaffected by this staging-only reconciliation.
+  const nativeItems = (
+    await discoverClaudeMemory({
+      ...options,
+      onLocalProjectResolved: (vendorKey, dir) => {
+        const base = safeDirectoryBasename(dir);
+        if (base) nameHints.set(vendorKey, base);
+      },
+    })
+  ).filter((item) => item.scope === 'global'); // project-scope Memory now goes through canonical staging (stageCanonicalMemory), not this v1 path.
+  // `syncRegistryForBackup` requires a `vendorKeys` map (Bug-B zombie-retirement
+  // bookkeeping, keyed by project-scope identity) — but `nativeItems` is global-only
+  // now, so it can never contain a project-scope item and this is always empty.
+  // Left in place only because the parameter is required; the loop that used to
+  // populate it from project-scope items is gone.
   const vendorKeys = new Map<string, string>();
-  for (const item of nativeItems) {
-    if (item.scope !== 'project' || !item.project || !item.source.vendorKey)
-      continue;
-    vendorKeys.set(projectIdentityKey(item.project), item.source.vendorKey);
-  }
 
   const registry = await readLocalRegistry(options.stackHome);
   const stagedManifest = await readMemoryManifest(options.stackHome);
@@ -72,6 +73,10 @@ export const stageMemoryWithProjectDedup = async (
     carryForward: composition.carriedForward,
     ...(options.now ? { now: options.now } : {}),
   });
-  await syncRegistryForBackup({ stackHome: options.stackHome, nameHints, vendorKeys });
+  await syncRegistryForBackup({
+    stackHome: options.stackHome,
+    nameHints,
+    vendorKeys,
+  });
   return result;
 };

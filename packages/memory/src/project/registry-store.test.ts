@@ -7,7 +7,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { ManifestItem, MemoryManifest } from '../domain.js';
 import { writeMemoryManifest } from '../store.js';
 import {
+  emptyRegistry,
   nameHintFor,
+  resolveOrMintProject,
   resolveProjectForIdentity,
   setBinding,
   setExplicitNameHint,
@@ -16,6 +18,7 @@ import {
   readLocalRegistry,
   readPortableSnapshot,
   reconcileRegistryAfterRecover,
+  refreshPortableSnapshot,
   syncRegistryForBackup,
   writeLocalRegistry,
 } from './registry-store.js';
@@ -278,5 +281,46 @@ describe('explicit display names survive future backups (stak project name prece
 
     const reloaded = await readLocalRegistry(stackHome);
     expect(nameHintFor(reloaded, projectId)).toBe('my nexus');
+  });
+});
+
+describe('refreshPortableSnapshot', () => {
+  it('replaces a stale snapshot with one derived from the current registry, without bindings or paths', async () => {
+    const stackHome = await tempHome();
+    // A stale, empty snapshot, as the legacy staging step leaves it.
+    await syncRegistryForBackup({ stackHome });
+    expect((await readPortableSnapshot(stackHome))?.projects).toEqual([]);
+
+    const identity = {
+      kind: 'git' as const,
+      canonical: 'github.com/example/stak-2m-demo',
+      host: 'github.com',
+      owner: 'example',
+      repo: 'stak-2m-demo',
+    };
+    const minted = resolveOrMintProject(emptyRegistry(), identity);
+    await writeLocalRegistry(
+      stackHome,
+      setBinding(minted.registry, {
+        projectId: minted.projectId,
+        dir: path.join(stackHome, 'proj'),
+        boundAt: '2026-10-26T00:00:00.000Z',
+        provenance: 'user-map',
+      }),
+    );
+
+    await refreshPortableSnapshot(stackHome);
+
+    const snapshot = await readPortableSnapshot(stackHome);
+    expect(snapshot?.projects.map((p) => p.projectId)).toEqual([
+      minted.projectId,
+    ]);
+    expect(snapshot?.projects[0]?.claims).toContainEqual({
+      type: 'git',
+      canonical: 'github.com/example/stak-2m-demo',
+    });
+    const raw = JSON.stringify(snapshot);
+    expect(raw).not.toContain('bindings');
+    expect(raw).not.toContain(JSON.stringify(stackHome).slice(1, -1));
   });
 });

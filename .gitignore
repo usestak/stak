@@ -19,3 +19,6 @@ packages/cli/*.tgz
 
 # Supabase CLI generated temp state
 supabase/.temp
+
+# Subagent-driven-development scratch (progress ledger, not project output)
+.superpowers/

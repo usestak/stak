@@ -279,7 +279,7 @@ describe('historical memory generation recovery (15B.6)', () => {
     expect(supersession.nextGeneration).toBe(2);
   });
 
-  it('backup after historical recovery parents from Cloud latest and resets provenance; older generations stay immutable', async () => {
+  it('backup after historical recovery on a machine with no sync history is refused like push (final review T15-4); older generations stay immutable', async () => {
     const store = new InMemoryRemoteMemoryStore();
     const backend = inMemoryRemoteMemoryBackend(store, USER);
     await standardCloudBackup({
@@ -302,15 +302,18 @@ describe('historical memory generation recovery (15B.6)', () => {
     const deps = makeDeps(backend, machineB, secureKeys(await temp('k-')));
     await runMemoryCloudRecover(deps, { generation: 0 }); // historical
 
+    // Machine B has never synced (no canonical base): seeding the base from
+    // gen 0 would silently discard the rollback, so backup refuses — exactly
+    // like `stak push` — and publishes nothing.
     const outcome = await runMemoryCloudBackup(deps);
-    expect(outcome.cloud.status).toBe('standard');
-    // New generation parents from Cloud latest (1), not from the recovered gen (0).
-    const gen2 = await backend.getGeneration(2);
-    expect(gen2?.parentGeneration).toBe(1);
-    // Provenance reset to current — status no longer historical.
+    expect(outcome.cloud).toMatchObject({ status: 'failed' });
+    expect(
+      outcome.cloud.status === 'failed' && outcome.cloud.message,
+    ).toContain('stak memory recover');
+    expect(await backend.getGeneration(2)).toBeNull();
     const status = await readMemoryCloudStatus(deps);
-    expect(status.historicalRecovery).toBe(false);
-    expect(status.latestGeneration).toBe(2);
+    expect(status.historicalRecovery).toBe(true);
+    expect(status.latestGeneration).toBe(1);
     // Older generations remain immutable/byte-identical.
     const gen0After = await backend.getPayload(
       (await backend.getGeneration(0))?.backupId as string,

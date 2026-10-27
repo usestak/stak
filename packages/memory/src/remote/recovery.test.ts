@@ -19,6 +19,7 @@ import {
   generateRecoveryKey,
   recoveryKeyFromCode,
   recoveryKeyFromFile,
+  parseRecoveryFile,
   unwrapWithPasskey,
   unwrapWithRecoveryKey,
 } from './recovery-methods.js';
@@ -110,6 +111,22 @@ describe('MMK keyring + multiple recovery methods', () => {
 });
 
 describe('recovery-file fallback', () => {
+  it('parses a written recovery file back to its key, and rejects anything else', () => {
+    const artifacts = generateRecoveryKey();
+    const text = `${JSON.stringify(artifacts.file, null, 2)}
+`;
+    expect(parseRecoveryFile(text).equals(artifacts.keyBytes)).toBe(true);
+    expect(() => parseRecoveryFile('not json')).toThrowError(/recovery file/i);
+    expect(() =>
+      parseRecoveryFile(JSON.stringify({ ...artifacts.file, format: 'other' })),
+    ).toThrowError(/recovery file/i);
+    expect(() =>
+      parseRecoveryFile(
+        JSON.stringify({ ...artifacts.file, secretB64: 'AAAA' }),
+      ),
+    ).toThrowError(/recovery file/i);
+  });
+
   it('generates a 256-bit key with matching printable + file forms', () => {
     const artifacts = generateRecoveryKey();
     expect(artifacts.keyBytes).toHaveLength(32);

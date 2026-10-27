@@ -35,7 +35,7 @@ const write = async (file: string, body: string) => {
 };
 
 describe('stageMemoryWithProjectDedup — `stak add .` after relocation', () => {
-  it('H: old + new Claude auto-memory folders for the SAME reconciled Project, same content — stages ONE logical record, not two', async () => {
+  it('global-only scoping: project-scope auto-memory (even duplicated across the SAME reconciled Project) is EXCLUDED — it now goes through canonical staging, not the v1 manifest — while a global item still stages normally', async () => {
     const stackHome = await temp('stack-stage-');
     const claudeHome = await temp('claude-home-');
     const newProjectDir = await temp('swft-fresh-');
@@ -44,7 +44,8 @@ describe('stageMemoryWithProjectDedup — `stak add .` after relocation', () => 
     const newVendorKey = encodeClaudeProjectKey(path.resolve(newProjectDir));
 
     // Claude's own per-directory Memory folders for BOTH the stale old location and
-    // the current one — exactly the real production discovery.
+    // the current one — exactly the real production discovery. This is project-scope
+    // Memory: it must be excluded from this v1 path entirely now (spec 9.1 step 5).
     await write(
       path.join(claudeHome, 'projects', oldVendorKey, 'memory', 'feedback.md'),
       'same feedback content',
@@ -53,6 +54,8 @@ describe('stageMemoryWithProjectDedup — `stak add .` after relocation', () => 
       path.join(claudeHome, 'projects', newVendorKey, 'memory', 'feedback.md'),
       'same feedback content',
     );
+    // A genuinely global item — `stak add .`'s v1 staging still owns this.
+    await write(path.join(claudeHome, 'CLAUDE.md'), 'global instructions');
 
     // Reconcile: the old vendor key is a known (claimed) Project; the new directory
     // is explicitly mapped (bound, not claimed) to the SAME Project — exactly the
@@ -76,12 +79,18 @@ describe('stageMemoryWithProjectDedup — `stak add .` after relocation', () => 
       projects: [{ dir: newProjectDir }],
     });
 
+    // Only the global item stages — the dedup machinery never even sees the
+    // project-scope auto-memory copies, so there is nothing to dedup here anymore.
     expect(result.files).toBe(1);
     const manifest = await readMemoryManifest(stackHome);
     const feedbackEntries = manifest?.items.filter((item) =>
       item.logicalId.endsWith('feedback.md'),
     );
-    expect(feedbackEntries).toHaveLength(1);
+    expect(feedbackEntries).toHaveLength(0);
+    const globalEntries = manifest?.items.filter(
+      (item) => item.scope === 'global',
+    );
+    expect(globalEntries).toHaveLength(1);
   });
 
   it('fails closed (stages neither copy) when old + new locations genuinely differ in content — never two portable records, never an arbitrary pick', async () => {
@@ -128,7 +137,7 @@ describe('stageMemoryWithProjectDedup — `stak add .` after relocation', () => 
     expect(result.files).toBe(0);
   });
 
-  it('reproduces the exact production regression: starting from an EXISTING staged MAIN entry under the OLD locator, relocating and re-running `stak add .` is fully idempotent — no duplicate file, no duplicate Project', async () => {
+  it("what used to be the exact production regression (relocation dedup) now stays a no-op across relocation and repeat runs — project-scope auto-memory never reaches the v1 manifest or this path's registry sync at all", async () => {
     const stackHome = await temp('stack-stage-');
     const claudeHome = await temp('claude-home-');
     const oldProjectDir = await temp('swft-original-');
@@ -140,53 +149,45 @@ describe('stageMemoryWithProjectDedup — `stak add .` after relocation', () => 
       'feedback content',
     );
 
-    // Step 1: stage from the ORIGINAL location — this is the pre-existing MAIN state
-    // (the real "30 files / 10 projects" baseline before relocation).
+    // Step 1: stage from the ORIGINAL location. Project-scope auto-memory is
+    // excluded from this v1 path entirely now (it's canonical Memory's job via
+    // `stageCanonicalMemory`), so nothing stages and this path's registry sync
+    // (`syncRegistryForBackup`, driven off project-scope vendor keys) never mints
+    // a Project either.
     const initial = await stageMemoryWithProjectDedup({
       stackHome,
       claudeHome,
       projects: [{ dir: oldProjectDir }],
     });
-    expect(initial.files).toBe(1);
+    expect(initial.files).toBe(0);
     const registryAfterInitial = await readLocalRegistry(stackHome);
-    expect(registryAfterInitial.projects).toHaveLength(1);
-    const projectId = registryAfterInitial.projects[0]?.projectId;
+    expect(registryAfterInitial.projects).toHaveLength(0);
 
     // Step 2 (the relocation): the project moves to a new directory. Claude's own
     // per-directory Memory folder for the OLD directory still exists on disk (real,
     // observed production behavior — Claude never deletes it), alongside the freshly
-    // discovered new one, with byte-identical content.
+    // discovered new one, with byte-identical content. (No registry binding needed
+    // here anymore — there is no Project ID to bind to, since none was minted.)
     const newVendorKey = encodeClaudeProjectKey(path.resolve(newProjectDir));
     await write(
       path.join(claudeHome, 'projects', newVendorKey, 'memory', 'feedback.md'),
       'feedback content',
     );
-    let registry = await readLocalRegistry(stackHome);
-    registry = setBinding(registry, {
-      projectId: projectId as string,
-      dir: path.resolve(newProjectDir),
-      boundAt: '2026-10-20T00:00:00.000Z',
-      provenance: 'user-map',
-    });
-    await writeLocalRegistry(stackHome, registry);
 
     // Step 3: `stak add .` after relocation — native discovery now reports BOTH the
-    // stale old-location copy AND the new one. Staging MUST reconcile against the
-    // EXISTING staged MAIN entry, not just against the two native copies: the result
-    // must be a true no-op, not a second file/Project record.
+    // stale old-location copy AND the new one. Both remain excluded; still a no-op.
     const afterRelocation = await stageMemoryWithProjectDedup({
       stackHome,
       claudeHome,
       projects: [{ dir: oldProjectDir }, { dir: newProjectDir }],
     });
-    expect(afterRelocation.files).toBe(1);
+    expect(afterRelocation.files).toBe(0);
 
     const manifest = await readMemoryManifest(stackHome);
-    expect(manifest?.items).toHaveLength(1);
+    expect(manifest?.items ?? []).toHaveLength(0);
 
     const registryAfterAdd = await readLocalRegistry(stackHome);
-    expect(registryAfterAdd.projects).toHaveLength(1);
-    expect(registryAfterAdd.projects[0]?.projectId).toBe(projectId);
+    expect(registryAfterAdd.projects).toHaveLength(0);
 
     // Step 4: running `stak add .` again must be fully idempotent.
     const second = await stageMemoryWithProjectDedup({
@@ -194,10 +195,10 @@ describe('stageMemoryWithProjectDedup — `stak add .` after relocation', () => 
       claudeHome,
       projects: [{ dir: oldProjectDir }, { dir: newProjectDir }],
     });
-    expect(second.files).toBe(1);
+    expect(second.files).toBe(0);
     const manifestAfterSecond = await readMemoryManifest(stackHome);
-    expect(manifestAfterSecond?.items).toHaveLength(1);
+    expect(manifestAfterSecond?.items ?? []).toHaveLength(0);
     const registryAfterSecond = await readLocalRegistry(stackHome);
-    expect(registryAfterSecond.projects).toHaveLength(1);
+    expect(registryAfterSecond.projects).toHaveLength(0);
   });
 });

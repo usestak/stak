@@ -1,4 +1,24 @@
+import { StackAdapterError } from '@stack/adapters';
 import { StackCloudError } from '@stack/cloud-client';
+import {
+  StackCompositionError,
+  StackStateError,
+  StackStoreError,
+} from '@stack/core';
+import { MemoryLockError } from '@stack/memory';
+
+/**
+ * Typed STAK errors whose message is user-facing: the CLI entry point prints them via
+ * `formatCliError` (no stack trace) and exits 1. Anything else is a bug and re-thrown.
+ */
+export const isRenderableCliError = (error: unknown): error is Error =>
+  error instanceof StackStateError ||
+  error instanceof StackStoreError ||
+  error instanceof StackCompositionError ||
+  error instanceof StackAdapterError ||
+  error instanceof StackCloudError ||
+  // Spec 2026-10-25 §3.3: "Another STAK command … is changing Memory. Try again …".
+  error instanceof MemoryLockError;
 
 // Cloud errors whose message is already user-facing and actionable (auth,
 // configuration, and synchronization conflicts). These are shown verbatim.

@@ -7,10 +7,13 @@ import {
   newKeyring,
   openMmkFromEnvelope,
   unwrapWithPasskey,
+  wrapDekWithMmk,
 } from '@stack/memory';
 import { describe, expect, it } from 'vitest';
 
 import {
+  mmkOpensWrappedDek,
+  selectPasskeyMmk,
   sealMmkForCli,
   unwrapMmkWithPrf,
   wrapMmkWithPrf,
@@ -111,5 +114,108 @@ describe('web ↔ domain crypto interop', () => {
         },
       }),
     ).rejects.toThrow();
+  });
+});
+
+describe('final review I7: passkey recovery verifies the unwrapped key and tries every wrapper', () => {
+  const storedFor = (mmk: Buffer, prf: Buffer): StoredMmkWrapper => {
+    const added = addPasskeyWrapper({
+      keyring: newKeyring(),
+      mmk,
+      prfOutput: prf,
+    });
+    return {
+      mmkId: added.keyring.mmkId,
+      wrapper: added.wrapper as StoredMmkWrapper['wrapper'],
+    };
+  };
+
+  it('mmkOpensWrappedDek matches the domain DEK wrap (right key true, wrong key or wrong backup false)', async () => {
+    const mmk = generateMmk();
+    const check = {
+      backupId: 'b-1',
+      wrappedDek: wrapDekWithMmk(randomBytes(32), mmk, 'b-1'),
+    };
+    expect(await mmkOpensWrappedDek({ mmk, check })).toBe(true);
+    expect(await mmkOpensWrappedDek({ mmk: generateMmk(), check })).toBe(false);
+    expect(
+      await mmkOpensWrappedDek({ mmk, check: { ...check, backupId: 'b-2' } }),
+    ).toBe(false);
+  });
+
+  it('a leftover wrapper (an abandoned protect key, listed FIRST, same passkey) is skipped; the verified key is chosen, with one passkey prompt', async () => {
+    const prf = randomBytes(32);
+    const leftover = generateMmk();
+    const real = generateMmk();
+    const check = {
+      backupId: 'b-9',
+      wrappedDek: wrapDekWithMmk(randomBytes(32), real, 'b-9'),
+    };
+    let prompts = 0;
+    const result = await selectPasskeyMmk({
+      wrappers: [
+        { publicIdentifier: 'cred-1', mmkWrapper: storedFor(leftover, prf) },
+        { publicIdentifier: 'cred-1', mmkWrapper: storedFor(real, prf) },
+      ],
+      getPrf: async () => {
+        prompts += 1;
+        return new Uint8Array(prf);
+      },
+      check,
+    });
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') expect(bytesEqual(result.mmk, real)).toBe(true);
+    expect(prompts).toBe(1);
+  });
+
+  it('a passkey without PRF does not stop the search; only no PRF at all reports no-prf; nothing verifiable reports no-match', async () => {
+    const prf = randomBytes(32);
+    const real = generateMmk();
+    const check = {
+      backupId: 'b-3',
+      wrappedDek: wrapDekWithMmk(randomBytes(32), real, 'b-3'),
+    };
+    const wrappers = [
+      {
+        publicIdentifier: 'cred-no-prf',
+        mmkWrapper: storedFor(generateMmk(), randomBytes(32)),
+      },
+      { publicIdentifier: 'cred-2', mmkWrapper: storedFor(real, prf) },
+    ];
+    const ok = await selectPasskeyMmk({
+      wrappers,
+      getPrf: async (id) => (id === 'cred-2' ? new Uint8Array(prf) : null),
+      check,
+    });
+    expect(ok.status).toBe('ok');
+    expect(
+      (await selectPasskeyMmk({ wrappers, getPrf: async () => null, check }))
+        .status,
+    ).toBe('no-prf');
+    const leftoverOnly = [
+      { publicIdentifier: 'cred-2', mmkWrapper: storedFor(generateMmk(), prf) },
+    ];
+    expect(
+      (
+        await selectPasskeyMmk({
+          wrappers: leftoverOnly,
+          getPrf: async () => new Uint8Array(prf),
+          check,
+        })
+      ).status,
+    ).toBe('no-match');
+  });
+
+  it('with no Protected generation to check against, the first key that unwraps is used (unchanged behaviour)', async () => {
+    const prf = randomBytes(32);
+    const mmk = generateMmk();
+    const result = await selectPasskeyMmk({
+      wrappers: [
+        { publicIdentifier: 'cred-1', mmkWrapper: storedFor(mmk, prf) },
+      ],
+      getPrf: async () => new Uint8Array(prf),
+      check: null,
+    });
+    expect(result.status === 'ok' && bytesEqual(result.mmk, mmk)).toBe(true);
   });
 });

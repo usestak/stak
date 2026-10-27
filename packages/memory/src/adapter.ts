@@ -19,6 +19,7 @@ import {
   type RestorePlan,
 } from './restore.js';
 import { readMemoryManifest } from './store.js';
+import { readCanonicalMain } from './canonical/store.js';
 import {
   readLocalRegistry,
   syncRegistryForBackup,
@@ -222,25 +223,42 @@ export type MemoryStatus = {
   lastBackupAt: string | null;
 };
 
-/** Summarize the last committed backup, or null when none exists. */
+/**
+ * Summarize the staged Memory, or null when nothing is staged at all. Since the
+ * canonical migration the v1 manifest holds global Memory only and Project
+ * Memory lives in canonical `main.json`, so both are counted: projects with at
+ * least one present document, and present documents (tombstones are not
+ * backed-up files), plus the v1 manifest's own items.
+ */
 export const readMemoryStatus = async (
   stackHome: string,
 ): Promise<MemoryStatus | null> => {
   const manifest = await readMemoryManifest(stackHome);
-  if (!manifest) return null;
-  const projects = new Set(
-    manifest.items
-      .filter((item) => item.scope === 'project' && item.project)
-      .map((item) =>
-        item.project?.kind === 'git'
-          ? item.project.canonical
-          : `local:${item.project?.kind === 'local' ? item.project.vendorKey : ''}`,
-      ),
-  ).size;
+  const canonical = (await readCanonicalMain(stackHome)).projects
+    .map((project) => ({
+      projectId: project.projectId,
+      present: project.documents.filter((doc) => doc.state === 'present')
+        .length,
+    }))
+    .filter((project) => project.present > 0);
+  if (!manifest && canonical.length === 0) return null;
+  const items = manifest?.items ?? [];
+  const legacyProjects = items
+    .filter((item) => item.scope === 'project' && item.project)
+    .map((item) =>
+      item.project?.kind === 'git'
+        ? item.project.canonical
+        : `local:${item.project?.kind === 'local' ? item.project.vendorKey : ''}`,
+    );
+  const projects = new Set([
+    ...legacyProjects,
+    ...canonical.map((project) => project.projectId),
+  ]).size;
   return {
     provider: 'claude',
     projects,
-    files: manifest.items.length,
-    lastBackupAt: manifest.createdAt,
+    files:
+      items.length + canonical.reduce((n, project) => n + project.present, 0),
+    lastBackupAt: manifest?.createdAt ?? null,
   };
 };

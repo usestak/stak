@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import type { ProjectListRow } from '../memory/project-ops.js';
@@ -36,7 +38,8 @@ describe('identityLabel (project-naming UX)', () => {
   });
 
   it('falls back to the generic label when the binding has no safe basename', () => {
-    const row = baseRow({ binding: 'C:/' });
+    // A filesystem root of the platform running the test ('C:\\' on Windows, '/' on POSIX).
+    const row = baseRow({ binding: path.parse(process.cwd()).root });
     expect(identityLabel(row)).toBe('local project');
   });
 

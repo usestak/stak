@@ -1,3 +1,4 @@
+import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { GitProjectIdentity, ProjectIdentity } from './domain.js';
@@ -59,13 +60,16 @@ export const canonicalGitIdentity = (
 
 /**
  * Encode an absolute project path the way Claude Code keys its per-project
- * directory under `~/.claude/projects/` (drive/path separators become `-`).
- * Deterministic forward-only; used to match a known local project to its
- * auto-memory directory. The result is a machine-local vendor key, never a
- * portable identity.
+ * directory under `~/.claude/projects/`: every character that is not
+ * `[a-zA-Z0-9]` becomes `-` — not just the drive/path separators (`:`, `\`, `/`),
+ * but also `.`, `_`, spaces, and any other punctuation in a path segment's name
+ * (observed on a real machine: `C:\Users\NT\.claude-mem` encodes to
+ * `C--Users-NT--claude-mem`). Deterministic forward-only; used to match a known
+ * local project to its auto-memory directory. The result is a machine-local
+ * vendor key, never a portable identity.
  */
 export const encodeClaudeProjectKey = (absolutePath: string): string =>
-  absolutePath.replace(/[:\\/]/g, '-');
+  absolutePath.replace(/[^a-zA-Z0-9]/g, '-');
 
 /**
  * Normalize a Claude vendor key for MATCHING against a known local project.
@@ -86,23 +90,103 @@ export const projectIdentityKey = (identity: ProjectIdentity): string =>
     ? identity.canonical
     : `local:${identity.vendorKey ?? 'unresolved'}`;
 
+/** List the real child directory NAMES of `dir` — including a symlink/junction
+ * entry whose TARGET is a directory (unlike the plain `Dirent.isDirectory()` check,
+ * which reports a symlink entry's own type, never what it points to). This is
+ * deliberately permissive: `claude-project-adapter.ts` only ever rejects a symlink
+ * for the `~/.claude/projects/<key>` folder ITSELF, and explicitly allows a
+ * project's own `dir` to be a symlink or a junction (e.g. a `C:\dev` -> `D:\dev`
+ * junction) — a real, locatable project under one must stay locatable here too.
+ * The probe budget in `reconstructProjectDirs` bounds any symlink cycle.
+ *
+ * `[]` on "doesn't exist"/"not a directory" (ENOENT/ENOTDIR) — expected and
+ * common while probing candidate paths that mostly don't exist. Any OTHER readdir
+ * error (EACCES, EIO, ...) is RE-THROWN so the caller fails the WHOLE walk closed
+ * rather than silently treating this one level as childless, which could turn a
+ * real ambiguity into a single, wrong match. */
+const defaultListChildDirNames = async (dir: string): Promise<string[]> => {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return [];
+    throw error;
+  }
+  const names: string[] = [];
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      names.push(entry.name);
+      continue;
+    }
+    if (entry.isSymbolicLink()) {
+      try {
+        if ((await stat(path.join(dir, entry.name))).isDirectory())
+          names.push(entry.name);
+      } catch {
+        // Broken symlink (or its target vanished mid-walk) — not a directory,
+        // same as any other non-matching entry; never fails the whole walk.
+      }
+    }
+  }
+  return names;
+};
+
+/** Real `stat`-based directory check — used ONLY for `reconstructProjectDirs`'s
+ * degenerate zero-token case (the vendor key IS the root itself, e.g. `C--`), where
+ * there is no recursive readdir step to drive at all. */
+const defaultIsDirectory = async (candidate: string): Promise<boolean> => {
+  try {
+    return (await stat(candidate)).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
 /**
  * Enumerate EVERY existing absolute directory that a Claude auto-memory vendor key
- * could decode to. `encodeClaudeProjectKey` is lossy (`:`, `\`, `/` all become `-`),
- * so a key such as `...-foo-bar-baz` may correspond to `foo-bar\baz`, `foo\bar-baz`,
- * etc. This walks the real filesystem and returns all distinct paths that fully
- * decode to existing directory chains — the raw material for a SAFE, unique-only
- * resolution (see `reconstructProjectDir`). On probe-limit overflow it returns `[]`
- * (fail closed) rather than a partial/biased set.
+ * could decode to, by walking the REAL directory tree level by level rather than
+ * guessing separator characters: at each level, list the current directory's real
+ * children, and for each child whose OWN `encodeClaudeProjectKey`-encoded name is a
+ * prefix of the remaining key (followed by `-`, or exactly the remainder at the very
+ * end), recurse into it with whatever key remains. Because this compares against
+ * each child's ACTUAL encoded name rather than enumerating candidate separator
+ * choices, it handles ANY punctuation or Unicode in a real directory name (a dot, an
+ * underscore, a space, parentheses, accented characters, ...) with no combinatorial
+ * cost and no cap — `encodeClaudeProjectKey` is still lossy (multiple real
+ * directories can decode to the same key), so this returns every distinct match;
+ * the raw material for a SAFE, unique-only resolution (see `reconstructProjectDir`).
+ * On readdir-budget overflow, or any readdir error other than "doesn't exist", it
+ * returns `[]` (fail closed) rather than a partial/biased set. On win32, matching
+ * is case-INSENSITIVE (NTFS is, and Claude/PowerShell can record either casing for
+ * the same real folder — see `normalizeVendorKey`); POSIX stays case-sensitive. A
+ * symlink or junction child (e.g. a `C:\dev` -> `D:\dev` junction) whose TARGET is
+ * a directory is traversed exactly like a real one — `claude-project-adapter.ts`
+ * never rejects a project's own `dir` for being a symlink, so reconstruction must
+ * not either.
  */
 export const reconstructProjectDirs = async (options: {
   vendorKey: string;
-  isDirectory: (candidate: string) => Promise<boolean>;
+  /** Real `stat`-based existence check, used ONLY for the degenerate zero-token
+   * (vendor key IS the root) case. Defaults to a real filesystem check; inject for
+   * deterministic tests of that one edge case. */
+  isDirectory?: (candidate: string) => Promise<boolean>;
+  /** List a directory's real child directory NAMES — INCLUDING a symlink/junction
+   * entry whose target is a directory (see `defaultListChildDirNames`) — the
+   * walk's one dependency. Defaults to reading the real filesystem; inject a
+   * synthetic one for deterministic tests of a fake directory tree. */
+  listDirs?: (dir: string) => Promise<string[]>;
   platform?: NodeJS.Platform;
+  /** Max number of `listDirs` (readdir) CALLS across the whole walk — not a
+   * per-candidate-string probe count like before: this algorithm never enumerates
+   * candidate strings, so even a long, ambiguous real tree costs at most one call
+   * per directory level actually visited. Exists purely as a defensive guard
+   * against a pathological tree, essentially never reached by a realistic path. */
   maxProbes?: number;
 }): Promise<string[]> => {
   const platform = options.platform ?? process.platform;
   const p = platform === 'win32' ? path.win32 : path.posix;
+  const listDirs = options.listDirs ?? defaultListChildDirNames;
   let root: string;
   let rest: string;
   if (platform === 'win32') {
@@ -115,34 +199,63 @@ export const reconstructProjectDirs = async (options: {
     root = '/';
     rest = options.vendorKey.slice(1);
   }
-  const tokens = rest.length > 0 ? rest.split('-') : [];
-  if (tokens.length === 0)
-    return (await options.isDirectory(root)) ? [root] : [];
+  if (rest.length === 0) {
+    const isDirectory = options.isDirectory ?? defaultIsDirectory;
+    return (await isDirectory(root)) ? [root] : [];
+  }
 
   const results = new Set<string>();
   let probes = 0;
   let overflow = false;
   const limit = options.maxProbes ?? 4000;
   // Enumerate ALL complete decodings (no ordering preference — order must never
-  // decide identity). Every split point is explored so ambiguity is detectable.
-  const walk = async (base: string, index: number): Promise<void> => {
+  // decide identity). Every real child whose encoded name matches the current
+  // remaining key prefix is explored, so ambiguity (more than one real directory
+  // decoding to the same key) is still fully detectable.
+  const walk = async (base: string, remaining: string): Promise<void> => {
     if (overflow) return;
-    if (index >= tokens.length) {
+    if (remaining.length === 0) {
       results.add(base);
       return;
     }
-    for (let end = index; end < tokens.length; end += 1) {
-      if (probes >= limit) {
-        overflow = true;
-        return;
+    if (probes >= limit) {
+      overflow = true;
+      return;
+    }
+    probes += 1;
+    let children: string[];
+    try {
+      children = await listDirs(base);
+    } catch {
+      // Any readdir error beyond "doesn't exist" (which `listDirs` already turns
+      // into `[]`) fails the WHOLE walk closed, never just this one branch — a
+      // silently-dropped branch could turn a real ambiguity into a single,
+      // wrong-looking match.
+      overflow = true;
+      return;
+    }
+    // On win32, NTFS is case-insensitive and Claude/PowerShell can record either
+    // casing for the same real folder — compare case-FOLDED (`remaining` is
+    // compared via `normalizeVendorKey`, never mutated itself), but slice the
+    // ORIGINAL `remaining` by the encoded child's own length (case folding never
+    // changes length) so the recursion keeps the real, unfolded remainder. POSIX
+    // stays case-sensitive (`normalizeVendorKey` is a no-op there).
+    const normalizedRemaining = normalizeVendorKey(remaining, platform);
+    for (const childName of children) {
+      if (overflow) return;
+      const encodedChild = encodeClaudeProjectKey(childName);
+      const normalizedChild = normalizeVendorKey(encodedChild, platform);
+      if (normalizedRemaining === normalizedChild) {
+        await walk(p.join(base, childName), '');
+      } else if (normalizedRemaining.startsWith(`${normalizedChild}-`)) {
+        await walk(
+          p.join(base, childName),
+          remaining.slice(encodedChild.length + 1),
+        );
       }
-      probes += 1;
-      const name = tokens.slice(index, end + 1).join('-');
-      const candidate = p.join(base, name);
-      if (await options.isDirectory(candidate)) await walk(candidate, end + 1);
     }
   };
-  await walk(root, 0);
+  await walk(root, rest);
   return overflow ? [] : [...results];
 };
 
@@ -159,7 +272,8 @@ export const reconstructProjectDirs = async (options: {
  */
 export const reconstructProjectDir = async (options: {
   vendorKey: string;
-  isDirectory: (candidate: string) => Promise<boolean>;
+  isDirectory?: (candidate: string) => Promise<boolean>;
+  listDirs?: (dir: string) => Promise<string[]>;
   platform?: NodeJS.Platform;
   maxProbes?: number;
 }): Promise<string | null> => {
