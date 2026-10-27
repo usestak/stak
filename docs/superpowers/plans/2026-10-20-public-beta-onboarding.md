@@ -442,13 +442,11 @@ import { FeedbackForm } from './feedback-form';
 
 describe('FeedbackForm', () => {
   it('submits the selected type and message, then shows a calm confirmation', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue({
-        ok: true,
-        status: 202,
-        json: async () => ({ ok: true }),
-      });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      json: async () => ({ ok: true }),
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     render(<FeedbackForm />);
