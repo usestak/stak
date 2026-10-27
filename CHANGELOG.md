@@ -26,6 +26,9 @@ semantic versioning.
   - **Upgrade note:** once your account has Memory in the new format, older
     CLIs are refused when they try to push Memory to it. Update with
     `npm i -g @memstk/cli@beta`.
+- **Update notifications.** STAK now tells you when a new version is
+  available (at most once a day, never in scripts/CI/`--json`; opt out with
+  `STAK_NO_UPDATE_CHECK=1`), and `stak upgrade` installs it.
 - **Fixed (security):** Skill archive extraction could be made to write or
   link outside the Skill's own folder. Archives are untrusted input reached
   through `stak use`, `stak try`, and `stak pull`. Entries whose path
