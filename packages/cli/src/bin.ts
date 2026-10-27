@@ -1,26 +1,12 @@
 #!/usr/bin/env node
 
-import {
-  StackCompositionError,
-  StackStateError,
-  StackStoreError,
-} from '@stack/core';
-import { StackAdapterError } from '@stack/adapters';
-import { StackCloudError } from '@stack/cloud-client';
-
 import { createProgram } from './program.js';
-import { formatCliError } from './ui/errors.js';
+import { formatCliError, isRenderableCliError } from './ui/errors.js';
 
 try {
   await createProgram().parseAsync(process.argv);
 } catch (error) {
-  if (
-    error instanceof StackStateError ||
-    error instanceof StackStoreError ||
-    error instanceof StackCompositionError ||
-    error instanceof StackAdapterError ||
-    error instanceof StackCloudError
-  ) {
+  if (isRenderableCliError(error)) {
     process.stderr.write(
       `${formatCliError(error, { verbose: process.argv.includes('--verbose') })}\n`,
     );

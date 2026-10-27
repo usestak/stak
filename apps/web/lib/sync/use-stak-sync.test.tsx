@@ -32,8 +32,16 @@ vi.mock('../supabase-browser', () => ({
 import { useStakSync } from './use-stak-sync';
 import { SYNC_CHANNEL_NAME, emitSync } from './stak-sync';
 
-function Mounted() {
-  useStakSync();
+function Mounted({
+  enabled = true,
+  freshKey,
+  focusMinIntervalMs = 0,
+}: {
+  enabled?: boolean;
+  freshKey?: string;
+  focusMinIntervalMs?: number;
+}) {
+  useStakSync({ enabled, freshKey, focusMinIntervalMs });
   return null;
 }
 
@@ -126,6 +134,9 @@ describe('useStakSync', () => {
 
   it('refreshes on an authenticated Realtime invalidation while the tab stays focused', async () => {
     render(<Mounted />);
+    await waitFor(() =>
+      expect(realtimeHandlers.user_stacks?.[0]).toBeDefined(),
+    );
 
     realtimeHandlers.user_stacks[0]();
 
@@ -134,6 +145,7 @@ describe('useStakSync', () => {
 
   it('coalesces a BroadcastChannel signal and a Realtime signal into one refresh', async () => {
     render(<Mounted />);
+    await waitFor(() => expect(realtimeHandlers.machines?.[0]).toBeDefined());
     const sender = new BroadcastChannel(SYNC_CHANNEL_NAME);
 
     sender.postMessage({
@@ -147,8 +159,11 @@ describe('useStakSync', () => {
     sender.close();
   });
 
-  it('cleans up the Realtime subscription on unmount', () => {
+  it('cleans up the Realtime subscription on unmount', async () => {
     const { unmount } = render(<Mounted />);
+    await waitFor(() =>
+      expect(createSupabaseBrowserClient).toHaveBeenCalledTimes(1),
+    );
     unmount();
 
     expect(removeChannel).toHaveBeenCalledTimes(1);
@@ -160,5 +175,52 @@ describe('useStakSync', () => {
     });
 
     expect(() => render(<Mounted />)).not.toThrow();
+  });
+
+  it('skips focus refreshes while the page data is still fresh', async () => {
+    render(<Mounted focusMinIntervalMs={60_000} />);
+
+    window.dispatchEvent(new Event('focus'));
+    setHidden(true);
+    setHidden(false);
+
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('never throttles another tab broadcast, even while fresh', async () => {
+    render(<Mounted focusMinIntervalMs={60_000} />);
+    const sender = new BroadcastChannel(SYNC_CHANNEL_NAME);
+
+    sender.postMessage({ domains: ['staks'], at: Date.now(), source: 'x' });
+
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    sender.close();
+  });
+
+  it('keeps one Realtime subscription across navigations (freshKey changes)', async () => {
+    createSupabaseBrowserClient.mockClear();
+    const { rerender } = render(<Mounted freshKey="/overview" />);
+    await waitFor(() =>
+      expect(createSupabaseBrowserClient).toHaveBeenCalledTimes(1),
+    );
+    rerender(<Mounted freshKey="/skills" />);
+    rerender(<Mounted freshKey="/machines" />);
+
+    expect(createSupabaseBrowserClient).toHaveBeenCalledTimes(1);
+    expect(removeChannel).not.toHaveBeenCalled();
+  });
+
+  it('does nothing while disabled (signed-out or public routes), never loading the Supabase client module', async () => {
+    createSupabaseBrowserClient.mockClear();
+    render(<Mounted enabled={false} />);
+    window.dispatchEvent(new Event('focus'));
+
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(refresh).not.toHaveBeenCalled();
+    // The dynamic import() in the effect is gated behind `enabled`, so when disabled the
+    // '../supabase-browser' module (and therefore @supabase/ssr) is never imported, let
+    // alone used to create a client.
+    expect(createSupabaseBrowserClient).not.toHaveBeenCalled();
   });
 });

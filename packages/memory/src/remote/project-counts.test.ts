@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { hashBytes, writeMemoryManifest, writeMemoryObject } from '../store.js';
 import { writePortableSnapshot } from '../project/registry-store.js';
 import type { ManifestItem } from '../domain.js';
+import { writeCanonicalMain } from '../canonical/store.js';
+import { CANONICAL_MAIN_SCHEMA_VERSION } from '../canonical/domain.js';
 import { bundleFromStore } from './bundle-codec.js';
 import { standardProjectCountsFromBundle } from './project-counts.js';
 
@@ -114,5 +116,58 @@ describe('standardProjectCountsFromBundle (P3 §2)', () => {
     expect(
       standardProjectCountsFromBundle(Buffer.from('not a bundle', 'utf8')),
     ).toBeNull();
+  });
+
+  it('counts present documents per project from a v2 bundle, ignoring tombstones', async () => {
+    const stackHome = await temp();
+    await writeMemoryManifest({
+      stackHome,
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-22T00:00:00.000Z',
+        items: [],
+      },
+    });
+    // `bundleFromStore` (Task 13 fix) now requires a real stored object for every
+    // `present` canonical document it bundles, not only for v1 manifest items — a
+    // present document's content must actually travel in the bundle, or a
+    // recovering machine would restore a canonical manifest pointing at content
+    // that was never uploaded. The old fake, unresolvable `sha256:111...1` hash
+    // below relied on that gap and would now fail with `store-object-missing`.
+    const presentBytes = Buffer.from('present doc body', 'utf8');
+    const presentContentHash = hashBytes(presentBytes);
+    await writeMemoryObject({
+      stackHome,
+      contentHash: presentContentHash,
+      bytes: presentBytes,
+    });
+    await writeCanonicalMain(stackHome, {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [
+        {
+          projectId: PRJ_A,
+          documents: [
+            {
+              path: 'notes/a.md',
+              state: 'present',
+              contentHash: presentContentHash,
+              importedFrom: 'claude',
+              importedAt: '2026-10-22T00:00:00.000Z',
+            },
+            {
+              path: 'notes/b.md',
+              state: 'deleted',
+              lastContentHash: `sha256:${'2'.repeat(64)}`,
+              deletedAt: '2026-10-22T00:00:00.000Z',
+            },
+          ],
+        },
+      ],
+    });
+    const { bytes } = await bundleFromStore(stackHome);
+    expect(standardProjectCountsFromBundle(bytes)).toEqual([
+      { projectId: PRJ_A, fileCount: 1 },
+    ]);
   });
 });

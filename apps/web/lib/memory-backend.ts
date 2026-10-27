@@ -45,6 +45,7 @@ const mapGeneration = (row: any): MemoryGenerationMeta => ({
   ...(row.wrapped_dek ? { wrappedDek: row.wrapped_dek } : {}),
   state: row.state,
   softDeletedAt: row.soft_deleted_at ?? null,
+  ...(row.replica_of ? { replicaOf: row.replica_of } : {}),
 });
 
 const mapMethod = (row: any): RecoveryMethodRecord => ({
@@ -216,6 +217,11 @@ export const supabaseRemoteMemoryBackend = (
         p_bundle_format_version: input.bundleFormatVersion,
         p_crypto_version: input.cryptoVersion ?? null,
         p_wrapped_dek: input.wrappedDek ?? null,
+        // Task 13 fix round 3 (migration 0018): the server already verified
+        // this protect replica's claim (`assertCreateGenerationAllowed`); the
+        // column's per-account unique index enforces one replica per original
+        // atomically, even against a concurrent second create.
+        p_replica_of: input.replicaOf ?? null,
         p_now: nowIso,
       });
       if (error) {
@@ -223,6 +229,11 @@ export const supabaseRemoteMemoryBackend = (
           throw new RemoteMemoryError(
             'conflict',
             'Cloud latest generation moved. Refresh and retry.',
+          );
+        if (error.message.includes('memory_backups_user_replica_of_key'))
+          throw new RemoteMemoryError(
+            'invalid-replica',
+            'Refused Protected replica: the original generation already has a replica.',
           );
         throw new Error(`Memory commit failed: ${error.message}`);
       }
@@ -238,14 +249,39 @@ export const supabaseRemoteMemoryBackend = (
       return new Uint8Array(await data.arrayBuffer());
     },
 
-    retireGeneration: async (backupId, now) => {
+    retireGeneration: async (backupId, now, options) => {
       const nowIso = (now ?? (() => new Date()))().toISOString();
-      const { error } = await db()
-        .from('memory_backups')
-        .update({ state: 'retired', soft_deleted_at: nowIso })
-        .eq('user_id', userId)
-        .eq('backup_id', backupId);
-      if (error) throw new Error(`Memory retire failed: ${error.message}`);
+      if (options?.guarded) {
+        // Task 13 fix round 5: atomic guarded retire (migration 0018's
+        // `retire_memory_generation_guarded`, the SQL twin of
+        // `assertRetireAllowed`) — never removes the last committed copy.
+        const { error } = await db().rpc('retire_memory_generation_guarded', {
+          p_user_id: userId,
+          p_backup_id: backupId,
+          p_now: nowIso,
+        });
+        if (error) {
+          if (error.message.includes('STACK_RETIRE_REFUSED'))
+            throw new RemoteMemoryError(
+              'retire-refused',
+              'Refused to retire the last committed copy of this Memory backup.',
+            );
+          throw new Error(`Memory retire failed: ${error.message}`);
+        }
+      } else {
+        // Final review I2: only a COMMITTED row may be retired — migration
+        // 0018's trigger raises on any update of an already-retired row, and
+        // Delete Cloud Memory re-runs this over every backup id (retired ones
+        // included, to re-remove orphaned payloads). Filtering makes a retired
+        // row a no-op update, so the storage remove below still runs.
+        const { error } = await db()
+          .from('memory_backups')
+          .update({ state: 'retired', soft_deleted_at: nowIso })
+          .eq('user_id', userId)
+          .eq('backup_id', backupId)
+          .eq('state', 'committed');
+        if (error) throw new Error(`Memory retire failed: ${error.message}`);
+      }
       // The payload object MUST be removed; a silent storage failure would orphan recoverable
       // ciphertext and let Delete Cloud Memory falsely claim success. Propagate it so the
       // destructive action reports failure and a retry (idempotent) can clean the object.

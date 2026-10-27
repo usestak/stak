@@ -110,9 +110,29 @@ export const writePortableSnapshot = async (
   });
   await atomicWriteFile(
     paths.projectRegistrySnapshot,
-    canonicalJson(portableRegistrySnapshotSchema.parse(snapshot)),
+    portableSnapshotBytes(snapshot),
   );
 };
+
+/** The exact bytes `writePortableSnapshot` stores (and a bundle carries) for a snapshot. */
+export const portableSnapshotBytes = (
+  snapshot: PortableRegistrySnapshot,
+): Buffer => canonicalJson(portableRegistrySnapshotSchema.parse(snapshot));
+
+/**
+ * Re-derive the portable snapshot from the CURRENT local registry and write it, so
+ * the next bundle carries every Project ID and claim this machine knows right now.
+ * Canonical staging mints Project IDs after the legacy staging step last wrote the
+ * snapshot, so every canonical bundling path calls this immediately before
+ * bundling. `toPortableSnapshot` strips bindings and paths.
+ */
+export const refreshPortableSnapshot = async (
+  stackHome: string,
+): Promise<void> =>
+  writePortableSnapshot(
+    stackHome,
+    toPortableSnapshot(await readLocalRegistry(stackHome)),
+  );
 
 /** Distinct project identities referenced by the current manifest. */
 const manifestProjectIdentities = async (

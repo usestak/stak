@@ -8,9 +8,45 @@ import type {
   EnvironmentStatus,
   SkillStatus,
 } from '@stack/spec';
-import type { MemoryWorkingTreeStatus } from '../memory/working-tree-status.js';
+import type {
+  CanonicalMemoryProjectStatus,
+  MemoryWorkingTreeStatus,
+  UnlocatableProject,
+} from '../memory/working-tree-status.js';
 
-import { agentLabel, block, changes, skills } from './format.js';
+/** `stak status`'s Memory section, widened (additively) to also carry canonical
+ * (Project) Memory summaries — set by `program.ts`'s `checkMemory` dependency,
+ * read by `renderCanonicalMemorySection` below. The existing `MemoryWorkingTreeStatus`
+ * union itself is untouched; this is purely a display-layer extension of the single
+ * object `stak status` already threads through as `memory`. */
+export type MemoryStatusDisplay = MemoryWorkingTreeStatus & {
+  canonicalProjects?: CanonicalMemoryProjectStatus[];
+  /** Locatable project-scope identities discovered on this machine with no
+   * registered Project ID yet — `stak add .` would mint and import them. */
+  newProjects?: number;
+  /** Project identities with genuinely ambiguous resolution (more than one existing
+   * Project ID claims or is bound to the same identity) — never counted in
+   * `newProjects`. No existing `stak project` subcommand can merge/remove a claim,
+   * so this is a standing conflict STAK won't guess at, not something to "resolve". */
+  conflictedProjects?: number;
+  /** REGISTERED project identities whose directory could not be located at all —
+   * named and actionable: `stak project map <project> <dir>` is the escape hatch. */
+  unlocatableProjects?: UnlocatableProject[];
+  /** Stale Claude memory folders with no Project ID at all AND no locatable
+   * directory — quieter and un-actionable, distinct from `unlocatableProjects`. */
+  untrackedFolders?: number;
+  /** The v1 -> canonical migration hasn't run yet, so no per-project pending count
+   * is meaningful — see `canonicalMemoryStatus`'s `upgradePending` doc comment. */
+  upgradePending?: boolean;
+};
+
+import {
+  agentLabel,
+  block,
+  changes,
+  localMemoryConflictAdvice,
+  skills,
+} from './format.js';
 
 export type RenderOptions = { verbose?: boolean };
 export type AgentReadiness = { agent: AgentId; ready: boolean };
@@ -92,8 +128,84 @@ const memoryLine = (memory: MemoryWorkingTreeStatus): string => {
       return `${memory.changed} change${memory.changed === 1 ? '' : 's'} not added`;
   }
 };
-const renderMemorySection = (memory?: MemoryWorkingTreeStatus): string[] =>
-  memory ? ['', 'Memory', `  ${memoryLine(memory)}`] : [];
+/** Canonical (Project) Memory status — one line per bound project that has any
+ * pending (not-yet-added) changes, conflicts, source conflicts, or guarded
+ * (to-be-regenerated) paths. A clean project stays silent, matching this file's
+ * existing `'clean'` convention for `MemoryWorkingTreeStatus` itself. */
+const canonicalMemoryLines = (
+  projects: CanonicalMemoryProjectStatus[],
+): string[] => {
+  const lines: string[] = [];
+  for (const project of projects) {
+    const totalConflicts =
+      project.conflicts.length + project.sourceConflicts.length;
+    if (
+      project.pending === 0 &&
+      totalConflicts === 0 &&
+      project.guardedPaths.length === 0
+    )
+      continue;
+    if (project.pending > 0)
+      lines.push(
+        `  ${project.projectId}: ${project.pending} change${project.pending === 1 ? '' : 's'} not added — run \`stak add .\``,
+      );
+    if (totalConflicts > 0) {
+      // Final review I4: a local agent-vs-STAK conflict, never a Cloud merge
+      // conflict — give the action that actually clears each one.
+      lines.push(
+        `  ${project.projectId}: ${totalConflicts} conflict${totalConflicts === 1 ? '' : 's'} between agent files and STAK (nothing was overwritten):`,
+      );
+      for (const conflict of project.conflicts)
+        lines.push(
+          `    ${conflict.path}: ${localMemoryConflictAdvice(conflict.reason)}`,
+        );
+      for (const conflictPath of project.sourceConflicts)
+        lines.push(
+          `    ${conflictPath}: ${localMemoryConflictAdvice('source-conflict')}`,
+        );
+    }
+    if (project.guardedPaths.length > 0)
+      lines.push(
+        `  ${project.projectId}: ${project.guardedPaths.length} path${project.guardedPaths.length === 1 ? '' : 's'} will be regenerated — run \`stak memory materialize\``,
+      );
+  }
+  return lines;
+};
+
+const renderMemorySection = (memory?: MemoryStatusDisplay): string[] => {
+  if (!memory) return [];
+  const lines = [`  ${memoryLine(memory)}`];
+  if (memory.upgradePending) {
+    // Planning against the canonical store before migration has ever run would be
+    // meaningless (every claimed project would show as "pending" against an empty
+    // store) — a single, distinct line instead of a misleading per-project count.
+    lines.push(
+      '  upgrade pending — run `stak add .` to move project Memory into STAK',
+    );
+    return ['', 'Memory', ...lines];
+  }
+  if (memory.canonicalProjects?.length)
+    lines.push(...canonicalMemoryLines(memory.canonicalProjects));
+  if (memory.newProjects)
+    lines.push(
+      `  ${memory.newProjects} new project${memory.newProjects === 1 ? '' : 's'} not added yet — run \`stak add .\``,
+    );
+  if (memory.conflictedProjects)
+    lines.push(
+      `  ${memory.conflictedProjects} project${memory.conflictedProjects === 1 ? '' : 's'} have conflicting identities — STAK won't guess which is correct; left unchanged`,
+    );
+  if (memory.unlocatableProjects?.length)
+    lines.push(
+      `  ${memory.unlocatableProjects.length} project${memory.unlocatableProjects.length === 1 ? '' : 's'} couldn't be located on this machine` +
+        ` (${memory.unlocatableProjects.map((p) => p.name).join(', ')})` +
+        ' — run `stak project map <project> <dir>`',
+    );
+  if (memory.untrackedFolders)
+    lines.push(
+      `  ${memory.untrackedFolders} Claude memory folder${memory.untrackedFolders === 1 ? '' : 's'} have no project folder on this machine and aren't tracked`,
+    );
+  return ['', 'Memory', ...lines];
+};
 
 // ---------------------------------------------------------------------------
 // init
@@ -225,7 +337,7 @@ export const renderStatus = (
   options: RenderOptions & {
     agents?: AgentReadiness[];
     cloud?: CloudSyncDisplayState;
-    memory?: MemoryWorkingTreeStatus;
+    memory?: MemoryStatusDisplay;
     memoryCloud?: MemoryCloudDisplayState;
   } = {},
 ): string => {
@@ -248,8 +360,10 @@ export const renderStatus = (
   } else {
     lines.push('Changes not added', '', 'Skills');
     for (const skill of modified) lines.push(`  ~ ${skill.name}`);
-    for (const skill of missing) lines.push(`  ! ${skill.name}  (tracked in main, missing on disk)`);
-    for (const skill of uncertain) lines.push(`  ? ${skill.name}  (could not be verified)`);
+    for (const skill of missing)
+      lines.push(`  ! ${skill.name}  (tracked in main, missing on disk)`);
+    for (const skill of uncertain)
+      lines.push(`  ? ${skill.name}  (could not be verified)`);
     for (const skill of status.untracked) lines.push(`  + ${skill.name}`);
     lines.push(
       '',
@@ -257,7 +371,10 @@ export const renderStatus = (
       summary.untracked > 0 && `${summary.untracked} untracked`,
     );
     if (missing.length > 0)
-      lines.push('', 'Run `stak remove <skill>` to deliberately drop a missing Skill from main.');
+      lines.push(
+        '',
+        'Run `stak remove <skill>` to deliberately drop a missing Skill from main.',
+      );
     lines.push('', 'Run `stak add <skill>` or `stak add .` to stage changes.');
   }
   if (status.invalidSkills.length > 0)

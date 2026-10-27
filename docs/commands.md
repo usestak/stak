@@ -67,7 +67,11 @@ Read-only discovery of portable Claude memory on this machine. Changes nothing.
 
 Copy allowlisted memory into STAK's private store (read-only capture; native
 Claude files are never modified) and, when signed in, upload it to STAK
-Cloud. Commits the manifest last.
+Cloud. Commits the manifest last. Now the Memory part of `stak push` (it merges
+with Cloud and never overwrites); kept as a deprecated alias.
+While its "supersede?" confirmation is waiting for your answer, it holds the
+Memory lock, so other Memory commands wait (up to 10 seconds) and then ask you
+to try again.
 
 ### `stak memory status [--json] [--verbose]`
 
@@ -78,7 +82,11 @@ Show the last memory backup.
 Download the private memory store from STAK Cloud onto this machine (requires
 sign-in). Use `recover` for explicit or history-based recovery, or when Memory
 is Protected; a fresh machine normally gets its Memory from `stak pull`
-instead.
+instead. Recovering an older backup is a rollback: files added since then are
+recorded as deletions, and the next `stak push` publishes the rollback as the
+newest backup (merged with Cloud like any push; Cloud history is never
+rewritten). On a machine that has never synced Memory, push refuses after an
+older-backup recover; recover the latest first.
 
 ### `stak memory restore [--dry-run] [--json] [--verbose]`
 
@@ -90,10 +98,42 @@ reported as a conflict and left untouched (never merged).
 
 Enable client-side encrypted (Protected) Cloud backup, optionally with a
 passkey or recovery file.
+The `--passkey` flows of `protect` and `recover` hold the Memory lock while they
+wait for you in the browser, so finish or cancel them before running other
+Memory commands.
 
 ### `stak memory history [--json]`
 
 Show your Memory backup history (newest first).
+
+### `stak memory resolve [project] [path] [--keep local|cloud|both]`
+
+Resolve a Memory conflict between machines: keep local, keep cloud, or keep
+both. With no arguments, lists the pending conflicts. `<project>` is a Project
+ID or a unique prefix of one. Choices take effect when the last conflict is
+resolved; then run `stak push`. "Keep both" keeps Cloud's version at the
+original name and yours at `<name>.conflict-<hash>.<ext>`.
+
+### `stak memory diff <project> <path>`
+
+Show both versions (local and Cloud) of one pending Memory conflict. The only
+command that prints Memory content.
+
+### `stak memory materialize [project] [--agent claude]`
+
+Rebuild agent Memory files from STAK Memory, for every project on this machine
+or just one. Never overwrites a file you edited and haven't added yet. Projects
+not found on this machine are reported as not available and nothing is written
+for them. Only `claude` is supported.
+
+### `stak memory unlock [--force]`
+
+Remove a leftover Memory lock left behind by a crashed STAK command. Shows which
+command held it and when it started. Removes it if that process is no longer
+running; refuses if it may still be running. `--force` removes it anyway, after
+a warning: doing this while a real STAK command is running can lose its Memory
+changes. Says so, and succeeds, when no lock is held. Leftover locks normally
+clear themselves; this is the manual fallback.
 
 Memory is currently scoped to Claude Code; Codex and Cursor memory support is
 planned.

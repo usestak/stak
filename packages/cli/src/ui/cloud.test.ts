@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import type { CloudRecoverOutcome } from '../memory/cloud-ops.js';
 import {
+  pullFailed,
   renderCombinedPullResult,
   renderCombinedPushResult,
   type MemoryPushOutcome,
@@ -115,11 +117,21 @@ describe('renderCombinedPullResult', () => {
   it('reports a clean fresh-machine recovery', () => {
     const skill: PullSkillOutcome = {
       status: 'applied',
-      result: { status: 'restored', desiredSkills: 12, digest: `sha256:${'a'.repeat(64)}` } as never,
+      result: {
+        status: 'restored',
+        desiredSkills: 12,
+        digest: `sha256:${'a'.repeat(64)}`,
+      } as never,
     };
     const memory: PullMemoryOutcome = {
       status: 'applied',
-      outcome: { status: 'recovered', privacyMode: 'standard', objects: 10, files: 14, generation: 3 },
+      outcome: {
+        status: 'recovered',
+        privacyMode: 'standard',
+        objects: 10,
+        files: 14,
+        generation: 3,
+      },
     };
     const output = renderCombinedPullResult(skill, memory);
     expect(output).toContain('14');
@@ -136,5 +148,86 @@ describe('renderCombinedPullResult', () => {
     const output = renderCombinedPullResult(skill, memory);
     expect(output).toContain('Local Memory already exists');
     expect(output).toContain('stak memory recover');
+  });
+});
+
+describe('pullFailed (fresh-machine Memory outcomes)', () => {
+  const restored: PullSkillOutcome = {
+    status: 'applied',
+    result: {
+      status: 'restored',
+      desiredSkills: 2,
+      digest: `sha256:${'a'.repeat(64)}`,
+    } as never,
+  };
+  const applied = (outcome: CloudRecoverOutcome): PullMemoryOutcome => ({
+    status: 'applied',
+    outcome,
+  });
+
+  it('no Cloud Memory backup yet (a Skills-only account on a new machine) is not a failure', () => {
+    const memory = applied({ status: 'no-backup' });
+    expect(pullFailed(restored, memory)).toBe(false);
+    const output = renderCombinedPullResult(restored, memory);
+    expect(output).toContain('no Cloud Memory backup exists yet.');
+    expect(output).toContain('Pull complete.');
+    expect(output).not.toContain('did not fully succeed');
+  });
+
+  it('locked Protected Memory is the same friendly, non-failing status push gives `protected-locked`', () => {
+    const memory = applied({ status: 'needs-recovery-method' });
+    expect(pullFailed(restored, memory)).toBe(false);
+    expect(renderCombinedPullResult(restored, memory)).toContain(
+      'needs a recovery method',
+    );
+  });
+
+  it('not signed in is not a failure, like push reporting `skipped`', () => {
+    expect(pullFailed(restored, applied({ status: 'not-authenticated' }))).toBe(
+      false,
+    );
+  });
+
+  it('a genuine Memory error is still a failure', () => {
+    const memory: PullMemoryOutcome = {
+      status: 'failed',
+      error: 'network down',
+    };
+    expect(pullFailed(restored, memory)).toBe(true);
+    const output = renderCombinedPullResult(restored, memory);
+    expect(output).toContain('FAILED: network down');
+    expect(output).toContain('Pull did not fully succeed.');
+  });
+
+  it('a Skills failure is still a failure even when Memory has no backup', () => {
+    expect(
+      pullFailed(
+        { status: 'failed', error: 'offline' },
+        applied({ status: 'no-backup' }),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('local Memory conflicts after a pull (final review I4)', () => {
+  it('does not claim `stak add .` resolves them; points at `stak status` and names the files', () => {
+    const skill: PullSkillOutcome = { status: 'noop' };
+    const memory: PullMemoryOutcome = { status: 'not-attempted' };
+    const output = renderCombinedPullResult(skill, memory, {
+      status: 'applied',
+      outcome: {
+        status: 'merged',
+        conflicts: [
+          {
+            projectId: 'prj_demo',
+            path: 'notes/MEMORY.md',
+            reason: 'adopt-mismatch',
+          },
+        ],
+      },
+    });
+    expect(output).not.toContain('need `stak add .` to resolve');
+    expect(output).toContain('notes/MEMORY.md');
+    expect(output).toContain('stak status');
   });
 });

@@ -30,9 +30,26 @@ import {
   isRemoteUseProposal,
   type ProgramDependencies,
 } from './program.js';
+import type { MemoryPushPreflight } from './commands/push.js';
 import { gatherCheckinInputs, reportCheckin } from './cloud/checkin.js';
+import { isRenderableCliError } from './ui/errors.js';
 import type { PullPlan, PushPlan, TrialStackResolution } from '@stack/core';
-import type { DiscoveredMemoryItem } from '@stack/memory';
+import {
+  MemoryLockError,
+  unlockMemory,
+  withMemoryLock,
+  type DiscoveredMemoryItem,
+} from '@stack/memory';
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 const memItem = (
   index: number,
@@ -501,7 +518,9 @@ describe('`stak use` renders the right proposal kind (P10B)', () => {
     });
     expect(applyUse).toHaveBeenCalledTimes(1);
     expect(result.output).toContain('added to main');
-    expect(result.output).toContain('Run `stak push` to sync this change to STAK Cloud.');
+    expect(result.output).toContain(
+      'Run `stak push` to sync this change to STAK Cloud.',
+    );
   });
 });
 
@@ -1359,7 +1378,10 @@ describe('STAK CLI', () => {
   });
 
   it('summarizes missing skills by name and points to remove', async () => {
-    const missingSkill = (entryId: string, name: string): EnvironmentStatus['skills'][number] => ({
+    const missingSkill = (
+      entryId: string,
+      name: string,
+    ): EnvironmentStatus['skills'][number] => ({
       entryId,
       name,
       state: 'missing',
@@ -1377,7 +1399,10 @@ describe('STAK CLI', () => {
     const result = await runProgram(['status'], {
       status: async () => ({
         ...emptyStatus,
-        skills: [missingSkill('skill_a', 'alpha'), missingSkill('skill_b', 'beta')],
+        skills: [
+          missingSkill('skill_a', 'alpha'),
+          missingSkill('skill_b', 'beta'),
+        ],
         summary: { ...emptyStatus.summary, satisfied: 29, missing: 2 },
       }),
     });
@@ -1609,7 +1634,9 @@ describe('STAK CLI', () => {
       }),
     });
     expect(applied.output).toContain('Pushing main...');
-    expect(applied.output).toContain('2 skills uploaded; main created in the cloud.');
+    expect(applied.output).toContain(
+      '2 skills uploaded; main created in the cloud.',
+    );
     expect(applied.output).toContain('Push complete.');
   });
 
@@ -1650,6 +1677,36 @@ describe('STAK CLI', () => {
       }),
     ).rejects.toThrow('older generation');
     expect(cloudApplyPush).not.toHaveBeenCalled();
+  });
+
+  it('spec 8.5: push after a historical recover proceeds (Skills and Memory) and announces the rollback', async () => {
+    const cloudApplyPush = vi.fn(async () => ({
+      environment: 'main' as const,
+      versionId: '00000000-0000-4000-8000-000000000002',
+      versionNumber: 2,
+      digest: basePushPlan.digest,
+      createdNew: true,
+      uploaded: 0,
+    }));
+    const applyMemoryPush = vi.fn(async () => ({
+      status: 'standard' as const,
+      generation: 5,
+    }));
+    const result = await runProgram(['push', '--yes'], {
+      cloudPreparePush: async () => basePushPlan,
+      cloudApplyPush,
+      applyMemoryPush,
+      memoryPushPreflight: async () => ({
+        blocked: false,
+        note: 'Memory: publishing a rollback to Backup #2.',
+      }),
+    });
+    expect(result.output).toContain(
+      'Memory: publishing a rollback to Backup #2.',
+    );
+    expect(cloudApplyPush).toHaveBeenCalled();
+    expect(applyMemoryPush).toHaveBeenCalled();
+    expect(result.output).toContain('synced to Cloud (generation 5)');
   });
 
   it('a fully clean push (Skills and Memory both already up to date) says "Nothing to push.", never claims a new Memory generation', async () => {
@@ -1742,6 +1799,135 @@ describe('STAK CLI', () => {
     expect(out).toContain('stak memory recover');
   });
 
+  it('Task 13 Important-8: a fresh-machine recover attempt that does NOT succeed (Protected locked, network error, …) skips the canonical pull entirely, so the next `stak pull` still auto-recovers', async () => {
+    const applyMemoryPull = vi.fn(async () => ({
+      status: 'needs-recovery-method' as const,
+    }));
+    const applyCanonicalPull = vi.fn(async () => ({
+      status: 'merged' as const,
+    }));
+    // Locked Protected Memory is a friendly status, not a failure (the same
+    // treatment push gives `protected-locked`) — this test is only about
+    // whether `applyCanonicalPull` ran.
+    await expect(
+      runProgram(['pull', '--yes'], {
+        cloudPreparePull: async () => basePullPlan,
+        cloudApplyPull: async () => ({
+          status: 'restored',
+          environment: 'main',
+          desiredSkills: 2,
+          importedStackVersions: 1,
+          snapshotsDownloaded: 2,
+          referencesRestored: 0,
+          reusedFromStore: 0,
+          localSnapshotRecords: 2,
+          digest: basePullPlan.remoteDigest ?? `sha256:${'a'.repeat(64)}`,
+        }),
+        // Fresh machine: eligible for auto-recover.
+        memoryPullPreflight: async () => ({ eligible: true }),
+        applyMemoryPull,
+        applyCanonicalPull,
+      }),
+    ).resolves.toBeDefined();
+    expect(applyMemoryPull).toHaveBeenCalledTimes(1);
+    // `applyCanonicalPull`'s own `migrateLocalStore` call writes
+    // `manifests/current.json` (even with zero items) and, eventually, the
+    // migration-complete marker — either of which would make the NEXT
+    // `stak pull` see this machine as already established and never retry the
+    // recover that just failed. It must not even run here.
+    expect(applyCanonicalPull).not.toHaveBeenCalled();
+  });
+
+  it('a fresh machine whose account has no Cloud Memory yet (Skills-only) completes the pull and does not exit with an error', async () => {
+    const applyMemoryPull = vi.fn(async () => ({
+      status: 'no-backup' as const,
+    }));
+    const applyCanonicalPull = vi.fn(async () => ({
+      status: 'up-to-date' as const,
+    }));
+    const result = await runProgram(['pull', '--yes'], {
+      cloudPreparePull: async () => basePullPlan,
+      cloudApplyPull: async () => ({
+        status: 'restored',
+        environment: 'main',
+        desiredSkills: 2,
+        importedStackVersions: 1,
+        snapshotsDownloaded: 2,
+        referencesRestored: 0,
+        reusedFromStore: 0,
+        localSnapshotRecords: 2,
+        digest: basePullPlan.remoteDigest ?? `sha256:${'a'.repeat(64)}`,
+      }),
+      memoryPullPreflight: async () => ({ eligible: true }),
+      applyMemoryPull,
+      applyCanonicalPull,
+    });
+    expect(result.output).toContain('no Cloud Memory backup exists yet.');
+    expect(result.output).toContain('Pull complete.');
+    expect(result.output).not.toContain('did not fully succeed');
+    // Unchanged: a recover that did not succeed still skips the canonical pull.
+    expect(applyCanonicalPull).not.toHaveBeenCalled();
+  });
+
+  it('a fresh-machine Memory recover that throws (a genuine error) still makes `stak pull` fail', async () => {
+    const applyMemoryPull = vi.fn(async (): Promise<never> => {
+      throw new Error('network down');
+    });
+    const chunks: string[] = [];
+    await expect(
+      runProgram(['pull', '--yes'], {
+        cloudPreparePull: async () => basePullPlan,
+        cloudApplyPull: async () => ({
+          status: 'restored',
+          environment: 'main',
+          desiredSkills: 2,
+          importedStackVersions: 1,
+          snapshotsDownloaded: 2,
+          referencesRestored: 0,
+          reusedFromStore: 0,
+          localSnapshotRecords: 2,
+          digest: basePullPlan.remoteDigest ?? `sha256:${'a'.repeat(64)}`,
+        }),
+        memoryPullPreflight: async () => ({ eligible: true }),
+        applyMemoryPull,
+        writeOut: (value) => chunks.push(value),
+      }),
+    ).rejects.toThrow('Pull did not fully succeed');
+    expect(chunks.join('')).toContain('FAILED: network down');
+  });
+
+  it('Task 13 Important-8 (contrast): a SUCCESSFUL fresh-machine recover still runs the canonical pull right after it', async () => {
+    const applyMemoryPull = vi.fn(async () => ({
+      status: 'recovered' as const,
+      privacyMode: 'standard' as const,
+      objects: 1,
+      files: 1,
+      generation: 0,
+    }));
+    const applyCanonicalPull = vi.fn(async () => ({
+      status: 'up-to-date' as const,
+    }));
+    await runProgram(['pull', '--yes'], {
+      cloudPreparePull: async () => basePullPlan,
+      cloudApplyPull: async () => ({
+        status: 'restored',
+        environment: 'main',
+        desiredSkills: 2,
+        importedStackVersions: 1,
+        snapshotsDownloaded: 2,
+        referencesRestored: 0,
+        reusedFromStore: 0,
+        localSnapshotRecords: 2,
+        digest: basePullPlan.remoteDigest ?? `sha256:${'a'.repeat(64)}`,
+      }),
+      memoryPullPreflight: async () => ({ eligible: true }),
+      applyMemoryPull,
+      applyCanonicalPull,
+    });
+    expect(applyMemoryPull).toHaveBeenCalledTimes(1);
+    expect(applyCanonicalPull).toHaveBeenCalledTimes(1);
+  });
+
   it('emits parseable pull dry-run JSON', async () => {
     const result = await runProgram(['pull', '--dry-run', '--json'], {
       cloudPreparePull: async () => basePullPlan,
@@ -1799,8 +1985,1164 @@ describe('STAK CLI', () => {
       'recover',
       'status',
       'restore',
+      'resolve',
+      'diff',
+      'materialize',
+      'unlock',
     ])
       expect(result.output).toContain(sub);
+  });
+
+  // Memory lock (spec 2026-10-25 §3.2/§3.3, Task 2): every Memory-changing command holds
+  // the cross-process Memory lock from its first Memory read to its last Memory write.
+  describe('Memory lock (spec 2026-10-25)', () => {
+    const recordingLock = (events: string[]) => {
+      const calls: string[] = [];
+      const withMemoryLock = async <T>(
+        command: string,
+        fn: () => Promise<T>,
+      ): Promise<T> => {
+        calls.push(command);
+        events.push(`lock:${command}`);
+        try {
+          return await fn();
+        } finally {
+          events.push('unlock');
+        }
+      };
+      return { calls, withMemoryLock };
+    };
+    const BUSY =
+      'Another STAK command (`stak pull`, started 3s ago) is changing Memory. Try again when it finishes.';
+    const busyLock =
+      (calls: string[] = []) =>
+      // Never calls the work function: a busy lock runs nothing.
+      async <T>(command: string): Promise<T> => {
+        calls.push(command);
+        throw new MemoryLockError(BUSY);
+      };
+    const addProposal = {
+      stackHome: '/tmp/stack',
+      current: {} as never,
+      manifest: {} as never,
+      lock: {} as never,
+      baseline: {} as never,
+      targets: [],
+      issues: [],
+      snapshotRecords: [],
+      ingestions: [],
+    };
+    const restoredPull = async () => ({
+      status: 'restored' as const,
+      environment: 'main' as const,
+      desiredSkills: 2,
+      importedStackVersions: 1,
+      snapshotsDownloaded: 2,
+      referencesRestored: 0,
+      reusedFromStore: 0,
+      localSnapshotRecords: 2,
+      digest: basePullPlan.remoteDigest ?? `sha256:${'a'.repeat(64)}`,
+    });
+    const appliedPush = async () => ({
+      environment: 'main' as const,
+      versionId: '00000000-0000-4000-8000-000000000002',
+      versionNumber: 2,
+      digest: basePushPlan.digest,
+      createdNew: true,
+      uploaded: 0,
+    });
+    const resolved = {
+      projectId: 'prj_abc123',
+      name: 'demo',
+      path: 'notes/MEMORY.md',
+      keep: 'local' as const,
+      state: 'present' as const,
+      remaining: 0,
+    };
+    const materialized = {
+      materialized: 1,
+      unavailable: [],
+      conflicts: [],
+      written: 1,
+      deleted: 0,
+    };
+    const backupPreview = () => ({
+      provider: 'claude' as const,
+      native: [],
+      carriedForward: [],
+      nativeFiles: 0,
+      nativeProjects: 0,
+      availableProjects: 0,
+      retainedFiles: 0,
+      retainedProjects: 0,
+      retainedAvailableFiles: 0,
+      retainedAvailableProjects: 0,
+      retainedUnavailableFiles: 0,
+      retainedUnavailableProjects: 0,
+      finalFiles: 0,
+      finalProjects: 0,
+      privacy: null,
+      supersession: {
+        localRecoveredGeneration: 2,
+        cloudLatestGeneration: 3,
+        parentGeneration: 3,
+        nextGeneration: 4,
+        supersedes: true,
+      },
+    });
+
+    it('stak add . stages Memory inside the lock; add <skill> never takes it', async () => {
+      const events: string[] = [];
+      const { calls, withMemoryLock } = recordingLock(events);
+      await runProgram(['add', '.'], {
+        prepareAdd: async () => addProposal,
+        stageMemory: async () => {
+          events.push('stage');
+          return { files: 1, projects: 0 };
+        },
+        withMemoryLock,
+      });
+      expect(calls).toEqual(['stak add']);
+      expect(events).toEqual(['lock:stak add', 'stage', 'unlock']);
+
+      calls.length = 0;
+      await runProgram(['add', 'some-skill'], {
+        prepareAdd: async () => addProposal,
+        stageMemory: async () => ({ files: 1, projects: 0 }),
+        withMemoryLock,
+      });
+      expect(calls).toEqual([]);
+    });
+
+    it('stak add . stops with the busy message and changes nothing when the lock is busy', async () => {
+      const stageMemory = vi.fn(async () => ({ files: 1, projects: 0 }));
+      const applyAdd = vi.fn(async () => undefined);
+      await expect(
+        runProgram(['add', '.'], {
+          prepareAdd: async () => ({ ...addProposal, targets: [{} as never] }),
+          applyAdd,
+          stageMemory,
+          withMemoryLock: busyLock(),
+        }),
+      ).rejects.toThrow(BUSY);
+      expect(stageMemory).not.toHaveBeenCalled();
+      // The busy check comes before anything changes, Skills included (spec §3.3).
+      expect(applyAdd).not.toHaveBeenCalled();
+    });
+
+    it('stak push runs its Memory part inside the lock and its Skills part outside it', async () => {
+      const events: string[] = [];
+      const { calls, withMemoryLock } = recordingLock(events);
+      await runProgram(['push', '--yes'], {
+        cloudPreparePush: async () => basePushPlan,
+        cloudApplyPush: async () => {
+          events.push('skills');
+          return appliedPush();
+        },
+        memoryPushPreflight: async () => {
+          events.push('preflight');
+          return { blocked: false };
+        },
+        applyMemoryPush: async () => {
+          events.push('memory');
+          return { status: 'standard', generation: 3 };
+        },
+        withMemoryLock,
+      });
+      expect(calls).toEqual(['stak push']);
+      // The first preflight is the read-only gate for BOTH domains (a blocked preflight
+      // must stop Skills too); the one inside the lock is the authoritative re-check
+      // right before the Memory write.
+      expect(events).toEqual([
+        'preflight',
+        'skills',
+        'lock:stak push',
+        'preflight',
+        'memory',
+        'unlock',
+      ]);
+    });
+
+    it('stak push with a busy lock still pushes Skills and reports Memory FAILED with the lock message', async () => {
+      const applyMemoryPush = vi.fn(async () => ({
+        status: 'standard' as const,
+        generation: 3,
+      }));
+      const cloudApplyPush = vi.fn(appliedPush);
+      const chunks: string[] = [];
+      await expect(
+        runProgram(['push', '--yes'], {
+          cloudPreparePush: async () => basePushPlan,
+          cloudApplyPush,
+          applyMemoryPush,
+          withMemoryLock: busyLock(),
+          writeOut: (value) => chunks.push(value),
+        }),
+      ).rejects.toThrow('Push did not fully succeed');
+      expect(cloudApplyPush).toHaveBeenCalledTimes(1);
+      expect(applyMemoryPush).not.toHaveBeenCalled();
+      expect(chunks.join('')).toContain(`FAILED: ${BUSY}`);
+    });
+
+    it('stak push reports Memory FAILED when the re-check inside the lock is blocked', async () => {
+      let preflights = 0;
+      const applyMemoryPush = vi.fn(async () => ({
+        status: 'standard' as const,
+        generation: 3,
+      }));
+      const chunks: string[] = [];
+      await expect(
+        runProgram(['push', '--yes'], {
+          cloudPreparePush: async () => basePushPlan,
+          cloudApplyPush: appliedPush,
+          memoryPushPreflight: async () =>
+            ++preflights === 1
+              ? { blocked: false }
+              : { blocked: true, reason: 'changed meanwhile' },
+          applyMemoryPush,
+          withMemoryLock: recordingLock([]).withMemoryLock,
+          writeOut: (value) => chunks.push(value),
+        }),
+      ).rejects.toThrow('Push did not fully succeed');
+      expect(applyMemoryPush).not.toHaveBeenCalled();
+      expect(chunks.join('')).toContain('FAILED: changed meanwhile');
+    });
+
+    // Split from #11: Skills and Memory are independent domains with their own Cloud
+    // state, so `stak push` applies them concurrently. The Memory branch keeps the lock
+    // and the re-check inside it; only the outer ordering changed.
+    describe('stak push applies Skills and Memory concurrently', () => {
+      const tick = () =>
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, 5);
+        });
+
+      it('starts both domains before either finishes, Memory still inside the lock with its re-check', async () => {
+        const events: string[] = [];
+        const { calls, withMemoryLock } = recordingLock(events);
+        let preflights = 0;
+        const result = await runProgram(['push', '--yes'], {
+          cloudPreparePush: async () => basePushPlan,
+          cloudApplyPush: async () => {
+            events.push('skills:start');
+            await tick();
+            events.push('skills:end');
+            return appliedPush();
+          },
+          memoryPushPreflight: async () => {
+            events.push(++preflights === 1 ? 'preflight' : 'recheck');
+            return { blocked: false };
+          },
+          applyMemoryPush: async () => {
+            events.push('memory:start');
+            await tick();
+            events.push('memory:end');
+            return { status: 'standard', generation: 3 };
+          },
+          withMemoryLock,
+        });
+        expect(calls).toEqual(['stak push']);
+        const at = (event: string) => events.indexOf(event);
+        // Both started before either finished.
+        expect(at('memory:start')).toBeLessThan(at('skills:end'));
+        expect(at('skills:start')).toBeLessThan(at('memory:end'));
+        // Memory still runs inside the lock, after the authoritative re-check.
+        expect(at('lock:stak push')).toBeLessThan(at('recheck'));
+        expect(at('recheck')).toBeLessThan(at('memory:start'));
+        expect(at('memory:end')).toBeLessThan(at('unlock'));
+        // The early, unlocked preflight ran before anything was applied.
+        expect(at('preflight')).toBeLessThan(at('skills:start'));
+        expect(at('preflight')).toBeLessThan(at('lock:stak push'));
+        expect(result.output).toContain('main updated in the cloud.');
+        expect(result.output).toContain('synced to Cloud (generation 3)');
+        expect(result.output).toContain('Push complete.');
+      });
+
+      it('a busy lock fails Memory while a slower Skills push still completes; both are reported, exit is partial failure', async () => {
+        let skillsFinished = false;
+        const applyMemoryPush = vi.fn(async () => ({
+          status: 'standard' as const,
+          generation: 3,
+        }));
+        const chunks: string[] = [];
+        await expect(
+          runProgram(['push', '--yes'], {
+            cloudPreparePush: async () => basePushPlan,
+            cloudApplyPush: async () => {
+              await tick();
+              skillsFinished = true;
+              return appliedPush();
+            },
+            applyMemoryPush,
+            withMemoryLock: busyLock(),
+            writeOut: (value) => chunks.push(value),
+          }),
+        ).rejects.toMatchObject({
+          code: 'push-partial-failure',
+          message: expect.stringContaining('Push did not fully succeed'),
+        });
+        // The lock rejection never cut the Skills branch short.
+        expect(skillsFinished).toBe(true);
+        expect(applyMemoryPush).not.toHaveBeenCalled();
+        const out = chunks.join('');
+        expect(out).toContain('main updated in the cloud.');
+        expect(out).toContain(`FAILED: ${BUSY}`);
+        expect(out).not.toContain('Push complete.');
+      });
+
+      it('a Skills failure with a slower Memory success reports both, exit is partial failure', async () => {
+        let memoryFinished = false;
+        const chunks: string[] = [];
+        await expect(
+          runProgram(['push', '--yes'], {
+            cloudPreparePush: async () => basePushPlan,
+            cloudApplyPush: async () => {
+              throw new Error('upload failed');
+            },
+            applyMemoryPush: async () => {
+              await tick();
+              memoryFinished = true;
+              return { status: 'standard', generation: 4 };
+            },
+            withMemoryLock: recordingLock([]).withMemoryLock,
+            writeOut: (value) => chunks.push(value),
+          }),
+        ).rejects.toMatchObject({ code: 'push-partial-failure' });
+        expect(memoryFinished).toBe(true);
+        const out = chunks.join('');
+        expect(out).toContain('FAILED: upload failed');
+        expect(out).toContain('synced to Cloud (generation 4)');
+        expect(out).not.toContain('Push complete.');
+      });
+
+      it('Skills-only push (no Memory wiring) is unchanged: no lock, Memory not attempted, nothing-to-push still short-circuits', async () => {
+        const { calls: lockCalls, withMemoryLock: lock } = recordingLock([]);
+        const cloudApplyPush = vi.fn(appliedPush);
+        const result = await runProgram(['push', '--yes'], {
+          cloudPreparePush: async () => basePushPlan,
+          cloudApplyPush,
+          withMemoryLock: lock,
+        });
+        expect(cloudApplyPush).toHaveBeenCalledTimes(1);
+        expect(lockCalls).toEqual([]);
+        expect(result.output).toContain('main updated in the cloud.');
+        expect(result.output).toContain('not attempted.');
+
+        const noopApply = vi.fn(appliedPush);
+        const noop = await runProgram(['push', '--yes'], {
+          cloudPreparePush: async () => ({ ...basePushPlan, noop: true }),
+          cloudApplyPush: noopApply,
+          withMemoryLock: lock,
+        });
+        expect(noopApply).not.toHaveBeenCalled();
+        expect(lockCalls).toEqual([]);
+        expect(noop.output).not.toContain('Pushing main...');
+      });
+
+      it('starts the early Memory preflight while Skills planning is still in flight', async () => {
+        const events: string[] = [];
+        await runProgram(['push', '--yes'], {
+          cloudPreparePush: async () => {
+            events.push('plan:start');
+            await tick();
+            events.push('plan:end');
+            return basePushPlan;
+          },
+          cloudApplyPush: appliedPush,
+          memoryPushPreflight: async () => {
+            events.push('preflight');
+            return { blocked: false };
+          },
+          applyMemoryPush: async () => ({ status: 'standard', generation: 3 }),
+          withMemoryLock: recordingLock([]).withMemoryLock,
+        });
+        expect(events.indexOf('preflight')).toBeLessThan(
+          events.indexOf('plan:end'),
+        );
+      });
+
+      it('a Skills conflict still outranks a blocked or failing early preflight, and nothing is applied', async () => {
+        const preflights: Array<() => Promise<MemoryPushPreflight>> = [
+          async () => ({ blocked: true, reason: 'memory blocked' }),
+          async () => {
+            throw new Error('preflight network down');
+          },
+        ];
+        for (const memoryPushPreflight of preflights) {
+          const cloudApplyPush = vi.fn(appliedPush);
+          const applyMemoryPush = vi.fn(async () => ({
+            status: 'standard' as const,
+            generation: 3,
+          }));
+          await expect(
+            runProgram(['push', '--yes'], {
+              cloudPreparePush: async () => ({
+                ...basePushPlan,
+                conflict: {
+                  kind: 'remote-newer',
+                  message: 'Cloud moved on',
+                  localBaseVersionId: null,
+                  remoteVersionNumber: 3,
+                },
+              }),
+              cloudApplyPush,
+              memoryPushPreflight,
+              applyMemoryPush,
+            }),
+          ).rejects.toThrow('Cloud moved on');
+          expect(cloudApplyPush).not.toHaveBeenCalled();
+          expect(applyMemoryPush).not.toHaveBeenCalled();
+        }
+      });
+
+      it('a blocked early preflight still stops both domains before any change', async () => {
+        const cloudApplyPush = vi.fn(appliedPush);
+        const { calls: lockCalls, withMemoryLock: lock } = recordingLock([]);
+        await expect(
+          runProgram(['push', '--yes'], {
+            cloudPreparePush: async () => basePushPlan,
+            cloudApplyPush,
+            memoryPushPreflight: async () => ({
+              blocked: true,
+              reason: 'no sync history',
+            }),
+            applyMemoryPush: async () => ({
+              status: 'standard',
+              generation: 3,
+            }),
+            withMemoryLock: lock,
+          }),
+        ).rejects.toThrow('no sync history');
+        expect(cloudApplyPush).not.toHaveBeenCalled();
+        expect(lockCalls).toEqual([]);
+      });
+
+      it('push --json --dry-run never runs the Memory preflight', async () => {
+        const memoryPushPreflight = vi.fn(async () => ({ blocked: false }));
+        await runProgram(['push', '--dry-run', '--json'], {
+          cloudPreparePush: async () => basePushPlan,
+          memoryPushPreflight,
+        });
+        expect(memoryPushPreflight).not.toHaveBeenCalled();
+      });
+    });
+
+    it('stak pull runs all Memory work inside the lock, Skills outside', async () => {
+      const events: string[] = [];
+      const { calls, withMemoryLock } = recordingLock(events);
+      await runProgram(['pull', '--yes'], {
+        cloudPreparePull: async () => basePullPlan,
+        cloudApplyPull: async () => {
+          events.push('skills');
+          return restoredPull();
+        },
+        memoryPullPreflight: async () => {
+          events.push('preflight');
+          return { eligible: false };
+        },
+        applyCanonicalPull: async () => {
+          events.push('canonical');
+          return { status: 'up-to-date' } as never;
+        },
+        withMemoryLock,
+      });
+      expect(calls).toEqual(['stak pull']);
+      expect(events).toEqual([
+        'skills',
+        'lock:stak pull',
+        'preflight',
+        'canonical',
+        'unlock',
+      ]);
+    });
+
+    it('stak pull recovers a fresh machine inside the lock', async () => {
+      const events: string[] = [];
+      const { withMemoryLock } = recordingLock(events);
+      await runProgram(['pull', '--yes'], {
+        cloudPreparePull: async () => basePullPlan,
+        cloudApplyPull: restoredPull,
+        memoryPullPreflight: async () => {
+          events.push('preflight');
+          return { eligible: true };
+        },
+        applyMemoryPull: async () => {
+          events.push('recover');
+          return {
+            status: 'recovered',
+            privacyMode: 'standard',
+            objects: 1,
+            files: 1,
+            generation: 1,
+          };
+        },
+        applyCanonicalPull: async () => {
+          events.push('canonical');
+          return { status: 'up-to-date' } as never;
+        },
+        withMemoryLock,
+      });
+      expect(events).toEqual([
+        'lock:stak pull',
+        'preflight',
+        'recover',
+        'canonical',
+        'unlock',
+      ]);
+    });
+
+    // Review fix (Task 13): an established machine with no Skills changes must still
+    // pull Project Memory — `stak pull` syncs canonical Memory on every run.
+    describe('stak pull with no Skills changes on an established machine', () => {
+      const noopPlan = { ...basePullPlan, mode: 'noop' as const };
+      const established = async () => ({
+        eligible: false,
+        reason: 'Local Memory already exists on this machine.',
+      });
+
+      it('runs the canonical pull inside the lock and reports what it synced', async () => {
+        const events: string[] = [];
+        const { calls, withMemoryLock } = recordingLock(events);
+        const cloudApplyPull = vi.fn(restoredPull);
+        const applyMemoryPull = vi.fn(async () => ({
+          status: 'no-backup' as const,
+        }));
+        const confirm = vi.fn(async () => true);
+        const result = await runProgram(['pull'], {
+          cloudPreparePull: async () => noopPlan,
+          cloudApplyPull,
+          memoryPullPreflight: async () => {
+            events.push('preflight');
+            return established();
+          },
+          applyMemoryPull,
+          applyCanonicalPull: async () => {
+            events.push('canonical');
+            return { status: 'merged' as const };
+          },
+          confirm,
+          withMemoryLock,
+        });
+        expect(calls).toEqual(['stak pull']);
+        // One preflight decides there is no fresh-machine recover; the authoritative one
+        // is re-read under the lock right before the canonical pull.
+        expect(events).toEqual([
+          'preflight',
+          'lock:stak pull',
+          'preflight',
+          'canonical',
+          'unlock',
+        ]);
+        expect(cloudApplyPull).not.toHaveBeenCalled();
+        expect(applyMemoryPull).not.toHaveBeenCalled();
+        expect(confirm).not.toHaveBeenCalled();
+        expect(result.output).toBe(
+          'Skills\n  already up to date with main.\n\nMemory\n  Project Memory synced.\n\nPull complete.\n',
+        );
+      });
+
+      it('still says everything is up to date when the canonical pull changes nothing', async () => {
+        const applyCanonicalPull = vi.fn(async () => ({
+          status: 'up-to-date' as const,
+        }));
+        const result = await runProgram(['pull', '--yes'], {
+          cloudPreparePull: async () => noopPlan,
+          memoryPullPreflight: established,
+          applyCanonicalPull,
+        });
+        expect(applyCanonicalPull).toHaveBeenCalledTimes(1);
+        expect(result.output).toBe('Everything is already up to date.\n');
+      });
+
+      it('reports a busy lock as a Memory failure', async () => {
+        const applyCanonicalPull = vi.fn(async () => ({
+          status: 'up-to-date' as const,
+        }));
+        const chunks: string[] = [];
+        await expect(
+          runProgram(['pull', '--yes'], {
+            cloudPreparePull: async () => noopPlan,
+            memoryPullPreflight: established,
+            applyCanonicalPull,
+            withMemoryLock: busyLock(),
+            writeOut: (value) => chunks.push(value),
+          }),
+        ).rejects.toThrow('Pull did not fully succeed');
+        expect(applyCanonicalPull).not.toHaveBeenCalled();
+        expect(chunks.join('')).toContain(`FAILED: ${BUSY}`);
+      });
+
+      it('--dry-run stays read-only: no canonical pull, no lock', async () => {
+        const calls: string[] = [];
+        const applyCanonicalPull = vi.fn(async () => ({
+          status: 'merged' as const,
+        }));
+        const result = await runProgram(['pull', '--dry-run'], {
+          cloudPreparePull: async () => noopPlan,
+          memoryPullPreflight: established,
+          applyCanonicalPull,
+          withMemoryLock: busyLock(calls),
+        });
+        expect(applyCanonicalPull).not.toHaveBeenCalled();
+        expect(calls).toEqual([]);
+        expect(result.output).toBe('Everything is already up to date.\n');
+      });
+
+      it('without canonical Memory wired, prints the plan as before', async () => {
+        const result = await runProgram(['pull', '--yes'], {
+          cloudPreparePull: async () => noopPlan,
+          memoryPullPreflight: established,
+        });
+        expect(result.output).toBe('Everything is already up to date.\n');
+      });
+    });
+
+    it('stak pull with a busy lock still pulls Skills and reports Memory FAILED with the lock message', async () => {
+      const applyCanonicalPull = vi.fn(
+        async () => ({ status: 'up-to-date' }) as never,
+      );
+      const applyMemoryPull = vi.fn(async () => ({
+        status: 'no-backup' as const,
+      }));
+      const memoryPullPreflight = vi.fn(async () => ({ eligible: true }));
+      const cloudApplyPull = vi.fn(restoredPull);
+      const chunks: string[] = [];
+      await expect(
+        runProgram(['pull', '--yes'], {
+          cloudPreparePull: async () => basePullPlan,
+          cloudApplyPull,
+          memoryPullPreflight,
+          applyMemoryPull,
+          applyCanonicalPull,
+          withMemoryLock: busyLock(),
+          writeOut: (value) => chunks.push(value),
+        }),
+      ).rejects.toThrow('Pull did not fully succeed');
+      expect(cloudApplyPull).toHaveBeenCalledTimes(1);
+      expect(memoryPullPreflight).not.toHaveBeenCalled();
+      expect(applyMemoryPull).not.toHaveBeenCalled();
+      expect(applyCanonicalPull).not.toHaveBeenCalled();
+      expect(chunks.join('')).toContain(`FAILED: ${BUSY}`);
+    });
+
+    it('stak memory backup reads the preview, confirms and writes the backup inside the lock', async () => {
+      const events: string[] = [];
+      const { calls, withMemoryLock } = recordingLock(events);
+      await runProgram(['memory', 'backup'], {
+        memoryBackupPreview: async () => {
+          events.push('preview');
+          return backupPreview();
+        },
+        confirm: async () => {
+          events.push('confirm');
+          return true;
+        },
+        memoryCloudBackup: async () => {
+          events.push('backup');
+          return {
+            local: {
+              provider: 'claude',
+              files: 0,
+              projects: 0,
+              createdAt: '2026-10-25T00:00:00.000Z',
+            },
+            cloud: { status: 'skipped' },
+          };
+        },
+        withMemoryLock,
+      });
+      expect(calls).toEqual(['stak memory backup']);
+      expect(events).toEqual([
+        'lock:stak memory backup',
+        'preview',
+        'confirm',
+        'backup',
+        'unlock',
+      ]);
+    });
+
+    it.each([
+      ['memory recover', ['memory', 'recover'], 'stak memory recover'],
+      [
+        'memory recover --passkey',
+        ['memory', 'recover', '--passkey'],
+        'stak memory recover',
+      ],
+      ['memory restore', ['memory', 'restore'], 'stak memory restore'],
+      [
+        'memory resolve',
+        ['memory', 'resolve', 'prj_abc', 'notes/MEMORY.md', '--keep', 'local'],
+        'stak memory resolve',
+      ],
+      [
+        'memory materialize',
+        ['memory', 'materialize'],
+        'stak memory materialize',
+      ],
+      ['memory protect', ['memory', 'protect'], 'stak memory protect'],
+      [
+        'memory protect --passkey',
+        ['memory', 'protect', '--passkey'],
+        'stak memory protect',
+      ],
+      [
+        'project map',
+        ['project', 'map', 'prj_abc', '.', '--yes'],
+        'stak project map',
+      ],
+      [
+        'project name',
+        ['project', 'name', 'prj_abc', 'Demo'],
+        'stak project name',
+      ],
+      [
+        'project archive',
+        ['project', 'archive', 'prj_abc', '--yes'],
+        'stak project archive',
+      ],
+      [
+        'project unarchive',
+        ['project', 'unarchive', 'prj_abc'],
+        'stak project unarchive',
+      ],
+    ])(
+      '%s runs its Memory work inside the lock',
+      async (_label, argv, command) => {
+        const events: string[] = [];
+        const { calls, withMemoryLock } = recordingLock(events);
+        const mark =
+          <T>(value: T) =>
+          async () => {
+            events.push('work');
+            return value;
+          };
+        await runProgram(argv, {
+          memoryCloudRecover: mark({ status: 'no-backup' as const }),
+          memoryRecoverPasskey: mark({ status: 'not-authenticated' as const }),
+          memoryRestore: mark({
+            provider: 'claude' as const,
+            files: 0,
+            projects: 0,
+            items: [],
+          }),
+          memoryResolveConflict: mark(resolved),
+          memoryMaterialize: mark(materialized),
+          memoryCloudProtect: mark({ status: 'not-authenticated' as const }),
+          memoryProtectPasskey: mark({ status: 'not-authenticated' as const }),
+          projectMap: mark({ status: 'project-not-found' as const }),
+          projectSetName: mark({ status: 'project-not-found' as const }),
+          projectArchive: mark({ status: 'project-not-found' as const }),
+          projectUnarchive: mark({ status: 'project-not-found' as const }),
+          withMemoryLock,
+        });
+        expect(calls).toEqual([command]);
+        expect(events).toEqual([`lock:${command}`, 'work', 'unlock']);
+      },
+    );
+
+    it.each([
+      ['memory recover', ['memory', 'recover']],
+      ['memory restore', ['memory', 'restore']],
+      [
+        'memory resolve',
+        ['memory', 'resolve', 'prj_abc', 'notes/MEMORY.md', '--keep', 'local'],
+      ],
+      ['memory materialize', ['memory', 'materialize']],
+      ['memory protect', ['memory', 'protect']],
+      ['memory backup', ['memory', 'backup']],
+      ['project map', ['project', 'map', 'prj_abc', '.', '--yes']],
+      ['project name', ['project', 'name', 'prj_abc', 'Demo']],
+      ['project archive', ['project', 'archive', 'prj_abc', '--yes']],
+      ['project unarchive', ['project', 'unarchive', 'prj_abc']],
+    ])(
+      '%s stops with the busy message and runs no Memory dependency when the lock is busy',
+      async (_label, argv) => {
+        const work = vi.fn(async (): Promise<never> => {
+          throw new Error('must not run');
+        });
+        await expect(
+          runProgram(argv, {
+            memoryCloudRecover: work,
+            memoryRestore: work,
+            memoryResolveConflict: work,
+            memoryMaterialize: work,
+            memoryCloudProtect: work,
+            memoryBackupPreview: work,
+            memoryCloudBackup: work,
+            projectMap: work,
+            projectSetName: work,
+            projectArchive: work,
+            projectUnarchive: work,
+            withMemoryLock: busyLock(),
+          }),
+        ).rejects.toThrow(BUSY);
+        expect(work).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['status', ['status']],
+      ['memory status', ['memory', 'status']],
+      ['memory diff', ['memory', 'diff', 'prj_abc', 'notes/MEMORY.md']],
+      ['memory history', ['memory', 'history']],
+      ['memory scan', ['memory', 'scan']],
+      ['memory resolve (list)', ['memory', 'resolve']],
+      ['memory backup --dry-run', ['memory', 'backup', '--dry-run']],
+      ['memory restore --dry-run', ['memory', 'restore', '--dry-run']],
+      ['project list', ['project', 'list']],
+      ['push --dry-run', ['push', '--dry-run']],
+      ['pull --dry-run', ['pull', '--dry-run']],
+    ])('read-only %s never takes the lock', async (_label, argv) => {
+      const calls: string[] = [];
+      await runProgram(argv, {
+        cloudPreparePush: async () => basePushPlan,
+        cloudPreparePull: async () => basePullPlan,
+        memoryPushPreflight: async () => ({ blocked: false }),
+        memoryPullPreflight: async () => ({ eligible: false }),
+        applyMemoryPush: async () => ({ status: 'up-to-date', generation: 1 }),
+        applyCanonicalPull: async () => ({ status: 'up-to-date' }) as never,
+        memoryListConflicts: async () => [],
+        memoryDiffConflict: async () => ({
+          projectId: 'prj_abc123',
+          name: 'demo',
+          path: 'notes/MEMORY.md',
+          reason: 'edit-edit',
+          generation: 1,
+          local: { state: 'absent' },
+          cloud: { state: 'absent' },
+        }),
+        withMemoryLock: busyLock(calls),
+      });
+      expect(calls).toEqual([]);
+    });
+
+    // The REAL lock against a temp STAK home holding a planted live lock (this test
+    // process's own pid on this host, reported alive, so it is never cleared as a leftover).
+    it('real lock: a planted live lock makes Memory commands stop with the busy message and change nothing', async () => {
+      const home = await mkdtemp(path.join(os.tmpdir(), 'stak-lock-cli-'));
+      try {
+        await mkdir(path.join(home, 'memory'), { recursive: true });
+        const planted = JSON.stringify({
+          lockId: 'planted-lock',
+          pid: process.pid,
+          hostname: os.hostname(),
+          startedAt: new Date(Date.now() - 12_000).toISOString(),
+          command: 'stak pull',
+        });
+        const lockFile = path.join(home, 'memory', '.memory.lock');
+        await writeFile(lockFile, planted);
+        const realLock = <T>(command: string, fn: () => Promise<T>) =>
+          withMemoryLock(home, command, fn, {
+            timeoutMs: 300,
+            pollMs: 50,
+            installSignalHandlers: false,
+            isProcessAlive: () => true,
+          });
+        const busy =
+          /Another STAK command \(`stak pull`, started \d+s ago\) is changing Memory\. Try again when it finishes\./;
+
+        const memoryMaterialize = vi.fn(async () => materialized);
+        await expect(
+          runProgram(['memory', 'materialize'], {
+            memoryMaterialize,
+            withMemoryLock: realLock,
+          }),
+        ).rejects.toThrow(busy);
+        expect(memoryMaterialize).not.toHaveBeenCalled();
+
+        const applyCanonicalPull = vi.fn(
+          async () => ({ status: 'up-to-date' }) as never,
+        );
+        const chunks: string[] = [];
+        await expect(
+          runProgram(['pull', '--yes'], {
+            cloudPreparePull: async () => basePullPlan,
+            cloudApplyPull: restoredPull,
+            memoryPullPreflight: async () => ({ eligible: false }),
+            applyCanonicalPull,
+            withMemoryLock: realLock,
+            writeOut: (value) => chunks.push(value),
+          }),
+        ).rejects.toThrow('Pull did not fully succeed');
+        expect(applyCanonicalPull).not.toHaveBeenCalled();
+        expect(chunks.join('')).toMatch(busy);
+
+        // Nothing changed: the planted lock is intact and nothing else appeared.
+        expect(await readFile(lockFile, 'utf8')).toBe(planted);
+        expect(await readdir(path.join(home, 'memory'))).toEqual([
+          '.memory.lock',
+        ]);
+      } finally {
+        await rm(home, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // Lock Task 3 (spec 2026-10-25 §3.6): `stak memory unlock [--force]`.
+  describe('stak memory unlock', () => {
+    const holder = (secondsAgo: number) => ({
+      lockId: 'lock-1',
+      pid: 1234,
+      hostname: 'this-host',
+      startedAt: new Date(Date.now() - secondsAgo * 1000).toISOString(),
+      command: 'stak pull',
+    });
+
+    it('says so when no lock is held', async () => {
+      const seen: unknown[] = [];
+      const { output } = await runProgram(['memory', 'unlock'], {
+        unlockMemory: async (options) => {
+          seen.push(options);
+          return { status: 'no-lock' };
+        },
+      });
+      expect(output).toBe('No Memory lock is held.\n');
+      expect(seen).toEqual([{ force: false }]);
+    });
+
+    it('removes a lock whose process is no longer running', async () => {
+      const { output } = await runProgram(['memory', 'unlock'], {
+        unlockMemory: async () => ({
+          status: 'removed',
+          holder: holder(180),
+          wasAlive: false,
+        }),
+      });
+      expect(output).toBe(
+        'Removed the Memory lock held by `stak pull` (process 1234, started 3m ago, no longer running).\n',
+      );
+    });
+
+    it('refuses, exiting non-zero, when the process may still be running', async () => {
+      await expect(
+        runProgram(['memory', 'unlock'], {
+          unlockMemory: async () => ({ status: 'refused', holder: holder(12) }),
+        }),
+      ).rejects.toSatisfy(
+        (error: Error) =>
+          // A typed STAK error, so the CLI prints the message alone (no stack trace).
+          isRenderableCliError(error) &&
+          error.message ===
+            'The Memory lock is held by `stak pull` (process 1234 on this-host, started 12s ago), which may still be running.\nWait for it to finish. If you are sure it is not a STAK command, run `stak memory unlock --force`.',
+      );
+    });
+
+    it('when the lock kept changing, says to try again — never to rerun with --force', async () => {
+      const error = await runProgram(['memory', 'unlock', '--force'], {
+        unlockMemory: async () => ({
+          status: 'refused',
+          holder: holder(1),
+          reason: 'changing',
+        }),
+      }).catch((caught: unknown) => caught as Error);
+      expect(error).toBeInstanceOf(Error);
+      expect(isRenderableCliError(error)).toBe(true);
+      expect((error as Error).message).toBe(
+        'The Memory lock kept changing while STAK tried to remove it (now held by `stak pull`, process 1234 on this-host). Other STAK commands are using Memory. Nothing was removed. Try again when they finish.',
+      );
+      expect((error as Error).message).not.toContain('--force');
+    });
+
+    it('--force removes a possibly-running lock after a warning', async () => {
+      const seen: unknown[] = [];
+      const { output } = await runProgram(['memory', 'unlock', '--force'], {
+        unlockMemory: async (options) => {
+          seen.push(options);
+          return { status: 'removed', holder: holder(12), wasAlive: true };
+        },
+      });
+      expect(seen).toEqual([{ force: true }]);
+      expect(output).toBe(
+        'Warning: removing a Memory lock that may belong to a running STAK command. If one is running, its Memory changes can be lost.\nRemoved the Memory lock held by `stak pull` (process 1234).\n',
+      );
+    });
+
+    it('removes an unreadable lock file', async () => {
+      const { output } = await runProgram(['memory', 'unlock'], {
+        unlockMemory: async () => ({
+          status: 'removed',
+          holder: 'corrupt',
+          wasAlive: false,
+        }),
+      });
+      expect(output).toBe('Removed an unreadable Memory lock file.\n');
+    });
+
+    it('never takes the Memory lock itself', async () => {
+      const calls: string[] = [];
+      await runProgram(['memory', 'unlock'], {
+        unlockMemory: async () => ({ status: 'no-lock' }),
+        withMemoryLock: async <T>(command: string, fn: () => Promise<T>) => {
+          calls.push(command);
+          return fn();
+        },
+      });
+      expect(calls).toEqual([]);
+    });
+
+    it('real unlock: removes a planted lock whose process is gone, even while the lock looks held', async () => {
+      const home = await mkdtemp(path.join(os.tmpdir(), 'stak-unlock-cli-'));
+      try {
+        await mkdir(path.join(home, 'memory'), { recursive: true });
+        await writeFile(
+          path.join(home, 'memory', '.memory.lock'),
+          JSON.stringify({ ...holder(5), hostname: os.hostname() }),
+        );
+        const { output } = await runProgram(['memory', 'unlock'], {
+          unlockMemory: (options) =>
+            unlockMemory(home, { ...options, isProcessAlive: () => false }),
+        });
+        expect(output).toBe(
+          'Removed the Memory lock held by `stak pull` (process 1234, started 5s ago, no longer running).\n',
+        );
+        expect(await readdir(path.join(home, 'memory'))).toEqual([]);
+      } finally {
+        await rm(home, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe('stak memory resolve / diff / materialize (Task 14)', () => {
+    const conflict = {
+      projectId: 'prj_abc123',
+      name: 'demo',
+      path: 'notes/MEMORY.md',
+      reason: 'edit-edit',
+    };
+
+    it('resolve with no arguments lists pending conflicts', async () => {
+      const listed = await runProgram(['memory', 'resolve'], {
+        memoryListConflicts: async () => [conflict],
+      });
+      expect(listed.output).toContain('1 pending Memory conflict(s)');
+      expect(listed.output).toContain(
+        'prj_abc123  demo  notes/MEMORY.md  (edit-edit)',
+      );
+      expect(listed.output).toContain('--keep local|cloud|both');
+      const none = await runProgram(['memory', 'resolve'], {
+        memoryListConflicts: async () => [],
+      });
+      expect(none.output).toContain('No pending Memory conflicts.');
+    });
+
+    it('resolve passes project, path and side through, and reports keep-both paths', async () => {
+      let seen: unknown;
+      const result = await runProgram(
+        ['memory', 'resolve', 'prj_abc', 'notes/MEMORY.md', '--keep', 'both'],
+        {
+          memoryResolveConflict: async (options) => {
+            seen = options;
+            return {
+              projectId: 'prj_abc123',
+              name: 'demo',
+              path: 'notes/MEMORY.md',
+              keep: 'both',
+              state: 'present',
+              altPath: 'notes/MEMORY.conflict-0123456789ab.md',
+              remaining: 0,
+              materialize: {
+                materialized: 1,
+                unavailable: [],
+                conflicts: [],
+                written: 2,
+                deleted: 0,
+              },
+            };
+          },
+        },
+      );
+      expect(seen).toEqual({
+        project: 'prj_abc',
+        path: 'notes/MEMORY.md',
+        keep: 'both',
+      });
+      expect(result.output).toContain(
+        "kept both: Cloud's version at notes/MEMORY.md, yours at notes/MEMORY.conflict-0123456789ab.md",
+      );
+      expect(result.output).toContain(
+        'All Memory conflicts resolved. Run `stak push` to publish.',
+      );
+    });
+
+    it('resolve requires a valid --keep side', async () => {
+      await expect(
+        runProgram(['memory', 'resolve', 'prj_abc', 'notes/MEMORY.md'], {
+          memoryResolveConflict: async () => {
+            throw new Error('must not be called');
+          },
+        }),
+      ).rejects.toThrow(/--keep local, --keep cloud, or --keep both/);
+      await expect(
+        runProgram([
+          'memory',
+          'resolve',
+          'prj_abc',
+          'notes/MEMORY.md',
+          '--keep',
+          'mine',
+        ]),
+      ).rejects.toThrow(/--keep local, --keep cloud, or --keep both/);
+    });
+
+    it('diff shows a deleted or absent side explicitly, never as empty text', async () => {
+      const result = await runProgram(
+        ['memory', 'diff', 'prj_abc', 'notes/MEMORY.md'],
+        {
+          memoryDiffConflict: async () => ({
+            ...conflict,
+            generation: 4,
+            local: { state: 'present', text: 'local text' },
+            cloud: { state: 'deleted' },
+          }),
+        },
+      );
+      expect(result.output).toContain(
+        '--- local ---\nlocal text\n--- cloud ---\n(deleted)\n',
+      );
+      const absent = await runProgram(
+        ['memory', 'diff', 'prj_abc', 'notes/MEMORY.md'],
+        {
+          memoryDiffConflict: async () => ({
+            ...conflict,
+            generation: 4,
+            local: { state: 'absent' },
+            cloud: { state: 'present', text: '' },
+          }),
+        },
+      );
+      expect(absent.output).toContain(
+        '--- local ---\n(absent)\n--- cloud ---\n\n',
+      );
+    });
+
+    it('materialize reports counts and unavailable projects; only --agent claude is accepted', async () => {
+      let seen: unknown;
+      const result = await runProgram(
+        ['memory', 'materialize', '--agent', 'claude'],
+        {
+          memoryMaterialize: async (options) => {
+            seen = options;
+            return {
+              materialized: 1,
+              unavailable: [{ projectId: 'prj_x', name: 'elsewhere' }],
+              conflicts: [],
+              written: 3,
+              deleted: 1,
+            };
+          },
+        },
+      );
+      expect(seen).toEqual({});
+      expect(result.output).toContain(
+        'Materialized Memory for 1 project(s): 3 file(s) written, 1 removed.',
+      );
+      expect(result.output).toContain(
+        '1 project(s) not available on this machine (elsewhere)',
+      );
+      await expect(
+        runProgram(['memory', 'materialize', '--agent', 'cursor']),
+      ).rejects.toThrow(/Only claude is supported/);
+    });
   });
 
   const scanItems = [
@@ -2385,6 +3727,52 @@ describe('STAK CLI', () => {
       },
     });
     expect(backedUp).toBe(true);
+  });
+
+  it('final review T15-4: memory backup after a historical recover on a machine with no sync history refuses (like push), before asking to supersede', async () => {
+    const preview = {
+      provider: 'claude' as const,
+      native: [],
+      carriedForward: [],
+      nativeFiles: 1,
+      nativeProjects: 1,
+      availableProjects: 1,
+      retainedFiles: 0,
+      retainedProjects: 0,
+      retainedAvailableFiles: 0,
+      retainedAvailableProjects: 0,
+      retainedUnavailableFiles: 0,
+      retainedUnavailableProjects: 0,
+      finalFiles: 1,
+      finalProjects: 1,
+      privacy: 'standard' as const,
+      supersession: {
+        localRecoveredGeneration: 3,
+        cloudLatestGeneration: 4,
+        parentGeneration: 4,
+        nextGeneration: 5,
+        supersedes: true,
+        noSyncHistory: true,
+      },
+    };
+    const blocked = await runProgram(['memory', 'backup', '--yes'], {
+      memoryBackupPreview: async () => preview,
+      confirm: async () => {
+        throw new Error('must not ask to supersede');
+      },
+      memoryCloudBackup: async () => {
+        throw new Error('must not back up');
+      },
+    });
+    expect(blocked.output).toContain('stak memory recover');
+    expect(blocked.output).toContain('no Memory sync history');
+    const json = await runProgram(['memory', 'backup', '--json', '--yes'], {
+      memoryBackupPreview: async () => preview,
+      memoryCloudBackup: async () => {
+        throw new Error('must not back up');
+      },
+    });
+    expect(JSON.parse(json.output)).toMatchObject({ status: 'needs-catch-up' });
   });
 
   it('memory backup refuses outright (no override) when the fresh/reset-registry safeguard trips — Cloud history exists but this machine never recovered it', async () => {

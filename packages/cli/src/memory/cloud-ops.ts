@@ -14,35 +14,78 @@
  * fully testable without the network. The commands layer builds the real backend
  * from the authenticated cloud client.
  */
+import { readFile } from 'node:fs/promises';
+
 import { applyRecoveredProjectNames } from './project-ops.js';
 import {
+  assertNoCurrentPendingMerge,
+  MemorySyncError,
+} from './pending-merge.js';
+import {
+  foldingFetch,
+  foldNoteCollector,
+  foldProjectMemory,
+  type ProjectFoldNote,
+} from './project-fold.js';
+import {
   BundleError,
+  foldProjectAliases,
   CIPHER_VERSION,
   addRecoveryFileWrapper,
   asBridgeFailure,
+  assertNotAlreadyProtected,
   bundleFromStore,
+  clearPendingMerge,
   cloudRecover,
   createRecoverySession,
+  effectiveCanonicalBase,
   LocalKeyStoreError,
+  fetchRemoteCanonical,
   generateMmk,
+  globalManifestDigest,
   hashBytes,
+  isProtectInProgress,
+  migrateLocalStore,
+  PROTECT_NEEDS_ORIGINAL_KEY_MESSAGE,
+  protectInProgressMessage,
+  replicaOfRetiredGeneration,
+  replicasNeedingOriginalKey,
+  RemoteMemoryError,
   migrateStandardToProtected,
   newKeyring,
   openMmkFromEnvelope,
+  parseRecoveryFile,
   protectedCloudBackup,
+  pushCanonicalMemory,
+  readCanonicalBase,
+  readCanonicalMain,
+  readLocalRegistry,
+  refreshPortableSnapshot,
+  composeBundleSnapshot,
+  type BundleSnapshotConflict,
+  type PortableRegistrySnapshot,
   resolveProjectForIdentity,
   standardCloudBackup,
   unwrapWithRecoveryKey,
   isHistoricalRecovery,
+  recordedAsHistorical,
   readLocalRecoveryState,
   readMemoryManifest,
+  writeCanonicalBase,
+  writeCanonicalMain,
   writeLocalRecoveryState,
+  writeMemoryObject,
+  writePendingMerge,
+  v1ManifestFingerprint,
   type BackupResult,
+  type CanonicalMainManifest,
   type DiscoveredMemoryItem,
   type LocalRegistry,
   type BridgeEnvelope,
   type BridgeFailureReason,
   type LocalMemoryKeyStore,
+  type LocalRecoveryState,
+  type MergeConflict,
   type MmkKeyring,
   type MmkWrapper,
   type RecoveryKeyArtifacts,
@@ -74,12 +117,48 @@ export type MemoryCloudDeps = {
   fetchProjectNames?: () => Promise<{ projectId: string; name?: string }[]>;
 };
 
+/** Canonical projects not locatable on this machine right now — named (spec
+ * §4.5), never a silent gap (Task 13 Important-5). */
+export type UnavailableCanonicalProject = { projectId: string; name: string };
+/** A native-vs-canonical materialize conflict, or a moved-folder source
+ * conflict, surfaced instead of being silently dropped (Task 13 Important-5). */
+export type CanonicalMaterializeConflict = {
+  projectId: string;
+  path: string;
+  reason: string;
+};
+
 export type CloudBackupOutcome =
   | { status: 'skipped' }
+  /** Nothing has ever been staged on THIS machine (no v1 manifest/`stak add .`
+   * ever ran) AND Cloud has no Memory history at all for this account either —
+   * a pure Skills-only account. Distinct from `skipped` (that means "not signed
+   * in"); this means "nothing to back up yet" (Task 13 Important-7(a)). */
+  | { status: 'nothing-staged' }
   | { status: 'protected-locked' }
   | { status: 'failed'; message: string }
-  | { status: 'standard'; generation: number }
-  | { status: 'protected'; generation: number };
+  | ({ status: 'standard'; generation: number } & CanonicalMaterializeExtras)
+  | ({ status: 'protected'; generation: number } & CanonicalMaterializeExtras)
+  /** Cloud already has exactly this machine's canonical Memory — no new
+   * generation was created (Task 13 Critical-3: `stak memory backup` merges
+   * like `stak push` now, so it can genuinely be a no-op). */
+  | ({ status: 'up-to-date'; generation: number } & CanonicalMaterializeExtras)
+  /** A real three-way-merge conflict against Cloud stopped the publish — no
+   * generation was created. Resolve with `stak memory resolve`, then back up
+   * again (same contract as `stak push`). */
+  | { status: 'conflict'; conflicts: MergeConflict[] };
+
+/** Never silently dropped (Task 13 Important-5) — a successful/no-op Cloud
+ * publish can still have unlocatable projects or native materialize conflicts. */
+export type CanonicalMaterializeExtras = {
+  unavailable?: UnavailableCanonicalProject[];
+  materializeConflicts?: CanonicalMaterializeConflict[];
+  /** Files materialized back from STAK because migration found them absent
+   * natively (Task 13 fix round 4). */
+  restoredFromStak?: number;
+  /** Spec §4.2.1: former Project IDs folded into their surviving ones. */
+  folded?: ProjectFoldNote[];
+};
 
 export type MemoryBackupOutcome = {
   local: BackupResult;
@@ -120,6 +199,11 @@ const isStoredWrapper = (value: unknown): value is StoredWrapper =>
   typeof (value as { mmkId?: unknown }).mmkId === 'string' &&
   typeof (value as { wrapper?: unknown }).wrapper === 'object';
 
+const isOlderThanLatest = (
+  generation: number,
+  cloudLatest: number | null,
+): boolean => cloudLatest !== null && generation < cloudLatest;
+
 /**
  * Record which Cloud generation the local private store now reflects (Phase 15B.6).
  * Machine-local, non-secret provenance so `status` can flag a historical recovery and
@@ -134,6 +218,10 @@ const recordRecoveryProvenance = async (
     /** The staged state's semantic digest at the moment it reached this generation —
      * lets a later push detect "nothing changed" (see `resolveMemoryPushState`). */
     semanticDigest?: string;
+    /** Recover only (Task 13 fix round 3): fingerprint of the v1 manifest the
+     * recover just restored — see `LocalRecoveryState.recoveredManifestFingerprint`.
+     * Every push omits it, which is what clears the "came from Cloud" signal. */
+    recoveredManifestFingerprint?: string;
   },
 ): Promise<void> => {
   await writeLocalRecoveryState(deps.stackHome, {
@@ -142,10 +230,185 @@ const recordRecoveryProvenance = async (
     cloudLatestAtRecovery: recovered.cloudLatest,
     recoveredAt: (deps.now ?? (() => new Date()))().toISOString(),
     privacyMode: recovered.privacyMode,
+    // Spec §8.5: historical only for a recover of an OLDER generation than the
+    // latest at that moment. Every publish/sync records `cloudLatest ===
+    // generation`, which is what clears it.
+    historical: isOlderThanLatest(recovered.generation, recovered.cloudLatest),
     ...(recovered.semanticDigest
       ? { semanticDigest: recovered.semanticDigest }
       : {}),
+    ...(recovered.recoveredManifestFingerprint
+      ? { recoveredManifestFingerprint: recovered.recoveredManifestFingerprint }
+      : {}),
   });
+};
+
+/**
+ * Final review T15-2: a push or backup that ends `up-to-date` proves local
+ * Memory equals Cloud's `generation`, so record that as this machine's
+ * provenance, exactly as a publish does. Otherwise a rollback whose content
+ * already matched Cloud kept the historical-recovery flag forever (every push
+ * announcing a rollback it never publishes). Advances only, never backwards.
+ */
+export const recordInSyncWithCloud = async (
+  deps: MemoryCloudDeps,
+  generation: number,
+): Promise<void> => {
+  if (!deps.backend) return;
+  const provenance = await readLocalRecoveryState(deps.stackHome);
+  if (
+    provenance &&
+    !recordedAsHistorical(provenance) &&
+    provenance.recoveredGeneration >= generation
+  )
+    return;
+  await recordRecoveryProvenance(deps, {
+    generation,
+    privacyMode: (await deps.backend.getProfile())?.privacyMode ?? 'standard',
+    cloudLatest: generation,
+  });
+};
+
+/**
+ * Called once `stak memory protect` has finalized (recovery-file or passkey,
+ * fresh or resumed). Protect re-encrypts each Standard generation as a
+ * Protected replica under a NEW, higher generation number and retires the
+ * original, but this machine's provenance still names the original. Status
+ * would then compare it with the replica that is now latest and report a
+ * "historical recovery" (and `stak push` a rollback) for identical content.
+ *
+ * Moves each recorded generation (`recoveredGeneration`, `cloudLatestAtRecovery`)
+ * that is no longer committed onto its committed Protected replica, using the
+ * same `replicaOf` lookup as `effectiveCanonicalBase`. A genuine historical
+ * recover moves to the OLDER generation's replica, so it stays historical. The
+ * semantic digest is kept (the replica's plaintext is byte-identical), as are
+ * the recover fingerprint and timestamp.
+ *
+ * Best-effort: Cloud is already Protected, and protect can't be re-run to
+ * retry this, so a local failure here must not fail protect. The next push
+ * or backup that ends up to date records fresh provenance anyway.
+ */
+const moveProvenanceToProtectReplicas = async (
+  stackHome: string,
+  backend: RemoteMemoryBackend,
+): Promise<void> => {
+  try {
+    const provenance = await readLocalRecoveryState(stackHome);
+    if (!provenance) return;
+    const replicaGenerationOf = async (generation: number): Promise<number> => {
+      if ((await backend.getGeneration(generation)) !== null) return generation;
+      return (
+        (await replicaOfRetiredGeneration(backend, generation))?.generation ??
+        generation
+      );
+    };
+    const recoveredGeneration = await replicaGenerationOf(
+      provenance.recoveredGeneration,
+    );
+    const cloudLatestAtRecovery =
+      provenance.cloudLatestAtRecovery === null
+        ? null
+        : await replicaGenerationOf(provenance.cloudLatestAtRecovery);
+    if (
+      recoveredGeneration === provenance.recoveredGeneration &&
+      cloudLatestAtRecovery === provenance.cloudLatestAtRecovery
+    )
+      return;
+    await writeLocalRecoveryState(stackHome, {
+      ...provenance,
+      // Decided from the generations as recorded, before any is moved: a
+      // replica numbering can't turn a sync into a rollback or back.
+      historical: recordedAsHistorical(provenance),
+      recoveredGeneration,
+      cloudLatestAtRecovery,
+      ...(recoveredGeneration !== provenance.recoveredGeneration
+        ? { privacyMode: 'protected' as const }
+        : {}),
+    });
+  } catch {
+    // See above: never fail a finished protect over local provenance.
+  }
+};
+
+/**
+ * Read-time counterpart of `moveProvenanceToProtectReplicas`, for every
+ * machine that did NOT run protect (and for homes protected before that fix):
+ * when the recorded generation is older than `latest`, and protect retired it
+ * in favour of a committed Protected replica (same plaintext), treat the
+ * replica's generation as the recorded one. Same `replicaOf` lookup as
+ * `effectiveCanonicalBase`. A genuine older recover maps to the older
+ * generation's replica and stays historical.
+ *
+ * Read-only (never writes provenance). Only when the recorded generation is
+ * behind `latest`: one `getGeneration` (a still-committed generation is
+ * returned unchanged), then the replica lookup only if it was retired. Fails safe: on any lookup error the
+ * recorded provenance is returned unchanged (today's behaviour).
+ *
+ * Whether the state is historical never depends on this mapping: it is
+ * decided from the state as recorded (`recordedAsHistorical`) and carried
+ * explicitly onto the mapped state. Being behind is not historical; the mapping
+ * only keeps the displayed "Backup #N" a generation Cloud still holds.
+ */
+const effectiveRecoveryProvenance = async (
+  backend: RemoteMemoryBackend,
+  provenance: LocalRecoveryState | null,
+  latest: number | null,
+): Promise<LocalRecoveryState | null> => {
+  if (
+    !provenance ||
+    latest === null ||
+    provenance.recoveredGeneration >= latest
+  )
+    return provenance;
+  try {
+    // Still committed: not retired by protect (as in `effectiveCanonicalBase`).
+    if ((await backend.getGeneration(provenance.recoveredGeneration)) !== null)
+      return provenance;
+    const replica = await replicaOfRetiredGeneration(
+      backend,
+      provenance.recoveredGeneration,
+    );
+    return replica
+      ? {
+          ...provenance,
+          historical: recordedAsHistorical(provenance),
+          recoveredGeneration: replica.generation,
+        }
+      : provenance;
+  } catch {
+    return provenance;
+  }
+};
+
+/** Fingerprint of the v1 manifest currently on disk (right after a recover). */
+const restoredManifestFingerprint = async (
+  stackHome: string,
+): Promise<{ recoveredManifestFingerprint?: string }> => {
+  const manifest = await readMemoryManifest(stackHome).catch(() => null);
+  return manifest
+    ? { recoveredManifestFingerprint: v1ManifestFingerprint(manifest) }
+    : {};
+};
+
+/**
+ * Task 13 fix round 3 (finding B): a STATELESS "is there anything to push at
+ * all?" check, replacing the old "did a manifest exist before migration"
+ * guard (which migration's own empty `manifests/current.json` defeated on
+ * every second push or pull). Nothing to push exactly when Cloud has no Memory
+ * generation, local canonical main has no documents, and the global v1
+ * manifest has no items — then no generation is published. Run AFTER
+ * migration (so any v1 project content has already moved into canonical main).
+ */
+export const hasNothingToPush = async (
+  deps: MemoryCloudDeps,
+): Promise<boolean> => {
+  if (!deps.backend) return false;
+  if ((await deps.backend.getLatest()) !== null) return false;
+  const main = await readCanonicalMain(deps.stackHome);
+  if (main.projects.some((project) => project.documents.length > 0))
+    return false;
+  const manifest = await readMemoryManifest(deps.stackHome);
+  return (manifest?.items.length ?? 0) === 0;
 };
 
 /**
@@ -154,12 +417,22 @@ const recordRecoveryProvenance = async (
  * identical staged state always hashes identically, regardless of Protected mode's
  * per-upload randomized ciphertext. Null when nothing is staged yet (no local
  * manifest). Read-only: never mutates the store.
+ *
+ * `canonicalMainOverride` bundles THAT canonical Memory instead of whatever's on
+ * disk (see `bundleFromStore`'s identical option) — so this digest reflects
+ * exactly what a publish is about to upload, never a stale on-disk value.
+ * `registrySnapshotOverride` does the same for the bundled registry snapshot.
  */
 const computeSemanticDigest = async (
   stackHome: string,
+  canonicalMainOverride?: CanonicalMainManifest,
+  registrySnapshotOverride?: PortableRegistrySnapshot,
 ): Promise<string | null> => {
   try {
-    const { bytes } = await bundleFromStore(stackHome);
+    const { bytes } = await bundleFromStore(stackHome, {
+      ...(canonicalMainOverride ? { canonicalMainOverride } : {}),
+      ...(registrySnapshotOverride ? { registrySnapshotOverride } : {}),
+    });
     return hashBytes(bytes);
   } catch (error) {
     if (error instanceof BundleError && error.code === 'no-backup') return null;
@@ -199,6 +472,8 @@ export const pushStagedMemory = async (
 ): Promise<CloudBackupOutcome> => {
   if (!deps.backend) return { status: 'skipped' };
   try {
+    // Same as `publishCanonicalGeneration`: bundle a current registry snapshot.
+    await refreshPortableSnapshot(deps.stackHome);
     const semanticDigest = await computeSemanticDigest(deps.stackHome);
     const profile = await deps.backend.getProfile();
     const mode = profile?.privacyMode ?? 'standard';
@@ -236,6 +511,134 @@ export const pushStagedMemory = async (
   } catch (error) {
     return { status: 'failed', message: errorMessage(error) };
   }
+};
+
+/**
+ * Upload exactly one new Cloud generation built from `main` — bundled directly
+ * from this IN-MEMORY value (`standardCloudBackup`/`protectedCloudBackup`'s
+ * `canonicalMainOverride`), never by writing `main` to `canonical/main.json`
+ * first. Task 13 Important-4 review finding: writing to disk before the upload
+ * even attempts broke "local main and base move together, only after a
+ * successful publish" — a failed or conflicting publish would otherwise leave
+ * disk holding content no generation ever actually committed, visible to every
+ * other command in between. This function writes NOTHING to local canonical
+ * storage, on success or failure; `pushCanonicalMemory`/`pullCanonicalMemory`'s
+ * own `setLocalMain`/`setBase` callbacks (wired by callers) persist `main` to
+ * disk — and ONLY after a publish they orchestrated actually succeeds.
+ *
+ * Unlike `pushStagedMemory`, this lets any thrown error (including
+ * `RemoteMemoryError('conflict', ...)`) propagate — `pushCanonicalMemory`'s
+ * retry loop (`@stack/memory`'s `canonical/push.ts`) depends on seeing that
+ * error, not a swallowed `{status:'failed'}` result.
+ *
+ * Deviates from the Task 13 brief's literal `Promise<{ generation: number }>`
+ * return type by also returning `privacyMode`: `runMemoryCloudBackup`'s Cloud
+ * branch (below) needs it to populate `CloudBackupOutcome`'s existing
+ * `'standard' | 'protected'` status discriminant, and nothing else in this file
+ * computes that independently of the backup call actually made.
+ */
+export const publishCanonicalGeneration = async (
+  deps: MemoryCloudDeps,
+  main: CanonicalMainManifest,
+  /**
+   * The EXACT `expectedParent` `pushCanonicalMemory`/`pullCanonicalMemory`
+   * decided to publish against (Task 13 fix round 2, Critical-1: lost update).
+   * Threaded straight through to `standardCloudBackup`/`protectedCloudBackup`,
+   * which must NEVER re-read `getLatest()` for this path — doing so could
+   * silently adopt a DIFFERENT, newer generation that another machine pushed
+   * in between the canonical engine's own fetch and this publish call, letting
+   * `createGeneration`'s optimistic-concurrency check compare against the
+   * wrong parent and overwrite that machine's change instead of conflicting.
+   */
+  expectedParent: number | null,
+  /**
+   * The portable registry snapshot of the Cloud generation the canonical engine
+   * fetched (and is publishing on top of). Records for projects in `main` that
+   * this machine has no record of are carried into the bundle, read-only — see
+   * `composeBundleSnapshot`. Omitted when nothing was fetched.
+   */
+  remoteSnapshot?: PortableRegistrySnapshot,
+): Promise<{
+  generation: number;
+  privacyMode: 'standard' | 'protected';
+  /** Local/remote snapshot disagreements resolved in favor of the local record. */
+  snapshotConflicts: BundleSnapshotConflict[];
+}> => {
+  if (!deps.backend) throw new Error('No Cloud backend configured.');
+  // Task 13 fix round 6: the canonical engine publishes with `expectedParent:
+  // null` whenever Cloud has NO committed generation. On an account that has
+  // had generations (all since retired, e.g. Delete Cloud Memory) the commit
+  // checks against the never-reset counter, so use it — but only while there
+  // is still no committed generation; if one appeared, keep null and let the
+  // commit conflict and the engine re-fetch.
+  if (expectedParent === null && (await deps.backend.getLatest()) === null)
+    expectedParent =
+      (await deps.backend.getProfile())?.latestGeneration ?? null;
+  // Two-machine fix: the bundle must carry a portable registry snapshot derived
+  // from the registry AS IT IS NOW. Canonical staging mints Project IDs after the
+  // legacy staging step last wrote the snapshot, so without this a fresh machine
+  // receives an empty snapshot and cannot locate the project by its Git claim.
+  // The local snapshot FILE stays this machine's own (local registry only).
+  await refreshPortableSnapshot(deps.stackHome);
+  // The BUNDLED snapshot additionally carries, read-only and in memory only, the
+  // remote generation's records for projects in `main` this machine has no
+  // record of. Otherwise a machine that never located a project would strip
+  // that project's identity from Cloud on every push.
+  const { snapshot, conflicts: snapshotConflicts } = composeBundleSnapshot(
+    await readLocalRegistry(deps.stackHome),
+    remoteSnapshot,
+    main.projects.map((p) => p.projectId),
+  );
+  const semanticDigest = await computeSemanticDigest(
+    deps.stackHome,
+    main,
+    snapshot,
+  );
+  const profile = await deps.backend.getProfile();
+  const mode = profile?.privacyMode ?? 'standard';
+  if (mode === 'protected') {
+    const mmk = await deps.localKeyStore.loadMmk();
+    if (!mmk) throw new Error('Protected Memory is locked on this machine.');
+    const result = await protectedCloudBackup({
+      stackHome: deps.stackHome,
+      backend: deps.backend,
+      mmk,
+      canonicalMainOverride: main,
+      registrySnapshotOverride: snapshot,
+      expectedParent,
+      ...(deps.now ? { now: deps.now } : {}),
+    });
+    await recordRecoveryProvenance(deps, {
+      generation: result.generation,
+      privacyMode: 'protected',
+      cloudLatest: result.generation,
+      ...(semanticDigest ? { semanticDigest } : {}),
+    });
+    return {
+      generation: result.generation,
+      privacyMode: 'protected',
+      snapshotConflicts,
+    };
+  }
+  const result = await standardCloudBackup({
+    stackHome: deps.stackHome,
+    backend: deps.backend,
+    canonicalMainOverride: main,
+    registrySnapshotOverride: snapshot,
+    expectedParent,
+    ...(deps.now ? { now: deps.now } : {}),
+  });
+  await recordRecoveryProvenance(deps, {
+    generation: result.generation,
+    privacyMode: 'standard',
+    cloudLatest: result.generation,
+    ...(semanticDigest ? { semanticDigest } : {}),
+  });
+  return {
+    generation: result.generation,
+    privacyMode: 'standard',
+    snapshotConflicts,
+  };
 };
 
 export type MemoryPushState =
@@ -283,12 +686,298 @@ export const resolveMemoryPushState = async (
     : { status: 'needs-push' };
 };
 
-/** backup: local first, then Cloud (never fails the local commit). */
+/**
+ * backup: local first, then Cloud (never fails the local commit). Migrates the
+ * local store to canonical Memory first (idempotent, short-circuits after its
+ * first run — see `migrateLocalStore`), then ALWAYS publishes a new generation
+ * built from canonical Memory (unlike `stak push`'s `pushMemoryViaCanonical`,
+ * which is a no-op when nothing changed) — this is `stak memory backup`'s own,
+ * intentionally unchanged "always create a generation" behavior (spec §9.3:
+ * `memory backup` stays as a deprecated alias for the Memory part of `stak
+ * push`, with that one behavioral difference preserved).
+ *
+ * NOTE: concurrent STAK commands against the same `stackHome` are not
+ * serialized across processes (see `canonical-ops.ts`'s `pushMemoryViaCanonical`/
+ * `pullMemoryViaCanonical` for the same caveat) — a cross-process lock is a
+ * known, deferred design gap.
+ */
+/**
+ * Spec Appendix A.4 / Task 13 fix round 2, finding 7 — same fix as
+ * `canonical-ops.ts`'s identically-named helper (duplicated rather than
+ * imported, for the same circular-module reason as this file's own
+ * `fetchRemote` closure in `runMemoryCloudBackup` below): seed
+ * `canonical/base.json` from the Cloud generation THIS MACHINE last pushed or
+ * recovered in v1, when known — never Cloud's current latest. Lazy,
+ * idempotent (never overwrites an existing base), safe no-op when the
+ * generation isn't known or can't be fetched.
+ */
+const seedBaseFromLastKnownV1Generation = async (
+  deps: MemoryCloudDeps,
+  mmk: Buffer | undefined,
+): Promise<void> => {
+  if (!deps.backend) return;
+  if ((await readCanonicalBase(deps.stackHome)) !== null) return;
+  const localMain = await readCanonicalMain(deps.stackHome);
+  if (localMain.projects.length === 0) return;
+  const provenance = await readLocalRecoveryState(deps.stackHome);
+  const knownGeneration = provenance?.recoveredGeneration;
+  if (knownGeneration === null || knownGeneration === undefined) return;
+  try {
+    const result = await fetchRemoteCanonical({
+      backend: deps.backend,
+      ...(mmk ? { mmk } : {}),
+      localRegistry: await readLocalRegistry(deps.stackHome),
+      generation: knownGeneration,
+    });
+    if (!result) return;
+    await writeCanonicalBase(deps.stackHome, {
+      generation: result.generation,
+      main: result.main,
+    });
+  } catch {
+    // Leave base empty — the documented safe fallback.
+  }
+};
+
+/** Final review T15-4: shared by `stak push`'s preflight and `stak memory
+ * backup` — after recovering an OLDER backup, a machine with no canonical sync
+ * base can't tell its rollback apart from Cloud (seeding the base from the
+ * recovered generation would silently discard the rollback). */
+export const HISTORICAL_NO_SYNC_HISTORY_MESSAGE =
+  'Local Memory was recovered from an older STAK Cloud backup, and this machine has no Memory sync history yet, so STAK could not tell the rollback apart from Cloud. Run `stak memory recover` to catch up to the latest backup first. Nothing was changed in Cloud.';
+
+/** True in exactly the T15-4 case: a historical recover and no sync base. */
+export const isHistoricalWithoutSyncHistory = async (
+  deps: MemoryCloudDeps,
+): Promise<boolean> => {
+  if (!deps.backend) return false;
+  const latest = (await deps.backend.getProfile())?.latestGeneration ?? null;
+  const provenance = await effectiveRecoveryProvenance(
+    deps.backend,
+    await readLocalRecoveryState(deps.stackHome),
+    latest,
+  );
+  if (!isHistoricalRecovery(provenance, latest)) return false;
+  return (await readCanonicalBase(deps.stackHome)) === null;
+};
+
+/**
+ * `stak push`'s Memory preflight (spec §8.5), wired by `program.ts`'s
+ * `memoryPushPreflight`. After `stak memory recover --backup N` the rollback is
+ * ordinary local changes against this machine's sync base, so push publishes it
+ * through the canonical merge like any other push, announced by `note`. The one
+ * case the merge does NOT cover is a historical recover with no canonical base
+ * yet: push would seed the base from the recovered generation itself and
+ * silently discard the rollback, so that case stays blocked (T15-4).
+ */
+export const resolveMemoryPushPreflight = async (
+  deps: MemoryCloudDeps,
+): Promise<{ blocked: boolean; reason?: string; note?: string }> => {
+  const status = await readMemoryCloudStatus(deps);
+  if (!status.historicalRecovery) return { blocked: false };
+  if ((await readCanonicalBase(deps.stackHome)) === null)
+    return { blocked: true, reason: HISTORICAL_NO_SYNC_HISTORY_MESSAGE };
+  return {
+    blocked: false,
+    note: `Memory: publishing a rollback to Backup #${status.localRecoveredGeneration ?? '?'}.`,
+  };
+};
+
 export const runMemoryCloudBackup = async (
   deps: MemoryCloudDeps,
+  options: {
+    /** Runs the local v1 -> canonical migration. `program.ts` passes
+     * `canonical-ops.ts`'s `migrateWithProjectionSeed` (with this machine's
+     * discovery), so a migration triggered by `stak memory backup` seeds the
+     * projection exactly like one triggered by push/pull (Task 13 fix round 3,
+     * finding C) — injected rather than imported to avoid a circular import
+     * between this module and `canonical-ops.ts`. Defaults to a plain
+     * `migrateLocalStore` with no directory locator. */
+    migrate?: (stackHome: string) => Promise<unknown>;
+  } = {},
 ): Promise<MemoryBackupOutcome> => {
   const local = await deps.runLocalBackup();
-  return { local, cloud: await pushStagedMemory(deps) };
+  // NOTE: concurrent STAK commands against the same stackHome are not
+  // serialized across processes (see `canonical-ops.ts`'s `pushMemoryViaCanonical`/
+  // `pullMemoryViaCanonical` for the same caveat) — a cross-process lock is a
+  // known, deferred design gap.
+  if (options.migrate) await options.migrate(deps.stackHome);
+  else await migrateLocalStore(deps.stackHome);
+  if (!deps.backend) return { local, cloud: { status: 'skipped' } };
+  // Task 13 fix round 2 (Minor): `getProfile`/`loadMmk` moved INSIDE the try —
+  // a network error reading the profile (or anything else below) now returns
+  // `{status:'failed'}` alongside the already-safe local backup, instead of
+  // propagating past this function entirely.
+  try {
+    const profile = await deps.backend.getProfile();
+    if (
+      (profile?.privacyMode ?? 'standard') === 'protected' &&
+      !(await deps.localKeyStore.loadMmk().catch(() => null))
+    )
+      return { local, cloud: { status: 'protected-locked' } };
+    const mmk =
+      (await deps.localKeyStore.loadMmk().catch(() => undefined)) ?? undefined;
+    // Also persists every object the fetched generation carries into this
+    // machine's local content store (same fix as `canonical-ops.ts`'s
+    // `remoteOf` — a materialize/merge elsewhere needs the actual bytes, not
+    // just the manifest metadata).
+    // The fetched generation's registry snapshot, carried into the publish
+    // (see `publishCanonicalGeneration`'s `remoteSnapshot`).
+    let remoteSnapshot: PortableRegistrySnapshot | undefined;
+    // Spec §4.2.1: Cloud's latest is fetched once up front for the project
+    // fold below; the merge engine's first fetch reuses it.
+    let prefetched: Awaited<ReturnType<typeof fetchNow>> | undefined;
+    const cachedFetch = async () => {
+      if (prefetched !== undefined) {
+        const result = prefetched;
+        prefetched = undefined;
+        return result;
+      }
+      return fetchNow();
+    };
+    const collector = foldNoteCollector();
+    // Review fix C1: every engine fetch (a retry's too) re-learns aliases and
+    // re-folds local/base with that fetch's map before returning the remote.
+    const fetchRemote = foldingFetch(
+      deps.stackHome,
+      cachedFetch,
+      () => remoteSnapshot,
+      collector.add,
+    );
+    const fetchNow = async () => {
+      remoteSnapshot = undefined;
+      if (!deps.backend) return null;
+      const result = await fetchRemoteCanonical({
+        backend: deps.backend,
+        ...(mmk ? { mmk } : {}),
+        localRegistry: await readLocalRegistry(deps.stackHome),
+      });
+      if (!result) return null;
+      remoteSnapshot = result.registrySnapshot;
+      for (const object of result.objects)
+        await writeMemoryObject({
+          stackHome: deps.stackHome,
+          contentHash: object.contentHash,
+          bytes: object.bytes,
+        });
+      return {
+        generation: result.generation,
+        contentGeneration: result.contentGeneration,
+        main: result.main,
+        globalDigest: result.globalDigest,
+      };
+    };
+    // Spec §4.2.1: fold before any sync decision, exactly as `stak push` does.
+    prefetched = await fetchNow();
+    collector.add(
+      (await foldProjectMemory(deps.stackHome, { remoteSnapshot })).notes,
+    );
+    const foldedExtra = () => {
+      const folded = collector.notes();
+      return folded.length > 0 ? { folded } : {};
+    };
+
+    // Task 14 fix round 1 — spec A.6 `merge-pending`, the same gate as `stak
+    // push`: a still-current pending merge against an unmoved Cloud stops here
+    // before anything changes (its partial resolutions are kept).
+    try {
+      await assertNoCurrentPendingMerge(deps);
+    } catch (error) {
+      if (error instanceof MemorySyncError)
+        return {
+          local,
+          cloud: { status: 'conflict', conflicts: error.conflicts },
+        };
+      throw error;
+    }
+
+    // Final review T15-4: the same block as `stak push` — checked BEFORE the
+    // base is seeded from the recovered generation, which would discard the
+    // rollback the user just confirmed.
+    if (await isHistoricalWithoutSyncHistory(deps))
+      return {
+        local,
+        cloud: {
+          status: 'failed',
+          message: HISTORICAL_NO_SYNC_HISTORY_MESSAGE,
+        },
+      };
+
+    // Spec Appendix A.4 / Task 13 finding 7: lazily seed base from this
+    // machine's own last-known v1 generation, before the first canonical merge.
+    await seedBaseFromLastKnownV1Generation(deps, mmk);
+
+    // Task 13 Important-7(a) / fix round 3 (finding B): a Skills-only account
+    // with no Memory anywhere must not publish an empty Memory generation —
+    // decided statelessly from content, never from file existence.
+    if (await hasNothingToPush(deps))
+      return { local, cloud: { status: 'nothing-staged' } };
+
+    // Spec §9.3: `stak memory backup` is a deprecated alias for the Memory HALF
+    // of `stak push` — it must merge against Cloud exactly like push does
+    // (fetch, three-way merge, at most one generation, conflict stops the
+    // publish entirely), never blindly overwrite it (Task 13 Critical-3).
+    const outcome = await pushCanonicalMemory({
+      getLocalMain: () => readCanonicalMain(deps.stackHome),
+      // Final review I1: a global-only Memory change is published too.
+      getLocalGlobalDigest: async () =>
+        globalManifestDigest(await readMemoryManifest(deps.stackHome)),
+      // Task 13 fix round 7: a base Cloud no longer holds merges as empty.
+      getBase: async () =>
+        effectiveCanonicalBase(
+          deps.backend,
+          await readCanonicalBase(deps.stackHome),
+        ),
+      setLocalMain: (nextMain) => writeCanonicalMain(deps.stackHome, nextMain),
+      setBase: (base) => writeCanonicalBase(deps.stackHome, base),
+      fetchRemote,
+      publish: async (nextMain, expectedParent) => {
+        const result = await publishCanonicalGeneration(
+          deps,
+          nextMain,
+          expectedParent,
+          remoteSnapshot,
+        );
+        return { generation: result.generation };
+      },
+      savePendingMerge: (pending) => writePendingMerge(deps.stackHome, pending),
+      clearPendingMerge: () => clearPendingMerge(deps.stackHome),
+    });
+
+    if (outcome.status === 'conflict')
+      return {
+        local,
+        cloud: { status: 'conflict', conflicts: outcome.conflicts },
+      };
+    if (outcome.status === 'retry-exhausted')
+      return {
+        local,
+        cloud: {
+          status: 'failed',
+          message: 'STAK Cloud kept moving while backing up Memory. Try again.',
+        },
+      };
+    if (outcome.status === 'up-to-date') {
+      await recordInSyncWithCloud(deps, outcome.generation);
+      return {
+        local,
+        cloud: {
+          status: 'up-to-date',
+          generation: outcome.generation,
+          ...foldedExtra(),
+        },
+      };
+    }
+    // 'pushed': a generation was actually created, in whichever privacy mode
+    // this account is currently in (read once, above, before publishing).
+    const mode: 'standard' | 'protected' = profile?.privacyMode ?? 'standard';
+    return {
+      local,
+      cloud: { status: mode, generation: outcome.generation, ...foldedExtra() },
+    };
+  } catch (error) {
+    return { local, cloud: { status: 'failed', message: errorMessage(error) } };
+  }
 };
 
 export type CloudRecoverOutcome =
@@ -309,15 +998,105 @@ export type CloudRecoverOutcome =
        */
       files: number;
       generation: number;
+      /** Spec §4.2.1: former Project IDs folded after the recover. */
+      folded?: ProjectFoldNote[];
     }
   | { status: 'needs-recovery-method' }
   | { status: 'not-authenticated' }
   | { status: 'no-backup' };
 
-/** The restored manifest's logical item count, or 0 if unreadable (never thrown). */
+/**
+ * The restored store's logical file count: the v1 manifest's own items PLUS
+ * every `present` canonical document (Task 13 fix — once a store migrates,
+ * project-scope files move OUT of the v1 manifest into canonical Memory
+ * (`migrate.ts`'s `slimToGlobal`); counting only `manifest.items.length` after a
+ * migrated recovery would silently undercount, reporting 0 recovered files for
+ * an account whose Memory is entirely project-scope). Never thrown — `0` for an
+ * unreadable/absent manifest.
+ */
 const recoveredFileCount = async (stackHome: string): Promise<number> => {
   const manifest = await readMemoryManifest(stackHome);
-  return manifest?.items.length ?? 0;
+  const main = await readCanonicalMain(stackHome);
+  const canonicalCount = main.projects.reduce(
+    (n, project) =>
+      n + project.documents.filter((doc) => doc.state === 'present').length,
+    0,
+  );
+  return (manifest?.items.length ?? 0) + canonicalCount;
+};
+
+/**
+ * Spec §4.2.1, recover and historical recover: the restored `main.json` is
+ * Cloud's raw content, and the registry now also holds the recovered
+ * snapshot's former IDs. Fold the restored state on disk, and fold the
+ * pre-recover Memory with the SAME aliases, so the rollback comparison below
+ * never mistakes a merged project for deleted documents. Returns the folded
+ * pre-recover Memory and the fold line notes (review fix M3).
+ */
+const foldAfterRecover = async (
+  stackHome: string,
+  before: CanonicalMainManifest,
+): Promise<{ before: CanonicalMainManifest; notes: ProjectFoldNote[] }> => {
+  const { notes, aliasOf } = await foldProjectMemory(stackHome);
+  return { before: foldProjectAliases(before, aliasOf).main, notes };
+};
+
+/**
+ * Spec §7 / §8.5: a HISTORICAL recover (an older generation than Cloud's
+ * latest) is a rollback, which must show up as ordinary local changes,
+ * deletions included. The recovered `main.json` simply lacks documents added
+ * since that generation, so record each one that was present locally before
+ * the recover as a tombstone carrying its pre-recover content hash. Existing
+ * tombstones absent from the recovered generation are kept. Documents in the
+ * recovered generation are never touched. A non-historical recover (latest,
+ * e.g. a fresh machine) is left exactly as restored.
+ */
+const recordRollbackTombstones = async (
+  deps: { stackHome: string; now?: (() => Date) | undefined },
+  before: CanonicalMainManifest,
+  recoveredGeneration: number,
+  cloudLatest: number | null,
+): Promise<void> => {
+  if (cloudLatest === null || recoveredGeneration === cloudLatest) return;
+  const recovered = await readCanonicalMain(deps.stackHome);
+  const deletedAt = (deps.now ?? (() => new Date()))().toISOString();
+  let changed = false;
+  const projects = recovered.projects.map((p) => ({
+    ...p,
+    documents: [...p.documents],
+  }));
+  for (const prior of before.projects) {
+    let project = projects.find((p) => p.projectId === prior.projectId);
+    for (const doc of prior.documents) {
+      if (project?.documents.some((d) => d.path === doc.path)) continue;
+      const tombstone =
+        doc.state === 'deleted'
+          ? doc
+          : {
+              path: doc.path,
+              state: 'deleted' as const,
+              lastContentHash: doc.contentHash,
+              deletedAt,
+            };
+      if (!project) {
+        project = { projectId: prior.projectId, documents: [] };
+        projects.push(project);
+      }
+      project.documents.push(tombstone);
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  const byPath = (a: { path: string }, b: { path: string }) =>
+    a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+  await writeCanonicalMain(deps.stackHome, {
+    ...recovered,
+    projects: projects
+      .map((p) => ({ ...p, documents: p.documents.sort(byPath) }))
+      .sort((a, b) =>
+        a.projectId < b.projectId ? -1 : a.projectId > b.projectId ? 1 : 0,
+      ),
+  });
 };
 
 /** Recover the private store from Cloud. Does not touch native agent files. */
@@ -326,6 +1105,13 @@ export const runMemoryCloudRecover = async (
   options: { generation?: number; recoveryKey?: Buffer } = {},
 ): Promise<CloudRecoverOutcome> => {
   if (!deps.backend) return { status: 'not-authenticated' };
+  // Task 13 fix round 4: never restore from an account whose protect was
+  // interrupted (latest may be a replica of an unfinished migration).
+  if (await isProtectInProgress(deps.backend))
+    throw new RemoteMemoryError(
+      'protect-in-progress',
+      await protectInProgressMessage(deps.backend),
+    );
   const meta =
     options.generation !== undefined
       ? await deps.backend.getGeneration(options.generation)
@@ -333,6 +1119,8 @@ export const runMemoryCloudRecover = async (
   if (!meta) return { status: 'no-backup' };
 
   const cloudLatest = (await deps.backend.getLatest())?.generation ?? null;
+
+  const before = await readCanonicalMain(deps.stackHome);
 
   if (meta.privacyMode === 'standard') {
     const result = await cloudRecover({
@@ -342,14 +1130,23 @@ export const runMemoryCloudRecover = async (
         ? { generation: options.generation }
         : {}),
     });
+    const recoverFold = await foldAfterRecover(deps.stackHome, before);
+    await recordRollbackTombstones(
+      deps,
+      recoverFold.before,
+      result.generation,
+      cloudLatest,
+    );
     await recordRecoveryProvenance(deps, {
       generation: result.generation,
       privacyMode: 'standard',
       cloudLatest,
+      ...(await restoredManifestFingerprint(deps.stackHome)),
     });
     await seedRecoveredProjectNames(deps);
     return {
       status: 'recovered',
+      ...(recoverFold.notes.length > 0 ? { folded: recoverFold.notes } : {}),
       privacyMode: 'standard',
       objects: result.objects,
       files: await recoveredFileCount(deps.stackHome),
@@ -374,6 +1171,13 @@ export const runMemoryCloudRecover = async (
       ? { generation: options.generation }
       : {}),
   });
+  const recoverFold = await foldAfterRecover(deps.stackHome, before);
+  await recordRollbackTombstones(
+    deps,
+    recoverFold.before,
+    result.generation,
+    cloudLatest,
+  );
   // Recovery already succeeded; enrolling this device is best-effort and must not
   // persist insecure key material (enrollDeviceSafe fails closed internally).
   if (unlockedViaRecoveryKey) await enrollDeviceSafe(deps.localKeyStore, mmk);
@@ -381,15 +1185,43 @@ export const runMemoryCloudRecover = async (
     generation: result.generation,
     privacyMode: 'protected',
     cloudLatest,
+    ...(await restoredManifestFingerprint(deps.stackHome)),
   });
   await seedRecoveredProjectNames(deps);
   return {
     status: 'recovered',
+    ...(recoverFold.notes.length > 0 ? { folded: recoverFold.notes } : {}),
     privacyMode: 'protected',
     objects: result.objects,
     files: await recoveredFileCount(deps.stackHome),
     generation: result.generation,
   };
+};
+
+/**
+ * Read the recovery key from a `.stackkey` file for `stak memory recover
+ * --recovery-file <path>`. (Final review follow-up: the option was accepted but
+ * never read, so recovering with a recovery file always reported the device as
+ * locked.) Never echoes file content in its errors.
+ */
+export const readRecoveryKeyFile = async (
+  filePath: string,
+): Promise<Buffer> => {
+  let text: string;
+  try {
+    text = await readFile(filePath, 'utf8');
+  } catch {
+    throw new Error(
+      `Couldn't read the recovery file at ${filePath}. Nothing was changed.`,
+    );
+  }
+  try {
+    return parseRecoveryFile(text);
+  } catch {
+    throw new Error(
+      `${filePath} isn't a STAK recovery file. Nothing was changed.`,
+    );
+  }
 };
 
 /** Try each stored recovery-file wrapper until the recovery key unwraps the MMK. */
@@ -425,13 +1257,46 @@ export type ProtectOutcome =
 /** Enable Protected: new MMK + recovery-file method + device enrollment + migrate. */
 export const runMemoryCloudProtect = async (
   deps: MemoryCloudDeps & { backend: RemoteMemoryBackend },
-  options: { recoveryKey: RecoveryKeyArtifacts },
+  options: {
+    recoveryKey: RecoveryKeyArtifacts;
+    /** Final review I8: saves `recoveryKey`'s file to disk. Called after this
+     * device's key is enrolled and BEFORE anything changes in Cloud (the
+     * recovery wrapper, replicas, the mode), so a crash or failure later can
+     * never leave a Protected account whose only key is on this device. A
+     * failure here stops protect with nothing changed in Cloud. */
+    writeRecoveryFile?: () => Promise<void>;
+  },
 ): Promise<ProtectOutcome> => {
-  const mmk = generateMmk();
+  // Task 13 fix rounds 3-4: RESUME an interrupted protect with the Memory key
+  // this device already enrolled for it, so the replicas already in Cloud are
+  // reused. A device WITHOUT that key generates a fresh one: the migration
+  // then retires the replicas it can't open and re-replicates with the new
+  // key (originals intact) — never a lockout. A fresh recovery file is issued
+  // either way, because an interrupted run never wrote one.
+  // Final review C1: never on an account that is already Protected.
+  await assertNotAlreadyProtected(deps.backend);
+  const inProgress = await isProtectInProgress(deps.backend);
+  const resumeMmk = inProgress
+    ? await deps.localKeyStore.loadMmk().catch(() => null)
+    : null;
+  // Fix round 4 (d): if finishing needs the interrupted run's key (originals
+  // already retired) and this device doesn't have one, stop BEFORE generating
+  // or enrolling a key or adding a recovery wrapper.
+  if (
+    inProgress &&
+    !resumeMmk &&
+    (await replicasNeedingOriginalKey(deps.backend)).length > 0
+  )
+    throw new RemoteMemoryError(
+      'protect-in-progress',
+      PROTECT_NEEDS_ORIGINAL_KEY_MESSAGE,
+    );
+  const mmk = resumeMmk ?? generateMmk();
   // Enroll this device FIRST and fail closed: if local key storage can't be
   // secured, persist nothing and finalize nothing in Cloud.
-  if (!(await enrollDeviceSafe(deps.localKeyStore, mmk)))
+  if (!resumeMmk && !(await enrollDeviceSafe(deps.localKeyStore, mmk)))
     return { status: 'insecure-local-key' };
+  if (options.writeRecoveryFile) await options.writeRecoveryFile();
   const keyring = newKeyring();
   const { wrapper } = addRecoveryFileWrapper({
     keyring,
@@ -445,11 +1310,16 @@ export const runMemoryCloudProtect = async (
     mmkWrapper: stored,
     cryptoVersion: CIPHER_VERSION,
   });
+  // Final review I8: the recovery file for this wrapper is already on disk, so
+  // the wrapper is NEVER revoked on failure — it may be the only off-device
+  // copy of the key any replicas made so far were sealed with. (The device key
+  // stays enrolled too: a re-run on this machine resumes with it.)
   const migration = await migrateStandardToProtected({
     backend: deps.backend,
     mmk,
     ...(deps.now ? { now: deps.now } : {}),
   });
+  await moveProvenanceToProtectReplicas(deps.stackHome, deps.backend);
   return {
     status: 'protected',
     migrated: migration.migrated,
@@ -474,8 +1344,7 @@ export const readMemoryCloudStatus = async (
   deps: MemoryCloudDeps,
 ): Promise<MemoryCloudStatus> => {
   const deviceEnrolled = await deps.localKeyStore.hasKey();
-  const provenance = await readLocalRecoveryState(deps.stackHome);
-  const localRecoveredGeneration = provenance?.recoveredGeneration ?? null;
+  const recorded = await readLocalRecoveryState(deps.stackHome);
   if (!deps.backend)
     return {
       authenticated: false,
@@ -484,13 +1353,22 @@ export const readMemoryCloudStatus = async (
       lastCloudBackupAt: null,
       recoveryMethodTypes: [],
       deviceEnrolled,
-      localRecoveredGeneration,
+      localRecoveredGeneration: recorded?.recoveredGeneration ?? null,
       historicalRecovery: false,
     };
-  const profile = await deps.backend.getProfile();
-  const latest = await deps.backend.getLatest();
-  const methods = await deps.backend.listRecoveryMethods();
+  // Three independent reads: fetched in parallel rather than one after another.
+  const [profile, latest, methods] = await Promise.all([
+    deps.backend.getProfile(),
+    deps.backend.getLatest(),
+    deps.backend.listRecoveryMethods(),
+  ]);
   const latestGeneration = profile?.latestGeneration ?? null;
+  const provenance = await effectiveRecoveryProvenance(
+    deps.backend,
+    recorded,
+    latestGeneration,
+  );
+  const localRecoveredGeneration = provenance?.recoveredGeneration ?? null;
   return {
     authenticated: true,
     privacyMode: profile?.privacyMode ?? null,
@@ -553,6 +1431,9 @@ export type BackupSupersession = {
   parentGeneration: number | null;
   nextGeneration: number | null;
   supersedes: boolean;
+  /** Final review T15-4: superseding from a machine with no Memory sync
+   * history — refused (like `stak push`), never confirmable. */
+  noSyncHistory?: boolean;
 };
 
 /**
@@ -564,11 +1445,10 @@ export type BackupSupersession = {
 export const readBackupSupersession = async (
   deps: MemoryCloudDeps,
 ): Promise<BackupSupersession> => {
-  const provenance = await readLocalRecoveryState(deps.stackHome);
-  const localRecoveredGeneration = provenance?.recoveredGeneration ?? null;
+  const recorded = await readLocalRecoveryState(deps.stackHome);
   if (!deps.backend)
     return {
-      localRecoveredGeneration,
+      localRecoveredGeneration: recorded?.recoveredGeneration ?? null,
       cloudLatestGeneration: null,
       parentGeneration: null,
       nextGeneration: null,
@@ -576,6 +1456,12 @@ export const readBackupSupersession = async (
     };
   const cloudLatestGeneration =
     (await deps.backend.getLatest())?.generation ?? null;
+  const provenance = await effectiveRecoveryProvenance(
+    deps.backend,
+    recorded,
+    cloudLatestGeneration,
+  );
+  const localRecoveredGeneration = provenance?.recoveredGeneration ?? null;
   return {
     localRecoveredGeneration,
     cloudLatestGeneration,
@@ -583,6 +1469,10 @@ export const readBackupSupersession = async (
     nextGeneration:
       cloudLatestGeneration === null ? 0 : cloudLatestGeneration + 1,
     supersedes: isHistoricalRecovery(provenance, cloudLatestGeneration),
+    // Final review T15-4: a supersede that can't be published safely at all.
+    noSyncHistory:
+      isHistoricalRecovery(provenance, cloudLatestGeneration) &&
+      (await readCanonicalBase(deps.stackHome)) === null,
   };
 };
 
@@ -711,6 +1601,29 @@ export const runPasskeyProtect = async (
   if (!deps.backend) return { status: 'not-authenticated' };
   const now = deps.now ?? (() => new Date());
   const sleep = deps.sleep ?? defaultSleep;
+  // Task 13 fix round 3: resume an interrupted protect with the key this
+  // device already enrolled for it (the first run's passkey wrapper already
+  // wraps that same key) — never a new key the existing replicas can't use.
+  // Final review C1: never on an account that is already Protected.
+  await assertNotAlreadyProtected(deps.backend);
+  if (await isProtectInProgress(deps.backend)) {
+    const resumeMmk = await deps.localKeyStore.loadMmk().catch(() => null);
+    if (resumeMmk) {
+      const resumed = await migrateStandardToProtected({
+        backend: deps.backend,
+        mmk: resumeMmk,
+        now,
+      });
+      await moveProvenanceToProtectReplicas(deps.stackHome, deps.backend);
+      return { status: 'protected', migrated: resumed.migrated };
+    }
+    // Fix round 4 (d): never open a passkey ceremony for a key that can't finish.
+    if ((await replicasNeedingOriginalKey(deps.backend)).length > 0)
+      throw new RemoteMemoryError(
+        'protect-in-progress',
+        PROTECT_NEEDS_ORIGINAL_KEY_MESSAGE,
+      );
+  }
   const { session, initiatorPrivateKey } = await createRecoverySession({
     userId: 'stack-memory',
     ttlMs: deps.ttlMs ?? 5 * 60_000,
@@ -754,6 +1667,7 @@ export const runPasskeyProtect = async (
     mmk,
     now,
   });
+  await moveProvenanceToProtectReplicas(deps.stackHome, deps.backend);
   return { status: 'protected', migrated: migration.migrated };
 };
 
@@ -773,6 +1687,11 @@ export const runPasskeyRecover = async (
   options: { generation?: number } = {},
 ): Promise<PasskeyRecoverResult> => {
   if (!deps.backend) return { status: 'not-authenticated' };
+  if (await isProtectInProgress(deps.backend))
+    throw new RemoteMemoryError(
+      'protect-in-progress',
+      await protectInProgressMessage(deps.backend),
+    );
   const now = deps.now ?? (() => new Date());
   const sleep = deps.sleep ?? defaultSleep;
   // The CLI authoritatively selects the generation and fetches/decrypts its payload;
@@ -820,6 +1739,7 @@ export const runPasskeyRecover = async (
     envelope: poll.envelope as BridgeEnvelope,
     now,
   });
+  const before = await readCanonicalMain(deps.stackHome);
   const result = await cloudRecover({
     stackHome: deps.stackHome,
     backend: deps.backend,
@@ -828,6 +1748,13 @@ export const runPasskeyRecover = async (
       ? { generation: options.generation }
       : {}),
   });
+  const recoverFold = await foldAfterRecover(deps.stackHome, before);
+  await recordRollbackTombstones(
+    deps,
+    recoverFold.before,
+    result.generation,
+    cloudLatest,
+  );
   // Recovery already succeeded; enroll best-effort (never persists insecure state).
   await enrollDeviceSafe(deps.localKeyStore, mmk);
   await writeLocalRecoveryState(deps.stackHome, {
@@ -836,10 +1763,13 @@ export const runPasskeyRecover = async (
     cloudLatestAtRecovery: cloudLatest,
     recoveredAt: now().toISOString(),
     privacyMode: 'protected',
+    historical: isOlderThanLatest(result.generation, cloudLatest),
+    ...(await restoredManifestFingerprint(deps.stackHome)),
   });
   await seedRecoveredProjectNames(deps);
   return {
     status: 'recovered',
+    ...(recoverFold.notes.length > 0 ? { folded: recoverFold.notes } : {}),
     objects: result.objects,
     files: await recoveredFileCount(deps.stackHome),
     generation: result.generation,

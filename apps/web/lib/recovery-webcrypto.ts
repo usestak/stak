@@ -385,3 +385,109 @@ export const credentialIdToB64url = toB64url;
 export const credentialIdFromB64url = fromB64url;
 export const randomMmk = (): Uint8Array =>
   globalThis.crypto.getRandomValues(new Uint8Array(32));
+
+/* -------------------------------------------------------------------------- */
+/* Final review I7: verify the unwrapped MMK; try every passkey wrapper        */
+/* -------------------------------------------------------------------------- */
+
+/** The latest Protected generation's DEK wrap (metadata only — no payload). */
+export type MmkKeyCheck = {
+  backupId: string;
+  wrappedDek: { nonceB64: string; ciphertextB64: string; tagB64: string };
+};
+
+// Must match @stack/memory mmk.ts `dekAad`.
+const dekAad = (backupId: string): Uint8Array =>
+  enc.encode(JSON.stringify({ purpose: 'wrap-dek', backupId }));
+
+/** True when `mmk` unwraps the check's DEK (AES-GCM authenticates it). */
+export const mmkOpensWrappedDek = async (options: {
+  mmk: Uint8Array;
+  check: MmkKeyCheck;
+}): Promise<boolean> => {
+  try {
+    const key = await subtle().importKey(
+      'raw',
+      bs(options.mmk),
+      { name: 'AES-GCM' },
+      false,
+      ['decrypt'],
+    );
+    const combined = new Uint8Array([
+      ...fromB64(options.check.wrappedDek.ciphertextB64),
+      ...fromB64(options.check.wrappedDek.tagB64),
+    ]);
+    const dek = new Uint8Array(
+      await subtle().decrypt(
+        {
+          name: 'AES-GCM',
+          iv: bs(fromB64(options.check.wrappedDek.nonceB64)),
+          additionalData: bs(dekAad(options.check.backupId)),
+        },
+        key,
+        bs(combined),
+      ),
+    );
+    dek.fill(0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export type PasskeyMmkSelection =
+  | { status: 'ok'; mmk: Uint8Array }
+  /** No listed passkey produced a PRF output here. */
+  | { status: 'no-prf' }
+  /** PRF worked, but no wrapper yielded a key that opens the account's Memory. */
+  | { status: 'no-match' };
+
+/**
+ * Final review I7: pick the passkey-wrapped MMK that actually opens this
+ * account's Memory. An abandoned protect can leave a wrapper for a key nothing
+ * uses (possibly for the same passkey, listed first); taking the first wrapper
+ * that unwraps would then fail every recovery. So: try EVERY wrapper (asking
+ * each passkey for its PRF once), skip a passkey without PRF instead of
+ * stopping, and accept a key only when it opens `check` (the latest Protected
+ * generation's DEK). With no check available, the first key that unwraps is
+ * used, as before.
+ */
+export const selectPasskeyMmk = async (options: {
+  wrappers: { publicIdentifier: string | null; mmkWrapper: unknown }[];
+  getPrf: (publicIdentifier: string) => Promise<Uint8Array | null>;
+  check: MmkKeyCheck | null;
+}): Promise<PasskeyMmkSelection> => {
+  const prfByCredential = new Map<string, Uint8Array | null>();
+  let anyPrf = false;
+  try {
+    for (const wrapper of options.wrappers) {
+      if (!wrapper.publicIdentifier) continue;
+      if (!prfByCredential.has(wrapper.publicIdentifier))
+        prfByCredential.set(
+          wrapper.publicIdentifier,
+          await options.getPrf(wrapper.publicIdentifier),
+        );
+      const prf = prfByCredential.get(wrapper.publicIdentifier) ?? null;
+      if (!prf) continue;
+      anyPrf = true;
+      let mmk: Uint8Array;
+      try {
+        mmk = await unwrapMmkWithPrf({
+          stored: wrapper.mmkWrapper as StoredMmkWrapper,
+          prfOutput: prf,
+        });
+      } catch {
+        continue; // not this passkey's wrapper
+      }
+      if (
+        !options.check ||
+        (await mmkOpensWrappedDek({ mmk, check: options.check }))
+      )
+        return { status: 'ok', mmk };
+      mmk.fill(0); // a leftover key that opens nothing — try the next wrapper
+    }
+  } finally {
+    for (const prf of prfByCredential.values()) prf?.fill(0);
+  }
+  return anyPrf ? { status: 'no-match' } : { status: 'no-prf' };
+};

@@ -2,8 +2,9 @@ import { readFile } from 'node:fs/promises';
 
 import { z } from 'zod';
 
+import type { MemoryManifest } from './domain.js';
 import { atomicWriteFile } from './remote/secure-file.js';
-import { memoryStorePaths } from './store.js';
+import { hashBytes, memoryStorePaths } from './store.js';
 
 /**
  * Machine-local recovery provenance (Phase 15B.6).
@@ -35,6 +36,26 @@ export const localRecoveryStateSchema = z.object({
    * made (callers must not treat it as "unchanged").
    */
   semanticDigest: z.string().optional(),
+  /**
+   * Task 13 fix round 3: written ONLY by a Cloud recover (never by a push) —
+   * the `v1ManifestFingerprint` of the v1 manifest that recover just restored.
+   * Migration compares it with the manifest it is about to migrate: a match
+   * means "this manifest came from Cloud and nothing was added locally since",
+   * so this machine's native files can't be assumed to hold it. Absent (any
+   * push, or any state written by an older CLI) means the manifest is treated
+   * as locally produced.
+   */
+  recoveredManifestFingerprint: z.string().optional(),
+  /**
+   * Spec §8.5: true ONLY when `stak memory recover` restored a generation OLDER
+   * than Cloud's latest at that moment (a deliberate rollback). Every publish,
+   * every push/backup that ends up to date and every syncing pull rewrites the
+   * state with `false`. Being merely BEHIND Cloud (another machine pushed since
+   * this one last synced) is never historical. Absent in state written before
+   * this field existed: then derived from the recorded fields (see
+   * `recordedAsHistorical`).
+   */
+  historical: z.boolean().optional(),
 });
 export type LocalRecoveryState = z.infer<typeof localRecoveryStateSchema>;
 
@@ -48,6 +69,11 @@ export class LocalRecoveryStateError extends Error {
     this.name = 'LocalRecoveryStateError';
   }
 }
+
+/** Stable fingerprint of a (schema-parsed) v1 manifest — see
+ * `recoveredManifestFingerprint`. */
+export const v1ManifestFingerprint = (manifest: MemoryManifest): string =>
+  hashBytes(Buffer.from(JSON.stringify(manifest), 'utf8'));
 
 /** Read the local recovery provenance, or null when none has been recorded. */
 export const readLocalRecoveryState = async (
@@ -87,8 +113,27 @@ export const writeLocalRecoveryState = async (
 };
 
 /**
- * Whether the local state was recovered from an OLDER generation than the current
- * Cloud latest — i.e. a subsequent backup would supersede a newer Cloud generation.
+ * Whether this state records a deliberate historical recover (see `historical`).
+ * State written before that field existed is derived from what was recorded at
+ * the time: a recover of an older generation than the latest then recorded
+ * `recoveredGeneration < cloudLatestAtRecovery`, while every publish and
+ * in-sync record wrote both as the same generation.
+ */
+export const recordedAsHistorical = (state: LocalRecoveryState): boolean =>
+  state.historical ??
+  (state.cloudLatestAtRecovery !== null &&
+    state.recoveredGeneration < state.cloudLatestAtRecovery);
+
+/**
+ * Whether local Memory is a deliberate historical recovery (spec §8.5): this
+ * machine ran `stak memory recover` for a generation older than the latest at
+ * that time, and has not published or synced since — so its next push or backup
+ * publishes a rollback that supersedes newer Cloud generations.
+ *
+ * Being merely BEHIND Cloud (`recoveredGeneration < cloudLatestGeneration`
+ * because another machine pushed since this one last synced) is NOT historical:
+ * that machine's next push simply merges. A Cloud with no Memory (null latest)
+ * has nothing to supersede.
  */
 export const isHistoricalRecovery = (
   state: LocalRecoveryState | null,
@@ -96,4 +141,4 @@ export const isHistoricalRecovery = (
 ): boolean =>
   state !== null &&
   cloudLatestGeneration !== null &&
-  state.recoveredGeneration < cloudLatestGeneration;
+  recordedAsHistorical(state);

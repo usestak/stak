@@ -8,6 +8,7 @@
  */
 import {
   RemoteMemoryError,
+  assertCreateGenerationAllowed,
   type MemoryGenerationMeta,
   type MemoryProfile,
   type RecoveryMethodRecord,
@@ -28,7 +29,9 @@ import type {
 import {
   CloudServiceError,
   memoryConflict,
+  memoryIncompatibleFormat,
   memoryIntegrity,
+  memoryInvalidReplica,
   memoryNoEnvelope,
   memoryNotConfigured,
   memoryNotFound,
@@ -67,6 +70,12 @@ const mapError = (error: unknown): never => {
         throw memorySessionExpired(error.message);
       case 'no-envelope':
         throw memoryNoEnvelope(error.message);
+      case 'incompatible-format':
+        throw memoryIncompatibleFormat(error.message);
+      case 'invalid-replica':
+        throw memoryInvalidReplica(error.message);
+      case 'retire-refused':
+        throw memoryConflict(error.message);
       default:
         throw error;
     }
@@ -97,6 +106,7 @@ const generationDto = (meta: MemoryGenerationMeta): MemoryGenerationDto => ({
   ...(meta.wrappedDek ? { wrappedDek: meta.wrappedDek } : {}),
   state: meta.state,
   softDeletedAt: meta.softDeletedAt ?? null,
+  ...(meta.replicaOf ? { replicaOf: meta.replicaOf } : {}),
 });
 
 const methodDto = (record: RecoveryMethodRecord): MemoryRecoveryMethodDto => ({
@@ -197,13 +207,44 @@ export const createMemoryMethods = (config: MemoryServiceConfig) => {
       request: MemoryCreateGenerationRequest,
     ) =>
       run(async () => {
+        // Spec §9.3/A.5 + Task 13 fix round 3: the STICKY v1-after-v2 gate
+        // (refuse a v1 create once this account has EVER committed a v2
+        // generation) and the server-verified protect-replica exemption
+        // (`replicaOf`), enforced HERE — backend-agnostic, because production's
+        // real backend (Supabase, via `memoryBackendFor`) has no such check of
+        // its own — via the SAME function the in-memory backend runs, so the
+        // two can never drift apart. Decided entirely from this account's own
+        // server-side records; nothing the client claims is trusted, and the
+        // payload is never decrypted or parsed.
+        const backend = backendFor(user.userId);
         const payload = Buffer.from(request.payloadB64, 'base64');
-        const meta = await backendFor(user.userId).createGeneration({
+        assertCreateGenerationAllowed(
+          {
+            bundleFormatVersion: request.bundleFormatVersion,
+            privacyMode: request.privacyMode,
+            payloadBytes: payload.byteLength,
+            ...(request.replicaOf !== undefined
+              ? { replicaOf: request.replicaOf }
+              : {}),
+          },
+          {
+            profile: await backend.getProfile(),
+            committed: await backend.listGenerations(),
+            original:
+              request.replicaOf !== undefined
+                ? await backend.getGenerationById(request.replicaOf)
+                : null,
+          },
+        );
+        const meta = await backend.createGeneration({
           backupId: request.backupId,
           expectedParent: request.expectedParent,
           privacyMode: request.privacyMode,
           payload,
           bundleFormatVersion: request.bundleFormatVersion,
+          ...(request.replicaOf !== undefined
+            ? { replicaOf: request.replicaOf }
+            : {}),
           ...(request.cryptoVersion
             ? { cryptoVersion: request.cryptoVersion }
             : {}),
@@ -223,7 +264,14 @@ export const createMemoryMethods = (config: MemoryServiceConfig) => {
 
     memoryRetireGeneration: (user: MemoryAuthenticatedUser, backupId: string) =>
       run(async () => {
-        await backendFor(user.userId).retireGeneration(backupId, now);
+        // Task 13 fix round 5: every retire over this route (the CLI's only
+        // retire path — `stak memory protect`) is GUARDED: it may never remove
+        // the last committed copy of a Standard original's content (see
+        // `assertRetireAllowed`). Delete Cloud Memory retires server-side via
+        // the product service, unguarded, and is unaffected.
+        await backendFor(user.userId).retireGeneration(backupId, now, {
+          guarded: true,
+        });
         return { ok: true as const };
       }),
 

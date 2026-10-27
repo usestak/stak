@@ -23,7 +23,11 @@ import {
   publishUserStackRequestSchema,
 } from '@stack/spec';
 
-import { CloudServiceError, invalidRequest } from './errors.js';
+import {
+  CloudServiceError,
+  invalidRequest,
+  memoryInvalidReplica,
+} from './errors.js';
 import { MAX_REVIEW_PAYLOAD_BYTES } from './product-service.js';
 import type { AuthenticatedUser, CloudService } from './service.js';
 
@@ -552,10 +556,23 @@ export const handleCloudRequest = async (
         return json(200, await service.memoryGetLatest(await authenticate()));
       if (method === 'POST' && matches(rest, ['generations'])) {
         const user = await authenticate();
-        const body = memoryCreateGenerationRequestSchema.parse(
+        const parsed = memoryCreateGenerationRequestSchema.safeParse(
           request.jsonBody ?? {},
         );
-        return json(200, await service.memoryCreateGeneration(user, body));
+        // Task 13 fix round 4: a malformed `replicaOf` is a refused replica
+        // (400 memory-invalid-replica), never a Postgres uuid-cast 500.
+        if (
+          !parsed.success &&
+          parsed.error.issues.some((issue) => issue.path[0] === 'replicaOf')
+        )
+          throw memoryInvalidReplica(
+            'Refused Protected replica: replicaOf is not a valid backup id.',
+          );
+        if (!parsed.success) throw parsed.error;
+        return json(
+          200,
+          await service.memoryCreateGeneration(user, parsed.data),
+        );
       }
       if (method === 'GET' && rest.length === 2 && rest[0] === 'by-number') {
         const generation = Number.parseInt(rest[1] ?? '', 10);

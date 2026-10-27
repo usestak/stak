@@ -1752,6 +1752,20 @@ Use authenticated, short-lived downloads.
 
 Never expose private snapshot URLs publicly.
 
+Snapshots are append-only. A user's snapshot metadata and bytes are never deleted
+while that user has any Environment version (today they go only with the account,
+via the `auth.users` cascade). Two things depend on this:
+
+* `commitEnvironmentVersion` does not re-verify that a bundle's
+  `contentUploadRequirements` exist in the store.
+* `stak push` skips existence checks for content its previous push confirmed
+  (`confirmedContentHashes` in machine-local sync state), and trusts that list only
+  while the version it last synced is still Cloud's latest.
+
+Any future snapshot garbage collection, retention policy or per-snapshot delete must
+keep every hash referenced by a stored version, or add an existence check to commit
+(with a CLI fallback to a full re-check) in the same change.
+
 ---
 
 ## 49. CLI Authentication

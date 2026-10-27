@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  CANONICAL_MAIN_SCHEMA_VERSION,
   InMemoryRemoteMemoryStore,
   emptyRegistry,
   fileLocalMemoryKeyStore,
@@ -14,11 +15,15 @@ import {
   inMemoryRemoteMemoryBackend,
   memoryStorePaths,
   mintProjectId,
+  readCanonicalMain,
+  readLocalRecoveryState,
+  readLocalRegistry,
   readMemoryManifest,
   readMemoryObject,
   resolveOrMintProject,
   runMemoryBackup,
   setBinding,
+  writeCanonicalMain,
   writeLocalRegistry,
   writeMemoryManifest,
   writeMemoryObject,
@@ -27,17 +32,22 @@ import {
   type DiscoveredMemoryItem,
   type ManifestItem,
   type MemoryManifest,
+  unwrapWithRecoveryKey,
 } from '@stack/memory';
 
 import {
   freshRegistryRisksDuplication,
+  isHistoricalWithoutSyncHistory,
   pushStagedMemory,
+  readBackupSupersession,
   readMemoryCloudStatus,
   resolveMemoryPushState,
   runMemoryCloudBackup,
   runMemoryCloudProtect,
   runMemoryCloudRecover,
+  readRecoveryKeyFile,
 } from './cloud-ops.js';
+import { defined } from '../test-support.js';
 
 const USER = 'user-ops';
 const secureKeys = (dir: string) =>
@@ -133,6 +143,30 @@ describe('memory cloud operations', () => {
     });
     expect(outcome.local.files).toBe(3);
     expect(outcome.cloud.status).toBe('skipped');
+  });
+
+  it('a pure Skills-only account (no v1 manifest ever, Cloud has no Memory history) does not publish an empty generation (Task 13 Important-7(a))', async () => {
+    const stackHome = await temp('stack-skills-only-');
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-skills-only-keys-'));
+    const fakeBackupNoManifest = (): Promise<BackupResult> =>
+      // The local backup itself touches nothing Memory-related — e.g. a plain
+      // Skills-only `stak memory backup` with zero discovered items.
+      Promise.resolve({
+        provider: 'claude',
+        files: 0,
+        projects: 0,
+        createdAt: '2026-10-23T00:00:00.000Z',
+      });
+    const outcome = await runMemoryCloudBackup({
+      stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackupNoManifest,
+    });
+    expect(outcome.cloud.status).toBe('nothing-staged');
+    expect(await backend.listGenerations()).toHaveLength(0);
   });
 
   it('Standard backup then recover byte-exactly', async () => {
@@ -256,7 +290,48 @@ describe('memory cloud operations', () => {
     expect(await keys.hasKey()).toBe(true);
     expect((await backend.getProfile())?.privacyMode).toBe('protected');
 
-    // A subsequent everyday backup is Protected without any prompt.
+    // Task 13 Critical-3 fix (review round): backup now merges like push, so a
+    // subsequent backup with NOTHING changed since protect (protect only
+    // re-encrypts existing generations; it never touches canonical content) is
+    // correctly a no-op — never a second, identical Protected generation.
+    const noop = await runMemoryCloudBackup({
+      stackHome: source.stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    });
+    expect(noop.cloud.status).toBe('up-to-date');
+
+    // A subsequent backup with a GENUINE change stays Protected without any prompt.
+    const mainBefore = await readCanonicalMain(source.stackHome);
+    const projectId = mainBefore.projects[0]?.projectId as string;
+    const newBody = Buffer.from('a new protected note', 'utf8');
+    const newHash = hashBytes(newBody);
+    await writeMemoryObject({
+      stackHome: source.stackHome,
+      contentHash: newHash,
+      bytes: newBody,
+    });
+    await writeCanonicalMain(source.stackHome, {
+      ...mainBefore,
+      projects: mainBefore.projects.map((p) =>
+        p.projectId === projectId
+          ? {
+              ...p,
+              documents: [
+                ...p.documents,
+                {
+                  path: 'notes/new.md',
+                  state: 'present' as const,
+                  contentHash: newHash,
+                  importedFrom: 'claude' as const,
+                  importedAt: '2026-10-23T00:00:00.000Z',
+                },
+              ],
+            }
+          : p,
+      ),
+    });
     const out = await runMemoryCloudBackup({
       stackHome: source.stackHome,
       backend,
@@ -360,6 +435,58 @@ describe('memory cloud operations', () => {
     expect(status.authenticated).toBe(true);
     expect(status.privacyMode).toBe('standard');
     expect(status.latestGeneration).toBe(0);
+  });
+
+  it('status issues its three independent Cloud reads concurrently and reports the same result', async () => {
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-ops-keys-'));
+    const deps = {
+      stackHome: source.stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    };
+    await runMemoryCloudBackup(deps);
+    const latest = await backend.getLatest();
+
+    const events: string[] = [];
+    const delayed: typeof backend = Object.create(backend);
+    for (const name of [
+      'getProfile',
+      'getLatest',
+      'listRecoveryMethods',
+    ] as const) {
+      const original = backend[name].bind(backend) as () => Promise<unknown>;
+      (delayed as unknown as Record<string, unknown>)[name] = async () => {
+        events.push(`${name}:start`);
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 5);
+        });
+        events.push(`${name}:end`);
+        return original();
+      };
+    }
+    const status = await readMemoryCloudStatus({ ...deps, backend: delayed });
+    // All three started before any finished.
+    expect(events.slice(0, 3).sort()).toEqual([
+      'getLatest:start',
+      'getProfile:start',
+      'listRecoveryMethods:start',
+    ]);
+    expect(status).toEqual({
+      authenticated: true,
+      privacyMode: 'standard',
+      latestGeneration: 0,
+      lastCloudBackupAt: latest?.createdAt ?? null,
+      recoveryMethodTypes: [],
+      deviceEnrolled: await keys.hasKey(),
+      // The backup above recorded this machine as synced at generation 0.
+      localRecoveredGeneration: 0,
+      historicalRecovery: false,
+    });
+    expect(await readMemoryCloudStatus(deps)).toEqual(status);
   });
 
   it('protect fails closed and does not finalize Protected when the local key cannot be secured', async () => {
@@ -548,7 +675,10 @@ describe('resolveMemoryPushState — top-level push must not create duplicate Me
             scope: 'global',
             logicalId: 'claude/auto-memory/second-file.md',
             contentHash: newHash,
-            restoreTarget: { base: 'claude-home', relativePath: 'second-file.md' },
+            restoreTarget: {
+              base: 'claude-home',
+              relativePath: 'second-file.md',
+            },
             capturedAt: '2026-09-25T12:00:00.000Z',
             sensitivity: 'private',
           },
@@ -590,7 +720,9 @@ describe('resolveMemoryPushState — top-level push must not create duplicate Me
       ],
     });
 
-    expect(await resolveMemoryPushState(deps)).toEqual({ status: 'needs-push' });
+    expect(await resolveMemoryPushState(deps)).toEqual({
+      status: 'needs-push',
+    });
     const second = await pushStagedMemory(deps);
     expect(second).toMatchObject({ status: 'standard', generation: 1 });
     expect(await resolveMemoryPushState(deps)).toEqual({
@@ -655,13 +787,19 @@ describe('resolveMemoryPushState — top-level push must not create duplicate Me
 
     const first = await pushStagedMemory(deps);
     expect(first.status).toBe('protected');
-    const firstGeneration = first.status === 'protected' ? first.generation : -1;
+    const firstGeneration =
+      first.status === 'protected' ? first.generation : -1;
 
     // Pushing the exact same staged state again must be a no-op, even though each
     // Protected upload is independently encrypted (fresh nonce/DEK every time).
     const state = await resolveMemoryPushState(deps);
-    expect(state).toEqual({ status: 'already-up-to-date', generation: firstGeneration });
-    expect(await backend.getLatest()).toMatchObject({ generation: firstGeneration });
+    expect(state).toEqual({
+      status: 'already-up-to-date',
+      generation: firstGeneration,
+    });
+    expect(await backend.getLatest()).toMatchObject({
+      generation: firstGeneration,
+    });
   });
 });
 
@@ -861,5 +999,724 @@ describe('freshRegistryRisksDuplication (fresh/reset-registry safeguard)', () =>
         registry: emptyRegistry(),
       }),
     ).toBe(false);
+  });
+});
+
+describe('runMemoryCloudBackup migrates to canonical Memory and always publishes a v2 generation (Task 13)', () => {
+  it('migrates a project-scope v1 item into canonical Memory and publishes exactly one v2 generation per call, even with nothing changed', async () => {
+    const stackHome = await temp('stack-backup-v2-');
+    // A project-scope (git identity) item — exactly what `migrateLocalStore`
+    // moves out of the v1 manifest and into canonical Memory.
+    const body = Buffer.from('project note', 'utf8');
+    const contentHash = hashBytes(body);
+    await writeMemoryObject({ stackHome, contentHash, bytes: body });
+    await writeMemoryManifest({
+      stackHome,
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-23T00:00:00.000Z',
+        items: [
+          {
+            provider: 'claude',
+            kind: 'auto-memory',
+            scope: 'project',
+            logicalId: 'claude/auto-memory/github.com/acme/demo/MEMORY.md',
+            project: {
+              kind: 'git',
+              canonical: 'github.com/acme/demo',
+              host: 'github.com',
+              owner: 'acme',
+              repo: 'demo',
+            },
+            contentHash,
+            restoreTarget: {
+              base: 'claude-project-memory',
+              relativePath: 'MEMORY.md',
+            },
+            capturedAt: '2026-10-23T00:00:00.000Z',
+            sensitivity: 'private',
+          },
+        ],
+      },
+    });
+
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-backup-v2-keys-'));
+
+    const first = await runMemoryCloudBackup({
+      stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    });
+    expect(first.cloud.status).toBe('standard');
+    if (first.cloud.status === 'standard')
+      expect(first.cloud.generation).toBe(0);
+    // Migration ran: the project-scope item left the v1 manifest...
+    expect((await readMemoryManifest(stackHome))?.items).toHaveLength(0);
+    // ...and landed in canonical Memory.
+    const main = await readCanonicalMain(stackHome);
+    expect(
+      main.projects[0]?.documents.some(
+        (doc) => doc.state === 'present' && doc.contentHash === contentHash,
+      ),
+    ).toBe(true);
+
+    // Task 13 Critical-3 fix (review round): the spec (§9.3) says `stak memory
+    // backup` "stays as a deprecated alias for the memory part of `stak push`" —
+    // it must MERGE against Cloud like push does, never blindly overwrite it.
+    // A second backup with nothing changed since the first is therefore a
+    // genuine no-op: no second generation is created.
+    const second = await runMemoryCloudBackup({
+      stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    });
+    expect(second.cloud.status).toBe('up-to-date');
+    expect(await backend.listGenerations()).toHaveLength(1);
+  });
+
+  it("merges instead of overwriting: another machine pushes a doc, then this machine backs up — the other machine's doc survives in Cloud", async () => {
+    // Machine B: push doc Z for some project.
+    const stackHomeB = await temp('stack-backup-merge-b-');
+    let registryB = await readLocalRegistry(stackHomeB);
+    const minted = resolveOrMintProject(registryB, {
+      kind: 'git',
+      canonical: 'github.com/acme/shared',
+      host: 'github.com',
+      owner: 'acme',
+      repo: 'shared',
+    });
+    registryB = minted.registry;
+    await writeLocalRegistry(stackHomeB, registryB);
+    const bodyZ = Buffer.from('doc Z from machine B', 'utf8');
+    const hashZ = hashBytes(bodyZ);
+    await writeMemoryObject({
+      stackHome: stackHomeB,
+      contentHash: hashZ,
+      bytes: bodyZ,
+    });
+    await writeCanonicalMain(stackHomeB, {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [
+        {
+          projectId: minted.projectId,
+          documents: [
+            {
+              path: 'notes/z.md',
+              state: 'present',
+              contentHash: hashZ,
+              importedFrom: 'claude',
+              importedAt: '2026-10-23T00:00:00.000Z',
+            },
+          ],
+        },
+      ],
+    });
+
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, 'backup-merge-user');
+    const keysB = secureKeys(await temp('stack-backup-merge-b-keys-'));
+    const pushedB = await runMemoryCloudBackup({
+      stackHome: stackHomeB,
+      backend,
+      localKeyStore: keysB,
+      runLocalBackup: fakeBackup,
+    });
+    expect(pushedB.cloud.status).toBe('standard');
+
+    // Machine A: the SAME logical project (registry already agrees on the
+    // Project ID), a DIFFERENT doc of its own, never having synced with B's
+    // push. Running `stak memory backup` here must MERGE — never overwrite —
+    // so Z survives.
+    const stackHomeA = await temp('stack-backup-merge-a-');
+    let registryA = await readLocalRegistry(stackHomeA);
+    registryA = resolveOrMintProject(
+      registryA,
+      {
+        kind: 'git',
+        canonical: 'github.com/acme/shared',
+        host: 'github.com',
+        owner: 'acme',
+        repo: 'shared',
+      },
+      () => minted.projectId,
+    ).registry;
+    await writeLocalRegistry(stackHomeA, registryA);
+    const bodyY = Buffer.from('doc Y from machine A', 'utf8');
+    const hashY = hashBytes(bodyY);
+    await writeMemoryObject({
+      stackHome: stackHomeA,
+      contentHash: hashY,
+      bytes: bodyY,
+    });
+    await writeCanonicalMain(stackHomeA, {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [
+        {
+          projectId: minted.projectId,
+          documents: [
+            {
+              path: 'notes/y.md',
+              state: 'present',
+              contentHash: hashY,
+              importedFrom: 'claude',
+              importedAt: '2026-10-23T00:00:00.000Z',
+            },
+          ],
+        },
+      ],
+    });
+    const keysA = secureKeys(await temp('stack-backup-merge-a-keys-'));
+    const backedUpA = await runMemoryCloudBackup({
+      stackHome: stackHomeA,
+      backend,
+      localKeyStore: keysA,
+      runLocalBackup: fakeBackup,
+    });
+    expect(backedUpA.cloud.status).toBe('standard');
+
+    // Z (from B) must survive in Cloud alongside Y (from A) — a merge, not an
+    // overwrite.
+    const latestMain = await readCanonicalMain(stackHomeA);
+    const docs =
+      latestMain.projects.find((p) => p.projectId === minted.projectId)
+        ?.documents ?? [];
+    expect(
+      docs.some((d) => d.state === 'present' && d.contentHash === hashZ),
+    ).toBe(true);
+    expect(
+      docs.some((d) => d.state === 'present' && d.contentHash === hashY),
+    ).toBe(true);
+  });
+});
+
+describe('C1: protect refuses an already-Protected account', () => {
+  it('never generates or enrolls a new key, adds no recovery method, and leaves the device MMK intact', async () => {
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-ops-c1-'));
+    const deps = {
+      stackHome: source.stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    };
+    await runMemoryCloudBackup(deps);
+    const first = await runMemoryCloudProtect(deps, {
+      recoveryKey: generateRecoveryKey(),
+    });
+    expect(first.status).toBe('protected');
+    const mmkBefore = await keys.loadMmk();
+    const methodsBefore = await backend.listRecoveryMethods();
+    const generationsBefore = await backend.listGenerations();
+
+    await expect(
+      runMemoryCloudProtect(deps, { recoveryKey: generateRecoveryKey() }),
+    ).rejects.toMatchObject({ code: 'already-protected' });
+
+    expect((await keys.loadMmk())?.equals(mmkBefore as Buffer)).toBe(true);
+    expect(await backend.listRecoveryMethods()).toHaveLength(
+      methodsBefore.length,
+    );
+    expect(await backend.listGenerations()).toHaveLength(
+      generationsBefore.length,
+    );
+    expect((await backend.getProfile())?.privacyMode).toBe('protected');
+  });
+
+  it('a locked device (no MMK) is refused too, pointing at `stak memory recover`', async () => {
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const deviceA = secureKeys(await temp('stack-ops-c1a-'));
+    await runMemoryCloudProtect(
+      {
+        stackHome: source.stackHome,
+        backend,
+        localKeyStore: deviceA,
+        runLocalBackup: fakeBackup,
+      },
+      { recoveryKey: generateRecoveryKey() },
+    );
+    const deviceB = secureKeys(await temp('stack-ops-c1b-'));
+    const error = await runMemoryCloudProtect(
+      {
+        stackHome: source.stackHome,
+        backend,
+        localKeyStore: deviceB,
+        runLocalBackup: fakeBackup,
+      },
+      { recoveryKey: generateRecoveryKey() },
+    ).catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: 'already-protected' });
+    expect(String((error as Error).message)).toContain('stak memory recover');
+    expect(await deviceB.hasKey()).toBe(false);
+    expect(await backend.listRecoveryMethods()).toHaveLength(1);
+  });
+});
+
+describe('recover --recovery-file reads the file (final review follow-up)', () => {
+  it('a recovery file written by protect unlocks a fresh device; a bad path or file fails without changing anything', async () => {
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const deviceA = secureKeys(await temp('stack-ops-rf-a-'));
+    const depsA = {
+      stackHome: source.stackHome,
+      backend,
+      localKeyStore: deviceA,
+      runLocalBackup: fakeBackup,
+    };
+    await runMemoryCloudBackup(depsA);
+    const recoveryKey = generateRecoveryKey();
+    await runMemoryCloudProtect(depsA, { recoveryKey });
+    const dir = await temp('stack-ops-rf-file-');
+    const filePath = path.join(dir, 'stack-memory-recovery.stackkey');
+    await writeFile(
+      filePath,
+      `${JSON.stringify(recoveryKey.file, null, 2)}
+`,
+      'utf8',
+    );
+
+    const deviceB = secureKeys(await temp('stack-ops-rf-b-'));
+    const dest = await temp('stack-ops-rf-dst-');
+    const rec = await runMemoryCloudRecover(
+      {
+        stackHome: dest,
+        backend,
+        localKeyStore: deviceB,
+        runLocalBackup: fakeBackup,
+      },
+      { recoveryKey: await readRecoveryKeyFile(filePath) },
+    );
+    expect(rec.status).toBe('recovered');
+    expect(await deviceB.hasKey()).toBe(true);
+
+    await expect(
+      readRecoveryKeyFile(path.join(dir, 'missing.stackkey')),
+    ).rejects.toThrow(/Couldn't read the recovery file/);
+    const junk = path.join(dir, 'junk.stackkey');
+    await writeFile(junk, '{"format":"nope"}', 'utf8');
+    await expect(readRecoveryKeyFile(junk)).rejects.toThrow(
+      /isn't a STAK recovery file/,
+    );
+  });
+});
+
+describe('I8: protect writes the recovery file before anything changes in Cloud', () => {
+  const setup = async () => {
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-ops-i8-'));
+    const deps = {
+      stackHome: source.stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    };
+    await runMemoryCloudBackup(deps);
+    return { backend, keys, deps };
+  };
+
+  it('writes the file before the recovery wrapper is added; a migration failure keeps the wrapper, and the file unlocks the enrolled key', async () => {
+    const { backend, keys, deps } = await setup();
+    const order: string[] = [];
+    const addRecoveryMethod = backend.addRecoveryMethod.bind(backend);
+    const failing: typeof backend = Object.assign(
+      Object.create(backend) as typeof backend,
+      {
+        addRecoveryMethod: async (
+          input: Parameters<typeof backend.addRecoveryMethod>[0],
+        ) => {
+          order.push('add-recovery-method');
+          return addRecoveryMethod(input);
+        },
+        createGeneration: async () => {
+          throw new Error('network died mid-protect');
+        },
+      },
+    );
+    const recoveryKey = generateRecoveryKey();
+    await expect(
+      runMemoryCloudProtect(
+        { ...deps, backend: failing },
+        {
+          recoveryKey,
+          writeRecoveryFile: async () => {
+            order.push('write-file');
+          },
+        },
+      ),
+    ).rejects.toThrow('network died mid-protect');
+    expect(order).toEqual(['write-file', 'add-recovery-method']);
+    const methods = await backend.listRecoveryMethods();
+    expect(methods).toHaveLength(1); // never revoked: the file on disk refers to it
+    const stored = methods[0]?.mmkWrapper as {
+      mmkId: string;
+      wrapper: Parameters<typeof unwrapWithRecoveryKey>[0]['wrapper'];
+    };
+    const unwrapped = unwrapWithRecoveryKey({
+      keyring: { mmkId: stored.mmkId, wrappers: [stored.wrapper] },
+      wrapper: stored.wrapper,
+      recoveryKey: recoveryKey.keyBytes,
+    });
+    expect(unwrapped.equals((await keys.loadMmk()) as Buffer)).toBe(true);
+  });
+
+  it('a recovery file that cannot be written stops protect before any recovery method, replica or mode change', async () => {
+    const { backend, deps } = await setup();
+    await expect(
+      runMemoryCloudProtect(deps, {
+        recoveryKey: generateRecoveryKey(),
+        writeRecoveryFile: async () => {
+          throw new Error('EEXIST: file already exists');
+        },
+      }),
+    ).rejects.toThrow('EEXIST');
+    expect(await backend.listRecoveryMethods()).toHaveLength(0);
+    expect(
+      (await backend.listGenerations()).every(
+        (g) => g.privacyMode === 'standard',
+      ),
+    ).toBe(true);
+    expect((await backend.getProfile())?.privacyMode ?? 'standard').toBe(
+      'standard',
+    );
+  });
+});
+
+describe("protect moves this machine's sync provenance to the Protected replica", () => {
+  const setup = async () => {
+    const source = await writeStore();
+    const backend = inMemoryRemoteMemoryBackend(
+      new InMemoryRemoteMemoryStore(),
+      USER,
+    );
+    const keys = secureKeys(await temp('stack-ops-prov-keys-'));
+    const deps = {
+      stackHome: source.stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    };
+    return { stackHome: source.stackHome, backend, keys, deps };
+  };
+  /** A genuine change to canonical Memory, so the next backup publishes. */
+  const addDoc = async (stackHome: string, body: string) => {
+    const main = await readCanonicalMain(stackHome);
+    const bytes = Buffer.from(body, 'utf8');
+    const contentHash = hashBytes(bytes);
+    await writeMemoryObject({ stackHome, contentHash, bytes });
+    await writeCanonicalMain(stackHome, {
+      ...main,
+      projects: main.projects.map((p, i) =>
+        i === 0
+          ? {
+              ...p,
+              documents: [
+                ...p.documents,
+                {
+                  path: `notes/${contentHash.slice(0, 8)}.md`,
+                  state: 'present' as const,
+                  contentHash,
+                  importedFrom: 'claude' as const,
+                  importedAt: '2026-10-26T00:00:00.000Z',
+                },
+              ],
+            }
+          : p,
+      ),
+    });
+  };
+
+  it('backup -> protect -> status: no historical recovery, local source is the latest replica', async () => {
+    const { stackHome, backend, deps } = await setup();
+    expect((await runMemoryCloudBackup(deps)).cloud).toMatchObject({
+      status: 'standard',
+      generation: 0,
+    });
+    expect(
+      (
+        await runMemoryCloudProtect(deps, {
+          recoveryKey: generateRecoveryKey(),
+        })
+      ).status,
+    ).toBe('protected');
+    const latest = await backend.getLatest();
+    expect(latest?.generation).toBe(1);
+
+    const status = await readMemoryCloudStatus(deps);
+    expect(status.historicalRecovery).toBe(false);
+    expect(status.localRecoveredGeneration).toBe(1);
+    expect(status.latestGeneration).toBe(1);
+    const provenance = await readLocalRecoveryState(stackHome);
+    expect(provenance).toMatchObject({
+      recoveredGeneration: 1,
+      cloudLatestAtRecovery: 1,
+      privacyMode: 'protected',
+    });
+    // The staged state is unchanged, so a Protected push is already up to date.
+    expect(await resolveMemoryPushState(deps)).toEqual({
+      status: 'already-up-to-date',
+      generation: 1,
+    });
+  });
+
+  it("backup x2 -> recover the older -> protect -> status: still historical, pointing at the older backup's replica", async () => {
+    const { stackHome, backend, deps } = await setup();
+    expect((await runMemoryCloudBackup(deps)).cloud).toMatchObject({
+      status: 'standard',
+      generation: 0,
+    });
+    await addDoc(stackHome, 'second backup note');
+    expect((await runMemoryCloudBackup(deps)).cloud).toMatchObject({
+      status: 'standard',
+      generation: 1,
+    });
+    const [newer, older] = await backend.listGenerations();
+    expect((await runMemoryCloudRecover(deps, { generation: 0 })).status).toBe(
+      'recovered',
+    );
+    expect((await readMemoryCloudStatus(deps)).historicalRecovery).toBe(true);
+
+    expect(
+      (
+        await runMemoryCloudProtect(deps, {
+          recoveryKey: generateRecoveryKey(),
+        })
+      ).status,
+    ).toBe('protected');
+    const committed = await backend.listGenerations();
+    const olderReplica = defined(
+      committed.find((g) => g.replicaOf === defined(older).backupId),
+    );
+    const newerReplica = defined(
+      committed.find((g) => g.replicaOf === defined(newer).backupId),
+    );
+    expect(olderReplica.generation).toBe(2);
+    expect(newerReplica.generation).toBe(3);
+
+    const status = await readMemoryCloudStatus(deps);
+    expect(status.historicalRecovery).toBe(true);
+    expect(status.localRecoveredGeneration).toBe(olderReplica.generation);
+    expect(status.latestGeneration).toBe(newerReplica.generation);
+    expect(await readLocalRecoveryState(stackHome)).toMatchObject({
+      recoveredGeneration: olderReplica.generation,
+      cloudLatestAtRecovery: newerReplica.generation,
+    });
+  });
+
+  it('resuming an interrupted protect moves the provenance too', async () => {
+    const { stackHome, backend, deps } = await setup();
+    expect((await runMemoryCloudBackup(deps)).cloud).toMatchObject({
+      status: 'standard',
+      generation: 0,
+    });
+    // Interrupt after the replica is committed and the original retired.
+    const interrupted: typeof backend = Object.create(backend);
+    interrupted.setPrivacyMode = () =>
+      Promise.reject(new Error('connection reset'));
+    await expect(
+      runMemoryCloudProtect(
+        { ...deps, backend: interrupted },
+        { recoveryKey: generateRecoveryKey() },
+      ),
+    ).rejects.toThrow('connection reset');
+    expect(
+      (
+        await runMemoryCloudProtect(deps, {
+          recoveryKey: generateRecoveryKey(),
+        })
+      ).status,
+    ).toBe('protected');
+
+    const status = await readMemoryCloudStatus(deps);
+    expect(status.historicalRecovery).toBe(false);
+    expect(status.localRecoveredGeneration).toBe(1);
+    expect((await readLocalRecoveryState(stackHome))?.recoveredGeneration).toBe(
+      1,
+    );
+  });
+
+  describe('another machine (read-time mapping)', () => {
+    const machineB = async (
+      backend: ReturnType<typeof inMemoryRemoteMemoryBackend>,
+    ) => ({
+      stackHome: await temp('stack-ops-prov-b-'),
+      backend,
+      localKeyStore: secureKeys(await temp('stack-ops-prov-b-keys-')),
+      runLocalBackup: fakeBackup,
+    });
+
+    it("B synced #0, then A protects: B shows no historical recovery, no rollback, no supersession; B's provenance file is not rewritten", async () => {
+      const { backend, deps: depsA } = await setup();
+      expect((await runMemoryCloudBackup(depsA)).cloud).toMatchObject({
+        status: 'standard',
+        generation: 0,
+      });
+      const depsB = await machineB(backend);
+      expect((await runMemoryCloudRecover(depsB)).status).toBe('recovered');
+      const before = await readFile(
+        memoryStorePaths(depsB.stackHome).recoveryState,
+        'utf8',
+      );
+      expect(
+        (
+          await runMemoryCloudProtect(depsA, {
+            recoveryKey: generateRecoveryKey(),
+          })
+        ).status,
+      ).toBe('protected');
+
+      // `stak push`'s preflight prints the rollback note exactly when
+      // `historicalRecovery` is true (program.ts `memoryPushPreflight`).
+      const status = await readMemoryCloudStatus(depsB);
+      expect(status.historicalRecovery).toBe(false);
+      expect(status.localRecoveredGeneration).toBe(1);
+      expect(status.latestGeneration).toBe(1);
+      expect(await readBackupSupersession(depsB)).toMatchObject({
+        supersedes: false,
+        noSyncHistory: false,
+        localRecoveredGeneration: 1,
+      });
+      expect(await isHistoricalWithoutSyncHistory(depsB)).toBe(false);
+      // Read-only: status never writes provenance.
+      expect(
+        await readFile(memoryStorePaths(depsB.stackHome).recoveryState, 'utf8'),
+      ).toBe(before);
+    });
+
+    it("a genuine older recover on B before A protects still counts as historical (at the older backup's replica)", async () => {
+      const { stackHome: homeA, backend, deps: depsA } = await setup();
+      expect((await runMemoryCloudBackup(depsA)).cloud).toMatchObject({
+        status: 'standard',
+        generation: 0,
+      });
+      await addDoc(homeA, 'second backup note');
+      expect((await runMemoryCloudBackup(depsA)).cloud).toMatchObject({
+        status: 'standard',
+        generation: 1,
+      });
+      const depsB = await machineB(backend);
+      expect(
+        (await runMemoryCloudRecover(depsB, { generation: 0 })).status,
+      ).toBe('recovered');
+      expect(
+        (
+          await runMemoryCloudProtect(depsA, {
+            recoveryKey: generateRecoveryKey(),
+          })
+        ).status,
+      ).toBe('protected');
+
+      const status = await readMemoryCloudStatus(depsB);
+      expect(status.historicalRecovery).toBe(true);
+      expect(status.localRecoveredGeneration).toBe(2);
+      expect(status.latestGeneration).toBe(3);
+      expect((await readBackupSupersession(depsB)).supersedes).toBe(true);
+      // B has no canonical sync base, so the no-base push/backup block
+      // (final review T15-4) must still apply after protect.
+      expect(await isHistoricalWithoutSyncHistory(depsB)).toBe(true);
+    });
+
+    it('fails safe: when the replica lookup errors, status keeps the recorded generation', async () => {
+      const { backend, deps: depsA } = await setup();
+      expect((await runMemoryCloudBackup(depsA)).cloud).toMatchObject({
+        status: 'standard',
+        generation: 0,
+      });
+      const depsB = await machineB(backend);
+      expect((await runMemoryCloudRecover(depsB)).status).toBe('recovered');
+      expect(
+        (
+          await runMemoryCloudProtect(depsA, {
+            recoveryKey: generateRecoveryKey(),
+          })
+        ).status,
+      ).toBe('protected');
+
+      const broken: typeof backend = Object.create(backend);
+      broken.getGenerationById = () =>
+        Promise.reject(new Error('network down'));
+      const status = await readMemoryCloudStatus({ ...depsB, backend: broken });
+      // B recovered the latest: being behind (or a failed lookup) never makes
+      // it a historical recovery (two-machine Bug A).
+      expect(status.historicalRecovery).toBe(false);
+      expect(status.localRecoveredGeneration).toBe(0);
+    });
+
+    it('fails safe: a genuine older recover stays historical when the replica lookup errors', async () => {
+      const { stackHome: homeA, backend, deps: depsA } = await setup();
+      expect((await runMemoryCloudBackup(depsA)).cloud).toMatchObject({
+        status: 'standard',
+        generation: 0,
+      });
+      await addDoc(homeA, 'second backup note');
+      expect((await runMemoryCloudBackup(depsA)).cloud).toMatchObject({
+        status: 'standard',
+        generation: 1,
+      });
+      const depsB = await machineB(backend);
+      expect(
+        (await runMemoryCloudRecover(depsB, { generation: 0 })).status,
+      ).toBe('recovered');
+      expect(
+        (
+          await runMemoryCloudProtect(depsA, {
+            recoveryKey: generateRecoveryKey(),
+          })
+        ).status,
+      ).toBe('protected');
+
+      const broken: typeof backend = Object.create(backend);
+      broken.getGenerationById = () =>
+        Promise.reject(new Error('network down'));
+      const status = await readMemoryCloudStatus({ ...depsB, backend: broken });
+      expect(status.historicalRecovery).toBe(true);
+      expect(status.localRecoveredGeneration).toBe(0);
+      expect(
+        await isHistoricalWithoutSyncHistory({ ...depsB, backend: broken }),
+      ).toBe(true);
+    });
+
+    it('a machine that synced #0 by push and fell behind (another push) is not historical, before or after protect', async () => {
+      const { stackHome: homeA, backend, deps: depsA } = await setup();
+      expect((await runMemoryCloudBackup(depsA)).cloud).toMatchObject({
+        status: 'standard',
+        generation: 0,
+      });
+      const depsB = await machineB(backend);
+      expect((await runMemoryCloudRecover(depsB)).status).toBe('recovered');
+      await addDoc(homeA, 'second backup note');
+      expect((await runMemoryCloudBackup(depsA)).cloud).toMatchObject({
+        status: 'standard',
+        generation: 1,
+      });
+      expect((await readMemoryCloudStatus(depsB)).historicalRecovery).toBe(
+        false,
+      );
+      expect((await readBackupSupersession(depsB)).supersedes).toBe(false);
+      expect(await isHistoricalWithoutSyncHistory(depsB)).toBe(false);
+
+      expect(
+        (
+          await runMemoryCloudProtect(depsA, {
+            recoveryKey: generateRecoveryKey(),
+          })
+        ).status,
+      ).toBe('protected');
+      const status = await readMemoryCloudStatus(depsB);
+      expect(status.historicalRecovery).toBe(false);
+      // Behind, so the display maps to the committed replica of what it synced.
+      expect(status.localRecoveredGeneration).toBe(2);
+      expect(status.latestGeneration).toBe(3);
+    });
   });
 });

@@ -104,7 +104,8 @@ export const deriveContentUploadRequirements = (
   importedStackVersions: PortableImportedStackVersion[],
 ): CloudContentUploadRequirement[] => {
   const hashes = new Set<string>();
-  for (const skill of Object.values(resolved.skills)) hashes.add(skill.contentHash);
+  for (const skill of Object.values(resolved.skills))
+    hashes.add(skill.contentHash);
   for (const version of importedStackVersions)
     for (const requirement of version.requirements)
       hashes.add(requirement.contentHash);
@@ -274,6 +275,11 @@ export const environmentSyncStateSchema = z.object({
   lastSyncedVersionId: z.uuid(),
   lastSyncedDigest: contentHashSchema,
   syncedAt: z.iso.datetime({ offset: true }),
+  /** Content hashes this Machine's last push confirmed are stored in Cloud (uploaded or
+   *  already present). Snapshots are never deleted (see `CloudRepository.hasSnapshot`), so
+   *  the next push skips re-checking them — but only while `lastSyncedVersionId` is still
+   *  Cloud's latest version. Optional: absent (older CLIs, pulls) means re-check all. */
+  confirmedContentHashes: z.array(contentHashSchema).optional(),
 });
 export const machineSyncStateSchema = z.object({
   schemaVersion: z.literal(1),
@@ -366,6 +372,12 @@ export const cloudErrorCodeSchema = z.enum([
   'memory-session-expired',
   'memory-no-envelope',
   'memory-not-configured',
+  // Task 13 fix round: the server refuses an old-format (`stack-mem-bundle-v1`)
+  // generation once the account's latest is v2 (spec §9.3/A.5).
+  'memory-incompatible-format',
+  // Task 13 fix round 4: a create naming a `replicaOf` that is malformed or
+  // fails the server's verification (`assertCreateGenerationAllowed`).
+  'memory-invalid-replica',
   // P10B named Stacks.
   'user-stack-not-found',
   'user-stack-conflict',

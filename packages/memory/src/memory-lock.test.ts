@@ -1,0 +1,535 @@
+import { spawn } from 'node:child_process';
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { afterEach, describe, expect, it } from 'vitest';
+
+import {
+  MemoryLockError,
+  acquireMemoryLock,
+  memoryLockPath,
+  readMemoryLock,
+  unlockMemory,
+  withMemoryLock,
+  type MemoryLockRecord,
+} from './memory-lock.js';
+import { defined } from './test-support.js';
+
+const roots: string[] = [];
+const temp = async (): Promise<string> => {
+  const root = await mkdtemp(path.join(tmpdir(), 'stak-memlock-'));
+  roots.push(root);
+  return root;
+};
+afterEach(async () => {
+  await Promise.all(
+    roots.splice(0).map((r) => rm(r, { recursive: true, force: true })),
+  );
+});
+
+const fast = {
+  timeoutMs: 600,
+  pollMs: 20,
+  installSignalHandlers: false,
+} as const;
+
+const plant = async (
+  stackHome: string,
+  record: Partial<MemoryLockRecord> = {},
+): Promise<MemoryLockRecord> => {
+  const full: MemoryLockRecord = {
+    lockId: 'planted-lock',
+    pid: 999_999,
+    hostname: 'this-host',
+    startedAt: new Date(Date.now() - 12_000).toISOString(),
+    command: 'stak pull',
+    ...record,
+  };
+  await mkdir(path.dirname(memoryLockPath(stackHome)), { recursive: true });
+  await writeFile(memoryLockPath(stackHome), JSON.stringify(full));
+  return full;
+};
+
+describe('withMemoryLock', () => {
+  it('takes the lock for the duration of fn and releases it afterwards', async () => {
+    const stackHome = await temp();
+    let seen: unknown;
+    const result = await withMemoryLock(
+      stackHome,
+      'stak add',
+      async () => {
+        seen = await readMemoryLock(stackHome);
+        return 42;
+      },
+      fast,
+    );
+    expect(result).toBe(42);
+    expect(seen).toMatchObject({ command: 'stak add', pid: process.pid });
+    expect(await readMemoryLock(stackHome)).toBeNull();
+  });
+
+  it('releases the lock when fn throws', async () => {
+    const stackHome = await temp();
+    await expect(
+      withMemoryLock(
+        stackHome,
+        'stak add',
+        async () => {
+          throw new Error('boom');
+        },
+        fast,
+      ),
+    ).rejects.toThrow('boom');
+    expect(await readMemoryLock(stackHome)).toBeNull();
+  });
+
+  it('release never removes a lock whose lockId is not its own', async () => {
+    const stackHome = await temp();
+    const lock = await acquireMemoryLock(stackHome, 'stak add', fast);
+    await plant(stackHome, {
+      lockId: 'someone-else',
+      pid: process.pid,
+      hostname: lock.record.hostname,
+    });
+    await lock.release();
+    expect(await readMemoryLock(stackHome)).toMatchObject({
+      lockId: 'someone-else',
+    });
+  });
+
+  it('serializes two holders in the same process', async () => {
+    const stackHome = await temp();
+    const order: string[] = [];
+    const slow = (name: string) =>
+      withMemoryLock(
+        stackHome,
+        name,
+        async () => {
+          order.push(`${name}:start`);
+          await new Promise((r) => setTimeout(r, 80));
+          order.push(`${name}:end`);
+        },
+        { ...fast, timeoutMs: 2_000 },
+      );
+    await Promise.all([slow('a'), slow('b')]);
+    expect(order[1]).toMatch(/:end$/);
+    expect(order[2]).toMatch(/:start$/);
+  });
+
+  it('waits, then stops with memory-locked and the exact message when a live holder keeps it', async () => {
+    const stackHome = await temp();
+    await plant(stackHome, { pid: process.pid, hostname: 'this-host' });
+    const error = await withMemoryLock(
+      stackHome,
+      'stak add',
+      async () => 'never',
+      {
+        ...fast,
+        hostname: 'this-host',
+        isProcessAlive: () => true,
+      },
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(MemoryLockError);
+    expect((error as MemoryLockError).code).toBe('memory-locked');
+    expect((error as MemoryLockError).message).toMatch(
+      /^Another STAK command \(`stak pull`, started \d+s ago\) is changing Memory\. Try again when it finishes\.$/,
+    );
+    expect(await readMemoryLock(stackHome)).toMatchObject({
+      lockId: 'planted-lock',
+    });
+  });
+
+  it('clears a leftover lock whose process is gone on this machine, and reports it', async () => {
+    const stackHome = await temp();
+    await plant(stackHome, { hostname: 'this-host' });
+    const cleared: MemoryLockRecord[] = [];
+    await withMemoryLock(stackHome, 'stak add', async () => undefined, {
+      ...fast,
+      hostname: 'this-host',
+      isProcessAlive: () => false,
+      onLeftoverCleared: (h) => cleared.push(h),
+    });
+    expect(cleared.map((h) => h.lockId)).toEqual(['planted-lock']);
+  });
+
+  it('never clears a lock recorded on a different machine', async () => {
+    const stackHome = await temp();
+    await plant(stackHome, { hostname: 'other-host' });
+    await expect(
+      withMemoryLock(stackHome, 'stak add', async () => undefined, {
+        ...fast,
+        hostname: 'this-host',
+        isProcessAlive: () => false,
+      }),
+    ).rejects.toMatchObject({ code: 'memory-locked' });
+    expect(await readMemoryLock(stackHome)).toMatchObject({
+      lockId: 'planted-lock',
+    });
+  });
+
+  it('removes a guard file older than guardStaleMs, then clears the leftover', async () => {
+    const stackHome = await temp();
+    await plant(stackHome, { hostname: 'this-host' });
+    const guard = path.join(stackHome, 'memory', '.memory.lock.clearing');
+    await writeFile(guard, '');
+    const old = new Date(Date.now() - 60_000);
+    await utimes(guard, old, old);
+    await withMemoryLock(stackHome, 'stak add', async () => undefined, {
+      ...fast,
+      hostname: 'this-host',
+      isProcessAlive: () => false,
+      guardStaleMs: 30_000,
+    });
+    expect(await readMemoryLock(stackHome)).toBeNull();
+  });
+
+  it('two processes racing to clear the same leftover: exactly one runs at a time and both finish', async () => {
+    const stackHome = await temp();
+    // Use this machine's real hostname so the children treat it as a local leftover.
+    const { hostname } = await import('node:os');
+    await plant(stackHome, { hostname: hostname(), pid: 999_999 });
+    const helper = fileURLToPath(
+      new URL('./memory-lock-child.test-helper.mjs', import.meta.url),
+    );
+    const log = path.join(stackHome, 'log.txt');
+    const run = (name: string) =>
+      new Promise<number>((resolve) => {
+        const child = spawn(process.execPath, [helper, stackHome, name, log], {
+          stdio: 'inherit',
+        });
+        child.on('exit', (code) => resolve(code ?? 1));
+      });
+    const codes = await Promise.all([run('a'), run('b')]);
+    expect(codes).toEqual([0, 0]);
+    const lines = (await readFile(log, 'utf8')).trim().split('\n');
+    expect(lines).toHaveLength(4);
+    // Critical sections never overlap: start/end pairs are adjacent.
+    expect(defined(lines[0]).split(':')[0]).toBe(
+      defined(lines[1]).split(':')[0],
+    );
+    expect(defined(lines[2]).split(':')[0]).toBe(
+      defined(lines[3]).split(':')[0],
+    );
+    expect(await readMemoryLock(stackHome)).toBeNull();
+  });
+
+  // Windows cannot deliver SIGINT to a child process (child.kill terminates it outright), so this runs on POSIX only.
+  it.skipIf(process.platform === 'win32')(
+    'a holder interrupted with SIGINT removes its own lock',
+    async () => {
+      const stackHome = await temp();
+      const helper = fileURLToPath(
+        new URL('./memory-lock-child.test-helper.mjs', import.meta.url),
+      );
+      const child = spawn(
+        process.execPath,
+        [helper, stackHome, 'sig', path.join(stackHome, 'log.txt'), 'hold'],
+        {
+          stdio: ['ignore', 'pipe', 'inherit'],
+        },
+      );
+      await new Promise<void>((resolve) =>
+        defined(child.stdout).on(
+          'data',
+          (d) => String(d).includes('ready') && resolve(),
+        ),
+      );
+      expect(await readMemoryLock(stackHome)).toMatchObject({
+        command: 'child sig',
+      });
+      const code = await new Promise<number | null>((resolve) => {
+        child.on('exit', (c) => resolve(c));
+        child.kill('SIGINT');
+      });
+      expect(code).toBe(130);
+      expect(await readMemoryLock(stackHome)).toBeNull();
+    },
+  );
+
+  it('churn: several processes doing many acquire/release cycles never hit an fs error or overlap', async () => {
+    const stackHome = await temp();
+    const helper = fileURLToPath(
+      new URL('./memory-lock-child.test-helper.mjs', import.meta.url),
+    );
+    const log = path.join(stackHome, 'log.txt');
+    const names = ['a', 'b', 'c', 'd'];
+    const cycles = 40;
+    const run = (name: string) =>
+      new Promise<number>((resolve) => {
+        const child = spawn(
+          process.execPath,
+          [helper, stackHome, name, log, 'churn', String(cycles)],
+          { stdio: 'inherit' },
+        );
+        child.on('exit', (code) => resolve(code ?? 1));
+      });
+    const codes = await Promise.all(names.map(run));
+    expect(codes).toEqual(names.map(() => 0));
+    const lines = (await readFile(log, 'utf8')).trim().split('\n');
+    expect(lines).toHaveLength(names.length * cycles * 2);
+    for (let i = 0; i < lines.length; i += 2) {
+      const [who, phase] = defined(lines[i]).split(':');
+      expect(phase).toBe('start');
+      expect(lines[i + 1]).toBe(`${who}:end`);
+    }
+    expect(await readMemoryLock(stackHome)).toBeNull();
+  }, 30_000);
+
+  it('a fresh guard held by someone else: stops with memory-locked near timeoutMs, not guardStaleMs, without spinning', async () => {
+    const stackHome = await temp();
+    await plant(stackHome, { hostname: 'this-host' });
+    await writeFile(
+      path.join(stackHome, 'memory', '.memory.lock.clearing'),
+      '',
+    );
+    let checks = 0;
+    const started = Date.now();
+    const error = await withMemoryLock(
+      stackHome,
+      'stak add',
+      async () => 'never',
+      {
+        timeoutMs: 300,
+        pollMs: 20,
+        installSignalHandlers: false,
+        hostname: 'this-host',
+        guardStaleMs: 30_000,
+        isProcessAlive: () => {
+          checks += 1;
+          return false;
+        },
+      },
+    ).catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: 'memory-locked' });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    // Polling at ~20 ms for 300 ms is about 15 checks; a hot spin would be thousands.
+    expect(checks).toBeLessThan(100);
+    expect(await readMemoryLock(stackHome)).toMatchObject({
+      lockId: 'planted-lock',
+    });
+  });
+
+  it('never auto-clears a corrupt lock, however old: waits, then points to stak memory unlock', async () => {
+    const stackHome = await temp();
+    await mkdir(path.dirname(memoryLockPath(stackHome)), { recursive: true });
+    await writeFile(memoryLockPath(stackHome), 'not json');
+    const old = new Date(Date.now() - 24 * 60 * 60_000);
+    await utimes(memoryLockPath(stackHome), old, old);
+    await expect(
+      withMemoryLock(stackHome, 'stak add', async () => undefined, {
+        ...fast,
+        guardStaleMs: 1,
+      }),
+    ).rejects.toThrow(/lock file is unreadable\).*`stak memory unlock`/);
+    expect(await readFile(memoryLockPath(stackHome), 'utf8')).toBe('not json');
+  });
+
+  it('after clearing a leftover on the deadline pass, tries once more instead of failing', async () => {
+    const stackHome = await temp();
+    await plant(stackHome, { hostname: 'this-host' });
+    const result = await withMemoryLock(
+      stackHome,
+      'stak add',
+      async () => 'ran',
+      {
+        ...fast,
+        timeoutMs: 0,
+        hostname: 'this-host',
+        isProcessAlive: () => false,
+      },
+    );
+    expect(result).toBe('ran');
+  });
+
+  it('treats a non-positive pid or an unparseable startedAt as corrupt', async () => {
+    const stackHome = await temp();
+    await plant(stackHome, { pid: 0 });
+    expect(await readMemoryLock(stackHome)).toBe('corrupt');
+    await plant(stackHome, { startedAt: 'not a date' });
+    expect(await readMemoryLock(stackHome)).toBe('corrupt');
+  });
+
+  it('sweeps orphaned lock temp files older than 60 s, and keeps fresh ones', async () => {
+    const stackHome = await temp();
+    const dir = path.join(stackHome, 'memory');
+    await mkdir(dir, { recursive: true });
+    const stale = path.join(dir, '.memory.lock.dead-id.tmp');
+    const fresh = path.join(dir, '.memory.lock.live-id.tmp');
+    await writeFile(stale, '{}');
+    await writeFile(fresh, '{}');
+    const old = new Date(Date.now() - 120_000);
+    await utimes(stale, old, old);
+    await withMemoryLock(stackHome, 'stak add', async () => undefined, fast);
+    const { readdir } = await import('node:fs/promises');
+    const names = await readdir(dir);
+    expect(names).not.toContain('.memory.lock.dead-id.tmp');
+    expect(names).toContain('.memory.lock.live-id.tmp');
+  });
+});
+
+describe('unlockMemory', () => {
+  it('reports no-lock when there is none', async () => {
+    expect(await unlockMemory(await temp())).toEqual({ status: 'no-lock' });
+  });
+
+  it('removes a lock whose process is not running', async () => {
+    const stackHome = await temp();
+    await plant(stackHome, { hostname: 'this-host' });
+    const result = await unlockMemory(stackHome, {
+      hostname: 'this-host',
+      isProcessAlive: () => false,
+    });
+    expect(result).toMatchObject({ status: 'removed', wasAlive: false });
+    expect(await readMemoryLock(stackHome)).toBeNull();
+  });
+
+  it('refuses when the recorded process is running, and --force removes it', async () => {
+    const stackHome = await temp();
+    await plant(stackHome, { hostname: 'this-host' });
+    expect(
+      await unlockMemory(stackHome, {
+        hostname: 'this-host',
+        isProcessAlive: () => true,
+      }),
+    ).toMatchObject({ status: 'refused' });
+    expect(await readMemoryLock(stackHome)).toMatchObject({
+      lockId: 'planted-lock',
+    });
+    expect(
+      await unlockMemory(stackHome, {
+        hostname: 'this-host',
+        isProcessAlive: () => true,
+        force: true,
+      }),
+    ).toMatchObject({
+      status: 'removed',
+      wasAlive: true,
+    });
+    expect(await readMemoryLock(stackHome)).toBeNull();
+  });
+
+  it('treats a lock from another machine as possibly running (refuses without --force)', async () => {
+    const stackHome = await temp();
+    await plant(stackHome, { hostname: 'other-host' });
+    expect(
+      await unlockMemory(stackHome, {
+        hostname: 'this-host',
+        isProcessAlive: () => false,
+      }),
+    ).toMatchObject({ status: 'refused' });
+  });
+
+  it('removes an unreadable lock file', async () => {
+    const stackHome = await temp();
+    await mkdir(path.dirname(memoryLockPath(stackHome)), { recursive: true });
+    await writeFile(memoryLockPath(stackHome), 'not json');
+    expect(await unlockMemory(stackHome)).toMatchObject({
+      status: 'removed',
+      holder: 'corrupt',
+    });
+  });
+
+  // The liveness check runs between unlock's read and its remove, so it is used here to
+  // replace or remove the lock at exactly that moment.
+  describe('when the lock changes between the read and the remove', () => {
+    const replacement: MemoryLockRecord = {
+      lockId: 'replacement-lock',
+      pid: 4242,
+      hostname: 'this-host',
+      startedAt: new Date().toISOString(),
+      command: 'stak push',
+    };
+
+    it('reports the new live holder as refused, and leaves it in place', async () => {
+      const stackHome = await temp();
+      await plant(stackHome);
+      const result = await unlockMemory(stackHome, {
+        hostname: 'this-host',
+        isProcessAlive: (pid) => {
+          if (pid === 999_999) {
+            writeFileSync(
+              memoryLockPath(stackHome),
+              JSON.stringify(replacement),
+            );
+            return false;
+          }
+          return true;
+        },
+      });
+      expect(result).toEqual({ status: 'refused', holder: replacement });
+      expect(
+        JSON.parse(await readFile(memoryLockPath(stackHome), 'utf8')),
+      ).toEqual(replacement);
+    });
+
+    it('reports no-lock when the lock disappeared meanwhile', async () => {
+      const stackHome = await temp();
+      await plant(stackHome);
+      const result = await unlockMemory(stackHome, {
+        hostname: 'this-host',
+        isProcessAlive: () => {
+          rmSync(memoryLockPath(stackHome), { force: true });
+          return false;
+        },
+      });
+      expect(result).toEqual({ status: 'no-lock' });
+    });
+
+    it('gives up with reason "changing" when the lock keeps changing, even with --force', async () => {
+      const stackHome = await temp();
+      await plant(stackHome);
+      let swaps = 0;
+      const result = await unlockMemory(stackHome, {
+        hostname: 'this-host',
+        force: true,
+        // Every look finds a fresh lock: another command took it again each time.
+        isProcessAlive: () => {
+          swaps += 1;
+          writeFileSync(
+            memoryLockPath(stackHome),
+            JSON.stringify({ ...replacement, lockId: `churn-${swaps}` }),
+          );
+          return true;
+        },
+      });
+      expect(result).toMatchObject({
+        status: 'refused',
+        reason: 'changing',
+        holder: { command: 'stak push' },
+      });
+      expect(existsSync(memoryLockPath(stackHome))).toBe(true);
+    });
+
+    it('removes the new lock when its process is not running either', async () => {
+      const stackHome = await temp();
+      await plant(stackHome);
+      const result = await unlockMemory(stackHome, {
+        hostname: 'this-host',
+        isProcessAlive: (pid) => {
+          if (pid === 999_999)
+            writeFileSync(
+              memoryLockPath(stackHome),
+              JSON.stringify(replacement),
+            );
+          return false;
+        },
+      });
+      expect(result).toEqual({
+        status: 'removed',
+        holder: replacement,
+        wasAlive: false,
+      });
+      expect(existsSync(memoryLockPath(stackHome))).toBe(false);
+    });
+  });
+});

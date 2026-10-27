@@ -2,6 +2,10 @@ import { emptyRegistry, readMemoryManifest } from '@stack/memory';
 import type { DiscoveredMemoryItem, LocalRegistry } from '@stack/memory';
 
 import { canonicalMemoryKey } from './canonical-identity.js';
+import type {
+  CanonicalProjectSummary,
+  UnlocatableProject,
+} from './canonical-ops.js';
 
 /**
  * MACHINE (native Memory) vs MAIN (the staged local manifest) — read-only, no Cloud call.
@@ -20,6 +24,27 @@ export type MemoryWorkingTreeStatus =
   | { state: 'clean' }
   | { state: 'changes-not-added'; changed: number };
 
+export type { CanonicalProjectSummary as CanonicalMemoryProjectStatus } from './canonical-ops.js';
+export type { UnlocatableProject } from './canonical-ops.js';
+
+/** Canonical (Project Memory) status, additive to `MemoryWorkingTreeStatus` above —
+ * consumed by `ui/environment.ts`'s `renderStatus`. `newProjects` counts locatable
+ * project-scope identities discovered on this machine with no registered Project ID
+ * yet; `conflictedProjects` counts identities with genuinely ambiguous resolution;
+ * `unlocatableProjects` are REGISTERED, named identities whose directory couldn't be
+ * located; `untrackedFolders` counts un-registered, un-named stale Claude folders
+ * with no locatable directory either; `upgradePending` is `true` when the v1 ->
+ * canonical migration hasn't run yet (see `canonical-ops.ts`'s
+ * `CanonicalMemoryStatusResult`, which this mirrors). */
+export type CanonicalMemoryWorkingTreeStatus = {
+  projects: CanonicalProjectSummary[];
+  newProjects: number;
+  conflictedProjects: number;
+  unlocatableProjects: UnlocatableProject[];
+  untrackedFolders: number;
+  upgradePending: boolean;
+};
+
 export type ComputeMemoryWorkingTreeStatusOptions = {
   stackHome: string;
   /** Already-scanned native Memory (reuse the caller's scan — never rescans here). */
@@ -30,7 +55,7 @@ export type ComputeMemoryWorkingTreeStatusOptions = {
   registry?: LocalRegistry;
 };
 
-const groupHashesByKey = <T,>(
+const groupHashesByKey = <T>(
   items: T[],
   keyOf: (item: T) => string,
   hashOf: (item: T) => string,
@@ -83,5 +108,7 @@ export const computeMemoryWorkingTreeStatus = async (
       [...stagedHashes][0] === [...nativeHashes][0];
     if (!clean) changed += 1;
   }
-  return changed === 0 ? { state: 'clean' } : { state: 'changes-not-added', changed };
+  return changed === 0
+    ? { state: 'clean' }
+    : { state: 'changes-not-added', changed };
 };

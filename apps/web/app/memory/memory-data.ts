@@ -106,6 +106,14 @@ export const loadMemoryView = async (
   if (!viewingId)
     return { kind: 'choose-machine', machines: options, anyCheckedIn };
 
+  // Badge counts don't depend on this page's own reads — fetch them concurrently.
+  const sidebarPromise = loadSidebarSummary(
+    service,
+    user,
+    viewingId,
+    active.length,
+  );
+
   const viewing = active.find((m) => m.machineId === viewingId)!;
   const viewingName = displayName(viewing, active);
   const viewingCheckedIn = checkedIn(viewing);
@@ -201,7 +209,7 @@ export const loadMemoryView = async (
     // so this page's careful Memory-status semantics are never second-guessed by a
     // differently-sourced value. Every other badge comes from the one shared loader.
     sidebar: {
-      ...(await loadSidebarSummary(service, user, viewingId, active.length)),
+      ...(await sidebarPromise),
       memory: backedUp
         ? { n: 'Backed up', tone: 'ready' }
         : { n: '', tone: 'neutral' },

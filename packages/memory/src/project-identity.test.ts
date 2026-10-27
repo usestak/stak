@@ -58,6 +58,15 @@ describe('encodeClaudeProjectKey', () => {
       'C--Users-NT-Desktop-stack',
     );
   });
+
+  it('encodes a dotted path segment the same way Claude does (observed on a real machine)', () => {
+    // Real observed example: ~/.claude/projects/ contains
+    // `C--Users-NT--claude-mem-observer-sessions` for `C:\Users\NT\.claude-mem`.
+    // Claude replaces EVERY non-alphanumeric character with `-`, not just `:\/`.
+    expect(encodeClaudeProjectKey('C:\\Users\\NT\\.claude-mem')).toBe(
+      'C--Users-NT--claude-mem',
+    );
+  });
 });
 
 describe('projectIdentityMatches', () => {

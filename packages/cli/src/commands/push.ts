@@ -4,7 +4,11 @@ import {
   LocalEnvironmentConflictError,
   RemoteEnvironmentConflictError,
 } from '@stack/cloud-client';
-import { StackCompositionError, type ApplyPushResult, type PushPlan } from '@stack/core';
+import {
+  StackCompositionError,
+  type ApplyPushResult,
+  type PushPlan,
+} from '@stack/core';
 
 import {
   pushFailed,
@@ -16,7 +20,13 @@ import {
   type PushSkillOutcome,
 } from '../ui/cloud.js';
 
-export type MemoryPushPreflight = { blocked: boolean; reason?: string };
+/** `note`: a one-line notice printed when the push proceeds (spec §8.5: a
+ * rollback published by an ordinary push is announced, never silent). */
+export type MemoryPushPreflight = {
+  blocked: boolean;
+  reason?: string;
+  note?: string;
+};
 
 export type PushCommandDependencies = {
   cloudPreparePush(): Promise<PushPlan>;
@@ -33,9 +43,19 @@ export type PushCommandDependencies = {
    * that's `stak add .`'s job; this is push, not an implicit add).
    */
   applyMemoryPush?(): Promise<MemoryPushOutcome>;
+  /**
+   * Runs `fn` while holding the cross-process Memory lock (spec 2026-10-25).
+   * Optional so existing tests keep working; when absent, `fn` runs directly.
+   */
+  withMemoryLock?<T>(command: string, fn: () => Promise<T>): Promise<T>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
+
+const runDirectly = async <T>(
+  _command: string,
+  fn: () => Promise<T>,
+): Promise<T> => fn();
 
 export const registerPushCommand = (
   program: Command,
@@ -58,6 +78,17 @@ export const registerPushCommand = (
         verbose?: boolean;
       }) => {
         const verbose = options.verbose === true;
+        // The early Memory preflight is read-only and independent of the Skills plan, so
+        // its Cloud reads overlap with planning instead of following it. Its outcome is
+        // still acted on only after the Skills conflict check, so error priority is
+        // unchanged (a rejection is held until then, never left unhandled). It is the
+        // unlocked gate for BOTH domains; the authoritative check runs again under the
+        // Memory lock below.
+        const memoryPreflightPromise: Promise<MemoryPushPreflight> =
+          dependencies.memoryPushPreflight && !options.json
+            ? dependencies.memoryPushPreflight()
+            : Promise.resolve({ blocked: false });
+        memoryPreflightPromise.catch(() => undefined);
         const plan = await dependencies.cloudPreparePush();
         if (options.json) {
           if (!options.dryRun)
@@ -72,9 +103,7 @@ export const registerPushCommand = (
           throw plan.conflict.kind === 'remote-newer'
             ? new RemoteEnvironmentConflictError(plan.conflict.message)
             : new LocalEnvironmentConflictError(plan.conflict.message);
-        const memoryPreflight = dependencies.memoryPushPreflight
-          ? await dependencies.memoryPushPreflight()
-          : { blocked: false };
+        const memoryPreflight = await memoryPreflightPromise;
         // Preflight for BOTH domains completes before either is mutated — a predictable
         // Memory conflict stops the Skill push too, even though Skills had none.
         if (memoryPreflight.blocked)
@@ -82,6 +111,8 @@ export const registerPushCommand = (
             memoryPreflight.reason ??
               'Memory has a predictable conflict with STAK Cloud. Resolve it before pushing.',
           );
+        if (memoryPreflight.note)
+          dependencies.writeOut(`${memoryPreflight.note}\n`);
         if (options.dryRun) {
           dependencies.writeOut(renderPushPlan(plan, true, { verbose }));
           return;
@@ -96,29 +127,64 @@ export const registerPushCommand = (
         }
         dependencies.writeOut('Pushing main...\n\n');
 
-        let skill: PushSkillOutcome;
-        if (plan.noop) skill = { status: 'noop' };
-        else
+        // Skills and Memory are independent domains with their own Cloud state, so they
+        // are applied concurrently. Each branch catches its own failure and resolves to
+        // an outcome, so neither can reject the Promise.all or cut the other short.
+        const applySkills = async (): Promise<PushSkillOutcome> => {
+          if (plan.noop) return { status: 'noop' };
           try {
-            skill = { status: 'applied', result: await dependencies.cloudApplyPush(plan) };
+            return {
+              status: 'applied',
+              result: await dependencies.cloudApplyPush(plan),
+            };
           } catch (error) {
-            skill = {
+            return {
               status: 'failed',
               error: error instanceof Error ? error.message : String(error),
             };
           }
+        };
 
-        let memory: PushMemoryOutcome;
-        if (!dependencies.applyMemoryPush) memory = { status: 'not-attempted' };
-        else
+        // The Memory part holds the Memory lock (spec 2026-10-25 §3.2); Skills run
+        // outside it. The preflight is read again under the lock so the write acts on
+        // the state it checked. A busy lock (MemoryLockError) lands in the catch below
+        // and reports Memory FAILED with the lock message, like any Memory failure.
+        const applyMemory = async (): Promise<PushMemoryOutcome> => {
+          const applyMemoryPush = dependencies.applyMemoryPush;
+          if (!applyMemoryPush) return { status: 'not-attempted' };
           try {
-            memory = { status: 'applied', outcome: await dependencies.applyMemoryPush() };
+            const lock = dependencies.withMemoryLock ?? runDirectly;
+            return await lock(
+              'stak push',
+              async (): Promise<PushMemoryOutcome> => {
+                const recheck = dependencies.memoryPushPreflight
+                  ? await dependencies.memoryPushPreflight()
+                  : { blocked: false };
+                if (recheck.blocked)
+                  return {
+                    status: 'failed',
+                    error:
+                      recheck.reason ??
+                      'Memory has a predictable conflict with STAK Cloud. Resolve it before pushing.',
+                  };
+                return {
+                  status: 'applied',
+                  outcome: await applyMemoryPush.call(dependencies),
+                };
+              },
+            );
           } catch (error) {
-            memory = {
+            return {
               status: 'failed',
               error: error instanceof Error ? error.message : String(error),
             };
           }
+        };
+
+        const [skill, memory] = await Promise.all([
+          applySkills(),
+          applyMemory(),
+        ]);
 
         dependencies.writeOut(renderCombinedPushResult(skill, memory));
         // A runtime/network failure in either domain after apply began is partial

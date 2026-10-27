@@ -13,6 +13,7 @@ import type {
   MemoryCloudStatus,
   PasskeyFailureReason,
 } from '../memory/cloud-ops.js';
+import { projectFoldNotes } from './cloud.js';
 import { block } from './format.js';
 
 type RenderOptions = { verbose?: boolean };
@@ -90,12 +91,37 @@ export const renderMemoryCloudBackup = (
   outcome: MemoryBackupOutcome,
 ): string => {
   const { local, cloud } = outcome;
-  const head = [`${files(local.files)} saved locally.`, ''];
+  // Spec §4.2.1: a project merged before syncing is reported once, up front.
+  const folded =
+    'folded' in cloud
+      ? projectFoldNotes(cloud.folded).map((note) => `${note}.`)
+      : [];
+  const head = [`${files(local.files)} saved locally.`, ...folded, ''];
   if (cloud.status === 'skipped')
     return block([
       ...head,
       'Cloud backup skipped.',
       'Run `stak login` to protect this backup from machine loss.',
+    ]);
+  if (cloud.status === 'nothing-staged')
+    return block([
+      ...head,
+      'Nothing to back up to STAK Cloud yet.',
+      'Run `stak add .` to stage Memory, then back up again.',
+    ]);
+  if (cloud.status === 'up-to-date')
+    return block([
+      ...head,
+      `Already up to date with STAK Cloud (generation ${cloud.generation}).`,
+    ]);
+  if (cloud.status === 'conflict')
+    return block([
+      ...head,
+      `Memory has ${cloud.conflicts.length} unresolved conflict(s) with STAK Cloud.`,
+      '',
+      'Run:',
+      '  stak memory resolve <project> <path> --keep local|cloud|both',
+      '  stak memory backup',
     ]);
   if (cloud.status === 'protected-locked')
     return block([
@@ -151,6 +177,8 @@ export const renderMemoryRecover = (outcome: CloudRecoverOutcome): string => {
     '',
     `${plainFiles(outcome.files)} available`,
     `Privacy: ${outcome.privacyMode === 'protected' ? 'Protected' : 'Standard'}`,
+    // Spec §4.2.1 (review fix M3): a project merged by the recover, once.
+    ...projectFoldNotes(outcome.folded).map((note) => `${note}.`),
     '',
     'Run `stak memory restore`.',
   ]);
@@ -382,6 +410,8 @@ export type BackupSupersessionView = {
   parentGeneration: number | null;
   nextGeneration: number | null;
   supersedes: boolean;
+  /** Final review T15-4 (see `BackupSupersession.noSyncHistory`). */
+  noSyncHistory?: boolean;
 };
 
 export type MemoryBackupPreview = BackupComposition & {

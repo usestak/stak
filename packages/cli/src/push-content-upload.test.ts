@@ -10,6 +10,7 @@ import { hashSkillDirectory } from '@stack/shared';
 import type { ScanResult, SkillSource } from '@stack/spec';
 import { applyPush, initializeMainEnvironment, preparePush } from '@stack/core';
 import {
+  CloudUnauthorizedError,
   createCloudClient,
   SnapshotUploadFailedError,
 } from '@stack/cloud-client';
@@ -42,7 +43,7 @@ afterEach(async () =>
   ),
 );
 
-const makeCloud = () => {
+const makeCloud = (options: { now?: () => Date } = {}) => {
   const repository = createInMemoryRepository();
   const blobStore = createInMemoryBlobStore();
   const service = createCloudService({
@@ -50,6 +51,7 @@ const makeCloud = () => {
     blobStore,
     appUrl: 'http://localhost:3000',
     ticketSecret: 'push-content-upload-secret',
+    ...(options.now ? { now: options.now } : {}),
   });
   const fetchImpl = createInProcessFetch(service);
   const client = createCloudClient({
@@ -402,5 +404,284 @@ describe('web-originated single-Skill share after a real stak push', () => {
     await expect(
       service.getPublicStack('temi', 'git-skill'),
     ).rejects.toMatchObject({ code: 'public-stack-not-found' });
+  });
+});
+
+describe('stak push round trips', () => {
+  /** Counts Cloud API calls by route so tests can assert on round trips, not just results. */
+  const countingClient = (
+    service: ReturnType<typeof makeCloud>['service'],
+    token: string,
+    /** Runs after each call completes, with the call's `METHOD route` label. */
+    afterCall?: (call: string) => void,
+  ) => {
+    const calls: string[] = [];
+    const inner = createInProcessFetch(service);
+    const client = createCloudClient({
+      baseUrl: 'http://localhost:3000',
+      token,
+      fetchImpl: async (input, init) => {
+        const route = new URL(input).pathname
+          .replace('/api/v1/', '')
+          .replace(/sha256:[0-9a-f]+|[0-9a-f-]{36}|up\.[^/]+/g, ':id');
+        const call = `${init.method} ${route.split('/').slice(0, 2).join('/')}`;
+        calls.push(call);
+        const response = await inner(input, init);
+        afterCall?.(call);
+        return response;
+      },
+    });
+    return { client, calls };
+  };
+
+  /** A Cloud whose clock the test controls, for driving upload-ticket expiry. */
+  const makeClockedCloud = () => {
+    const clock = { ms: Date.parse('2026-10-27T12:00:00.000Z') };
+    const cloud = makeCloud({ now: () => new Date(clock.ms) });
+    return { ...cloud, clock };
+  };
+  const TICKET_TTL_MS = 10 * 60 * 1000;
+
+  it('reuses the plan-time upload ticket instead of preparing each snapshot twice', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const { service, client } = makeCloud();
+    const token = await signIn(service, client);
+    const { client: counted, calls } = countingClient(service, token);
+    await seedMainWithLocalAndGitSkills(
+      stackHome,
+      path.join(root, 'src'),
+      'v1',
+    );
+
+    const plan = await preparePush({ stackHome, client: counted });
+    calls.length = 0;
+    const result = await applyPush({ stackHome, plan, client: counted });
+
+    expect(result.uploaded).toBe(2);
+    expect(calls.filter((c) => c === 'POST snapshots/prepare')).toHaveLength(0);
+  });
+
+  it('re-prepares when the plan-time ticket is too old to trust', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const { service, client } = makeCloud();
+    const token = await signIn(service, client);
+    const { client: counted, calls } = countingClient(service, token);
+    await seedMainWithLocalAndGitSkills(
+      stackHome,
+      path.join(root, 'src'),
+      'v1',
+    );
+
+    let now = 1_000_000;
+    const plan = await preparePush({
+      stackHome,
+      client: counted,
+      nowMs: () => now,
+    });
+    now += 6 * 60 * 1000;
+    calls.length = 0;
+    const result = await applyPush({
+      stackHome,
+      plan,
+      client: counted,
+      nowMs: () => now,
+    });
+
+    expect(result.uploaded).toBe(2);
+    expect(calls.filter((c) => c === 'POST snapshots/prepare')).toHaveLength(2);
+  });
+
+  it('only checks content that is new since this Machine last pushed', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const { service, client } = makeCloud();
+    const token = await signIn(service, client);
+    const { client: counted, calls } = countingClient(service, token);
+    const { localHash } = await seedMainWithLocalAndGitSkills(
+      stackHome,
+      path.join(root, 'src'),
+      'v1',
+    );
+    await applyPush({
+      stackHome,
+      plan: await preparePush({ stackHome, client: counted }),
+      client: counted,
+    });
+
+    const newHash = await bumpGitSkillContent(root, stackHome, 'v2');
+    calls.length = 0;
+    const plan = await preparePush({ stackHome, client: counted });
+
+    // The unchanged local Skill was confirmed by the previous push; only the new
+    // content costs a Cloud round trip.
+    expect(calls.filter((c) => c === 'POST snapshots/prepare')).toHaveLength(1);
+    expect(plan.snapshotsToUpload).toEqual([newHash]);
+    expect(plan.snapshotsAlready).toBe(1);
+    expect(plan.snapshotsToUpload).not.toContain(localHash);
+  });
+
+  it('re-checks everything when Cloud moved on since this Machine last synced', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const { service, client } = makeCloud();
+    const token = await signIn(service, client);
+    const { client: counted, calls } = countingClient(service, token);
+    await seedMainWithLocalAndGitSkills(
+      stackHome,
+      path.join(root, 'src'),
+      'v1',
+    );
+    await applyPush({
+      stackHome,
+      plan: await preparePush({ stackHome, client: counted }),
+      client: counted,
+    });
+
+    // A pull (or older CLI) rewrites sync state without confirmed hashes.
+    const syncDir = path.join(stackHome, 'state', 'machines');
+    const [machineId] = await (
+      await import('node:fs/promises')
+    ).readdir(syncDir);
+    const syncFile = path.join(syncDir, machineId as string, 'sync.json');
+    const sync = JSON.parse(await readFile(syncFile, 'utf8'));
+    delete sync.environments.main.confirmedContentHashes;
+    await writeFileFs(syncFile, JSON.stringify(sync));
+
+    await bumpGitSkillContent(root, stackHome, 'v2');
+    calls.length = 0;
+    await preparePush({ stackHome, client: counted });
+    expect(calls.filter((c) => c === 'POST snapshots/prepare')).toHaveLength(2);
+  });
+
+  it('re-prepares and retries once when a reused ticket expires during the upload', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const { service, client, clock } = makeClockedCloud();
+    const token = await signIn(service, client);
+    const { client: counted, calls } = countingClient(service, token);
+    await seedMainWithLocalAndGitSkills(
+      stackHome,
+      path.join(root, 'src'),
+      'v1',
+    );
+
+    // The CLI still considers the plan-time tickets fresh (its own clock did not move),
+    // but by the time the bytes arrive Cloud's 10-minute TTL has passed.
+    const plan = await preparePush({ stackHome, client: counted });
+    clock.ms += TICKET_TTL_MS + 1;
+    calls.length = 0;
+    const result = await applyPush({ stackHome, plan, client: counted });
+
+    expect(result.uploaded).toBe(2);
+    // One re-prepare per Skill; each upload is attempted twice (expired, then fresh).
+    expect(calls.filter((c) => c === 'POST snapshots/prepare')).toHaveLength(2);
+    expect(calls.filter((c) => c === 'PUT snapshots/upload')).toHaveLength(4);
+    expect(calls.filter((c) => c === 'POST snapshots/finalize')).toHaveLength(
+      2,
+    );
+  });
+
+  it('re-prepares and retries once when the ticket expires between upload and finalize', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const { service, client, clock } = makeClockedCloud();
+    const token = await signIn(service, client);
+    let slowUploads = 1;
+    const { client: counted, calls } = countingClient(
+      service,
+      token,
+      (call) => {
+        // The first upload to complete takes "longer than the TTL" before finalize runs.
+        if (call === 'PUT snapshots/upload' && slowUploads > 0) {
+          slowUploads -= 1;
+          clock.ms += TICKET_TTL_MS + 1;
+        }
+      },
+    );
+    await seedMainWithLocalAndGitSkills(
+      stackHome,
+      path.join(root, 'src'),
+      'v1',
+    );
+
+    const plan = await preparePush({ stackHome, client: counted });
+    calls.length = 0;
+    const result = await applyPush({ stackHome, plan, client: counted });
+
+    expect(result.uploaded).toBe(2);
+    expect(result.versionNumber).toBe(1);
+    // Every plan-time ticket is now expired: both Skills re-prepare exactly once.
+    expect(calls.filter((c) => c === 'POST snapshots/prepare')).toHaveLength(2);
+  });
+
+  it('gives up after one retry rather than looping on expired tickets', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const { service, client, clock } = makeClockedCloud();
+    const token = await signIn(service, client);
+    // Every upload "takes" longer than the TTL, so no ticket ever survives to finalize.
+    const { client: counted, calls } = countingClient(
+      service,
+      token,
+      (call) => {
+        if (call === 'PUT snapshots/upload') clock.ms += TICKET_TTL_MS + 1;
+      },
+    );
+    await seedMainWithLocalAndGitSkills(
+      stackHome,
+      path.join(root, 'src'),
+      'v1',
+    );
+
+    const plan = await preparePush({ stackHome, client: counted });
+    calls.length = 0;
+    await expect(
+      applyPush({ stackHome, plan, client: counted }),
+    ).rejects.toBeInstanceOf(CloudUnauthorizedError);
+    // At most one re-prepare per Skill, and nothing is committed.
+    expect(
+      calls.filter((c) => c === 'POST snapshots/prepare').length,
+    ).toBeLessThanOrEqual(2);
+    expect(calls.some((c) => c.startsWith('POST environments'))).toBe(false);
+  });
+
+  it('re-checks everything when Cloud no longer has the version this Machine last synced', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const first = makeCloud();
+    const firstToken = await signIn(first.service, first.client);
+    const { localHash, gitHash } = await seedMainWithLocalAndGitSkills(
+      stackHome,
+      path.join(root, 'src'),
+      'v1',
+    );
+    const firstClient = countingClient(first.service, firstToken).client;
+    await applyPush({
+      stackHome,
+      plan: await preparePush({ stackHome, client: firstClient }),
+      client: firstClient,
+    });
+
+    // Same Machine and sync state (including confirmedContentHashes), but Cloud's main is
+    // gone (e.g. the account was deleted and recreated): lastSyncedVersionId no longer
+    // matches Cloud's latest, so nothing the earlier push confirmed may be skipped.
+    const second = makeCloud();
+    const secondToken = await signIn(second.service, second.client);
+    const { client: counted, calls } = countingClient(
+      second.service,
+      secondToken,
+    );
+    const plan = await preparePush({ stackHome, client: counted });
+
+    expect(plan.conflict).toBeNull();
+    expect(calls.filter((c) => c === 'POST snapshots/prepare')).toHaveLength(2);
+    expect(plan.snapshotsAlready).toBe(0);
+    expect([...plan.snapshotsToUpload].sort()).toEqual(
+      [localHash, gitHash].sort(),
+    );
+    const result = await applyPush({ stackHome, plan, client: counted });
+    expect(result.uploaded).toBe(2);
   });
 });

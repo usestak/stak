@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import type { EnvironmentDiff, EnvironmentStatus, SkillStatus } from '@stack/spec';
+import type {
+  EnvironmentDiff,
+  EnvironmentStatus,
+  SkillStatus,
+} from '@stack/spec';
 
 import { renderDiff, renderStatus } from './environment.js';
 
@@ -20,21 +24,29 @@ const baseSummary: EnvironmentStatus['summary'] = {
 };
 
 const skillStatus = (
-  overrides: Partial<SkillStatus> & Pick<SkillStatus, 'entryId' | 'name' | 'state'>,
+  overrides: Partial<SkillStatus> &
+    Pick<SkillStatus, 'entryId' | 'name' | 'state'>,
 ): SkillStatus => ({
-  desiredHash: 'sha256:0000000000000000000000000000000000000000000000000000000000000'.slice(
-    0,
-    71,
-  ),
+  desiredHash:
+    'sha256:0000000000000000000000000000000000000000000000000000000000000'.slice(
+      0,
+      71,
+    ),
   baselineLocations: [],
   currentLocations: [],
   uncertaintyRoots: [],
-  preservation: { state: 'available', contentHash: 'sha256:0'.padEnd(71, '0'), objectPath: '/x' },
+  preservation: {
+    state: 'available',
+    contentHash: 'sha256:0'.padEnd(71, '0'),
+    objectPath: '/x',
+  },
   restorationStrategy: 'snapshot',
   ...overrides,
 });
 
-const baseStatus = (overrides: Partial<EnvironmentStatus> = {}): EnvironmentStatus => ({
+const baseStatus = (
+  overrides: Partial<EnvironmentStatus> = {},
+): EnvironmentStatus => ({
   schemaVersion: 1,
   environment: 'main',
   observedAt: new Date(0).toISOString(),
@@ -77,11 +89,56 @@ describe('renderStatus — Memory section (MACHINE vs MAIN, not Cloud)', () => {
   });
 });
 
+describe('renderStatus — local Memory conflicts (final review I4)', () => {
+  const cleanStatus = baseStatus({ summary: { ...baseSummary, satisfied: 1 } });
+  const project = (
+    conflicts: { path: string; reason: string }[],
+    sourceConflicts: string[] = [],
+  ) => ({
+    projectId: 'prj_demo',
+    imported: [],
+    pending: 0,
+    conflicts,
+    sourceConflicts,
+    guardedPaths: [],
+  });
+
+  it('never sends a local conflict to `stak memory resolve`, and gives the action that clears each kind', () => {
+    const output = renderStatus(cleanStatus, {
+      memory: {
+        state: 'clean',
+        canonicalProjects: [
+          project(
+            [
+              { path: 'notes/MEMORY.md', reason: 'adopt-mismatch' },
+              { path: 'notes/old.md', reason: 'edit-delete' },
+              { path: 'notes/both.md', reason: 'edit-edit' },
+            ],
+            ['notes/moved.md'],
+          ),
+        ],
+      },
+    });
+    expect(output).not.toContain('stak memory resolve');
+    expect(output).toContain('notes/MEMORY.md');
+    expect(output).toMatch(
+      /notes\/MEMORY\.md.*move the file somewhere else, then run `stak memory materialize`/,
+    );
+    expect(output).toMatch(/notes\/old\.md.*deleted in STAK/);
+    expect(output).toMatch(/notes\/moved\.md.*old and current Claude folders/);
+    expect(output).toMatch(
+      /notes\/both\.md.*can't settle this one automatically yet/,
+    );
+  });
+});
+
 describe('renderStatus — Cloud section', () => {
   const cleanStatus = baseStatus({ summary: { ...baseSummary, satisfied: 1 } });
 
   it('shows up to date, explicitly scoped to Skills', () => {
-    const output = renderStatus(cleanStatus, { cloud: { status: 'up-to-date' } });
+    const output = renderStatus(cleanStatus, {
+      cloud: { status: 'up-to-date' },
+    });
     expect(output).toContain('Cloud');
     expect(output).toContain('Skills');
     expect(output).toContain('up to date with main');
@@ -101,7 +158,9 @@ describe('renderStatus — Cloud section', () => {
   });
 
   it('shows nothing pushed yet', () => {
-    const output = renderStatus(cleanStatus, { cloud: { status: 'no-remote' } });
+    const output = renderStatus(cleanStatus, {
+      cloud: { status: 'no-remote' },
+    });
     expect(output).toContain('nothing pushed yet');
   });
 
@@ -122,7 +181,9 @@ describe('renderStatus — Cloud section', () => {
   });
 
   it('reports a data/compatibility read failure distinctly from offline', () => {
-    const output = renderStatus(cleanStatus, { cloud: { status: 'unavailable' } });
+    const output = renderStatus(cleanStatus, {
+      cloud: { status: 'unavailable' },
+    });
     expect(output).toContain('unavailable');
     expect(output).toContain('Cloud response could not be read');
     expect(output).not.toContain('offline');
@@ -136,7 +197,11 @@ describe('renderStatus — Cloud section', () => {
   it('never claims the overall STAK is up to date when Skills are synced but Memory is not — scopes each line separately', () => {
     const output = renderStatus(cleanStatus, {
       cloud: { status: 'up-to-date' },
-      memoryCloud: { status: 'backed-up', generation: 4, historicalRecovery: false },
+      memoryCloud: {
+        status: 'backed-up',
+        generation: 4,
+        historicalRecovery: false,
+      },
     });
     expect(output).toContain('Skills');
     expect(output).toContain('up to date with main');
@@ -166,7 +231,11 @@ describe('renderStatus (default, non-verbose)', () => {
     const status = baseStatus({
       desiredCount: 31,
       skills: Array.from({ length: 31 }, (_, index) =>
-        skillStatus({ entryId: `skill_${index}`, name: `skill-${index}`, state: 'satisfied' }),
+        skillStatus({
+          entryId: `skill_${index}`,
+          name: `skill-${index}`,
+          state: 'satisfied',
+        }),
       ),
       summary: { ...baseSummary, satisfied: 31 },
     });
@@ -181,7 +250,11 @@ describe('renderStatus (default, non-verbose)', () => {
     const status = baseStatus({
       desiredCount: 31,
       skills: Array.from({ length: 31 }, (_, index) =>
-        skillStatus({ entryId: `skill_${index}`, name: `skill-${index}`, state: 'satisfied' }),
+        skillStatus({
+          entryId: `skill_${index}`,
+          name: `skill-${index}`,
+          state: 'satisfied',
+        }),
       ),
       untracked: [
         {
@@ -221,7 +294,13 @@ describe('renderStatus (default, non-verbose)', () => {
   it('surfaces a missing tracked Skill by name with guidance to use remove', () => {
     const status = baseStatus({
       desiredCount: 1,
-      skills: [skillStatus({ entryId: 'skill_a', name: 'impeccable', state: 'missing' })],
+      skills: [
+        skillStatus({
+          entryId: 'skill_a',
+          name: 'impeccable',
+          state: 'missing',
+        }),
+      ],
       summary: { ...baseSummary, missing: 1 },
     });
     const output = renderStatus(status);
@@ -248,7 +327,9 @@ describe('renderStatus (default, non-verbose)', () => {
 });
 
 describe('renderDiff (default, non-verbose)', () => {
-  const baseDiff = (overrides: Partial<EnvironmentDiff> = {}): EnvironmentDiff => ({
+  const baseDiff = (
+    overrides: Partial<EnvironmentDiff> = {},
+  ): EnvironmentDiff => ({
     ...baseStatus(),
     entries: [],
     ...overrides,

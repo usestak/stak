@@ -17,7 +17,39 @@ export type MemoryCeremonyPort = Pick<
   | 'memorySubmitEnvelope'
   | 'memoryListRecoveryMethods'
   | 'memoryAddRecoveryMethod'
+  | 'memoryGetLatest'
 >;
+
+/**
+ * Final review I7: the latest Protected generation's backup id and wrapped DEK
+ * (metadata only, never the payload), so the browser can confirm a
+ * passkey-unwrapped Memory key really opens this account's Memory before
+ * sending it to the CLI. Null when the latest generation isn't Protected.
+ */
+export const latestKeyCheck = async (
+  service: MemoryCeremonyPort,
+  user: CeremonyUser,
+): Promise<{
+  backupId: string;
+  wrappedDek: { nonceB64: string; ciphertextB64: string; tagB64: string };
+} | null> => {
+  const { generation } = await service.memoryGetLatest({ userId: user.id });
+  if (
+    !generation ||
+    generation.privacyMode !== 'protected' ||
+    !generation.wrappedDek
+  )
+    return null;
+  const { nonceB64, ciphertextB64, tagB64 } = generation.wrappedDek as {
+    nonceB64: string;
+    ciphertextB64: string;
+    tagB64: string;
+  };
+  return {
+    backupId: generation.backupId,
+    wrappedDek: { nonceB64, ciphertextB64, tagB64 },
+  };
+};
 
 export type FetchSessionResult =
   | {

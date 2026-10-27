@@ -20,9 +20,17 @@ import {
   readMemoryObject,
   writeMemoryObject,
 } from '../store.js';
+import {
+  canonicalMainManifestSchema,
+  type CanonicalMainManifest,
+} from '../canonical/domain.js';
+import { canonicalStorePaths } from '../canonical/store.js';
+import type { PortableRegistrySnapshot } from '../project/registry.js';
+import { portableSnapshotBytes } from '../project/registry-store.js';
 import { atomicWriteFile } from './secure-file.js';
 
 export const BUNDLE_FORMAT = 'stack-mem-bundle-v1' as const;
+export const BUNDLE_FORMAT_V2 = 'stack-mem-bundle-v2' as const;
 
 export class BundleError extends Error {
   constructor(
@@ -46,7 +54,10 @@ const bundleObjectSchema = z.object({
 });
 
 const bundleSchema = z.object({
-  bundleFormat: z.literal(BUNDLE_FORMAT),
+  bundleFormat: z.union([
+    z.literal(BUNDLE_FORMAT),
+    z.literal(BUNDLE_FORMAT_V2),
+  ]),
   provider: z.literal('claude'),
   manifestSha256: z.string().regex(/^sha256:[a-f0-9]{64}$/),
   manifestB64: z.string(),
@@ -61,6 +72,12 @@ const bundleSchema = z.object({
     .regex(/^sha256:[a-f0-9]{64}$/)
     .optional(),
   registryB64: z.string().optional(),
+  // v2 only: the canonical Project Memory manifest, byte-exact.
+  canonicalSha256: z
+    .string()
+    .regex(/^sha256:[a-f0-9]{64}$/)
+    .optional(),
+  canonicalB64: z.string().optional(),
 });
 
 export type MemoryBackupBundle = z.infer<typeof bundleSchema>;
@@ -85,17 +102,74 @@ const serialize = (bundle: MemoryBackupBundle): Buffer => {
           registryB64: bundle.registryB64,
         }
       : {}),
+    ...(bundle.canonicalSha256 && bundle.canonicalB64
+      ? {
+          canonicalSha256: bundle.canonicalSha256,
+          canonicalB64: bundle.canonicalB64,
+        }
+      : {}),
   };
   return Buffer.from(JSON.stringify(canonical), 'utf8');
 };
 
-const referencedHashes = (manifest: MemoryManifest): string[] => [
-  ...new Set(manifest.items.map((item) => item.contentHash)),
-];
+/**
+ * Every content hash this bundle must carry an object for: the v1 manifest's own
+ * items, PLUS (v2 only) every `present` canonical document's `contentHash`. Task
+ * 13 found this the hard way: once `stak memory backup`/`stak push` migrate the
+ * local store before bundling, project-scope content moves OUT of the v1
+ * manifest (see `migrate.ts`'s `slimToGlobal`) and lives only as canonical
+ * documents — a bundle that scanned only `manifest.items` would silently stop
+ * carrying those objects at all, so a recovering machine would restore a
+ * `canonical/main.json` whose documents point at content that was never
+ * uploaded. Deleted canonical documents (`state: 'deleted'`) reference no live
+ * content and are correctly excluded.
+ */
+const referencedHashes = (
+  manifest: MemoryManifest,
+  canonicalMain?: CanonicalMainManifest,
+): string[] => {
+  const hashes = new Set(manifest.items.map((item) => item.contentHash));
+  if (canonicalMain)
+    for (const project of canonicalMain.projects)
+      for (const doc of project.documents)
+        if (doc.state === 'present') hashes.add(doc.contentHash);
+  return [...hashes];
+};
+
+/** Byte-exact on-disk serialization of a canonical main manifest — MUST match
+ * `canonical/store.ts`'s `writeCanonicalMain` exactly, so a bundle built from an
+ * in-memory override hashes identically to the SAME content once it's actually
+ * persisted to disk after a successful publish (see `canonicalMainOverride`). */
+const canonicalMainBytes = (main: CanonicalMainManifest): Buffer =>
+  Buffer.from(
+    `${JSON.stringify(canonicalMainManifestSchema.parse(main), null, 2)}\n`,
+    'utf8',
+  );
 
 /** Read the current Phase 14A store into a canonical bundle (parsed + bytes). */
 export const bundleFromStore = async (
   stackHome: string,
+  options: {
+    /**
+     * Bundle THIS canonical Memory instead of reading `canonical/main.json`
+     * from disk (Task 13 Important-4 fix). A Cloud publish must upload exactly
+     * the content it's about to ask the server to commit — writing that content
+     * to disk FIRST (so this function would pick it up) breaks "local main and
+     * base move together, only after a successful publish": a failed or
+     * conflicting publish would otherwise leave disk holding never-confirmed
+     * content, with no generation to match it. Callers persist the override to
+     * disk themselves, only once the publish actually succeeds.
+     */
+    canonicalMainOverride?: CanonicalMainManifest;
+    /**
+     * Bundle THIS portable registry snapshot instead of the store's snapshot file
+     * (two-machine fix): a canonical publish bundles the local snapshot plus
+     * remote records carried read-only for projects in the published `main`
+     * that this machine has no record of (`composeBundleSnapshot`). Kept in
+     * memory so carried records never land in this machine's own files.
+     */
+    registrySnapshotOverride?: PortableRegistrySnapshot;
+  } = {},
 ): Promise<{ bundle: MemoryBackupBundle; bytes: Buffer }> => {
   const manifest = await readMemoryManifest(stackHome);
   if (!manifest)
@@ -103,8 +177,25 @@ export const bundleFromStore = async (
   const manifestBytes = await readFile(
     memoryStorePaths(stackHome).currentManifest,
   );
+  // Read `canonical/main.json` directly (not through `readCanonicalMain`'s
+  // empty-default fallback) so a never-migrated store still produces a
+  // byte-identical v1 bundle — only a store that genuinely HAS a canonical
+  // manifest (on disk, or explicitly overridden) upgrades to v2.
+  const canonicalBytes = options.canonicalMainOverride
+    ? canonicalMainBytes(options.canonicalMainOverride)
+    : await readFile(canonicalStorePaths(stackHome).main).catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return undefined;
+          throw error;
+        },
+      );
+  const canonicalMain = canonicalBytes
+    ? canonicalMainManifestSchema.parse(
+        JSON.parse(canonicalBytes.toString('utf8')),
+      )
+    : undefined;
   const objects = [];
-  for (const contentHash of referencedHashes(manifest)) {
+  for (const contentHash of referencedHashes(manifest, canonicalMain)) {
     const bytes = await readMemoryObject({ stackHome, contentHash });
     objects.push({
       contentHash,
@@ -112,14 +203,16 @@ export const bundleFromStore = async (
     });
   }
   // Include the portable project-registry snapshot when the store has one.
-  const registryBytes = await readFile(
-    memoryStorePaths(stackHome).projectRegistrySnapshot,
-  ).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT') return undefined;
-    throw error;
-  });
+  const registryBytes = options.registrySnapshotOverride
+    ? portableSnapshotBytes(options.registrySnapshotOverride)
+    : await readFile(memoryStorePaths(stackHome).projectRegistrySnapshot).catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return undefined;
+          throw error;
+        },
+      );
   const bundle: MemoryBackupBundle = {
-    bundleFormat: BUNDLE_FORMAT,
+    bundleFormat: canonicalBytes ? BUNDLE_FORMAT_V2 : BUNDLE_FORMAT,
     provider: 'claude',
     manifestSha256: hashBytes(manifestBytes),
     manifestB64: manifestBytes.toString('base64'),
@@ -128,6 +221,12 @@ export const bundleFromStore = async (
       ? {
           registrySha256: hashBytes(registryBytes),
           registryB64: registryBytes.toString('base64'),
+        }
+      : {}),
+    ...(canonicalBytes
+      ? {
+          canonicalSha256: hashBytes(canonicalBytes),
+          canonicalB64: canonicalBytes.toString('base64'),
         }
       : {}),
   };
@@ -200,6 +299,19 @@ export const restoreBundleToStore = async (options: {
     await atomicWriteFile(
       memoryStorePaths(options.stackHome).projectRegistrySnapshot,
       registryBytes,
+    );
+  }
+  // Rebuild the canonical Memory manifest when the bundle carried one (v2).
+  if (bundle.canonicalB64 && bundle.canonicalSha256) {
+    const canonicalBytes = Buffer.from(bundle.canonicalB64, 'base64');
+    if (hashBytes(canonicalBytes) !== bundle.canonicalSha256)
+      throw new BundleError(
+        'manifest-hash-mismatch',
+        'The bundled canonical Memory manifest does not match its hash.',
+      );
+    await atomicWriteFile(
+      canonicalStorePaths(options.stackHome).main,
+      canonicalBytes,
     );
   }
   return {
