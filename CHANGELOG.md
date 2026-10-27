@@ -3,6 +3,48 @@
 All notable changes to STAK are documented here. This project adheres to
 semantic versioning.
 
+## 0.2.0-beta.3 — 2026-10-27
+
+- **STAK-native Project Memory.** Project Memory is now stored by STAK
+  itself, under a stable Project ID, in its own neutral layout — Claude Code
+  is a two-way adapter on top of it rather than the source of truth. Memory
+  syncs between machines through a three-way merge that stops on real
+  conflicts instead of silently picking a side or overwriting.
+  - New commands to work through a conflict by hand: `stak memory resolve`,
+    `stak memory diff`, and `stak memory materialize`.
+  - Local Memory stores on the older format upgrade automatically, with a
+    write-once backup first.
+  - `stak pull` now always syncs Project Memory, even on an established
+    machine with no Skills changes to bring down.
+  - Two Project IDs that turn out to be the same repository now fold their
+    Memory together automatically instead of leaving it split.
+  - Every command that changes Memory now takes turns through a lock, so
+    overlapping commands can't corrupt it; `stak memory unlock` clears a
+    lock left behind by a crashed or killed process.
+  - Hardened `stak memory protect` against being left in a half-finished
+    state.
+  - **Upgrade note:** once your account has Memory in the new format, older
+    CLIs are refused when they try to push Memory to it. Update with
+    `npm i -g @memstk/cli@beta`.
+- **Fixed (security):** Skill archive extraction could be made to write or
+  link outside the Skill's own folder. Archives are untrusted input reached
+  through `stak use`, `stak try`, and `stak pull`. Entries whose path
+  contains `:`, and file names that differ from another entry only by case,
+  are now rejected outright.
+- **Fixed:** a fresh-machine `stak pull` with no Cloud Memory yet was
+  reported as a failure; it's now treated as the normal, expected case.
+- **Fixed:** `stak push` on a Machine reached through a symlink lost Git
+  provenance for Git-backed Skills and republished them as snapshots instead
+  of references.
+- **Performance:** `stak push` makes fewer round trips to Cloud — Skills and
+  Memory now upload concurrently (Memory still holds its lock), confirmed
+  content from a prior push is no longer re-checked, uploads run with
+  bounded concurrency, and auth token bookkeeping is throttled instead of
+  written on every request.
+- **Performance:** the web dashboard navigates faster — pages show a loading
+  skeleton immediately instead of a blank screen, and several per-page round
+  trips were removed.
+
 ## 0.2.0-beta.2 — 2026-10-21
 
 - **Fixed:** `stak use`/`stak try` crashed with a raw, unhandled stack trace

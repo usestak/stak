@@ -52,13 +52,32 @@ is automatically verified from what requires an owner decision.
       no `0016`). None may be skipped.
 - [ ] **STAK-native Project Memory deploy order.** If the web app goes first,
       every Memory upload fails:
-  1. Apply Supabase migration `0018` (after all earlier ones).
-  2. Then run `notify pgrst, 'reload schema'`.
-  3. Then deploy the web app.
-  4. Only **after** the web deploy is live, publish the CLI on npm `@beta`.
-     Against the old server, the new CLI gets no sticky v1-after-v2 gate and no
-     guarded retire, so old CLIs could overwrite upgraded accounts and protect
-     runs unguarded.
+  1. [x] Apply Supabase migration `0018` (after all earlier ones). Done
+         2026-10-27 — applied to production.
+  2. [x] Then run `notify pgrst, 'reload schema'`. Done 2026-10-27, right
+         after migration `0018`.
+  3. [ ] Then deploy the web app. **Still open** — confirm the production
+         deployment is on latest `main`.
+  4. [ ] Only **after** the web deploy is live, publish the CLI on npm
+         `@beta`. **Still open.** Against the old server, the new CLI gets
+         no sticky v1-after-v2 gate and no guarded retire, so old CLIs could
+         overwrite upgraded accounts and protect runs unguarded.
+
+### Publishing `@memstk/cli@0.2.0-beta.3` to the `beta` dist-tag
+
+Run from a clean checkout, after the web deploy above is confirmed live.
+`latest` must stay on `0.1.2` — do not let this move it.
+
+- [ ] `pnpm install --frozen-lockfile`
+- [ ] `pnpm build` (from the repo root, or `pnpm --filter @memstk/cli build`)
+- [ ] `cd packages/cli`
+- [ ] `node dist/bin.js --version` → confirm it prints `0.2.0-beta.3`
+- [ ] `npm publish --tag beta` (never plain `npm publish` — that would move
+      `latest`; `publishConfig.access` is already `public` in
+      `packages/cli/package.json`)
+- [ ] `npm dist-tag ls @memstk/cli` → confirm `beta` points at `0.2.0-beta.3`
+      and `latest` is still `0.1.2`
+
 - [ ] **Production web deployment** of `apps/web` with production env vars.
 - [ ] Set server secrets (`SUPABASE_SERVICE_ROLE_KEY`, `STAK_TICKET_SECRET`) in the
       hosting environment — see [env-vars.md](env-vars.md).
