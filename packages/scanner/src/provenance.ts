@@ -66,14 +66,35 @@ export const detectProvenance = async (
   directory: string,
   ancestorCache: Map<string, boolean> = new Map(),
 ): Promise<SkillSource> => {
-  if (!(await hasGitAncestor(directory, ancestorCache)))
+  // Git reports the toplevel with symlinks resolved, so the Skill directory is resolved
+  // once, up front, and used everywhere: for the `.git` ancestor pre-check (a symlinked
+  // PARENT of the Skill must lead to the repository, not to wherever the link sits) and
+  // for relating it to the toplevel. Otherwise a Skill reached through any symlink (macOS
+  // /var -> /private/var, a symlinked ~/Developers, …) either misses the repository or
+  // yields `../../…`, which `git status -- <path>` rejects, and the Skill silently fell
+  // back to `local`.
+  let realDirectory: string;
+  try {
+    realDirectory = await realpath(directory);
+  } catch {
+    return { type: 'local' };
+  }
+  if (!(await hasGitAncestor(realDirectory, ancestorCache)))
     return { type: 'local' };
   try {
-    const repository = await git(directory, ['rev-parse', '--show-toplevel']);
-    const revision = await git(directory, ['rev-parse', 'HEAD']);
+    // Resolve the toplevel as well, so both sides of `path.relative` are canonical
+    // (Windows `subst` drives, mapped drives and 8.3 short names included).
+    const repository = await realpath(
+      await git(realDirectory, ['rev-parse', '--show-toplevel']),
+    );
+    const revision = await git(realDirectory, ['rev-parse', 'HEAD']);
     let remote: string | undefined;
     try {
-      remote = await git(directory, ['config', '--get', 'remote.origin.url']);
+      remote = await git(realDirectory, [
+        'config',
+        '--get',
+        'remote.origin.url',
+      ]);
     } catch {
       remote = undefined;
     }
@@ -82,17 +103,11 @@ export const detectProvenance = async (
     // `ref`, which marks the source as exact-commit-pinned (not update-trackable).
     let ref: string | undefined;
     try {
-      ref = await git(directory, ['symbolic-ref', '-q', 'HEAD']);
+      ref = await git(realDirectory, ['symbolic-ref', '-q', 'HEAD']);
       if (ref.length === 0) ref = undefined;
     } catch {
       ref = undefined;
     }
-    // Git reports the toplevel with symlinks resolved, so the Skill directory must be
-    // resolved too before relating them. Otherwise a Skill reached through any symlink
-    // (macOS /var -> /private/var, a symlinked ~/Developers, …) yields `../../…`, which
-    // `git status -- <path>` rejects as outside the repository and the Skill silently
-    // fell back to `local`.
-    const realDirectory = await realpath(directory);
     const sourcePath =
       path.relative(repository, realDirectory).split(path.sep).join('/') || '.';
     const clean =

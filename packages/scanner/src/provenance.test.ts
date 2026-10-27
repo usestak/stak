@@ -92,6 +92,42 @@ describe('detectProvenance', () => {
     });
   }, 15_000);
 
+  it('records Git provenance when a PARENT of the Skill is a symlink into a repo', async (context) => {
+    // The link sits outside the repository, so walking up the UNRESOLVED path never meets
+    // `.git`; the cheap ancestor pre-check must walk the resolved path instead.
+    const { mkdir, symlink } = await import('node:fs/promises');
+    const root = await mkdtemp(path.join(tmpdir(), 'stack-git-parent-link-'));
+    directories.push(root);
+    const repository = path.join(root, 'repo');
+    const skill = path.join(repository, 'skills', 'demo');
+    await mkdir(skill, { recursive: true });
+    await writeFile(path.join(skill, 'SKILL.md'), 'demo');
+    for (const args of [
+      ['init', '-q'],
+      ['config', 'user.email', 'test@example.com'],
+      ['config', 'user.name', 'Stack Test'],
+      ['add', '.'],
+      ['commit', '-qm', 'fixture'],
+    ])
+      execFileSync('git', args, { cwd: repository });
+    const linkedParent = path.join(root, 'outside', 'skills-link');
+    await mkdir(path.dirname(linkedParent), { recursive: true });
+    try {
+      await symlink(path.join(repository, 'skills'), linkedParent, 'junction');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EPERM') context.skip();
+      throw error;
+    }
+
+    const source = await detectProvenance(path.join(linkedParent, 'demo'));
+
+    expect(source).toMatchObject({
+      type: 'git',
+      path: 'skills/demo',
+      clean: true,
+    });
+  }, 15_000);
+
   it('omits the tracked ref on a detached HEAD (exact-commit-pinned)', async () => {
     const repository = await mkdtemp(path.join(tmpdir(), 'stack-git-detach-'));
     directories.push(repository);
