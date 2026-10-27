@@ -4,13 +4,11 @@ import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { createSyncController, type SyncController } from './sync-controller';
-import { subscribePrivateRealtime } from './realtime-sync';
 import {
   SYNC_CHANNEL_NAME,
   isOwnTabSource,
   type SyncMessage,
 } from './stak-sync';
-import { createSupabaseBrowserClient } from '../supabase-browser';
 
 /** Focus/visibility refreshes are skipped while the page's data is younger than this. */
 export const FOCUS_REFRESH_MIN_INTERVAL_MS = 30_000;
@@ -42,6 +40,12 @@ export type UseStakSyncOptions = {
  * Realtime is additive, never a hard dependency: if creating the browser client or
  * subscribing throws (e.g. no session yet), the hook stays silent and falls back to
  * BroadcastChannel + focus refresh only — no thrown error, no user-visible error state.
+ *
+ * The Supabase browser client and the Realtime subscription module are both loaded via a
+ * dynamic `import()` inside the effect, and only once `enabled` is true. `StakSyncMount` is
+ * mounted in the root layout, so a static top-level import here would pull `@supabase/ssr`
+ * into the bundle for every page — landing, docs, auth — not just the signed-in dashboard
+ * routes that actually turn this hook on.
  */
 export function useStakSync({
   enabled = true,
@@ -81,15 +85,24 @@ export function useStakSync({
       }
     }
 
+    let cancelled = false;
     let unsubscribeRealtime: (() => void) | null = null;
-    try {
-      const client = createSupabaseBrowserClient();
-      unsubscribeRealtime = subscribePrivateRealtime(client, () => {
-        controller.onBroadcastMessage();
-      });
-    } catch {
-      unsubscribeRealtime = null;
-    }
+    void (async () => {
+      try {
+        const [{ createSupabaseBrowserClient }, { subscribePrivateRealtime }] =
+          await Promise.all([
+            import('../supabase-browser'),
+            import('./realtime-sync'),
+          ]);
+        if (cancelled) return;
+        const client = createSupabaseBrowserClient();
+        unsubscribeRealtime = subscribePrivateRealtime(client, () => {
+          controller.onBroadcastMessage();
+        });
+      } catch {
+        unsubscribeRealtime = null;
+      }
+    })();
 
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') controller.onVisible();
@@ -100,6 +113,7 @@ export function useStakSync({
     window.addEventListener('focus', onFocus);
 
     return () => {
+      cancelled = true;
       controller.dispose();
       if (controllerRef.current === controller) controllerRef.current = null;
       document.removeEventListener('visibilitychange', onVisibilityChange);

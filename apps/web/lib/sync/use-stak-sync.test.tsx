@@ -134,6 +134,9 @@ describe('useStakSync', () => {
 
   it('refreshes on an authenticated Realtime invalidation while the tab stays focused', async () => {
     render(<Mounted />);
+    await waitFor(() =>
+      expect(realtimeHandlers.user_stacks?.[0]).toBeDefined(),
+    );
 
     realtimeHandlers.user_stacks[0]();
 
@@ -142,6 +145,7 @@ describe('useStakSync', () => {
 
   it('coalesces a BroadcastChannel signal and a Realtime signal into one refresh', async () => {
     render(<Mounted />);
+    await waitFor(() => expect(realtimeHandlers.machines?.[0]).toBeDefined());
     const sender = new BroadcastChannel(SYNC_CHANNEL_NAME);
 
     sender.postMessage({
@@ -155,8 +159,11 @@ describe('useStakSync', () => {
     sender.close();
   });
 
-  it('cleans up the Realtime subscription on unmount', () => {
+  it('cleans up the Realtime subscription on unmount', async () => {
     const { unmount } = render(<Mounted />);
+    await waitFor(() =>
+      expect(createSupabaseBrowserClient).toHaveBeenCalledTimes(1),
+    );
     unmount();
 
     expect(removeChannel).toHaveBeenCalledTimes(1);
@@ -191,9 +198,12 @@ describe('useStakSync', () => {
     sender.close();
   });
 
-  it('keeps one Realtime subscription across navigations (freshKey changes)', () => {
+  it('keeps one Realtime subscription across navigations (freshKey changes)', async () => {
     createSupabaseBrowserClient.mockClear();
     const { rerender } = render(<Mounted freshKey="/overview" />);
+    await waitFor(() =>
+      expect(createSupabaseBrowserClient).toHaveBeenCalledTimes(1),
+    );
     rerender(<Mounted freshKey="/skills" />);
     rerender(<Mounted freshKey="/machines" />);
 
@@ -201,13 +211,16 @@ describe('useStakSync', () => {
     expect(removeChannel).not.toHaveBeenCalled();
   });
 
-  it('does nothing while disabled (signed-out or public routes)', async () => {
+  it('does nothing while disabled (signed-out or public routes), never loading the Supabase client module', async () => {
     createSupabaseBrowserClient.mockClear();
     render(<Mounted enabled={false} />);
     window.dispatchEvent(new Event('focus'));
 
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(refresh).not.toHaveBeenCalled();
+    // The dynamic import() in the effect is gated behind `enabled`, so when disabled the
+    // '../supabase-browser' module (and therefore @supabase/ssr) is never imported, let
+    // alone used to create a client.
     expect(createSupabaseBrowserClient).not.toHaveBeenCalled();
   });
 });
