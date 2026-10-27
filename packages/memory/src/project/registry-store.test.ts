@@ -312,7 +312,9 @@ describe('refreshPortableSnapshot', () => {
     await refreshPortableSnapshot(stackHome);
 
     const snapshot = await readPortableSnapshot(stackHome);
-    expect(snapshot?.projects.map((p) => p.projectId)).toEqual([minted.projectId]);
+    expect(snapshot?.projects.map((p) => p.projectId)).toEqual([
+      minted.projectId,
+    ]);
     expect(snapshot?.projects[0]?.claims).toContainEqual({
       type: 'git',
       canonical: 'github.com/example/stak-2m-demo',

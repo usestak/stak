@@ -96,7 +96,9 @@ export type MemoryCommandDependencies = {
     project: string;
     path: string;
   }): Promise<ConflictDiff>;
-  memoryMaterialize?(options: { project?: string }): Promise<MaterializeOutcome>;
+  memoryMaterialize?(options: {
+    project?: string;
+  }): Promise<MaterializeOutcome>;
   /**
    * Runs `fn` while holding the cross-process Memory lock (spec 2026-10-25).
    * Optional so existing tests keep working; when absent, `fn` runs directly.
@@ -124,7 +126,9 @@ const renderPendingConflicts = (pending: PendingConflictSummary[]): string => {
   const lines = [
     `${pending.length} pending Memory conflict(s):`,
     '',
-    ...pending.map((c) => `  ${c.projectId}  ${c.name}  ${c.path}  (${c.reason})`),
+    ...pending.map(
+      (c) => `  ${c.projectId}  ${c.name}  ${c.path}  (${c.reason})`,
+    ),
     '',
     'See both versions: stak memory diff <project> <path>',
     'Resolve:           stak memory resolve <project> <path> --keep local|cloud|both',
@@ -202,7 +206,9 @@ export const registerMemoryCommand = (
   // Memory-changing subcommands hold the Memory lock from their first Memory read to
   // their last Memory write (spec 2026-10-25 §3.2). Read-only ones never take it.
   const locked = <T>(command: string, fn: () => Promise<T>): Promise<T> =>
-    dependencies.withMemoryLock ? dependencies.withMemoryLock(command, fn) : fn();
+    dependencies.withMemoryLock
+      ? dependencies.withMemoryLock(command, fn)
+      : fn();
 
   memory
     .command('scan')
@@ -294,7 +300,10 @@ export const registerMemoryCommand = (
         // Final review T15-4: the same refusal as `stak push` — no sync history
         // means the rollback can't be told apart from Cloud, so there is nothing
         // safe to confirm.
-        if (preview.supersession.supersedes && preview.supersession.noSyncHistory) {
+        if (
+          preview.supersession.supersedes &&
+          preview.supersession.noSyncHistory
+        ) {
           if (options.json) {
             emitJson(dependencies, { status: 'needs-catch-up' });
             return;
@@ -322,7 +331,9 @@ export const registerMemoryCommand = (
             );
           const ok =
             options.yes === true ||
-            (await dependencies.confirm('Create the new backup and supersede?'));
+            (await dependencies.confirm(
+              'Create the new backup and supersede?',
+            ));
           if (!ok) {
             if (!options.json) dependencies.writeOut('Cancelled.\n');
             return;
@@ -391,66 +402,69 @@ export const registerMemoryCommand = (
         passkey?: boolean;
         recoveryFile?: string;
         json?: boolean;
-      }) => locked('stak memory protect', async () => {
-        if (options.passkey) {
-          const result = await dependencies.memoryProtectPasskey();
+      }) =>
+        locked('stak memory protect', async () => {
+          if (options.passkey) {
+            const result = await dependencies.memoryProtectPasskey();
+            if (options.json) {
+              emitJson(
+                dependencies,
+                result.status === 'protected'
+                  ? { ...result, recoveryMethod: 'passkey' }
+                  : result,
+              );
+              return;
+            }
+            if (result.status === 'not-authenticated') {
+              dependencies.writeOut(
+                'Not signed in.\nRun `stak login` first.\n',
+              );
+              return;
+            }
+            if (result.status === 'insecure-local-key') {
+              dependencies.writeOut(INSECURE_LOCAL_KEY_MESSAGE);
+              return;
+            }
+            if (result.status === 'passkey-failed') {
+              dependencies.writeOut(
+                renderPasskeyFailure('protect', result.reason),
+              );
+              return;
+            }
+            dependencies.writeOut(
+              renderMemoryProtect({
+                recoveryMethod: 'passkey',
+                migrated: result.migrated,
+              }),
+            );
+            return;
+          }
+          const result = await dependencies.memoryCloudProtect({
+            ...(options.recoveryFile
+              ? { recoveryFile: options.recoveryFile }
+              : {}),
+          });
           if (options.json) {
             emitJson(
               dependencies,
-              result.status === 'protected'
-                ? { ...result, recoveryMethod: 'passkey' }
-                : result,
+              'status' in result
+                ? result
+                : { ...result, recoveryMethod: 'recovery-file' },
             );
             return;
           }
-          if (result.status === 'not-authenticated') {
-            dependencies.writeOut('Not signed in.\nRun `stak login` first.\n');
-            return;
-          }
-          if (result.status === 'insecure-local-key') {
-            dependencies.writeOut(INSECURE_LOCAL_KEY_MESSAGE);
-            return;
-          }
-          if (result.status === 'passkey-failed') {
+          if ('status' in result) {
             dependencies.writeOut(
-              renderPasskeyFailure('protect', result.reason),
+              result.status === 'insecure-local-key'
+                ? INSECURE_LOCAL_KEY_MESSAGE
+                : 'Not signed in.\nRun `stak login` first.\n',
             );
             return;
           }
           dependencies.writeOut(
-            renderMemoryProtect({
-              recoveryMethod: 'passkey',
-              migrated: result.migrated,
-            }),
+            renderMemoryProtect({ ...result, recoveryMethod: 'recovery-file' }),
           );
-          return;
-        }
-        const result = await dependencies.memoryCloudProtect({
-          ...(options.recoveryFile
-            ? { recoveryFile: options.recoveryFile }
-            : {}),
-        });
-        if (options.json) {
-          emitJson(
-            dependencies,
-            'status' in result
-              ? result
-              : { ...result, recoveryMethod: 'recovery-file' },
-          );
-          return;
-        }
-        if ('status' in result) {
-          dependencies.writeOut(
-            result.status === 'insecure-local-key'
-              ? INSECURE_LOCAL_KEY_MESSAGE
-              : 'Not signed in.\nRun `stak login` first.\n',
-          );
-          return;
-        }
-        dependencies.writeOut(
-          renderMemoryProtect({ ...result, recoveryMethod: 'recovery-file' }),
-        );
-      }),
+        }),
     );
 
   memory
@@ -515,7 +529,9 @@ export const registerMemoryCommand = (
               return;
             }
             if (result.status === 'not-authenticated') {
-              dependencies.writeOut('Not signed in.\nRun `stak login` first.\n');
+              dependencies.writeOut(
+                'Not signed in.\nRun `stak login` first.\n',
+              );
               return;
             }
             if (result.status === 'no-backup') {
@@ -664,20 +680,18 @@ export const registerMemoryCommand = (
       'Rebuild agent Memory files from STAK Memory (all projects on this machine, or one)',
     )
     .option('--agent <agent>', 'agent to write (claude)', 'claude')
-    .action(
-      async (project: string | undefined, options: { agent: string }) => {
-        if (options.agent !== 'claude')
-          throw new StackCompositionError(
-            'memory-materialize-agent',
-            `Unsupported agent "${options.agent}". Only claude is supported in this version.`,
-          );
-        const materialize = required(dependencies.memoryMaterialize);
-        const outcome = await locked('stak memory materialize', () =>
-          materialize(project !== undefined ? { project } : {}),
+    .action(async (project: string | undefined, options: { agent: string }) => {
+      if (options.agent !== 'claude')
+        throw new StackCompositionError(
+          'memory-materialize-agent',
+          `Unsupported agent "${options.agent}". Only claude is supported in this version.`,
         );
-        dependencies.writeOut(renderMaterializeOutcome(outcome));
-      },
-    );
+      const materialize = required(dependencies.memoryMaterialize);
+      const outcome = await locked('stak memory materialize', () =>
+        materialize(project !== undefined ? { project } : {}),
+      );
+      dependencies.writeOut(renderMaterializeOutcome(outcome));
+    });
 
   memory
     .command('restore')
@@ -720,7 +734,9 @@ export const registerMemoryCommand = (
   // Memory lock itself — that is the lock it is removing.
   memory
     .command('unlock')
-    .description('Remove a leftover Memory lock left behind by a crashed STAK command')
+    .description(
+      'Remove a leftover Memory lock left behind by a crashed STAK command',
+    )
     .option(
       '--force',
       'remove the lock even if its process may still be running (can lose Memory changes)',

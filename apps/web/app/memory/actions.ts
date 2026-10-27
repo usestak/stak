@@ -55,7 +55,10 @@ export async function latestKeyCheckAction(): Promise<
 > {
   const user = await getSessionUser();
   if (!user) return { ok: false, error: 'You must sign in first.' };
-  return { ok: true, check: await latestKeyCheck(getCloudService(), { id: user.id }) };
+  return {
+    ok: true,
+    check: await latestKeyCheck(getCloudService(), { id: user.id }),
+  };
 }
 
 export async function addPasskeyMethodAction(input: {

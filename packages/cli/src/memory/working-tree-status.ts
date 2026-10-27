@@ -2,7 +2,10 @@ import { emptyRegistry, readMemoryManifest } from '@stack/memory';
 import type { DiscoveredMemoryItem, LocalRegistry } from '@stack/memory';
 
 import { canonicalMemoryKey } from './canonical-identity.js';
-import type { CanonicalProjectSummary, UnlocatableProject } from './canonical-ops.js';
+import type {
+  CanonicalProjectSummary,
+  UnlocatableProject,
+} from './canonical-ops.js';
 
 /**
  * MACHINE (native Memory) vs MAIN (the staged local manifest) — read-only, no Cloud call.
@@ -52,7 +55,7 @@ export type ComputeMemoryWorkingTreeStatusOptions = {
   registry?: LocalRegistry;
 };
 
-const groupHashesByKey = <T,>(
+const groupHashesByKey = <T>(
   items: T[],
   keyOf: (item: T) => string,
   hashOf: (item: T) => string,
@@ -105,5 +108,7 @@ export const computeMemoryWorkingTreeStatus = async (
       [...stagedHashes][0] === [...nativeHashes][0];
     if (!clean) changed += 1;
   }
-  return changed === 0 ? { state: 'clean' } : { state: 'changes-not-added', changed };
+  return changed === 0
+    ? { state: 'clean' }
+    : { state: 'changes-not-added', changed };
 };

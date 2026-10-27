@@ -32,13 +32,18 @@ afterEach(async () => {
 describe('canonical main', () => {
   it('returns an empty manifest when nothing has been written', async () => {
     const main = await readCanonicalMain(stackHome);
-    expect(main).toEqual({ schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION, projects: [] });
+    expect(main).toEqual({
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [],
+    });
   });
 
   it('round-trips a written manifest', async () => {
     const main = {
       schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
-      projects: [{ projectId: 'prj_0123456789abcdefghjkmnpqrs', documents: [] }],
+      projects: [
+        { projectId: 'prj_0123456789abcdefghjkmnpqrs', documents: [] },
+      ],
     };
     await writeCanonicalMain(stackHome, main);
     expect(await readCanonicalMain(stackHome)).toEqual(main);
@@ -72,7 +77,11 @@ describe('pending merge', () => {
   });
 
   it('round-trips a pending merge, and clears it', async () => {
-    const merge = { basedOnGeneration: 5, merged: { a: 1 }, conflicts: [{ b: 2 }] };
+    const merge = {
+      basedOnGeneration: 5,
+      merged: { a: 1 },
+      conflicts: [{ b: 2 }],
+    };
     await writePendingMerge(stackHome, merge);
     expect(await readPendingMerge(stackHome, testMergeSchema)).toEqual(merge);
     await clearPendingMerge(stackHome);
@@ -91,7 +100,11 @@ describe('projections', () => {
   it('round-trips a projection file per adapter', async () => {
     const file = {
       schemaVersion: 1 as const,
-      projects: { 'prj_0123456789abcdefghjkmnpqrs': { 'notes/a.md': 'sha256:' + '0'.repeat(64) } },
+      projects: {
+        prj_0123456789abcdefghjkmnpqrs: {
+          'notes/a.md': 'sha256:' + '0'.repeat(64),
+        },
+      },
     };
     await writeProjection(stackHome, 'claude', file);
     expect(await readProjection(stackHome, 'claude')).toEqual(file);
@@ -108,7 +121,9 @@ describe('canonicalStorePaths', () => {
     const paths = canonicalStorePaths(stackHome);
     expect(paths.main).toContain(path.join('memory', 'canonical', 'main.json'));
     expect(paths.base).toContain(path.join('memory', 'canonical', 'base.json'));
-    expect(paths.merge).toContain(path.join('memory', 'canonical', 'merge.json'));
+    expect(paths.merge).toContain(
+      path.join('memory', 'canonical', 'merge.json'),
+    );
     expect(paths.projections('claude')).toContain(
       path.join('memory', 'projections', 'claude.json'),
     );

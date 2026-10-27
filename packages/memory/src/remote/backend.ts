@@ -182,22 +182,31 @@ export const assertCreateGenerationAllowed = (
   let verifiedReplica = false;
   if (input.replicaOf !== undefined) {
     const refuse = (why: string): never => {
-      throw new RemoteMemoryError('invalid-replica', `Refused Protected replica: ${why}.`);
+      throw new RemoteMemoryError(
+        'invalid-replica',
+        `Refused Protected replica: ${why}.`,
+      );
     };
     const original = context.original;
     if (!original || original.backupId !== input.replicaOf)
       return refuse('the original generation does not exist');
-    if (original.state !== 'committed') refuse('the original generation is not committed');
-    if (original.privacyMode !== 'standard') refuse('the original generation is not Standard');
+    if (original.state !== 'committed')
+      refuse('the original generation is not committed');
+    if (original.privacyMode !== 'standard')
+      refuse('the original generation is not Standard');
     if (original.bundleFormatVersion !== input.bundleFormatVersion)
       refuse('the bundle format differs from the original');
     if (context.committed.some((g) => g.replicaOf === input.replicaOf))
       refuse('the original generation already has a replica');
-    if (input.payloadBytes !== original.payloadBytes + REPLICA_PAYLOAD_OVERHEAD_BYTES)
+    if (
+      input.payloadBytes !==
+      original.payloadBytes + REPLICA_PAYLOAD_OVERHEAD_BYTES
+    )
       refuse('the payload length does not match the original');
     if ((context.profile?.privacyMode ?? 'standard') !== 'standard')
       refuse('the account is no longer Standard');
-    if (input.privacyMode !== 'protected') refuse('a replica must be Protected');
+    if (input.privacyMode !== 'protected')
+      refuse('a replica must be Protected');
     verifiedReplica = true;
   }
   // Final review I6: an UNCLAIMED Protected create while the account is still
@@ -218,7 +227,10 @@ export const assertCreateGenerationAllowed = (
     input.bundleFormatVersion === BUNDLE_FORMAT &&
     context.committed.some((g) => g.bundleFormatVersion === BUNDLE_FORMAT_V2)
   )
-    throw new RemoteMemoryError('incompatible-format', INCOMPATIBLE_FORMAT_MESSAGE);
+    throw new RemoteMemoryError(
+      'incompatible-format',
+      INCOMPATIBLE_FORMAT_MESSAGE,
+    );
 };
 
 /**
@@ -243,7 +255,9 @@ export const assertRetireAllowed = (
   const committed = all.filter((g) => g.state === 'committed');
   if (
     target.privacyMode === 'standard' &&
-    !committed.some((g) => g.privacyMode === 'protected' && g.replicaOf === target.backupId)
+    !committed.some(
+      (g) => g.privacyMode === 'protected' && g.replicaOf === target.backupId,
+    )
   )
     throw new RemoteMemoryError(
       'retire-refused',
@@ -453,7 +467,8 @@ class InMemoryRemoteMemoryBackend implements RemoteMemoryBackend {
     // RPC (supabase/migrations/0003 + 0018). Retiring a generation never lowers
     // it, so a retired number is never reused and both backends demand the
     // same `expectedParent` after a retire (e.g. protect retiring orphans).
-    const currentParent = this.store.profiles.get(this.userId)?.latestGeneration ?? null;
+    const currentParent =
+      this.store.profiles.get(this.userId)?.latestGeneration ?? null;
     if (input.expectedParent !== currentParent)
       throw new RemoteMemoryError(
         'conflict',
@@ -468,14 +483,18 @@ class InMemoryRemoteMemoryBackend implements RemoteMemoryBackend {
         bundleFormatVersion: input.bundleFormatVersion,
         privacyMode: input.privacyMode,
         payloadBytes: input.payload.byteLength,
-        ...(input.replicaOf !== undefined ? { replicaOf: input.replicaOf } : {}),
+        ...(input.replicaOf !== undefined
+          ? { replicaOf: input.replicaOf }
+          : {}),
       },
       {
         profile: this.store.profiles.get(this.userId) ?? null,
         committed: await this.listGenerations(),
         original:
           input.replicaOf !== undefined
-            ? (this.myGenerations().find((g) => g.backupId === input.replicaOf) ?? null)
+            ? (this.myGenerations().find(
+                (g) => g.backupId === input.replicaOf,
+              ) ?? null)
             : null,
       },
     );

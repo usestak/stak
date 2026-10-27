@@ -15,14 +15,18 @@ export type SyncAction =
       reason: 'edit-edit' | 'edit-delete' | 'delete-edit' | 'adopt-mismatch';
     };
 
-const canonicalContentHash = (doc: CanonicalDoc | undefined): string | undefined =>
+const canonicalContentHash = (
+  doc: CanonicalDoc | undefined,
+): string | undefined =>
   doc === undefined
     ? undefined
     : doc.state === 'present'
       ? doc.contentHash
       : undefined; // deleted carries no "current" content
 
-const canonicalTombstoneHash = (doc: CanonicalDoc | undefined): string | undefined =>
+const canonicalTombstoneHash = (
+  doc: CanonicalDoc | undefined,
+): string | undefined =>
   doc?.state === 'deleted' ? doc.lastContentHash : undefined;
 
 /**
@@ -37,8 +41,12 @@ export const planSync = (input: {
   projection: Record<string, string>;
   canonical: CanonicalDoc[];
 }): SyncAction[] => {
-  const nativeByPath = new Map(input.native.map((entry) => [entry.path, entry.contentHash]));
-  const canonicalByPath = new Map(input.canonical.map((doc) => [doc.path, doc]));
+  const nativeByPath = new Map(
+    input.native.map((entry) => [entry.path, entry.contentHash]),
+  );
+  const canonicalByPath = new Map(
+    input.canonical.map((doc) => [doc.path, doc]),
+  );
   const paths = new Set<string>([
     ...nativeByPath.keys(),
     ...Object.keys(input.projection),
@@ -63,7 +71,13 @@ export const planSync = (input: {
 
     // Tombstone-resurrection guard: a native file whose content exactly matches
     // what was deleted is never treated as a new import, but only in first sighting.
-    if (P === undefined && tombstone !== undefined && N !== undefined && N === tombstone && C === undefined) {
+    if (
+      P === undefined &&
+      tombstone !== undefined &&
+      N !== undefined &&
+      N === tombstone &&
+      C === undefined
+    ) {
       actions.push({ kind: 'none' });
       continue;
     }
@@ -78,7 +92,8 @@ export const planSync = (input: {
       } else if (N === undefined && C !== undefined) {
         actions.push({ kind: 'materialize-write', path, contentHash: C });
       } else if (N !== undefined && C !== undefined) {
-        if (N === C) actions.push({ kind: 'already-synced', path, contentHash: N });
+        if (N === C)
+          actions.push({ kind: 'already-synced', path, contentHash: N });
         else actions.push({ kind: 'conflict', path, reason: 'adopt-mismatch' });
       } else {
         actions.push({ kind: 'none' });

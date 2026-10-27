@@ -104,7 +104,8 @@ export const deriveContentUploadRequirements = (
   importedStackVersions: PortableImportedStackVersion[],
 ): CloudContentUploadRequirement[] => {
   const hashes = new Set<string>();
-  for (const skill of Object.values(resolved.skills)) hashes.add(skill.contentHash);
+  for (const skill of Object.values(resolved.skills))
+    hashes.add(skill.contentHash);
   for (const version of importedStackVersions)
     for (const requirement of version.requirements)
       hashes.add(requirement.contentHash);

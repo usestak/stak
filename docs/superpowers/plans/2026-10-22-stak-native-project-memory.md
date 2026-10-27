@@ -56,12 +56,14 @@ docs/memory.md                               # user docs update (Task 14)
 ### Task 1: Canonical domain model and path rules
 
 **Files:**
+
 - Create: `packages/memory/src/canonical/domain.ts`
 - Create: `packages/memory/src/canonical/paths.ts`
 - Test: `packages/memory/src/canonical/domain.test.ts`
 - Test: `packages/memory/src/canonical/paths.test.ts`
 
 **Interfaces:**
+
 - Produces (from `paths.ts`): `NAMESPACES`, `type Namespace = "notes" | "instructions" | "agents"`, `InvalidCanonicalPathError`, `validateCanonicalPath(path: string): string`, `namespaceOf(path: string): Namespace | null`, `agentOfAgentsPath(path: string): string | null`.
 - Produces (from `domain.ts`): `CANONICAL_MAIN_SCHEMA_VERSION`, `canonicalDocPresentSchema`, `canonicalDocDeletedSchema`, `canonicalDocSchema`, `type CanonicalDoc`, `canonicalProjectMemorySchema`, `type CanonicalProjectMemory`, `canonicalMainManifestSchema`, `type CanonicalMainManifest`, `emptyCanonicalMain()`, `canonicalDigest(main): string`, `projectMemoryOf(main, projectId)`, `documentOf(main, projectId, path)`.
 
@@ -357,9 +359,7 @@ export const canonicalMainManifestSchema = z.object({
   schemaVersion: z.literal(CANONICAL_MAIN_SCHEMA_VERSION),
   projects: z.array(canonicalProjectMemorySchema),
 });
-export type CanonicalMainManifest = z.infer<
-  typeof canonicalMainManifestSchema
->;
+export type CanonicalMainManifest = z.infer<typeof canonicalMainManifestSchema>;
 
 export const emptyCanonicalMain = (): CanonicalMainManifest => ({
   schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
@@ -417,11 +417,13 @@ git commit -m "feat(memory): add canonical Project Memory domain model and path 
 ### Task 2: Canonical store I/O (main/base/merge/projections)
 
 **Files:**
+
 - Create: `packages/memory/src/canonical/store.ts`
 - Test: `packages/memory/src/canonical/store.test.ts`
 - Modify: `packages/core/src/state.ts`
 
 **Interfaces:**
+
 - Consumes: `CanonicalMainManifest`, `canonicalMainManifestSchema`, `emptyCanonicalMain()` from `./domain.js` (Task 1).
 - Produces: `canonicalStorePaths(stackHome): { root, main, base, merge, projections(adapterId) }`, `readCanonicalMain(stackHome): Promise<CanonicalMainManifest>`, `writeCanonicalMain(stackHome, main): Promise<void>`, `type CanonicalBase = { generation: number; main: CanonicalMainManifest }`, `readCanonicalBase(stackHome): Promise<CanonicalBase | null>`, `writeCanonicalBase(stackHome, base): Promise<void>`, `type PendingMerge = { basedOnGeneration: number; merged: CanonicalMainManifest; conflicts: MergeConflict[] }` (re-exported type from `./merge.js`, defined there in Task 4 — this task only persists it as `unknown`-shaped JSON via a passed-in schema), `readPendingMerge(stackHome): Promise<PendingMerge | null>`, `writePendingMerge(stackHome, merge): Promise<void>`, `clearPendingMerge(stackHome): Promise<void>`, `type Projection = Record<string, string>` (canonical `path` -> last-synced content hash, scoped by project inside the file), `readProjection(stackHome, adapterId): Promise<ProjectionFile>`, `writeProjection(stackHome, adapterId, file): Promise<void>` where `ProjectionFile = { schemaVersion: 1; projects: Record<string, Record<string, string>> }` (projectId -> path -> hash).
 
@@ -466,7 +468,10 @@ afterEach(async () => {
 describe('canonical main', () => {
   it('returns an empty manifest when nothing has been written', async () => {
     const main = await readCanonicalMain(stackHome);
-    expect(main).toEqual({ schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION, projects: [] });
+    expect(main).toEqual({
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [],
+    });
   });
 
   it('round-trips a written manifest', async () => {
@@ -506,7 +511,11 @@ describe('pending merge', () => {
   });
 
   it('round-trips a pending merge, and clears it', async () => {
-    const merge = { basedOnGeneration: 5, merged: { a: 1 }, conflicts: [{ b: 2 }] };
+    const merge = {
+      basedOnGeneration: 5,
+      merged: { a: 1 },
+      conflicts: [{ b: 2 }],
+    };
     await writePendingMerge(stackHome, merge);
     expect(await readPendingMerge(stackHome, testMergeSchema)).toEqual(merge);
     await clearPendingMerge(stackHome);
@@ -542,7 +551,9 @@ describe('canonicalStorePaths', () => {
     const paths = canonicalStorePaths(stackHome);
     expect(paths.main).toContain(path.join('memory', 'canonical', 'main.json'));
     expect(paths.base).toContain(path.join('memory', 'canonical', 'base.json'));
-    expect(paths.merge).toContain(path.join('memory', 'canonical', 'merge.json'));
+    expect(paths.merge).toContain(
+      path.join('memory', 'canonical', 'merge.json'),
+    );
     expect(paths.projections('claude')).toContain(
       path.join('memory', 'projections', 'claude.json'),
     );
@@ -575,7 +586,8 @@ import {
 
 export class CanonicalStoreError extends Error {
   constructor(
-    public readonly code: 'main-corrupt' | 'base-corrupt' | 'merge-corrupt' | 'projection-corrupt',
+    public readonly code:
+      'main-corrupt' | 'base-corrupt' | 'merge-corrupt' | 'projection-corrupt',
     message: string,
     options?: ErrorOptions,
   ) {
@@ -586,14 +598,18 @@ export class CanonicalStoreError extends Error {
 
 export const canonicalStorePaths = (stackHome: string) => {
   const root = path.join(memoryStorePaths(stackHome).root, 'canonical');
-  const projectionsRoot = path.join(memoryStorePaths(stackHome).root, 'projections');
+  const projectionsRoot = path.join(
+    memoryStorePaths(stackHome).root,
+    'projections',
+  );
   return {
     root,
     main: path.join(root, 'main.json'),
     base: path.join(root, 'base.json'),
     merge: path.join(root, 'merge.json'),
     projectionsRoot,
-    projections: (adapterId: string) => path.join(projectionsRoot, `${adapterId}.json`),
+    projections: (adapterId: string) =>
+      path.join(projectionsRoot, `${adapterId}.json`),
   };
 };
 
@@ -609,7 +625,10 @@ const readJson = async <T>(file: string): Promise<unknown | undefined> => {
 };
 
 const writeJson = async (file: string, value: unknown): Promise<void> => {
-  await atomicWriteFile(file, Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8'));
+  await atomicWriteFile(
+    file,
+    Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf8'),
+  );
 };
 
 export const readCanonicalMain = async (
@@ -632,7 +651,10 @@ export const writeCanonicalMain = async (
   stackHome: string,
   main: CanonicalMainManifest,
 ): Promise<void> =>
-  writeJson(canonicalStorePaths(stackHome).main, canonicalMainManifestSchema.parse(main));
+  writeJson(
+    canonicalStorePaths(stackHome).main,
+    canonicalMainManifestSchema.parse(main),
+  );
 
 export type CanonicalBase = {
   generation: number;
@@ -652,9 +674,13 @@ export const readCanonicalBase = async (
   try {
     return canonicalBaseSchema.parse(raw);
   } catch (error) {
-    throw new CanonicalStoreError('base-corrupt', 'Canonical Memory base is malformed.', {
-      cause: error,
-    });
+    throw new CanonicalStoreError(
+      'base-corrupt',
+      'Canonical Memory base is malformed.',
+      {
+        cause: error,
+      },
+    );
   }
 };
 
@@ -662,7 +688,10 @@ export const writeCanonicalBase = async (
   stackHome: string,
   base: CanonicalBase,
 ): Promise<void> =>
-  writeJson(canonicalStorePaths(stackHome).base, canonicalBaseSchema.parse(base));
+  writeJson(
+    canonicalStorePaths(stackHome).base,
+    canonicalBaseSchema.parse(base),
+  );
 
 export const readPendingMerge = async <T>(
   stackHome: string,
@@ -710,7 +739,9 @@ export const readProjection = async (
   stackHome: string,
   adapterId: string,
 ): Promise<ProjectionFile> => {
-  const raw = await readJson(canonicalStorePaths(stackHome).projections(adapterId));
+  const raw = await readJson(
+    canonicalStorePaths(stackHome).projections(adapterId),
+  );
   if (raw === undefined) return emptyProjectionFile();
   try {
     return projectionFileSchema.parse(raw);
@@ -770,10 +801,12 @@ git commit -m "feat(memory): add canonical Memory store I/O (main/base/merge/pro
 This is the core decision logic from spec section 6 and Appendix A.2. It is pure: it takes three maps (native, projection, canonical) for one project and returns a plan. No file I/O, no adapter calls.
 
 **Files:**
+
 - Create: `packages/memory/src/canonical/sync.ts`
 - Test: `packages/memory/src/canonical/sync.test.ts`
 
 **Interfaces:**
+
 - Consumes: `CanonicalDoc`, `CanonicalProjectMemory` from `./domain.js` (Task 1).
 - Produces:
   - `type NativeEntry = { path: string; contentHash: string }`
@@ -803,7 +836,10 @@ const deleted = (path: string, n: number): CanonicalDoc => ({
   lastContentHash: h(n),
   deletedAt: '2026-10-22T00:00:00.000Z',
 });
-const native = (path: string, n: number): NativeEntry => ({ path, contentHash: h(n) });
+const native = (path: string, n: number): NativeEntry => ({
+  path,
+  contentHash: h(n),
+});
 
 describe('planSync', () => {
   it('N=P=C: nothing changed -> no action', () => {
@@ -874,7 +910,9 @@ describe('planSync', () => {
       projection: { 'notes/a.md': h(1) },
       canonical: [deleted('notes/a.md', 1)],
     });
-    expect(actions).toEqual([{ kind: 'materialize-delete', path: 'notes/a.md' }]);
+    expect(actions).toEqual([
+      { kind: 'materialize-delete', path: 'notes/a.md' },
+    ]);
   });
 
   it('canonical deleted, native edited (N!=P) -> conflict edit-delete', () => {
@@ -991,14 +1029,18 @@ export type SyncAction =
       reason: 'edit-edit' | 'edit-delete' | 'delete-edit' | 'adopt-mismatch';
     };
 
-const canonicalContentHash = (doc: CanonicalDoc | undefined): string | undefined =>
+const canonicalContentHash = (
+  doc: CanonicalDoc | undefined,
+): string | undefined =>
   doc === undefined
     ? undefined
     : doc.state === 'present'
       ? doc.contentHash
       : undefined; // deleted carries no "current" content
 
-const canonicalTombstoneHash = (doc: CanonicalDoc | undefined): string | undefined =>
+const canonicalTombstoneHash = (
+  doc: CanonicalDoc | undefined,
+): string | undefined =>
   doc?.state === 'deleted' ? doc.lastContentHash : undefined;
 
 /**
@@ -1013,8 +1055,12 @@ export const planSync = (input: {
   projection: Record<string, string>;
   canonical: CanonicalDoc[];
 }): SyncAction[] => {
-  const nativeByPath = new Map(input.native.map((entry) => [entry.path, entry.contentHash]));
-  const canonicalByPath = new Map(input.canonical.map((doc) => [doc.path, doc]));
+  const nativeByPath = new Map(
+    input.native.map((entry) => [entry.path, entry.contentHash]),
+  );
+  const canonicalByPath = new Map(
+    input.canonical.map((doc) => [doc.path, doc]),
+  );
   const paths = new Set<string>([
     ...nativeByPath.keys(),
     ...Object.keys(input.projection),
@@ -1059,7 +1105,8 @@ export const planSync = (input: {
       } else if (N === undefined && C !== undefined) {
         actions.push({ kind: 'materialize-write', path, contentHash: C });
       } else if (N !== undefined && C !== undefined) {
-        if (N === C) actions.push({ kind: 'already-synced', path, contentHash: N });
+        if (N === C)
+          actions.push({ kind: 'already-synced', path, contentHash: N });
         else actions.push({ kind: 'conflict', path, reason: 'adopt-mismatch' });
       } else {
         actions.push({ kind: 'none' });
@@ -1124,10 +1171,12 @@ git commit -m "feat(memory): add the N/P/C Memory sync decision engine"
 ### Task 4: Three-way merge engine and keep-both naming
 
 **Files:**
+
 - Create: `packages/memory/src/canonical/merge.ts`
 - Test: `packages/memory/src/canonical/merge.test.ts`
 
 **Interfaces:**
+
 - Consumes: `CanonicalDoc`, `CanonicalMainManifest`, `CanonicalProjectMemory`, `projectMemoryOf`, `documentOf` from `./domain.js` (Task 1).
 - Produces: `type MergeConflict = { projectId: string; path: string; reason: 'edit-edit' | 'edit-delete' | 'delete-delete' }` (`'delete-delete'` covers both sides having no live content — deleted, or an absent entry with no tombstone at all — with differing history; `'edit-edit'` requires BOTH sides to actually be `present`), `mergeConflictSchema` (zod, for persisting inside `PendingMerge`), `type MergeOutcome = { merged: CanonicalMainManifest; conflicts: MergeConflict[] }`, `mergeCanonical(base: CanonicalMainManifest, local: CanonicalMainManifest, remote: CanonicalMainManifest): MergeOutcome`, `keepBothPath(originalPath: string, localContentHash: string, isTaken: (candidate: string) => boolean): string`.
 
@@ -1137,7 +1186,11 @@ Create `packages/memory/src/canonical/merge.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { CANONICAL_MAIN_SCHEMA_VERSION, type CanonicalDoc, type CanonicalMainManifest } from './domain.js';
+import {
+  CANONICAL_MAIN_SCHEMA_VERSION,
+  type CanonicalDoc,
+  type CanonicalMainManifest,
+} from './domain.js';
 import { keepBothPath, mergeCanonical } from './merge.js';
 
 const h = (n: number) => `sha256:${n.toString().padStart(64, '0')}`;
@@ -1201,7 +1254,9 @@ describe('mergeCanonical', () => {
     const local = manifest([present('notes/a.md', 2)]);
     const remote = manifest([present('notes/a.md', 3)]);
     const { merged, conflicts } = mergeCanonical(base, local, remote);
-    expect(conflicts).toEqual([{ projectId: 'prj_x', path: 'notes/a.md', reason: 'edit-edit' }]);
+    expect(conflicts).toEqual([
+      { projectId: 'prj_x', path: 'notes/a.md', reason: 'edit-edit' },
+    ]);
     expect(merged.projects[0]!.documents).toEqual([]);
   });
 
@@ -1210,7 +1265,9 @@ describe('mergeCanonical', () => {
     const local = manifest([present('notes/a.md', 2)]);
     const remote = manifest([deleted('notes/a.md', 1)]);
     const { merged, conflicts } = mergeCanonical(base, local, remote);
-    expect(conflicts).toEqual([{ projectId: 'prj_x', path: 'notes/a.md', reason: 'edit-delete' }]);
+    expect(conflicts).toEqual([
+      { projectId: 'prj_x', path: 'notes/a.md', reason: 'edit-delete' },
+    ]);
     expect(merged.projects[0]!.documents).toEqual([]);
   });
 
@@ -1219,16 +1276,23 @@ describe('mergeCanonical', () => {
     const local = manifest([deleted('notes/a.md', 1)]);
     const remote = manifest([deleted('notes/a.md', 2)]); // remote edited to v2, then deleted
     const { merged, conflicts } = mergeCanonical(base, local, remote);
-    expect(conflicts).toEqual([{ projectId: 'prj_x', path: 'notes/a.md', reason: 'delete-delete' }]);
+    expect(conflicts).toEqual([
+      { projectId: 'prj_x', path: 'notes/a.md', reason: 'delete-delete' },
+    ]);
     expect(merged.projects[0]!.documents).toEqual([]);
   });
 
   it('an entry absent on one side (no tombstone at all) vs present on the other conflicts as edit-delete', () => {
     const base = manifest([present('notes/a.md', 1)]);
-    const local: CanonicalMainManifest = { schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION, projects: [{ projectId: 'prj_x', documents: [] }] };
+    const local: CanonicalMainManifest = {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [{ projectId: 'prj_x', documents: [] }],
+    };
     const remote = manifest([present('notes/a.md', 2)]);
     const { merged, conflicts } = mergeCanonical(base, local, remote);
-    expect(conflicts).toEqual([{ projectId: 'prj_x', path: 'notes/a.md', reason: 'edit-delete' }]);
+    expect(conflicts).toEqual([
+      { projectId: 'prj_x', path: 'notes/a.md', reason: 'edit-delete' },
+    ]);
     expect(merged.projects[0]!.documents).toEqual([]);
   });
 
@@ -1242,14 +1306,20 @@ describe('mergeCanonical', () => {
   });
 
   it('a project absent from base/local but present in remote is carried over', () => {
-    const base: CanonicalMainManifest = { schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION, projects: [] };
-    const local: CanonicalMainManifest = { schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION, projects: [] };
+    const base: CanonicalMainManifest = {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [],
+    };
+    const local: CanonicalMainManifest = {
+      schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+      projects: [],
+    };
     const remote = manifest([present('notes/a.md', 1)]);
     const { merged, conflicts } = mergeCanonical(base, local, remote);
     expect(conflicts).toEqual([]);
-    expect(merged.projects.find((p) => p.projectId === 'prj_x')?.documents).toEqual([
-      present('notes/a.md', 1),
-    ]);
+    expect(
+      merged.projects.find((p) => p.projectId === 'prj_x')?.documents,
+    ).toEqual([present('notes/a.md', 1)]);
   });
 });
 
@@ -1273,7 +1343,8 @@ describe('keepBothPath', () => {
     const twelve = 'notes/x.conflict-cccccccccccc.md';
     const sixteen = 'notes/x.conflict-cccccccccccccccc.md';
     const full = `notes/x.conflict-${'c'.repeat(64)}.md`;
-    const isTaken = (candidate: string) => candidate === twelve || candidate === sixteen;
+    const isTaken = (candidate: string) =>
+      candidate === twelve || candidate === sixteen;
     expect(keepBothPath('notes/x.md', hash, isTaken)).toBe(full);
   });
 
@@ -1322,10 +1393,15 @@ export type MergeOutcome = {
   conflicts: MergeConflict[];
 };
 
-const docsByPath = (project: CanonicalProjectMemory | undefined): Map<string, CanonicalDoc> =>
+const docsByPath = (
+  project: CanonicalProjectMemory | undefined,
+): Map<string, CanonicalDoc> =>
   new Map((project?.documents ?? []).map((doc) => [doc.path, doc]));
 
-const sameDoc = (a: CanonicalDoc | undefined, b: CanonicalDoc | undefined): boolean => {
+const sameDoc = (
+  a: CanonicalDoc | undefined,
+  b: CanonicalDoc | undefined,
+): boolean => {
   if (a === undefined && b === undefined) return true;
   if (a === undefined || b === undefined) return false;
   if (a.state !== b.state) return false;
@@ -1353,7 +1429,11 @@ const mergeProject = (
   const baseDocs = docsByPath(base);
   const localDocs = docsByPath(local);
   const remoteDocs = docsByPath(remote);
-  const paths = new Set<string>([...baseDocs.keys(), ...localDocs.keys(), ...remoteDocs.keys()]);
+  const paths = new Set<string>([
+    ...baseDocs.keys(),
+    ...localDocs.keys(),
+    ...remoteDocs.keys(),
+  ]);
 
   const documents: CanonicalDoc[] = [];
   const conflicts: MergeConflict[] = [];
@@ -1387,11 +1467,12 @@ const mergeProject = (
     // `present`, not just "not provably deleted."
     const isGone = (doc: CanonicalDoc | undefined): boolean =>
       doc === undefined || doc.state === 'deleted';
-    const reason: MergeConflict['reason'] = isGone(L) && isGone(R)
-      ? 'delete-delete'
-      : isGone(L) || isGone(R)
-        ? 'edit-delete'
-        : 'edit-edit';
+    const reason: MergeConflict['reason'] =
+      isGone(L) && isGone(R)
+        ? 'delete-delete'
+        : isGone(L) || isGone(R)
+          ? 'edit-delete'
+          : 'edit-edit';
     conflicts.push({ projectId, path, reason });
     // Conflicted documents are omitted from `merged` entirely until resolved.
   }
@@ -1442,7 +1523,8 @@ export const keepBothPath = (
   const hex = localContentHash.replace(/^sha256:/, '');
   const lastSlash = originalPath.lastIndexOf('/');
   const dir = lastSlash === -1 ? '' : originalPath.slice(0, lastSlash + 1);
-  const base = lastSlash === -1 ? originalPath : originalPath.slice(lastSlash + 1);
+  const base =
+    lastSlash === -1 ? originalPath : originalPath.slice(lastSlash + 1);
   const dot = base.lastIndexOf('.');
   const stem = dot <= 0 ? base : base.slice(0, dot);
   const ext = dot <= 0 ? '' : base.slice(dot); // includes leading "."
@@ -1473,10 +1555,12 @@ git commit -m "feat(memory): add three-way canonical Memory merge and keep-both 
 Reuses `discoverClaudeMemory` (`packages/memory/src/claude-adapter.ts`) for the hard part — matching every Claude folder (including ones left behind by a moved project) to a project identity — rather than re-implementing it. This adapter only maps the already-discovered items onto canonical paths and writes canonical documents back to the ONE currently-bound Claude location.
 
 **Files:**
+
 - Create: `packages/memory/src/canonical/claude-project-adapter.ts`
 - Test: `packages/memory/src/canonical/claude-project-adapter.test.ts`
 
 **Interfaces:**
+
 - Consumes: `discoverClaudeMemory`, `type ClaudeMemoryDiscoveryOptions`, `type DiscoveredMemoryItem` from `../claude-adapter.js`; `validateCanonicalPath`, `namespaceOf` from `./paths.js` (Task 1); `assertPathWithin` from `@stack/shared`; `atomicWriteFile` from `../remote/secure-file.js`.
 - Produces:
   - `type BoundProject = { projectId: string; dir: string; gitRemote?: string }`
@@ -1518,7 +1602,9 @@ const temp = async () => {
   return root;
 };
 afterEach(async () =>
-  Promise.all(roots.splice(0).map((r) => rm(r, { recursive: true, force: true }))),
+  Promise.all(
+    roots.splice(0).map((r) => rm(r, { recursive: true, force: true })),
+  ),
 );
 
 const write = async (file: string, body: string) => {
@@ -1532,7 +1618,10 @@ describe('scanClaudeProject', () => {
     const claudeHome = path.join(root, '.claude');
     const projectDir = path.join(root, 'proj');
     const key = 'D--proj'; // simplified encoding for this fixture
-    await write(path.join(claudeHome, 'projects', key, 'memory', 'MEMORY.md'), 'hello');
+    await write(
+      path.join(claudeHome, 'projects', key, 'memory', 'MEMORY.md'),
+      'hello',
+    );
     await write(
       path.join(projectDir, '.claude', 'agent-memory', 'reviewer', 'notes.md'),
       'agent notes',
@@ -1551,8 +1640,12 @@ describe('scanClaudeProject', () => {
     expect(result.sourceConflicts).toEqual([]);
     const byPath = new Map(result.docs.map((d) => [d.canonicalPath, d]));
     expect(byPath.get('notes/MEMORY.md')?.bytes.toString()).toBe('hello');
-    expect(byPath.get('agents/reviewer/notes.md')?.bytes.toString()).toBe('agent notes');
-    expect(byPath.get('instructions/private.md')?.bytes.toString()).toBe('private');
+    expect(byPath.get('agents/reviewer/notes.md')?.bytes.toString()).toBe(
+      'agent notes',
+    );
+    expect(byPath.get('instructions/private.md')?.bytes.toString()).toBe(
+      'private',
+    );
   });
 
   it('omits items whose resolved project id does not match', async () => {
@@ -1583,27 +1676,40 @@ describe('scanClaudeProject', () => {
     // reconstruction path. For this unit test we instead directly construct the
     // ambiguity by giving two DIFFERENT vendor keys both an identical gitRemote so
     // discoverClaudeMemory resolves them to the SAME git identity.
-    await write(path.join(claudeHome, 'projects', 'key-old', 'memory', 'a.md'), 'old');
-    await write(path.join(claudeHome, 'projects', 'key-new', 'memory', 'a.md'), 'new');
+    await write(
+      path.join(claudeHome, 'projects', 'key-old', 'memory', 'a.md'),
+      'old',
+    );
+    await write(
+      path.join(claudeHome, 'projects', 'key-new', 'memory', 'a.md'),
+      'new',
+    );
 
     const result = await scanClaudeProject(
       { projectId: 'prj_x', dir: projectDir },
       {
         claudeHome,
-        projects: [{ dir: projectDir, gitRemote: 'git@github.com:acme/widgets.git' }],
+        projects: [
+          { dir: projectDir, gitRemote: 'git@github.com:acme/widgets.git' },
+        ],
         gitRemoteOf: async () => 'git@github.com:acme/widgets.git',
         isDirectory: async () => true,
         resolveProjectId: () => 'prj_x',
       },
     );
     expect(result.sourceConflicts).toEqual([{ canonicalPath: 'notes/a.md' }]);
-    expect(result.docs.find((d) => d.canonicalPath === 'notes/a.md')).toBeUndefined();
+    expect(
+      result.docs.find((d) => d.canonicalPath === 'notes/a.md'),
+    ).toBeUndefined();
   });
 });
 
 describe('path mapping', () => {
   it('maps canonical paths to Claude native targets and back', () => {
-    const project = { projectId: 'prj_x', dir: path.join('C:', 'work', 'proj') };
+    const project = {
+      projectId: 'prj_x',
+      dir: path.join('C:', 'work', 'proj'),
+    };
     expect(claudeNativeTargetOf(project, 'instructions/private.md')).toBe(
       path.join(project.dir, 'CLAUDE.local.md'),
     );
@@ -1613,7 +1719,9 @@ describe('path mapping', () => {
   });
 
   it('rejects an out-of-namespace canonical path', () => {
-    expect(() => claudeNativeTargetOf({ projectId: 'prj_x', dir: '/x' }, 'other/a.md')).toThrow();
+    expect(() =>
+      claudeNativeTargetOf({ projectId: 'prj_x', dir: '/x' }, 'other/a.md'),
+    ).toThrow();
   });
 });
 
@@ -1621,20 +1729,25 @@ describe('writeClaudeProject', () => {
   it('writes and deletes native files for the bound project only', async () => {
     const root = await temp();
     const projectDir = path.join(root, 'proj');
-    await writeClaudeProject(
-      { projectId: 'prj_x', dir: projectDir },
-      [
-        { kind: 'write', canonicalPath: 'instructions/private.md', bytes: Buffer.from('p') },
-        { kind: 'write', canonicalPath: 'notes/a.md', bytes: Buffer.from('n') },
-      ],
-    );
+    await writeClaudeProject({ projectId: 'prj_x', dir: projectDir }, [
+      {
+        kind: 'write',
+        canonicalPath: 'instructions/private.md',
+        bytes: Buffer.from('p'),
+      },
+      { kind: 'write', canonicalPath: 'notes/a.md', bytes: Buffer.from('n') },
+    ]);
     const { readFile } = await import('node:fs/promises');
-    expect(await readFile(path.join(projectDir, 'CLAUDE.local.md'), 'utf8')).toBe('p');
+    expect(
+      await readFile(path.join(projectDir, 'CLAUDE.local.md'), 'utf8'),
+    ).toBe('p');
 
     await writeClaudeProject({ projectId: 'prj_x', dir: projectDir }, [
       { kind: 'delete', canonicalPath: 'instructions/private.md' },
     ]);
-    await expect(readFile(path.join(projectDir, 'CLAUDE.local.md'), 'utf8')).rejects.toThrow();
+    await expect(
+      readFile(path.join(projectDir, 'CLAUDE.local.md'), 'utf8'),
+    ).rejects.toThrow();
   });
 });
 ```
@@ -1667,11 +1780,22 @@ import { atomicWriteFile } from '../remote/secure-file.js';
 import { encodeClaudeProjectKey } from '../project-identity.js';
 import { namespaceOf, validateCanonicalPath } from './paths.js';
 
-export type BoundProject = { projectId: string; dir: string; gitRemote?: string };
+export type BoundProject = {
+  projectId: string;
+  dir: string;
+  gitRemote?: string;
+};
 
-export type NativeDoc = { canonicalPath: string; contentHash: string; bytes: Uint8Array };
+export type NativeDoc = {
+  canonicalPath: string;
+  contentHash: string;
+  bytes: Uint8Array;
+};
 export type SourceConflict = { canonicalPath: string };
-export type ScanResult = { docs: NativeDoc[]; sourceConflicts: SourceConflict[] };
+export type ScanResult = {
+  docs: NativeDoc[];
+  sourceConflicts: SourceConflict[];
+};
 
 export type MaterializeOp =
   | { kind: 'write'; canonicalPath: string; bytes: Uint8Array }
@@ -1681,7 +1805,9 @@ export type WriteResult = { written: string[]; deleted: string[] };
 /** Maps one discovered Claude item to its canonical path, or null if out of scope
  * (global items — `user-instructions` and global `agent-memory` — stay in the v1
  * store per spec section 3). */
-export const claudeCanonicalPathOf = (item: DiscoveredMemoryItem): string | null => {
+export const claudeCanonicalPathOf = (
+  item: DiscoveredMemoryItem,
+): string | null => {
   if (item.scope !== 'project') return null;
   switch (item.kind) {
     case 'auto-memory':
@@ -1713,10 +1839,13 @@ export const claudeNativeTargetOf = (
     const key = encodeClaudeProjectKey(path.resolve(project.dir));
     return path.join(claudeHome, 'projects', key, 'memory', rest);
   }
-  if (namespace === 'agents') return path.join(project.dir, '.claude', 'agent-memory', rest);
+  if (namespace === 'agents')
+    return path.join(project.dir, '.claude', 'agent-memory', rest);
   if (namespace === 'instructions' && rest === 'private.md')
     return path.join(project.dir, 'CLAUDE.local.md');
-  throw new Error(`No native Claude target for canonical path: ${canonicalPath}`);
+  throw new Error(
+    `No native Claude target for canonical path: ${canonicalPath}`,
+  );
 };
 
 /**
@@ -1733,7 +1862,9 @@ export const scanClaudeProject = async (
   },
 ): Promise<ScanResult> => {
   const items = await discoverClaudeMemory(options);
-  const matched = items.filter((item) => options.resolveProjectId(item) === project.projectId);
+  const matched = items.filter(
+    (item) => options.resolveProjectId(item) === project.projectId,
+  );
 
   const byPath = new Map<string, DiscoveredMemoryItem[]>();
   for (const item of matched) {
@@ -1756,7 +1887,12 @@ export const scanClaudeProject = async (
     const bytes = await readFile(chosen.source.path);
     docs.push({ canonicalPath, contentHash: hashBytes(bytes), bytes });
   }
-  return { docs, sourceConflicts: sourceConflicts.sort((a, b) => (a.canonicalPath < b.canonicalPath ? -1 : 1)) };
+  return {
+    docs,
+    sourceConflicts: sourceConflicts.sort((a, b) =>
+      a.canonicalPath < b.canonicalPath ? -1 : 1,
+    ),
+  };
 };
 
 /**
@@ -1769,9 +1905,14 @@ export const scanClaudeProject = async (
  * trusted as given — it is a user-confirmed `stak project map` binding or the
  * user's own home directory, never something a cloned repo's content controls.
  */
-const assertRootHasNoSymlinkSegments = async (anchor: string, root: string): Promise<void> => {
+const assertRootHasNoSymlinkSegments = async (
+  anchor: string,
+  root: string,
+): Promise<void> => {
   const relative = path.relative(anchor, root);
-  const segments = relative.split(path.sep).filter((segment) => segment.length > 0);
+  const segments = relative
+    .split(path.sep)
+    .filter((segment) => segment.length > 0);
   let current = anchor;
   for (const segment of segments) {
     current = path.join(current, segment);
@@ -1814,13 +1955,24 @@ export const writeClaudeProject = async (
     const namespace = namespaceOf(op.canonicalPath);
     const ownedRoot =
       namespace === 'notes'
-        ? path.join(claudeHome, 'projects', encodeClaudeProjectKey(path.resolve(project.dir)), 'memory')
+        ? path.join(
+            claudeHome,
+            'projects',
+            encodeClaudeProjectKey(path.resolve(project.dir)),
+            'memory',
+          )
         : namespace === 'agents'
           ? path.join(project.dir, '.claude', 'agent-memory')
           : project.dir;
-    if (namespace === 'notes') await assertRootHasNoSymlinkSegments(claudeHome, ownedRoot);
-    else if (namespace === 'agents') await assertRootHasNoSymlinkSegments(project.dir, ownedRoot);
-    await assertPathWithin({ ownedRoot, proposedPath: target, allowRoot: true });
+    if (namespace === 'notes')
+      await assertRootHasNoSymlinkSegments(claudeHome, ownedRoot);
+    else if (namespace === 'agents')
+      await assertRootHasNoSymlinkSegments(project.dir, ownedRoot);
+    await assertPathWithin({
+      ownedRoot,
+      proposedPath: target,
+      allowRoot: true,
+    });
     if (op.kind === 'write') {
       await atomicWriteFile(target, op.bytes);
       written.push(op.canonicalPath);
@@ -1852,11 +2004,13 @@ git commit -m "feat(memory): add the Claude project Memory adapter (scan + write
 ### Task 6: Resumable local-store migration (v1 -> v2)
 
 **Files:**
+
 - Modify: `packages/memory/src/canonical/claude-project-adapter.ts` (widen one type)
 - Create: `packages/memory/src/canonical/migrate.ts`
 - Test: `packages/memory/src/canonical/migrate.test.ts`
 
 **Interfaces:**
+
 - Consumes: `readMemoryManifest` from `../store.js`; `readLocalRegistry`, `writeLocalRegistry` from `../project/registry-store.js`; `resolveOrMintProject` from `../project/registry.js`; `readMemoryObject` from `../store.js`; `claudeCanonicalPathOf` from `./claude-project-adapter.js` (widened in Step 1); `readCanonicalMain`, `writeCanonicalMain` from `./store.js` (Task 2); `readProjection`, `writeProjection`, `type ProjectionFile` from `./store.js` (Task 2); `keepBothPath` from `./merge.js` (Task 4); `emptyCanonicalMain`, `type CanonicalMainManifest` from `./domain.js` (Task 1).
 - Produces: `class MigrationError extends Error { code: 'migration-invalid' }`, `type MigrationSummary = { migratedDocuments: number; keptBothDuplicates: number; alreadyMigrated: boolean }`, `migrateLocalStore(stackHome: string): Promise<MigrationSummary>`.
 
@@ -1918,9 +2072,18 @@ describe('migrateLocalStore', () => {
             kind: 'auto-memory',
             scope: 'project',
             logicalId: 'claude/auto-memory/github.com/acme/widgets/MEMORY.md',
-            project: { kind: 'git', canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' },
+            project: {
+              kind: 'git',
+              canonical: 'github.com/acme/widgets',
+              host: 'github.com',
+              owner: 'acme',
+              repo: 'widgets',
+            },
             contentHash: autoHash,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'MEMORY.md' },
+            restoreTarget: {
+              base: 'claude-project-memory',
+              relativePath: 'MEMORY.md',
+            },
             capturedAt: '2026-10-20T00:00:00.000Z',
             sensitivity: 'private',
           },
@@ -1943,17 +2106,29 @@ describe('migrateLocalStore', () => {
     expect(summary.migratedDocuments).toBe(1);
 
     const main = await readCanonicalMain(stackHome);
-    const doc = main.projects[0]?.documents.find((d) => d.path === 'notes/MEMORY.md');
+    const doc = main.projects[0]?.documents.find(
+      (d) => d.path === 'notes/MEMORY.md',
+    );
     expect(doc).toMatchObject({ state: 'present', contentHash: autoHash });
 
     const current = memoryManifestSchema.parse(
-      JSON.parse(await readFile(path.join(stackHome, 'memory', 'manifests', 'current.json'), 'utf8')),
+      JSON.parse(
+        await readFile(
+          path.join(stackHome, 'memory', 'manifests', 'current.json'),
+          'utf8',
+        ),
+      ),
     );
     expect(current.items).toHaveLength(1);
     expect(current.items[0]?.kind).toBe('user-instructions');
 
     const backupRaw = await readFile(
-      path.join(stackHome, 'memory', 'manifests', 'current.v1-premigration.json'),
+      path.join(
+        stackHome,
+        'memory',
+        'manifests',
+        'current.v1-premigration.json',
+      ),
       'utf8',
     );
     expect(JSON.parse(backupRaw).items).toHaveLength(2);
@@ -1972,8 +2147,15 @@ describe('migrateLocalStore', () => {
             provider: 'claude',
             kind: 'project-private-instructions',
             scope: 'project',
-            logicalId: 'claude/project-private/github.com/acme/widgets/CLAUDE.local.md',
-            project: { kind: 'git', canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' },
+            logicalId:
+              'claude/project-private/github.com/acme/widgets/CLAUDE.local.md',
+            project: {
+              kind: 'git',
+              canonical: 'github.com/acme/widgets',
+              host: 'github.com',
+              owner: 'acme',
+              repo: 'widgets',
+            },
             contentHash: hash,
             restoreTarget: { base: 'project', relativePath: 'CLAUDE.local.md' },
             capturedAt: '2026-10-20T00:00:00.000Z',
@@ -1985,13 +2167,23 @@ describe('migrateLocalStore', () => {
 
     const first = await migrateLocalStore(stackHome);
     const backupBefore = await readFile(
-      path.join(stackHome, 'memory', 'manifests', 'current.v1-premigration.json'),
+      path.join(
+        stackHome,
+        'memory',
+        'manifests',
+        'current.v1-premigration.json',
+      ),
       'utf8',
     );
     const second = await migrateLocalStore(stackHome);
     expect(second.alreadyMigrated).toBe(true);
     const backupAfter = await readFile(
-      path.join(stackHome, 'memory', 'manifests', 'current.v1-premigration.json'),
+      path.join(
+        stackHome,
+        'memory',
+        'manifests',
+        'current.v1-premigration.json',
+      ),
       'utf8',
     );
     expect(backupAfter).toBe(backupBefore);
@@ -2012,9 +2204,18 @@ describe('migrateLocalStore', () => {
             kind: 'auto-memory',
             scope: 'project',
             logicalId: 'claude/auto-memory/github.com/acme/widgets/a.md',
-            project: { kind: 'git', canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' },
+            project: {
+              kind: 'git',
+              canonical: 'github.com/acme/widgets',
+              host: 'github.com',
+              owner: 'acme',
+              repo: 'widgets',
+            },
             contentHash: hash,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
+            restoreTarget: {
+              base: 'claude-project-memory',
+              relativePath: 'a.md',
+            },
             capturedAt: '2026-10-20T00:00:00.000Z',
             sensitivity: 'private',
           },
@@ -2041,9 +2242,18 @@ describe('migrateLocalStore', () => {
           kind: 'auto-memory' as const,
           scope: 'project' as const,
           logicalId: 'claude/auto-memory/github.com/acme/widgets/a.md',
-          project: { kind: 'git' as const, canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' },
+          project: {
+            kind: 'git' as const,
+            canonical: 'github.com/acme/widgets',
+            host: 'github.com',
+            owner: 'acme',
+            repo: 'widgets',
+          },
           contentHash: hash,
-          restoreTarget: { base: 'claude-project-memory' as const, relativePath: 'a.md' },
+          restoreTarget: {
+            base: 'claude-project-memory' as const,
+            relativePath: 'a.md',
+          },
           capturedAt: '2026-10-20T00:00:00.000Z',
           sensitivity: 'private' as const,
         },
@@ -2053,7 +2263,12 @@ describe('migrateLocalStore', () => {
     // Simulate "crashed after backup, before main.json": write the backup file by
     // hand exactly as migrateLocalStore's first step would, then call migrate.
     await writeFile(
-      path.join(stackHome, 'memory', 'manifests', 'current.v1-premigration.json'),
+      path.join(
+        stackHome,
+        'memory',
+        'manifests',
+        'current.v1-premigration.json',
+      ),
       `${JSON.stringify(manifest, null, 2)}\n`,
       { flag: 'wx' },
     );
@@ -2092,7 +2307,10 @@ describe('migrateLocalStore', () => {
             logicalId: 'claude/auto-memory/github.com/acme/widgets/a.md#old',
             project: identity,
             contentHash: hashOld,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
+            restoreTarget: {
+              base: 'claude-project-memory',
+              relativePath: 'a.md',
+            },
             capturedAt: '2026-10-19T00:00:00.000Z',
             sensitivity: 'private',
           },
@@ -2103,7 +2321,10 @@ describe('migrateLocalStore', () => {
             logicalId: 'claude/auto-memory/github.com/acme/widgets/a.md#new',
             project: identity,
             contentHash: hashNew,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
+            restoreTarget: {
+              base: 'claude-project-memory',
+              relativePath: 'a.md',
+            },
             capturedAt: '2026-10-21T00:00:00.000Z',
             sensitivity: 'private',
           },
@@ -2144,7 +2365,10 @@ describe('migrateLocalStore', () => {
             logicalId: 'claude/auto-memory/local:key-foo/MEMORY.md',
             project: { kind: 'local', vendorKey: 'key-foo' },
             contentHash: hashA,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'MEMORY.md' },
+            restoreTarget: {
+              base: 'claude-project-memory',
+              relativePath: 'MEMORY.md',
+            },
             capturedAt: '2026-10-19T00:00:00.000Z',
             sensitivity: 'private',
           },
@@ -2155,7 +2379,10 @@ describe('migrateLocalStore', () => {
             logicalId: 'claude/auto-memory/local:key-bar/MEMORY.md',
             project: { kind: 'local', vendorKey: 'key-bar' },
             contentHash: hashB,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'MEMORY.md' },
+            restoreTarget: {
+              base: 'claude-project-memory',
+              relativePath: 'MEMORY.md',
+            },
             capturedAt: '2026-10-21T00:00:00.000Z',
             sensitivity: 'private',
           },
@@ -2170,7 +2397,9 @@ describe('migrateLocalStore', () => {
       expect(project.documents).toHaveLength(1);
       expect(project.documents[0]!.path).toBe('notes/MEMORY.md'); // each keeps its own, unsuffixed
     }
-    const hashes = main.projects.map((p) => (p.documents[0] as { contentHash: string }).contentHash).sort();
+    const hashes = main.projects
+      .map((p) => (p.documents[0] as { contentHash: string }).contentHash)
+      .sort();
     expect(hashes).toEqual([hashA, hashB].sort());
   });
 
@@ -2188,16 +2417,27 @@ describe('migrateLocalStore', () => {
             kind: 'auto-memory',
             scope: 'project',
             logicalId: 'claude/auto-memory/github.com/acme/widgets/broken.md',
-            project: { kind: 'git', canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' },
+            project: {
+              kind: 'git',
+              canonical: 'github.com/acme/widgets',
+              host: 'github.com',
+              owner: 'acme',
+              repo: 'widgets',
+            },
             contentHash: missingHash,
-            restoreTarget: { base: 'claude-project-memory', relativePath: 'broken.md' },
+            restoreTarget: {
+              base: 'claude-project-memory',
+              relativePath: 'broken.md',
+            },
             capturedAt: '2026-10-20T00:00:00.000Z',
             sensitivity: 'private',
           },
         ],
       },
     });
-    await expect(migrateLocalStore(stackHome)).rejects.toMatchObject({ code: 'migration-invalid' });
+    await expect(migrateLocalStore(stackHome)).rejects.toMatchObject({
+      code: 'migration-invalid',
+    });
     // Fails BEFORE any mutation: no backup side effect beyond the (harmless,
     // always-written) pre-migration backup file itself, and no canonical main.
     const main = await readCanonicalMain(stackHome);
@@ -2266,7 +2506,12 @@ describe('migrateLocalStore', () => {
     await migrateLocalStore(stackHome); // must NOT revert the above
 
     const current = memoryManifestSchema.parse(
-      JSON.parse(await readFile(path.join(stackHome, 'memory', 'manifests', 'current.json'), 'utf8')),
+      JSON.parse(
+        await readFile(
+          path.join(stackHome, 'memory', 'manifests', 'current.json'),
+          'utf8',
+        ),
+      ),
     );
     expect(current.items[0]?.contentHash).toBe(newHash); // not reverted to the old hash
   });
@@ -2287,8 +2532,16 @@ import { link, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { memoryManifestSchema, type ManifestItem } from '../domain.js';
-import { memoryStorePaths, readMemoryManifest, readMemoryObject, writeMemoryManifest } from '../store.js';
-import { readLocalRegistry, writeLocalRegistry } from '../project/registry-store.js';
+import {
+  memoryStorePaths,
+  readMemoryManifest,
+  readMemoryObject,
+  writeMemoryManifest,
+} from '../store.js';
+import {
+  readLocalRegistry,
+  writeLocalRegistry,
+} from '../project/registry-store.js';
 import { resolveOrMintProject } from '../project/registry.js';
 import { claudeCanonicalPathOf } from './claude-project-adapter.js';
 import { keepBothPath } from './merge.js';
@@ -2297,10 +2550,18 @@ import {
   type CanonicalDoc,
   type CanonicalMainManifest,
 } from './domain.js';
-import { readCanonicalMain, writeCanonicalMain, writeProjection } from './store.js';
+import {
+  readCanonicalMain,
+  writeCanonicalMain,
+  writeProjection,
+} from './store.js';
 
 export class MigrationError extends Error {
-  constructor(public readonly code: 'migration-invalid', message: string, options?: ErrorOptions) {
+  constructor(
+    public readonly code: 'migration-invalid',
+    message: string,
+    options?: ErrorOptions,
+  ) {
     super(message, options);
     this.name = 'MigrationError';
   }
@@ -2313,7 +2574,10 @@ export type MigrationSummary = {
 };
 
 const premigrationBackupPath = (stackHome: string) =>
-  path.join(memoryStorePaths(stackHome).manifests, 'current.v1-premigration.json');
+  path.join(
+    memoryStorePaths(stackHome).manifests,
+    'current.v1-premigration.json',
+  );
 
 // A dedicated completion marker — NOT just "the backup exists" and NOT just
 // "main.json has projects". Both of those are ambiguous: the backup is written
@@ -2357,21 +2621,35 @@ const ensureBackup = async (stackHome: string) => {
   await mkdir(dir, { recursive: true }); // a genuinely fresh $STAK_HOME has no manifests/ yet
   try {
     const raw = await readFile(file, 'utf8');
-    return { manifest: memoryManifestSchema.parse(JSON.parse(raw)), alreadyMigrated: true };
+    return {
+      manifest: memoryManifestSchema.parse(JSON.parse(raw)),
+      alreadyMigrated: true,
+    };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
   const current = await readMemoryManifest(stackHome);
-  const manifest = current ?? { schemaVersion: 1 as const, provider: 'claude' as const, createdAt: new Date().toISOString(), items: [] };
+  const manifest = current ?? {
+    schemaVersion: 1 as const,
+    provider: 'claude' as const,
+    createdAt: new Date().toISOString(),
+    items: [],
+  };
   const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(temp, `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+  await writeFile(temp, `${JSON.stringify(manifest, null, 2)}\n`, {
+    flag: 'wx',
+    mode: 0o600,
+  });
   try {
     await link(temp, file);
   } catch (error) {
     await unlink(temp).catch(() => undefined);
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
       const raw = await readFile(file, 'utf8');
-      return { manifest: memoryManifestSchema.parse(JSON.parse(raw)), alreadyMigrated: true };
+      return {
+        manifest: memoryManifestSchema.parse(JSON.parse(raw)),
+        alreadyMigrated: true,
+      };
     }
     throw error;
   }
@@ -2404,7 +2682,10 @@ const buildCanonicalMain = async (
     if (item.scope !== 'project' || !item.project) continue; // global stays in v1
     const canonicalPath = claudeCanonicalPathOf(item);
     if (!canonicalPath) continue;
-    const { registry: next, projectId } = resolveOrMintProject(registry, item.project);
+    const { registry: next, projectId } = resolveOrMintProject(
+      registry,
+      item.project,
+    );
     registry = next;
     const group = byProject.get(projectId) ?? [];
     group.push(item);
@@ -2413,7 +2694,10 @@ const buildCanonicalMain = async (
   await writeLocalRegistry(stackHome, registry);
 
   let keptBothDuplicates = 0;
-  const main: CanonicalMainManifest = { schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION, projects: [] };
+  const main: CanonicalMainManifest = {
+    schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+    projects: [],
+  };
   for (const [projectId, group] of byProject) {
     const byPath = new Map<string, ManifestItem[]>();
     for (const item of group) {
@@ -2435,7 +2719,8 @@ const buildCanonicalMain = async (
       const distinctByHash = new Map<string, ManifestItem>();
       for (const entry of bucket) {
         const prev = distinctByHash.get(entry.contentHash);
-        if (!prev || entry.capturedAt > prev.capturedAt) distinctByHash.set(entry.contentHash, entry);
+        if (!prev || entry.capturedAt > prev.capturedAt)
+          distinctByHash.set(entry.contentHash, entry);
       }
       const distinct = [...distinctByHash.values()];
       if (distinct.length === 1) {
@@ -2456,8 +2741,12 @@ const buildCanonicalMain = async (
       // across machines converting the same history.
       const sorted = [...distinct].sort((a, b) =>
         a.capturedAt !== b.capturedAt
-          ? a.capturedAt < b.capturedAt ? 1 : -1
-          : a.contentHash < b.contentHash ? -1 : 1,
+          ? a.capturedAt < b.capturedAt
+            ? 1
+            : -1
+          : a.contentHash < b.contentHash
+            ? -1
+            : 1,
       );
       const [primary, ...rest] = sorted;
       documents.push({
@@ -2468,7 +2757,11 @@ const buildCanonicalMain = async (
         importedAt: primary!.capturedAt,
       });
       for (const extra of rest) {
-        const altPath = keepBothPath(canonicalPath, extra.contentHash, (candidate) => takenPaths.has(candidate));
+        const altPath = keepBothPath(
+          canonicalPath,
+          extra.contentHash,
+          (candidate) => takenPaths.has(candidate),
+        );
         takenPaths.add(altPath);
         documents.push({
           path: altPath,
@@ -2488,7 +2781,10 @@ const buildCanonicalMain = async (
 /** Step C: seed the claude projection so every migrated document reads as
  * already synced (P = C), turning later native edits into ordinary edits rather
  * than a wall of first-sighting conflicts. */
-const seedClaudeProjection = async (stackHome: string, main: CanonicalMainManifest) => {
+const seedClaudeProjection = async (
+  stackHome: string,
+  main: CanonicalMainManifest,
+) => {
   const projects: Record<string, Record<string, string>> = {};
   for (const project of main.projects) {
     const byPath: Record<string, string> = {};
@@ -2504,7 +2800,12 @@ const slimToGlobal = async (stackHome: string, items: ManifestItem[]) => {
   const globalItems = items.filter((item) => item.scope === 'global');
   await writeMemoryManifest({
     stackHome,
-    manifest: { schemaVersion: 1, provider: 'claude', createdAt: new Date().toISOString(), items: globalItems },
+    manifest: {
+      schemaVersion: 1,
+      provider: 'claude',
+      createdAt: new Date().toISOString(),
+      items: globalItems,
+    },
   });
 };
 
@@ -2520,12 +2821,17 @@ const slimToGlobal = async (stackHome: string, items: ManifestItem[]) => {
  * else has already succeeded) is what tells "still resuming" apart from "already
  * done, nothing more to do here, ever again".
  */
-export const migrateLocalStore = async (stackHome: string): Promise<MigrationSummary> => {
+export const migrateLocalStore = async (
+  stackHome: string,
+): Promise<MigrationSummary> => {
   const markerFile = migrationCompleteMarkerPath(stackHome);
   if (await markerExists(markerFile)) {
     const main = await readCanonicalMain(stackHome);
     return {
-      migratedDocuments: main.projects.reduce((n, p) => n + p.documents.length, 0),
+      migratedDocuments: main.projects.reduce(
+        (n, p) => n + p.documents.length,
+        0,
+      ),
       keptBothDuplicates: 0,
       alreadyMigrated: true,
     };
@@ -2544,7 +2850,9 @@ export const migrateLocalStore = async (stackHome: string): Promise<MigrationSum
     }
   }
   const existingMain = await readCanonicalMain(stackHome);
-  const needsBuild = existingMain.projects.length === 0 && manifest.items.some((i: ManifestItem) => i.scope === 'project');
+  const needsBuild =
+    existingMain.projects.length === 0 &&
+    manifest.items.some((i: ManifestItem) => i.scope === 'project');
   const { main, keptBothDuplicates } = needsBuild
     ? await buildCanonicalMain(stackHome, manifest.items)
     : { main: existingMain, keptBothDuplicates: 0 };
@@ -2553,7 +2861,10 @@ export const migrateLocalStore = async (stackHome: string): Promise<MigrationSum
   await slimToGlobal(stackHome, manifest.items);
   await writeFile(markerFile, new Date().toISOString(), { mode: 0o600 });
 
-  const migratedDocuments = main.projects.reduce((n, p) => n + p.documents.length, 0);
+  const migratedDocuments = main.projects.reduce(
+    (n, p) => n + p.documents.length,
+    0,
+  );
   return { migratedDocuments, keptBothDuplicates, alreadyMigrated };
 };
 ```
@@ -2581,6 +2892,7 @@ git commit -m "feat(memory): add resumable v1 -> v2 local Memory store migration
 Factors the "group legacy v1 items by resolved Project ID + canonical path, collapse identical duplicates, keep-both the rest" logic out of `migrate.ts` (Task 6) into a shared pure helper, so the exact same rule drives both local migration and converting a historical Cloud generation — the two places spec section 9 requires it.
 
 **Files:**
+
 - Create: `packages/memory/src/canonical/group-legacy-items.ts`
 - Create: `packages/memory/src/canonical/group-legacy-items.test.ts`
 - Modify: `packages/memory/src/canonical/migrate.ts` (use the extracted helper)
@@ -2590,6 +2902,7 @@ Factors the "group legacy v1 items by resolved Project ID + canonical path, coll
 - Test: `packages/memory/src/remote/bundle-codec.test.ts` (existing file — add v2 cases)
 
 **Interfaces:**
+
 - Produces (`group-legacy-items.ts`): `type GroupedResult = { documents: CanonicalDoc[]; keptBothDuplicates: number }`, `groupLegacyItems(items: Array<ManifestItem & { __projectId: string }>): GroupedResult` — takes items ALREADY tagged with a resolved `projectId` (callers resolve identity their own way, keeping this function itself identity-resolution-free and pure) and groups them per project.
 - Produces (`convert-v1.ts`): `convertV1Bundle(bundle: MemoryBackupBundle, options?: { localRegistry?: LocalRegistry }): CanonicalMainManifest` — pure given the same bundle + same `localRegistry` fallback input.
 - Produces (`bundle-codec.ts`, additive): `BUNDLE_FORMAT_V2 = 'stack-mem-bundle-v2'`, bundle schema accepts `bundleFormat: BUNDLE_FORMAT | BUNDLE_FORMAT_V2`, optional `canonicalSha256`/`canonicalB64` fields; `bundleFromStore` emits v2 with those fields whenever `canonical/main.json` exists on disk, else v1 unchanged; `restoreBundleToStore` rebuilds `canonical/main.json` when present.
@@ -2640,7 +2953,9 @@ describe('groupLegacyItems', () => {
     expect(result.keptBothDuplicates).toBe(1);
     const original = result.documents.find((d) => d.path === 'notes/a.md');
     expect(original).toMatchObject({ contentHash: h(2) });
-    expect(result.documents.some((d) => d.path.startsWith('notes/a.conflict-'))).toBe(true);
+    expect(
+      result.documents.some((d) => d.path.startsWith('notes/a.conflict-')),
+    ).toBe(true);
   });
 });
 ```
@@ -2658,9 +2973,16 @@ Create `packages/memory/src/canonical/group-legacy-items.ts`:
 import type { ManifestItem } from '../domain.js';
 import { keepBothPath } from './merge.js';
 import { claudeCanonicalPathOf } from './claude-project-adapter.js';
-import { CANONICAL_MAIN_SCHEMA_VERSION, type CanonicalDoc, type CanonicalMainManifest } from './domain.js';
+import {
+  CANONICAL_MAIN_SCHEMA_VERSION,
+  type CanonicalDoc,
+  type CanonicalMainManifest,
+} from './domain.js';
 
-export type GroupedResult = { main: CanonicalMainManifest; keptBothDuplicates: number };
+export type GroupedResult = {
+  main: CanonicalMainManifest;
+  keptBothDuplicates: number;
+};
 
 /**
  * Pure grouping of legacy v1 items, each already tagged with its resolved Project
@@ -2674,7 +2996,10 @@ export type GroupedResult = { main: CanonicalMainManifest; keptBothDuplicates: n
 export const groupLegacyItems = (
   items: Array<ManifestItem & { __projectId: string }>,
 ): GroupedResult => {
-  const byProject = new Map<string, Array<ManifestItem & { __projectId: string }>>();
+  const byProject = new Map<
+    string,
+    Array<ManifestItem & { __projectId: string }>
+  >();
   for (const item of items) {
     const group = byProject.get(item.__projectId) ?? [];
     group.push(item);
@@ -2682,9 +3007,17 @@ export const groupLegacyItems = (
   }
 
   let keptBothDuplicates = 0;
-  const main: CanonicalMainManifest = { schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION, projects: [] };
-  for (const [projectId, group] of [...byProject].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
-    const byPath = new Map<string, Array<ManifestItem & { __projectId: string }>>();
+  const main: CanonicalMainManifest = {
+    schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+    projects: [],
+  };
+  for (const [projectId, group] of [...byProject].sort((a, b) =>
+    a[0] < b[0] ? -1 : 1,
+  )) {
+    const byPath = new Map<
+      string,
+      Array<ManifestItem & { __projectId: string }>
+    >();
     for (const item of group) {
       const canonicalPath = claudeCanonicalPathOf(item);
       if (!canonicalPath) continue;
@@ -2694,14 +3027,20 @@ export const groupLegacyItems = (
     }
     const documents: CanonicalDoc[] = [];
     const takenPaths = new Set<string>(byPath.keys());
-    for (const [canonicalPath, bucket] of [...byPath].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    for (const [canonicalPath, bucket] of [...byPath].sort((a, b) =>
+      a[0] < b[0] ? -1 : 1,
+    )) {
       // Deduplicate identical copies by hash FIRST, keeping the MOST RECENTLY
       // captured copy per hash — never first-seen, which would make the result
       // depend on array order (the exact bug fixed in migrate.ts, Task 6).
-      const distinctByHash = new Map<string, ManifestItem & { __projectId: string }>();
+      const distinctByHash = new Map<
+        string,
+        ManifestItem & { __projectId: string }
+      >();
       for (const entry of bucket) {
         const prev = distinctByHash.get(entry.contentHash);
-        if (!prev || entry.capturedAt > prev.capturedAt) distinctByHash.set(entry.contentHash, entry);
+        if (!prev || entry.capturedAt > prev.capturedAt)
+          distinctByHash.set(entry.contentHash, entry);
       }
       const distinct = [...distinctByHash.values()];
       if (distinct.length === 1) {
@@ -2720,8 +3059,12 @@ export const groupLegacyItems = (
       // `capturedAt`) still resolve the same way on every machine.
       const sorted = [...distinct].sort((a, b) =>
         a.capturedAt !== b.capturedAt
-          ? a.capturedAt < b.capturedAt ? 1 : -1
-          : a.contentHash < b.contentHash ? -1 : 1,
+          ? a.capturedAt < b.capturedAt
+            ? 1
+            : -1
+          : a.contentHash < b.contentHash
+            ? -1
+            : 1,
       );
       const [primary, ...rest] = sorted;
       documents.push({
@@ -2732,7 +3075,11 @@ export const groupLegacyItems = (
         importedAt: primary!.capturedAt,
       });
       for (const extra of rest) {
-        const altPath = keepBothPath(canonicalPath, extra.contentHash, (candidate) => takenPaths.has(candidate));
+        const altPath = keepBothPath(
+          canonicalPath,
+          extra.contentHash,
+          (candidate) => takenPaths.has(candidate),
+        );
         takenPaths.add(altPath);
         documents.push({
           path: altPath,
@@ -2778,7 +3125,10 @@ const buildCanonicalMain = async (
     // which items a DIFFERENT caller, like `convert-v1.ts`, already excluded),
     // but by the time an item reaches it here, this loop has already decided.
     if (!claudeCanonicalPathOf(item)) continue;
-    const { registry: next, projectId } = resolveOrMintProject(registry, item.project);
+    const { registry: next, projectId } = resolveOrMintProject(
+      registry,
+      item.project,
+    );
     registry = next;
     tagged.push({ ...item, __projectId: projectId });
   }
@@ -2802,7 +3152,11 @@ Create `packages/memory/src/canonical/convert-v1.test.ts`:
 ```ts
 import { describe, expect, it } from 'vitest';
 import type { MemoryManifest } from '../domain.js';
-import { emptyRegistry, resolveOrMintProject, toPortableSnapshot } from '../project/registry.js';
+import {
+  emptyRegistry,
+  resolveOrMintProject,
+  toPortableSnapshot,
+} from '../project/registry.js';
 import type { MemoryBackupBundle } from '../remote/bundle-codec.js';
 import { convertV1Bundle } from './convert-v1.js';
 
@@ -2820,14 +3174,22 @@ const makeBundle = (
   ...(registrySnapshot
     ? {
         registrySha256: h(0),
-        registryB64: Buffer.from(JSON.stringify(registrySnapshot)).toString('base64'),
+        registryB64: Buffer.from(JSON.stringify(registrySnapshot)).toString(
+          'base64',
+        ),
       }
     : {}),
 });
 
 describe('convertV1Bundle', () => {
   it('is deterministic when the bundle carries its registry snapshot, across two different local registries', () => {
-    const identity = { kind: 'git' as const, canonical: 'github.com/acme/widgets', host: 'github.com', owner: 'acme', repo: 'widgets' };
+    const identity = {
+      kind: 'git' as const,
+      canonical: 'github.com/acme/widgets',
+      host: 'github.com',
+      owner: 'acme',
+      repo: 'widgets',
+    };
     let registry = emptyRegistry();
     const minted = resolveOrMintProject(registry, identity);
     registry = minted.registry;
@@ -2845,7 +3207,10 @@ describe('convertV1Bundle', () => {
           logicalId: 'claude/auto-memory/github.com/acme/widgets/a.md',
           project: identity,
           contentHash: h(1),
-          restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
+          restoreTarget: {
+            base: 'claude-project-memory',
+            relativePath: 'a.md',
+          },
           capturedAt: '2026-10-20T00:00:00.000Z',
           sensitivity: 'private',
         },
@@ -2857,11 +3222,19 @@ describe('convertV1Bundle', () => {
     // A DIFFERENT local registry (e.g. a different machine's) must not change the
     // result when the bundle carries its own snapshot.
     const differentLocalRegistry = emptyRegistry();
-    const resultB = convertV1Bundle(bundle, { localRegistry: differentLocalRegistry });
+    const resultB = convertV1Bundle(bundle, {
+      localRegistry: differentLocalRegistry,
+    });
     expect(resultA).toEqual(resultB);
     expect(resultA.projects[0]?.projectId).toBe(minted.projectId);
     expect(resultA.projects[0]?.documents).toEqual([
-      { path: 'notes/a.md', state: 'present', contentHash: h(1), importedFrom: 'claude', importedAt: '2026-10-20T00:00:00.000Z' },
+      {
+        path: 'notes/a.md',
+        state: 'present',
+        contentHash: h(1),
+        importedFrom: 'claude',
+        importedAt: '2026-10-20T00:00:00.000Z',
+      },
     ]);
   });
 
@@ -2883,7 +3256,10 @@ describe('convertV1Bundle', () => {
           logicalId: 'claude/auto-memory/local:key-1/a.md',
           project: identity,
           contentHash: h(1),
-          restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
+          restoreTarget: {
+            base: 'claude-project-memory',
+            relativePath: 'a.md',
+          },
           capturedAt: '2026-10-20T00:00:00.000Z',
           sensitivity: 'private',
         },
@@ -2908,7 +3284,10 @@ describe('convertV1Bundle', () => {
           logicalId: 'claude/auto-memory/local:unregistered-key/a.md',
           project: identity,
           contentHash: h(1),
-          restoreTarget: { base: 'claude-project-memory', relativePath: 'a.md' },
+          restoreTarget: {
+            base: 'claude-project-memory',
+            relativePath: 'a.md',
+          },
           capturedAt: '2026-10-20T00:00:00.000Z',
           sensitivity: 'private',
         },
@@ -2932,8 +3311,15 @@ Create `packages/memory/src/canonical/convert-v1.ts`:
 
 ```ts
 import { memoryManifestSchema, type ManifestItem } from '../domain.js';
-import { resolveProjectForIdentity, type LocalRegistry } from '../project/registry.js';
-import { emptyRegistry, mergePortableSnapshot, portableRegistrySnapshotSchema } from '../project/registry.js';
+import {
+  resolveProjectForIdentity,
+  type LocalRegistry,
+} from '../project/registry.js';
+import {
+  emptyRegistry,
+  mergePortableSnapshot,
+  portableRegistrySnapshotSchema,
+} from '../project/registry.js';
 import type { MemoryBackupBundle } from '../remote/bundle-codec.js';
 import { groupLegacyItems } from './group-legacy-items.js';
 import { emptyCanonicalMain, type CanonicalMainManifest } from './domain.js';
@@ -2999,7 +3385,12 @@ describe('v2 canonical bundling', () => {
     const stackHome = await temp(); // reuse this file's existing temp-dir helper
     await writeMemoryManifest({
       stackHome,
-      manifest: { schemaVersion: 1, provider: 'claude', createdAt: '2026-10-22T00:00:00.000Z', items: [] },
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-22T00:00:00.000Z',
+        items: [],
+      },
     });
     await writeCanonicalMain(stackHome, {
       schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
@@ -3014,7 +3405,12 @@ describe('v2 canonical bundling', () => {
     const source = await temp();
     await writeMemoryManifest({
       stackHome: source,
-      manifest: { schemaVersion: 1, provider: 'claude', createdAt: '2026-10-22T00:00:00.000Z', items: [] },
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-22T00:00:00.000Z',
+        items: [],
+      },
     });
     const canonical = {
       schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION as const,
@@ -3033,7 +3429,12 @@ describe('v2 canonical bundling', () => {
     const stackHome = await temp();
     await writeMemoryManifest({
       stackHome,
-      manifest: { schemaVersion: 1, provider: 'claude', createdAt: '2026-10-22T00:00:00.000Z', items: [] },
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-22T00:00:00.000Z',
+        items: [],
+      },
     });
     const { bundle } = await bundleFromStore(stackHome);
     expect(bundle.bundleFormat).toBe('stack-mem-bundle-v1');
@@ -3054,21 +3455,34 @@ In `packages/memory/src/remote/bundle-codec.ts`:
 ```ts
 import { readFile } from 'node:fs/promises';
 // add:
-import { canonicalStorePaths, readCanonicalMain, writeCanonicalMain } from '../canonical/store.js';
+import {
+  canonicalStorePaths,
+  readCanonicalMain,
+  writeCanonicalMain,
+} from '../canonical/store.js';
 
 export const BUNDLE_FORMAT = 'stack-mem-bundle-v1' as const;
 export const BUNDLE_FORMAT_V2 = 'stack-mem-bundle-v2' as const;
 
 const bundleSchema = z.object({
-  bundleFormat: z.union([z.literal(BUNDLE_FORMAT), z.literal(BUNDLE_FORMAT_V2)]),
+  bundleFormat: z.union([
+    z.literal(BUNDLE_FORMAT),
+    z.literal(BUNDLE_FORMAT_V2),
+  ]),
   provider: z.literal('claude'),
   manifestSha256: z.string().regex(/^sha256:[a-f0-9]{64}$/),
   manifestB64: z.string(),
   objects: z.array(bundleObjectSchema),
-  registrySha256: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
+  registrySha256: z
+    .string()
+    .regex(/^sha256:[a-f0-9]{64}$/)
+    .optional(),
   registryB64: z.string().optional(),
   // v2 only: the canonical Project Memory manifest, byte-exact.
-  canonicalSha256: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
+  canonicalSha256: z
+    .string()
+    .regex(/^sha256:[a-f0-9]{64}$/)
+    .optional(),
   canonicalB64: z.string().optional(),
 });
 ```
@@ -3084,12 +3498,21 @@ const serialize = (bundle: MemoryBackupBundle): Buffer => {
     manifestB64: bundle.manifestB64,
     objects: [...bundle.objects]
       .sort((a, b) => (a.contentHash < b.contentHash ? -1 : 1))
-      .map((object) => ({ contentHash: object.contentHash, bytesB64: object.bytesB64 })),
+      .map((object) => ({
+        contentHash: object.contentHash,
+        bytesB64: object.bytesB64,
+      })),
     ...(bundle.registrySha256 && bundle.registryB64
-      ? { registrySha256: bundle.registrySha256, registryB64: bundle.registryB64 }
+      ? {
+          registrySha256: bundle.registrySha256,
+          registryB64: bundle.registryB64,
+        }
       : {}),
     ...(bundle.canonicalSha256 && bundle.canonicalB64
-      ? { canonicalSha256: bundle.canonicalSha256, canonicalB64: bundle.canonicalB64 }
+      ? {
+          canonicalSha256: bundle.canonicalSha256,
+          canonicalB64: bundle.canonicalB64,
+        }
       : {}),
   };
   return Buffer.from(JSON.stringify(canonical), 'utf8');
@@ -3103,25 +3526,31 @@ export const bundleFromStore = async (
   stackHome: string,
 ): Promise<{ bundle: MemoryBackupBundle; bytes: Buffer }> => {
   const manifest = await readMemoryManifest(stackHome);
-  if (!manifest) throw new BundleError('no-backup', 'No Memory backup exists to bundle.');
-  const manifestBytes = await readFile(memoryStorePaths(stackHome).currentManifest);
+  if (!manifest)
+    throw new BundleError('no-backup', 'No Memory backup exists to bundle.');
+  const manifestBytes = await readFile(
+    memoryStorePaths(stackHome).currentManifest,
+  );
   const objects = [];
   for (const contentHash of referencedHashes(manifest)) {
     const bytes = await readMemoryObject({ stackHome, contentHash });
-    objects.push({ contentHash, bytesB64: Buffer.from(bytes).toString('base64') });
+    objects.push({
+      contentHash,
+      bytesB64: Buffer.from(bytes).toString('base64'),
+    });
   }
-  const registryBytes = await readFile(memoryStorePaths(stackHome).projectRegistrySnapshot).catch(
-    (error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return undefined;
-      throw error;
-    },
-  );
-  const canonicalBytes = await readFile(canonicalStorePaths(stackHome).main).catch(
-    (error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return undefined;
-      throw error;
-    },
-  );
+  const registryBytes = await readFile(
+    memoryStorePaths(stackHome).projectRegistrySnapshot,
+  ).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined;
+    throw error;
+  });
+  const canonicalBytes = await readFile(
+    canonicalStorePaths(stackHome).main,
+  ).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined;
+    throw error;
+  });
   const bundle: MemoryBackupBundle = {
     bundleFormat: canonicalBytes ? BUNDLE_FORMAT_V2 : BUNDLE_FORMAT,
     provider: 'claude',
@@ -3129,10 +3558,16 @@ export const bundleFromStore = async (
     manifestB64: manifestBytes.toString('base64'),
     objects,
     ...(registryBytes
-      ? { registrySha256: hashBytes(registryBytes), registryB64: registryBytes.toString('base64') }
+      ? {
+          registrySha256: hashBytes(registryBytes),
+          registryB64: registryBytes.toString('base64'),
+        }
       : {}),
     ...(canonicalBytes
-      ? { canonicalSha256: hashBytes(canonicalBytes), canonicalB64: canonicalBytes.toString('base64') }
+      ? {
+          canonicalSha256: hashBytes(canonicalBytes),
+          canonicalB64: canonicalBytes.toString('base64'),
+        }
       : {}),
   };
   return { bundle, bytes: serialize(bundle) };
@@ -3142,12 +3577,18 @@ export const bundleFromStore = async (
 Update `restoreBundleToStore` to also rebuild `canonical/main.json` when present:
 
 ```ts
-  if (bundle.canonicalB64 && bundle.canonicalSha256) {
-    const canonicalBytes = Buffer.from(bundle.canonicalB64, 'base64');
-    if (hashBytes(canonicalBytes) !== bundle.canonicalSha256)
-      throw new BundleError('manifest-hash-mismatch', 'The bundled canonical Memory manifest does not match its hash.');
-    await atomicWriteFile(canonicalStorePaths(options.stackHome).main, canonicalBytes);
-  }
+if (bundle.canonicalB64 && bundle.canonicalSha256) {
+  const canonicalBytes = Buffer.from(bundle.canonicalB64, 'base64');
+  if (hashBytes(canonicalBytes) !== bundle.canonicalSha256)
+    throw new BundleError(
+      'manifest-hash-mismatch',
+      'The bundled canonical Memory manifest does not match its hash.',
+    );
+  await atomicWriteFile(
+    canonicalStorePaths(options.stackHome).main,
+    canonicalBytes,
+  );
+}
 ```
 
 Add this block right after the existing registry-rebuild block in `restoreBundleToStore`, before the final `return`.
@@ -3169,12 +3610,14 @@ git commit -m "feat(memory): add stack-mem-bundle-v2 and the deterministic old-b
 ### Task 8: Server version gate and v2 project counts
 
 **Files:**
+
 - Modify: `packages/memory/src/remote/backend.ts`
 - Test: `packages/memory/src/remote/backend.test.ts` (existing file — add cases)
 - Modify: `packages/memory/src/remote/project-counts.ts`
 - Test: `packages/memory/src/remote/project-counts.test.ts` (existing file — add v2 cases)
 
 **Interfaces:**
+
 - Consumes: `BUNDLE_FORMAT`, `BUNDLE_FORMAT_V2` from `./bundle-codec.js` (Task 7).
 - Produces: a new `RemoteMemoryError` code `'incompatible-format'`; `standardProjectCountsFromBundle` additionally reads `bundle.canonicalB64` when present.
 
@@ -3188,7 +3631,8 @@ import { RemoteMemoryError } from './backend.js';
 
 describe('version gate', () => {
   it('rejects a v1 generation once the latest committed generation is v2', async () => {
-    const backend = /* construct the same way this file's other tests do */ makeBackend();
+    const backend =
+      /* construct the same way this file's other tests do */ makeBackend();
     await backend.createGeneration({
       backupId: 'b1',
       expectedParent: null,
@@ -3285,18 +3729,18 @@ export class RemoteMemoryError extends Error {
 Add the check in `createGeneration`, right after the `expectedParent` conflict check and before the backup-id-exists check:
 
 ```ts
-    if (input.expectedParent !== currentParent)
-      throw new RemoteMemoryError(/* unchanged */);
-    if (
-      latest &&
-      latest.bundleFormatVersion !== input.bundleFormatVersion &&
-      latest.bundleFormatVersion === 'stack-mem-bundle-v2' &&
-      input.bundleFormatVersion === 'stack-mem-bundle-v1'
-    )
-      throw new RemoteMemoryError(
-        'incompatible-format',
-        'This account’s Memory was upgraded by a newer STAK CLI. Update with `npm i -g @memstk/cli@beta`.',
-      );
+if (input.expectedParent !== currentParent)
+  throw new RemoteMemoryError(/* unchanged */);
+if (
+  latest &&
+  latest.bundleFormatVersion !== input.bundleFormatVersion &&
+  latest.bundleFormatVersion === 'stack-mem-bundle-v2' &&
+  input.bundleFormatVersion === 'stack-mem-bundle-v1'
+)
+  throw new RemoteMemoryError(
+    'incompatible-format',
+    'This account’s Memory was upgraded by a newer STAK CLI. Update with `npm i -g @memstk/cli@beta`.',
+  );
 ```
 
 Note: this compares the literal string values rather than importing `BUNDLE_FORMAT`/`BUNDLE_FORMAT_V2` from `./bundle-codec.js`, because `bundle-codec.ts` already imports from `../canonical/store.js` (Task 7) and `backend.ts` must not gain a reverse dependency on the bundle codec — it only needs the two literal strings, which are part of the stable wire contract either way. If `bundle-codec.ts` does not depend on `backend.ts` (confirm this with `pnpm --filter @stack/memory exec madge --circular src` or a quick grep for `from '../remote/backend'` in `bundle-codec.ts` — there should be none), importing the constants instead of hardcoding the literals is preferable; use `import { BUNDLE_FORMAT, BUNDLE_FORMAT_V2 } from './bundle-codec.js';` and compare against those constants if the grep confirms no cycle.
@@ -3333,7 +3777,12 @@ it('counts present documents per project from a v2 bundle, ignoring tombstones',
   const stackHome = await temp(); // this file's existing temp-dir helper
   await writeMemoryManifest({
     stackHome,
-    manifest: { schemaVersion: 1, provider: 'claude', createdAt: '2026-10-22T00:00:00.000Z', items: [] },
+    manifest: {
+      schemaVersion: 1,
+      provider: 'claude',
+      createdAt: '2026-10-22T00:00:00.000Z',
+      items: [],
+    },
   });
   await writeCanonicalMain(stackHome, {
     schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
@@ -3341,14 +3790,27 @@ it('counts present documents per project from a v2 bundle, ignoring tombstones',
       {
         projectId: 'prj_a',
         documents: [
-          { path: 'notes/a.md', state: 'present', contentHash: `sha256:${'1'.repeat(64)}`, importedFrom: 'claude', importedAt: '2026-10-22T00:00:00.000Z' },
-          { path: 'notes/b.md', state: 'deleted', lastContentHash: `sha256:${'2'.repeat(64)}`, deletedAt: '2026-10-22T00:00:00.000Z' },
+          {
+            path: 'notes/a.md',
+            state: 'present',
+            contentHash: `sha256:${'1'.repeat(64)}`,
+            importedFrom: 'claude',
+            importedAt: '2026-10-22T00:00:00.000Z',
+          },
+          {
+            path: 'notes/b.md',
+            state: 'deleted',
+            lastContentHash: `sha256:${'2'.repeat(64)}`,
+            deletedAt: '2026-10-22T00:00:00.000Z',
+          },
         ],
       },
     ],
   });
   const { bytes } = await bundleFromStore(stackHome);
-  expect(standardProjectCountsFromBundle(bytes)).toEqual([{ projectId: 'prj_a', fileCount: 1 }]);
+  expect(standardProjectCountsFromBundle(bytes)).toEqual([
+    { projectId: 'prj_a', fileCount: 1 },
+  ]);
 });
 ```
 
@@ -3376,7 +3838,8 @@ export const standardProjectCountsFromBundle = (
       return main.projects
         .map((project) => ({
           projectId: project.projectId,
-          fileCount: project.documents.filter((doc) => doc.state === 'present').length,
+          fileCount: project.documents.filter((doc) => doc.state === 'present')
+            .length,
         }))
         .filter((entry) => entry.fileCount > 0)
         .sort((a, b) => (a.projectId < b.projectId ? -1 : 1));
@@ -3409,10 +3872,12 @@ git commit -m "feat(memory): reject v1-after-v2 pushes and read v2 project count
 `push.ts` is pure orchestration: it takes small injected functions for every I/O operation (read/write local state, fetch a remote generation's canonical content, publish a new generation) so the fast-forward/merge/retry/crash-repair logic (spec section 8.2 and Appendix A.4) is unit-testable with fakes, with no real network or crypto. Task 11 wires the real implementations of those injected functions.
 
 **Files:**
+
 - Create: `packages/memory/src/canonical/push.ts`
 - Test: `packages/memory/src/canonical/push.test.ts`
 
 **Interfaces:**
+
 - Consumes: `CanonicalMainManifest`, `canonicalDigest` from `./domain.js` (Task 1); `mergeCanonical`, `type MergeConflict`, `mergeConflictSchema` from `./merge.js` (Task 4); `readCanonicalMain`, `writeCanonicalBase`, `readCanonicalBase`, `writePendingMerge`, `clearPendingMerge` from `./store.js` (Task 2).
 - Produces:
   - `type RemoteCanonical = { generation: number; main: CanonicalMainManifest }`
@@ -3423,6 +3888,7 @@ git commit -m "feat(memory): reject v1-after-v2 pushes and read v2 project count
   - `pushCanonicalMemory(deps: PushDeps): Promise<PushOutcome>`
 
 **Two correctness properties this algorithm must hold, independent of each other — do not conflate them:**
+
 1. **Never create a Cloud generation whose content is identical to Cloud's current latest.** This depends ONLY on content (a digest comparison), never on whether generation numbers happen to agree. A plain "nothing changed since my last push" call is the single most common push of all, and it must never create a duplicate generation.
 2. **Never leave local canonical storage holding less than what a clean merge just proved should exist.** A clean merge's result must always be written to local storage, whether or not that merge result also gets published to Cloud.
 
@@ -3432,7 +3898,11 @@ Create `packages/memory/src/canonical/push.test.ts`:
 
 ```ts
 import { describe, expect, it, vi } from 'vitest';
-import { CANONICAL_MAIN_SCHEMA_VERSION, type CanonicalDoc, type CanonicalMainManifest } from './domain.js';
+import {
+  CANONICAL_MAIN_SCHEMA_VERSION,
+  type CanonicalDoc,
+  type CanonicalMainManifest,
+} from './domain.js';
 import { pushCanonicalMemory, type PushDeps } from './push.js';
 
 const h = (n: number) => `sha256:${n.toString().padStart(64, '0')}`;
@@ -3464,17 +3934,33 @@ describe('pushCanonicalMemory', () => {
   it('fast-forwards when this is the first push (no base, no remote)', async () => {
     const deps = baseDeps();
     const outcome = await pushCanonicalMemory(deps);
-    expect(outcome).toEqual({ status: 'pushed', generation: 0, main: manifest([present('notes/a.md', 1)]) });
-    expect(deps.publish).toHaveBeenCalledWith(manifest([present('notes/a.md', 1)]), null);
-    expect(deps.setBase).toHaveBeenCalledWith({ generation: 0, main: manifest([present('notes/a.md', 1)]) });
+    expect(outcome).toEqual({
+      status: 'pushed',
+      generation: 0,
+      main: manifest([present('notes/a.md', 1)]),
+    });
+    expect(deps.publish).toHaveBeenCalledWith(
+      manifest([present('notes/a.md', 1)]),
+      null,
+    );
+    expect(deps.setBase).toHaveBeenCalledWith({
+      generation: 0,
+      main: manifest([present('notes/a.md', 1)]),
+    });
   });
 
   it('fast-forwards when base already equals the remote latest', async () => {
     const local = manifest([present('notes/a.md', 2)]);
     const deps = baseDeps({
       getLocalMain: vi.fn(async () => local),
-      getBase: vi.fn(async () => ({ generation: 3, main: manifest([present('notes/a.md', 1)]) })),
-      fetchRemote: vi.fn(async () => ({ generation: 3, main: manifest([present('notes/a.md', 1)]) })),
+      getBase: vi.fn(async () => ({
+        generation: 3,
+        main: manifest([present('notes/a.md', 1)]),
+      })),
+      fetchRemote: vi.fn(async () => ({
+        generation: 3,
+        main: manifest([present('notes/a.md', 1)]),
+      })),
       publish: vi.fn(async (_main, expectedParent) => {
         expect(expectedParent).toBe(3);
         return { generation: 4 };
@@ -3488,7 +3974,10 @@ describe('pushCanonicalMemory', () => {
     const local = manifest([present('notes/a.md', 2)]);
     const deps = baseDeps({
       getLocalMain: vi.fn(async () => local),
-      getBase: vi.fn(async () => ({ generation: 3, main: manifest([present('notes/a.md', 1)]) })),
+      getBase: vi.fn(async () => ({
+        generation: 3,
+        main: manifest([present('notes/a.md', 1)]),
+      })),
       fetchRemote: vi.fn(async () => ({ generation: 4, main: local })), // Cloud already has exactly `local`
       publish: vi.fn(),
     });
@@ -3517,8 +4006,14 @@ describe('pushCanonicalMemory', () => {
     // remote-only change (covered by the next test), this one really does have
     // something new to upload.
     const base = manifest([present('notes/a.md', 1)]);
-    const local = manifest([present('notes/a.md', 1), present('notes/c.md', 7)]); // local added c.md
-    const remote = manifest([present('notes/a.md', 1), present('notes/b.md', 9)]); // remote added b.md
+    const local = manifest([
+      present('notes/a.md', 1),
+      present('notes/c.md', 7),
+    ]); // local added c.md
+    const remote = manifest([
+      present('notes/a.md', 1),
+      present('notes/b.md', 9),
+    ]); // remote added b.md
     const deps = baseDeps({
       getLocalMain: vi.fn(async () => local),
       getBase: vi.fn(async () => ({ generation: 3, main: base })),
@@ -3530,11 +4025,22 @@ describe('pushCanonicalMemory', () => {
     });
     const outcome = await pushCanonicalMemory(deps);
     expect(outcome.status).toBe('pushed');
-    const merged = manifest([present('notes/a.md', 1), present('notes/c.md', 7), present('notes/b.md', 9)]);
-    if (outcome.status === 'pushed') expect(outcome.main.projects[0]!.documents.length).toBe(3);
-    expect(deps.setLocalMain).toHaveBeenCalledWith(expect.objectContaining({
-      projects: [expect.objectContaining({ documents: expect.arrayContaining(merged.projects[0]!.documents) })],
-    }));
+    const merged = manifest([
+      present('notes/a.md', 1),
+      present('notes/c.md', 7),
+      present('notes/b.md', 9),
+    ]);
+    if (outcome.status === 'pushed')
+      expect(outcome.main.projects[0]!.documents.length).toBe(3);
+    expect(deps.setLocalMain).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projects: [
+          expect.objectContaining({
+            documents: expect.arrayContaining(merged.projects[0]!.documents),
+          }),
+        ],
+      }),
+    );
   });
 
   it('a clean merge that turns out identical to remote is adopted locally but never republished', async () => {
@@ -3546,7 +4052,10 @@ describe('pushCanonicalMemory', () => {
     // remote's change until now).
     const base = manifest([present('notes/a.md', 1)]);
     const local = manifest([present('notes/a.md', 1)]); // unchanged since base
-    const remote = manifest([present('notes/a.md', 1), present('notes/b.md', 9)]);
+    const remote = manifest([
+      present('notes/a.md', 1),
+      present('notes/b.md', 9),
+    ]);
     const deps = baseDeps({
       getLocalMain: vi.fn(async () => local),
       getBase: vi.fn(async () => ({ generation: 3, main: base })),
@@ -3565,20 +4074,27 @@ describe('pushCanonicalMemory', () => {
     const remote = manifest([present('notes/a.md', 3)]);
     const deps = baseDeps({
       getLocalMain: vi.fn(async () => local),
-      getBase: vi.fn(async () => ({ generation: 3, main: manifest([present('notes/a.md', 1)]) })),
+      getBase: vi.fn(async () => ({
+        generation: 3,
+        main: manifest([present('notes/a.md', 1)]),
+      })),
       fetchRemote: vi.fn(async () => ({ generation: 4, main: remote })),
       publish: vi.fn(),
     });
     const outcome = await pushCanonicalMemory(deps);
     expect(outcome).toEqual({
       status: 'conflict',
-      conflicts: [{ projectId: 'prj_x', path: 'notes/a.md', reason: 'edit-edit' }],
+      conflicts: [
+        { projectId: 'prj_x', path: 'notes/a.md', reason: 'edit-edit' },
+      ],
     });
     expect(deps.publish).not.toHaveBeenCalled();
     expect(deps.savePendingMerge).toHaveBeenCalledWith({
       basedOnGeneration: 4,
       merged: manifest([]),
-      conflicts: [{ projectId: 'prj_x', path: 'notes/a.md', reason: 'edit-edit' }],
+      conflicts: [
+        { projectId: 'prj_x', path: 'notes/a.md', reason: 'edit-edit' },
+      ],
     });
   });
 
@@ -3590,7 +4106,10 @@ describe('pushCanonicalMemory', () => {
     let fetchCount = 0;
     const deps = baseDeps({
       getLocalMain: vi.fn(async () => local),
-      getBase: vi.fn(async () => ({ generation: 3, main: manifest([present('notes/a.md', 1)]) })),
+      getBase: vi.fn(async () => ({
+        generation: 3,
+        main: manifest([present('notes/a.md', 1)]),
+      })),
       fetchRemote: vi.fn(async () => {
         fetchCount += 1;
         // Cloud stays at generation 3 with the old content on both calls — the
@@ -3598,7 +4117,8 @@ describe('pushCanonicalMemory', () => {
         // itself, not a real move of Cloud's latest.
         return { generation: 3, main: manifest([present('notes/a.md', 1)]) };
       }),
-      publish: vi.fn()
+      publish: vi
+        .fn()
         .mockRejectedValueOnce({ code: 'conflict' })
         .mockResolvedValueOnce({ generation: 4 }),
     });
@@ -3612,8 +4132,14 @@ describe('pushCanonicalMemory', () => {
     const local = manifest([present('notes/a.md', 2)]); // genuinely differs; see note above
     const deps = baseDeps({
       getLocalMain: vi.fn(async () => local),
-      getBase: vi.fn(async () => ({ generation: 3, main: manifest([present('notes/a.md', 1)]) })),
-      fetchRemote: vi.fn(async () => ({ generation: 3, main: manifest([present('notes/a.md', 1)]) })),
+      getBase: vi.fn(async () => ({
+        generation: 3,
+        main: manifest([present('notes/a.md', 1)]),
+      })),
+      fetchRemote: vi.fn(async () => ({
+        generation: 3,
+        main: manifest([present('notes/a.md', 1)]),
+      })),
       publish: vi.fn(async () => {
         throw { code: 'conflict' };
       }),
@@ -3629,8 +4155,14 @@ describe('pushCanonicalMemory', () => {
     const boom = new Error('network unreachable');
     const deps = baseDeps({
       getLocalMain: vi.fn(async () => local),
-      getBase: vi.fn(async () => ({ generation: 3, main: manifest([present('notes/a.md', 1)]) })),
-      fetchRemote: vi.fn(async () => ({ generation: 3, main: manifest([present('notes/a.md', 1)]) })),
+      getBase: vi.fn(async () => ({
+        generation: 3,
+        main: manifest([present('notes/a.md', 1)]),
+      })),
+      fetchRemote: vi.fn(async () => ({
+        generation: 3,
+        main: manifest([present('notes/a.md', 1)]),
+      })),
       publish: vi.fn(async () => {
         throw boom;
       }),
@@ -3651,23 +4183,39 @@ Expected: FAIL with a module-not-found error for `./push.js`
 Create `packages/memory/src/canonical/push.ts`:
 
 ```ts
-import { canonicalDigest, emptyCanonicalMain, type CanonicalMainManifest } from './domain.js';
+import {
+  canonicalDigest,
+  emptyCanonicalMain,
+  type CanonicalMainManifest,
+} from './domain.js';
 import { mergeCanonical, type MergeConflict } from './merge.js';
 
-export type RemoteCanonical = { generation: number; main: CanonicalMainManifest };
+export type RemoteCanonical = {
+  generation: number;
+  main: CanonicalMainManifest;
+};
 
 export type PushDeps = {
   getLocalMain(): Promise<CanonicalMainManifest>;
-  getBase(): Promise<{ generation: number; main: CanonicalMainManifest } | null>;
+  getBase(): Promise<{
+    generation: number;
+    main: CanonicalMainManifest;
+  } | null>;
   /** Called whenever a clean merge's result differs from what `getLocalMain`
    * returned — regardless of whether that result also gets published. A merge
    * can incorporate remote-only documents local never had; if that result is
    * never written to local storage, the NEXT push would re-upload the stale,
    * pre-merge local state and silently delete those documents from Cloud. */
   setLocalMain(main: CanonicalMainManifest): Promise<void>;
-  setBase(base: { generation: number; main: CanonicalMainManifest }): Promise<void>;
+  setBase(base: {
+    generation: number;
+    main: CanonicalMainManifest;
+  }): Promise<void>;
   fetchRemote(): Promise<RemoteCanonical | null>;
-  publish(main: CanonicalMainManifest, expectedParent: number | null): Promise<{ generation: number }>;
+  publish(
+    main: CanonicalMainManifest,
+    expectedParent: number | null,
+  ): Promise<{ generation: number }>;
   savePendingMerge(pending: {
     basedOnGeneration: number;
     merged: CanonicalMainManifest;
@@ -3692,7 +4240,9 @@ export class PushError extends Error {
 }
 
 const isConflictError = (error: unknown): boolean =>
-  typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'conflict';
+  typeof error === 'object' &&
+  error !== null &&
+  (error as { code?: unknown }).code === 'conflict';
 
 /**
  * Push canonical Memory: fast-forward when nothing else changed Cloud since this
@@ -3710,7 +4260,9 @@ const isConflictError = (error: unknown): boolean =>
  * agreement decides HOW to publish if something does need publishing
  * (fast-forward vs. merge) — it never decides WHETHER to.
  */
-export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> => {
+export const pushCanonicalMemory = async (
+  deps: PushDeps,
+): Promise<PushOutcome> => {
   const maxAttempts = deps.maxAttempts ?? 3;
   const local = await deps.getLocalMain();
 
@@ -3725,7 +4277,9 @@ export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> 
 
     const isFastForward =
       (base === null && remote === null) ||
-      (base !== null && remote !== null && base.generation === remote.generation);
+      (base !== null &&
+        remote !== null &&
+        base.generation === remote.generation);
 
     if (isFastForward) {
       const expectedParent = remote?.generation ?? null;
@@ -3745,7 +4299,11 @@ export const pushCanonicalMemory = async (deps: PushDeps): Promise<PushOutcome> 
     const remoteGeneration = remote!.generation; // non-null: isFastForward handles the null/null case
     const { merged, conflicts } = mergeCanonical(baseMain, local, remote!.main);
     if (conflicts.length > 0) {
-      await deps.savePendingMerge({ basedOnGeneration: remoteGeneration, merged, conflicts });
+      await deps.savePendingMerge({
+        basedOnGeneration: remoteGeneration,
+        merged,
+        conflicts,
+      });
       return { status: 'conflict', conflicts };
     }
     if (canonicalDigest(merged) === canonicalDigest(remote!.main)) {
@@ -3802,10 +4360,12 @@ git commit -m "feat(memory): add the canonical Memory push algorithm (fast-forwa
 Pull's semantics genuinely differ from push's (spec section 8.4: "no unpushed local changes: get the latest version... unpushed local changes: merge the same way as push, but upload nothing"), so this is its own small state machine rather than a flag bent onto `push.ts`. A successful merge-pull DOES advance the local base to the Cloud generation it merged against (even though nothing was uploaded) — this is what lets the very next `stak push` fast-forward the merged result as a plain new generation instead of re-merging.
 
 **Files:**
+
 - Create: `packages/memory/src/canonical/pull.ts`
 - Test: `packages/memory/src/canonical/pull.test.ts`
 
 **Interfaces:**
+
 - Consumes: `canonicalDigest`, `emptyCanonicalMain`, `type CanonicalMainManifest` from `./domain.js` (Task 1); `mergeCanonical`, `type MergeConflict` from `./merge.js` (Task 4); `type RemoteCanonical` from `./push.js` (Task 9).
 - Produces: `type PullDeps = { getLocalMain(): Promise<CanonicalMainManifest>; getBase(): Promise<{ generation: number; main: CanonicalMainManifest } | null>; setLocalMain(main: CanonicalMainManifest): Promise<void>; setBase(base: { generation: number; main: CanonicalMainManifest }): Promise<void>; fetchRemote(): Promise<RemoteCanonical | null>; savePendingMerge(pending: { basedOnGeneration: number; merged: CanonicalMainManifest; conflicts: MergeConflict[] }): Promise<void>; clearPendingMerge(): Promise<void>; }`, `type PullOutcome = | { status: 'up-to-date'; generation: number | null } | { status: 'merged-local'; main: CanonicalMainManifest } | { status: 'conflict'; conflicts: MergeConflict[] }`, `pullCanonicalMemory(deps: PullDeps): Promise<PullOutcome>`.
 
@@ -3815,12 +4375,25 @@ Create `packages/memory/src/canonical/pull.test.ts`:
 
 ```ts
 import { describe, expect, it, vi } from 'vitest';
-import { CANONICAL_MAIN_SCHEMA_VERSION, type CanonicalDoc, type CanonicalMainManifest } from './domain.js';
+import {
+  CANONICAL_MAIN_SCHEMA_VERSION,
+  type CanonicalDoc,
+  type CanonicalMainManifest,
+} from './domain.js';
 import { pullCanonicalMemory, type PullDeps } from './pull.js';
 
 const h = (n: number) => `sha256:${n.toString().padStart(64, '0')}`;
-const present = (path: string, n: number): CanonicalDoc => ({ path, state: 'present', contentHash: h(n), importedFrom: 'claude', importedAt: '2026-10-22T00:00:00.000Z' });
-const manifest = (docs: CanonicalDoc[]): CanonicalMainManifest => ({ schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION, projects: [{ projectId: 'prj_x', documents: docs }] });
+const present = (path: string, n: number): CanonicalDoc => ({
+  path,
+  state: 'present',
+  contentHash: h(n),
+  importedFrom: 'claude',
+  importedAt: '2026-10-22T00:00:00.000Z',
+});
+const manifest = (docs: CanonicalDoc[]): CanonicalMainManifest => ({
+  schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
+  projects: [{ projectId: 'prj_x', documents: docs }],
+});
 
 const baseDeps = (overrides: Partial<PullDeps> = {}): PullDeps => ({
   getLocalMain: vi.fn(async () => manifest([])),
@@ -3857,11 +4430,13 @@ describe('pullCanonicalMemory', () => {
   it('is up-to-date when Cloud has not moved since base (local differences are purely unpushed, not pulled)', async () => {
     const base = manifest([present('notes/a.md', 1)]);
     const local = manifest([present('notes/a.md', 2)]); // unpushed local edit
-    const outcome = await pullCanonicalMemory(baseDeps({
-      getLocalMain: vi.fn(async () => local),
-      getBase: vi.fn(async () => ({ generation: 3, main: base })),
-      fetchRemote: vi.fn(async () => ({ generation: 3, main: base })),
-    }));
+    const outcome = await pullCanonicalMemory(
+      baseDeps({
+        getLocalMain: vi.fn(async () => local),
+        getBase: vi.fn(async () => ({ generation: 3, main: base })),
+        fetchRemote: vi.fn(async () => ({ generation: 3, main: base })),
+      }),
+    );
     expect(outcome).toEqual({ status: 'up-to-date', generation: 3 });
   });
 
@@ -3880,7 +4455,10 @@ describe('pullCanonicalMemory', () => {
 
   it('merges a remote change on top of local-only edits with no conflict, basing on what Cloud ACTUALLY holds, not the merge result', async () => {
     const base = manifest([present('notes/a.md', 1)]);
-    const local = manifest([present('notes/a.md', 1), present('notes/local-only.md', 9)]); // unpushed local-only doc
+    const local = manifest([
+      present('notes/a.md', 1),
+      present('notes/local-only.md', 9),
+    ]); // unpushed local-only doc
     const remote = manifest([present('notes/a.md', 2)]);
     const deps = baseDeps({
       getLocalMain: vi.fn(async () => local),
@@ -3906,15 +4484,23 @@ describe('pullCanonicalMemory', () => {
 
   it('a later pull against a newer remote never loses a still-unpushed local-only document (regression for the base-content bug above)', async () => {
     const base1 = manifest([present('notes/a.md', 1)]);
-    const localWithUnpushedDoc = manifest([present('notes/a.md', 1), present('notes/local-only.md', 9)]);
+    const localWithUnpushedDoc = manifest([
+      present('notes/a.md', 1),
+      present('notes/local-only.md', 9),
+    ]);
     const remote1 = manifest([present('notes/a.md', 2)]);
     let storedLocal = localWithUnpushedDoc;
-    let storedBase: { generation: number; main: CanonicalMainManifest } | null = { generation: 3, main: base1 };
+    let storedBase: { generation: number; main: CanonicalMainManifest } | null =
+      { generation: 3, main: base1 };
     const deps: PullDeps = {
       getLocalMain: vi.fn(async () => storedLocal),
       getBase: vi.fn(async () => storedBase),
-      setLocalMain: vi.fn(async (main) => { storedLocal = main; }),
-      setBase: vi.fn(async (base) => { storedBase = base; }),
+      setLocalMain: vi.fn(async (main) => {
+        storedLocal = main;
+      }),
+      setBase: vi.fn(async (base) => {
+        storedBase = base;
+      }),
       fetchRemote: vi.fn(async () => ({ generation: 4, main: remote1 })),
       savePendingMerge: vi.fn(async () => undefined),
       clearPendingMerge: vi.fn(async () => undefined),
@@ -3923,7 +4509,10 @@ describe('pullCanonicalMemory', () => {
 
     // A second machine now publishes generation 5 — still without local-only.md,
     // since that document was never pushed by anyone.
-    const remote2 = manifest([present('notes/a.md', 2), present('notes/other.md', 5)]);
+    const remote2 = manifest([
+      present('notes/a.md', 2),
+      present('notes/other.md', 5),
+    ]);
     deps.fetchRemote = vi.fn(async () => ({ generation: 5, main: remote2 }));
     const second = await pullCanonicalMemory(deps);
     expect(second.status).toBe('merged-local');
@@ -3944,7 +4533,12 @@ describe('pullCanonicalMemory', () => {
       fetchRemote: vi.fn(async () => ({ generation: 4, main: remote })),
     });
     const outcome = await pullCanonicalMemory(deps);
-    expect(outcome).toEqual({ status: 'conflict', conflicts: [{ projectId: 'prj_x', path: 'notes/a.md', reason: 'edit-edit' }] });
+    expect(outcome).toEqual({
+      status: 'conflict',
+      conflicts: [
+        { projectId: 'prj_x', path: 'notes/a.md', reason: 'edit-edit' },
+      ],
+    });
     expect(deps.setLocalMain).not.toHaveBeenCalled();
     expect(deps.setBase).not.toHaveBeenCalled();
   });
@@ -3961,15 +4555,25 @@ Expected: FAIL with a module-not-found error for `./pull.js`
 Create `packages/memory/src/canonical/pull.ts`:
 
 ```ts
-import { canonicalDigest, emptyCanonicalMain, type CanonicalMainManifest } from './domain.js';
+import {
+  canonicalDigest,
+  emptyCanonicalMain,
+  type CanonicalMainManifest,
+} from './domain.js';
 import { mergeCanonical, type MergeConflict } from './merge.js';
 import type { RemoteCanonical } from './push.js';
 
 export type PullDeps = {
   getLocalMain(): Promise<CanonicalMainManifest>;
-  getBase(): Promise<{ generation: number; main: CanonicalMainManifest } | null>;
+  getBase(): Promise<{
+    generation: number;
+    main: CanonicalMainManifest;
+  } | null>;
   setLocalMain(main: CanonicalMainManifest): Promise<void>;
-  setBase(base: { generation: number; main: CanonicalMainManifest }): Promise<void>;
+  setBase(base: {
+    generation: number;
+    main: CanonicalMainManifest;
+  }): Promise<void>;
   fetchRemote(): Promise<RemoteCanonical | null>;
   savePendingMerge(pending: {
     basedOnGeneration: number;
@@ -4006,7 +4610,9 @@ export type PullOutcome =
  * the genuinely-published content of that generation; pull's `merged` was never
  * published anywhere, so the same substitution is wrong here.)
  */
-export const pullCanonicalMemory = async (deps: PullDeps): Promise<PullOutcome> => {
+export const pullCanonicalMemory = async (
+  deps: PullDeps,
+): Promise<PullOutcome> => {
   const remote = await deps.fetchRemote();
   if (!remote) return { status: 'up-to-date', generation: null };
 
@@ -4031,7 +4637,11 @@ export const pullCanonicalMemory = async (deps: PullDeps): Promise<PullOutcome> 
   const baseMain = base?.main ?? emptyCanonicalMain();
   const { merged, conflicts } = mergeCanonical(baseMain, local, remote.main);
   if (conflicts.length > 0) {
-    await deps.savePendingMerge({ basedOnGeneration: remote.generation, merged, conflicts });
+    await deps.savePendingMerge({
+      basedOnGeneration: remote.generation,
+      merged,
+      conflicts,
+    });
     return { status: 'conflict', conflicts };
   }
   await deps.setLocalMain(merged);
@@ -4060,11 +4670,13 @@ git commit -m "feat(memory): add the canonical Memory pull algorithm (merge, nev
 Ties `sync.ts`'s pure N/P/C plan to real I/O: the Claude adapter's `scan`/`write`, the canonical store, and the content-addressed object store. Implements the mass-delete guard (spec section 6) by stripping a missing native root's previously-known paths from the projection BEFORE planning — which `planSync` (Task 3) already turns into a `materialize-write` ("regenerate it") rather than an `import-delete` ("you deleted it"), with no change needed to `sync.ts` itself.
 
 **Files:**
+
 - Modify: `packages/memory/src/canonical/claude-project-adapter.ts` (add `nativeRootsExist`)
 - Create: `packages/memory/src/canonical/project-sync.ts`
 - Test: `packages/memory/src/canonical/project-sync.test.ts`
 
 **Interfaces:**
+
 - Consumes: `planSync`, `type NativeEntry`, `type SyncAction` from `./sync.js` (Task 3); `namespaceOf` from `./paths.js` (Task 1); `readCanonicalMain`, `writeCanonicalMain`, `readProjection`, `writeProjection` from `./store.js` (Task 2); `projectMemoryOf`, `type CanonicalDoc`, `type CanonicalMainManifest` from `./domain.js` (Task 1); `scanClaudeProject`, `writeClaudeProject`, `type BoundProject`, `type ScanResult`, `type MaterializeOp` from `./claude-project-adapter.js` (Task 5); `writeMemoryObject`, `readMemoryObject` from `../store.js`.
 - Produces:
   - `type ProjectSyncPlan = { actions: SyncAction[]; sourceConflicts: { canonicalPath: string }[]; guardedPaths: string[] }`
@@ -4081,7 +4693,10 @@ In `packages/memory/src/canonical/claude-project-adapter.ts`, add:
 ```ts
 import { lstat, stat } from 'node:fs/promises';
 
-export type NativeRoots = { projectDirExists: boolean; notesRootExists: boolean };
+export type NativeRoots = {
+  projectDirExists: boolean;
+  notesRootExists: boolean;
+};
 
 const isDir = async (candidate: string): Promise<boolean> => {
   try {
@@ -4133,7 +4748,8 @@ export const nativeRootsExist = async (
   const keyFolderIsRealDir = await isDirNoSymlink(keyDir);
   return {
     projectDirExists: await isDir(project.dir),
-    notesRootExists: keyFolderIsRealDir && (await isDir(path.join(keyDir, 'memory'))),
+    notesRootExists:
+      keyFolderIsRealDir && (await isDir(path.join(keyDir, 'memory'))),
   };
 };
 ```
@@ -4151,8 +4767,17 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { hashBytes, readMemoryObject, writeMemoryObject } from '../store.js';
 import { CANONICAL_MAIN_SCHEMA_VERSION, type CanonicalDoc } from './domain.js';
-import { writeCanonicalMain, readCanonicalMain, writeProjection, readProjection } from './store.js';
-import { applyImportActions, applyMaterializeActions, planProjectSync } from './project-sync.js';
+import {
+  writeCanonicalMain,
+  readCanonicalMain,
+  writeProjection,
+  readProjection,
+} from './store.js';
+import {
+  applyImportActions,
+  applyMaterializeActions,
+  planProjectSync,
+} from './project-sync.js';
 
 const write = async (file: string, body: string) => {
   await mkdir(path.dirname(file), { recursive: true });
@@ -4180,7 +4805,11 @@ describe('planProjectSync', () => {
     const plan = await planProjectSync(
       { projectId: 'prj_x', dir: path.join(root, 'missing') },
       stackHome,
-      { claudeHome, projects: [{ dir: path.join(root, 'missing') }], resolveProjectId: () => 'prj_x' },
+      {
+        claudeHome,
+        projects: [{ dir: path.join(root, 'missing') }],
+        resolveProjectId: () => 'prj_x',
+      },
     );
     expect(plan.actions).toEqual([]);
   });
@@ -4193,7 +4822,11 @@ describe('planProjectSync', () => {
       resolveProjectId: () => 'prj_x',
     });
     expect(plan.actions).toEqual([
-      { kind: 'import-edit', path: 'instructions/private.md', contentHash: hashBytes(Buffer.from('private v1')) },
+      {
+        kind: 'import-edit',
+        path: 'instructions/private.md',
+        contentHash: hashBytes(Buffer.from('private v1')),
+      },
     ]);
   });
 
@@ -4203,9 +4836,25 @@ describe('planProjectSync', () => {
     await writeMemoryObject({ stackHome, contentHash, bytes });
     await writeCanonicalMain(stackHome, {
       schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
-      projects: [{ projectId: 'prj_x', documents: [{ path: 'notes/MEMORY.md', state: 'present', contentHash, importedFrom: 'claude', importedAt: '2026-10-22T00:00:00.000Z' }] }],
+      projects: [
+        {
+          projectId: 'prj_x',
+          documents: [
+            {
+              path: 'notes/MEMORY.md',
+              state: 'present',
+              contentHash,
+              importedFrom: 'claude',
+              importedAt: '2026-10-22T00:00:00.000Z',
+            },
+          ],
+        },
+      ],
     });
-    await writeProjection(stackHome, 'claude', { schemaVersion: 1, projects: { prj_x: { 'notes/MEMORY.md': contentHash } } });
+    await writeProjection(stackHome, 'claude', {
+      schemaVersion: 1,
+      projects: { prj_x: { 'notes/MEMORY.md': contentHash } },
+    });
     // Note: claudeHome/projects/<key>/memory is never created, so the notes root is missing.
 
     const plan = await planProjectSync(project, stackHome, {
@@ -4214,7 +4863,11 @@ describe('planProjectSync', () => {
       resolveProjectId: () => 'prj_x',
     });
     expect(plan.guardedPaths).toEqual(['notes/MEMORY.md']);
-    expect(plan.actions).toContainEqual({ kind: 'materialize-write', path: 'notes/MEMORY.md', contentHash });
+    expect(plan.actions).toContainEqual({
+      kind: 'materialize-write',
+      path: 'notes/MEMORY.md',
+      contentHash,
+    });
     expect(plan.actions.some((a) => a.kind === 'import-delete')).toBe(false);
   });
 
@@ -4224,15 +4877,33 @@ describe('planProjectSync', () => {
     await writeMemoryObject({ stackHome, contentHash, bytes });
     await writeCanonicalMain(stackHome, {
       schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
-      projects: [{ projectId: 'prj_x', documents: [{ path: 'notes/MEMORY.md', state: 'present', contentHash, importedFrom: 'claude', importedAt: '2026-10-22T00:00:00.000Z' }] }],
+      projects: [
+        {
+          projectId: 'prj_x',
+          documents: [
+            {
+              path: 'notes/MEMORY.md',
+              state: 'present',
+              contentHash,
+              importedFrom: 'claude',
+              importedAt: '2026-10-22T00:00:00.000Z',
+            },
+          ],
+        },
+      ],
     });
-    await writeProjection(stackHome, 'claude', { schemaVersion: 1, projects: { prj_x: { 'notes/MEMORY.md': contentHash } } });
+    await writeProjection(stackHome, 'claude', {
+      schemaVersion: 1,
+      projects: { prj_x: { 'notes/MEMORY.md': contentHash } },
+    });
     // The notes root DOES exist this time — just empty (the user deleted the file,
     // the directory itself is untouched). A regression that guards on "no files
     // found" instead of "root missing" would wrongly protect this too.
     const { encodeClaudeProjectKey } = await import('../project-identity.js');
     const encodedKey = encodeClaudeProjectKey(path.resolve(projectDir));
-    await mkdir(path.join(claudeHome, 'projects', encodedKey, 'memory'), { recursive: true });
+    await mkdir(path.join(claudeHome, 'projects', encodedKey, 'memory'), {
+      recursive: true,
+    });
 
     const plan = await planProjectSync(project, stackHome, {
       claudeHome,
@@ -4240,23 +4911,50 @@ describe('planProjectSync', () => {
       resolveProjectId: () => 'prj_x',
     });
     expect(plan.guardedPaths).toEqual([]);
-    expect(plan.actions).toContainEqual({ kind: 'import-delete', path: 'notes/MEMORY.md' });
+    expect(plan.actions).toContainEqual({
+      kind: 'import-delete',
+      path: 'notes/MEMORY.md',
+    });
   });
 
-  it('a symlinked Claude project-key folder is treated the same as a missing one, matching discovery\'s own symlink-skipping rule', async () => {
+  it("a symlinked Claude project-key folder is treated the same as a missing one, matching discovery's own symlink-skipping rule", async () => {
     const bytes = Buffer.from('MEMORY content');
     const contentHash = hashBytes(bytes);
     await writeMemoryObject({ stackHome, contentHash, bytes });
     await writeCanonicalMain(stackHome, {
       schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
-      projects: [{ projectId: 'prj_x', documents: [{ path: 'notes/MEMORY.md', state: 'present', contentHash, importedFrom: 'claude', importedAt: '2026-10-22T00:00:00.000Z' }] }],
+      projects: [
+        {
+          projectId: 'prj_x',
+          documents: [
+            {
+              path: 'notes/MEMORY.md',
+              state: 'present',
+              contentHash,
+              importedFrom: 'claude',
+              importedAt: '2026-10-22T00:00:00.000Z',
+            },
+          ],
+        },
+      ],
     });
-    await writeProjection(stackHome, 'claude', { schemaVersion: 1, projects: { prj_x: { 'notes/MEMORY.md': contentHash } } });
-    const encodedKey = (await import('../project-identity.js')).encodeClaudeProjectKey(path.resolve(projectDir));
+    await writeProjection(stackHome, 'claude', {
+      schemaVersion: 1,
+      projects: { prj_x: { 'notes/MEMORY.md': contentHash } },
+    });
+    const encodedKey = (
+      await import('../project-identity.js')
+    ).encodeClaudeProjectKey(path.resolve(projectDir));
     const realTarget = path.join(root, 'symlink-target-with-memory');
     await mkdir(path.join(realTarget, 'memory'), { recursive: true });
     try {
-      await (await import('node:fs/promises')).symlink(realTarget, path.join(claudeHome, 'projects', encodedKey), 'junction');
+      await (
+        await import('node:fs/promises')
+      ).symlink(
+        realTarget,
+        path.join(claudeHome, 'projects', encodedKey),
+        'junction',
+      );
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EPERM') return; // no symlink privilege on this machine; skip
       throw error;
@@ -4293,19 +4991,37 @@ describe('applyImportActions and applyMaterializeActions', () => {
     await applyImportActions(project, stackHome, scanResult, plan.actions);
 
     const main = await readCanonicalMain(stackHome);
-    expect(main.projects[0]?.documents[0]).toMatchObject({ path: 'instructions/private.md', state: 'present' });
+    expect(main.projects[0]?.documents[0]).toMatchObject({
+      path: 'instructions/private.md',
+      state: 'present',
+    });
     const projection = await readProjection(stackHome, 'claude');
-    expect(projection.projects['prj_x']?.['instructions/private.md']).toBeDefined();
+    expect(
+      projection.projects['prj_x']?.['instructions/private.md'],
+    ).toBeDefined();
 
     // Now simulate a canonical-only change (as if it arrived from another machine).
     const mainAfterRemote = await readCanonicalMain(stackHome);
     const newHash = hashBytes(Buffer.from('private v2'));
-    await writeMemoryObject({ stackHome, contentHash: newHash, bytes: Buffer.from('private v2') });
+    await writeMemoryObject({
+      stackHome,
+      contentHash: newHash,
+      bytes: Buffer.from('private v2'),
+    });
     await writeCanonicalMain(stackHome, {
       ...mainAfterRemote,
       projects: mainAfterRemote.projects.map((p) => ({
         ...p,
-        documents: p.documents.map((d) => (d.path === 'instructions/private.md' ? { ...d, state: 'present' as const, contentHash: newHash, importedAt: '2026-10-22T00:00:00.000Z' } : d)),
+        documents: p.documents.map((d) =>
+          d.path === 'instructions/private.md'
+            ? {
+                ...d,
+                state: 'present' as const,
+                contentHash: newHash,
+                importedAt: '2026-10-22T00:00:00.000Z',
+              }
+            : d,
+        ),
       })),
     });
     plan = await planProjectSync(project, stackHome, {
@@ -4313,11 +5029,24 @@ describe('applyImportActions and applyMaterializeActions', () => {
       projects: [{ dir: projectDir }],
       resolveProjectId: () => 'prj_x',
     });
-    expect(plan.actions).toEqual([{ kind: 'materialize-write', path: 'instructions/private.md', contentHash: newHash }]);
-    const result = await applyMaterializeActions(project, stackHome, plan.actions, claudeHome);
+    expect(plan.actions).toEqual([
+      {
+        kind: 'materialize-write',
+        path: 'instructions/private.md',
+        contentHash: newHash,
+      },
+    ]);
+    const result = await applyMaterializeActions(
+      project,
+      stackHome,
+      plan.actions,
+      claudeHome,
+    );
     expect(result.written).toEqual(['instructions/private.md']);
     const { readFile } = await import('node:fs/promises');
-    expect(await readFile(path.join(projectDir, 'CLAUDE.local.md'), 'utf8')).toBe('private v2');
+    expect(
+      await readFile(path.join(projectDir, 'CLAUDE.local.md'), 'utf8'),
+    ).toBe('private v2');
   });
 });
 ```
@@ -4499,11 +5228,13 @@ git commit -m "feat(memory): add project-sync orchestration with the mass-delete
 ### Task 11: Fetch-remote-canonical bridge and bound-project enumeration
 
 **Files:**
+
 - Create: `packages/memory/src/canonical/fetch-remote-canonical.ts`
 - Test: `packages/memory/src/canonical/fetch-remote-canonical.test.ts`
 - Create: `packages/cli/src/memory/canonical-ops.ts`
 
 **Interfaces:**
+
 - Consumes: `type RemoteMemoryBackend`, `RemoteMemoryError` from `../remote/backend.js`; `open` from `../remote/cipher.js`; `unwrapDekWithMmk` from `../remote/mmk.js`; `parseBundle` from `../remote/bundle-codec.js`; `canonicalMainManifestSchema` from `./domain.js`; `convertV1Bundle` from `./convert-v1.js`; `type LocalRegistry` from `../project/registry.js`.
 - Produces (`fetch-remote-canonical.ts`): `fetchRemoteCanonical(options: { backend: RemoteMemoryBackend; mmk?: Buffer; localRegistry: LocalRegistry }): Promise<{ generation: number; main: CanonicalMainManifest } | null>`.
 - Produces (`canonical-ops.ts`): `type BoundProjectRecord = { projectId: string; dir: string }`, `listBoundProjects(stackHome: string): Promise<BoundProjectRecord[]>` (every registry binding, regardless of lifecycle — archived projects still sync, per spec), `resolveProjectIdForClaudeItem(item, registry): string | undefined` (re-exported wrapper around the existing `resolveCanonicalProjectId` from `packages/cli/src/memory/canonical-identity.ts`, so canonical-ops is the one place that bridges `@stack/memory`'s adapter-agnostic `resolveProjectId` callback to this CLI's already-proven identity resolution).
@@ -4556,15 +5287,26 @@ Create `packages/memory/src/canonical/fetch-remote-canonical.ts`:
 import { open } from '../remote/cipher.js';
 import { unwrapDekWithMmk } from '../remote/mmk.js';
 import { parseBundle } from '../remote/bundle-codec.js';
-import { RemoteMemoryError, type RemoteMemoryBackend } from '../remote/backend.js';
+import {
+  RemoteMemoryError,
+  type RemoteMemoryBackend,
+} from '../remote/backend.js';
 import { hashBytes } from '../store.js';
 import type { LocalRegistry } from '../project/registry.js';
 import { convertV1Bundle } from './convert-v1.js';
-import { canonicalMainManifestSchema, emptyCanonicalMain, type CanonicalMainManifest } from './domain.js';
+import {
+  canonicalMainManifestSchema,
+  emptyCanonicalMain,
+  type CanonicalMainManifest,
+} from './domain.js';
 
 const splitPayload = (payload: Uint8Array) => {
   const buf = Buffer.from(payload);
-  return { nonce: buf.subarray(0, 12), ciphertext: buf.subarray(12, buf.length - 16), tag: buf.subarray(buf.length - 16) };
+  return {
+    nonce: buf.subarray(0, 12),
+    ciphertext: buf.subarray(12, buf.length - 16),
+    tag: buf.subarray(buf.length - 16),
+  };
 };
 
 const protectedAad = (backupId: string): Buffer =>
@@ -4583,21 +5325,34 @@ export const fetchRemoteCanonical = async (options: {
   if (!meta) return null;
   const payload = await options.backend.getPayload(meta.backupId);
   if (hashBytes(payload) !== meta.payloadSha256)
-    throw new RemoteMemoryError('integrity', 'Payload failed its integrity hash.');
+    throw new RemoteMemoryError(
+      'integrity',
+      'Payload failed its integrity hash.',
+    );
 
   let bundleBytes: Uint8Array;
   if (meta.privacyMode === 'standard') {
     bundleBytes = payload;
   } else {
-    if (!options.mmk) throw new RemoteMemoryError('mmk-required', 'Protected recovery requires the Memory Master Key.');
-    if (!meta.wrappedDek) throw new RemoteMemoryError('not-protected', 'Protected generation is missing its wrapped DEK.');
+    if (!options.mmk)
+      throw new RemoteMemoryError(
+        'mmk-required',
+        'Protected recovery requires the Memory Master Key.',
+      );
+    if (!meta.wrappedDek)
+      throw new RemoteMemoryError(
+        'not-protected',
+        'Protected generation is missing its wrapped DEK.',
+      );
     const dek = unwrapDekWithMmk(meta.wrappedDek, options.mmk, meta.backupId);
     bundleBytes = open(splitPayload(payload), dek, protectedAad(meta.backupId));
   }
 
   const bundle = parseBundle(bundleBytes);
   const main = bundle.canonicalB64
-    ? canonicalMainManifestSchema.parse(JSON.parse(Buffer.from(bundle.canonicalB64, 'base64').toString('utf8')))
+    ? canonicalMainManifestSchema.parse(
+        JSON.parse(Buffer.from(bundle.canonicalB64, 'base64').toString('utf8')),
+      )
     : convertV1Bundle(bundle, { localRegistry: options.localRegistry });
   return { generation: meta.generation, main: main ?? emptyCanonicalMain() };
 };
@@ -4627,16 +5382,24 @@ export type BoundProjectRecord = { projectId: string; dir: string };
 /** Every machine-local binding this registry knows, regardless of lifecycle —
  * archived projects still sync their Memory (spec: "preserved regardless of
  * lifecycle"). */
-export const listBoundProjects = async (stackHome: string): Promise<BoundProjectRecord[]> => {
+export const listBoundProjects = async (
+  stackHome: string,
+): Promise<BoundProjectRecord[]> => {
   const registry = await readLocalRegistry(stackHome);
-  return registry.bindings.map((binding) => ({ projectId: binding.projectId, dir: binding.dir }));
+  return registry.bindings.map((binding) => ({
+    projectId: binding.projectId,
+    dir: binding.dir,
+  }));
 };
 
 /** The `resolveProjectId` callback the canonical scan/migration functions expect,
  * wired to this CLI's already-proven identity resolution (`canonical-identity.ts`,
  * unchanged by this feature) so `@stack/memory` itself never depends on it. */
 export const resolveProjectIdForClaudeItem = (
-  item: Pick<DiscoveredMemoryItem | ManifestItem, 'project' | 'kind' | 'logicalId' | 'restoreTarget'>,
+  item: Pick<
+    DiscoveredMemoryItem | ManifestItem,
+    'project' | 'kind' | 'logicalId' | 'restoreTarget'
+  >,
   registry: LocalRegistry,
 ): string | undefined => resolveCanonicalProjectId(item, registry);
 ```
@@ -4658,6 +5421,7 @@ git commit -m "feat(memory): bridge Cloud generations to canonical Memory and en
 ### Task 12: Wire canonical Memory into `stak status` and `stak add .`
 
 **Files:**
+
 - Modify: `packages/cli/src/memory/stage-memory.ts` (scope its native discovery to global-only, since project-scope Memory now belongs to canonical)
 - Modify: `packages/cli/src/memory/canonical-ops.ts`
 - Test: `packages/cli/src/memory/canonical-ops.test.ts`
@@ -4667,6 +5431,7 @@ git commit -m "feat(memory): bridge Cloud generations to canonical Memory and en
 - Modify: `packages/cli/src/program.ts` (wire `stageMemory`/`checkMemory` dependencies)
 
 **Interfaces:**
+
 - Produces (`canonical-ops.ts`, additive): `type CanonicalProjectSummary = { projectId: string; imported: string[]; conflicts: { path: string; reason: string }[]; sourceConflicts: string[]; guardedPaths: string[] }`, `stageCanonicalMemory(stackHome: string): Promise<CanonicalProjectSummary[]>` (runs `migrateLocalStore` once, then `planProjectSync` + `applyImportActions` for every bound project), `canonicalMemoryStatus(stackHome: string): Promise<CanonicalProjectSummary[]>` (same plan, read-only — never calls `applyImportActions`).
 - Produces (`working-tree-status.ts`, additive): a new exported type `CanonicalMemoryWorkingTreeStatus = { projects: CanonicalProjectSummaryLike[] }` re-exporting the shape above, consumed by `ui/environment.ts`.
 
@@ -4699,9 +5464,17 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { setBinding, writeLocalRegistry, readLocalRegistry, resolveOrMintProject } from '@stack/memory';
+import {
+  setBinding,
+  writeLocalRegistry,
+  readLocalRegistry,
+  resolveOrMintProject,
+} from '@stack/memory';
 
-import { canonicalMemoryStatus, stageCanonicalMemory } from './canonical-ops.js';
+import {
+  canonicalMemoryStatus,
+  stageCanonicalMemory,
+} from './canonical-ops.js';
 
 let root: string;
 let stackHome: string;
@@ -4719,8 +5492,16 @@ afterEach(async () => rm(root, { recursive: true, force: true }));
 
 const bindProject = async (dir: string) => {
   let registry = await readLocalRegistry(stackHome);
-  const minted = resolveOrMintProject(registry, { kind: 'local', vendorKey: `v-${path.basename(dir)}` });
-  registry = setBinding(minted.registry, { projectId: minted.projectId, dir, boundAt: '2026-10-22T00:00:00.000Z', provenance: 'user-map' });
+  const minted = resolveOrMintProject(registry, {
+    kind: 'local',
+    vendorKey: `v-${path.basename(dir)}`,
+  });
+  registry = setBinding(minted.registry, {
+    projectId: minted.projectId,
+    dir,
+    boundAt: '2026-10-22T00:00:00.000Z',
+    provenance: 'user-map',
+  });
   await writeLocalRegistry(stackHome, registry);
   return minted.projectId;
 };
@@ -4728,7 +5509,9 @@ const bindProject = async (dir: string) => {
 describe('stageCanonicalMemory', () => {
   it('imports a native edit for a bound project and reports it', async () => {
     const projectId = await bindProject(projectDir);
-    await mkdir(path.dirname(path.join(projectDir, 'CLAUDE.local.md')), { recursive: true });
+    await mkdir(path.dirname(path.join(projectDir, 'CLAUDE.local.md')), {
+      recursive: true,
+    });
     await writeFile(path.join(projectDir, 'CLAUDE.local.md'), 'private memory');
 
     const summaries = await stageCanonicalMemory(stackHome, { claudeHome });
@@ -4741,7 +5524,9 @@ describe('stageCanonicalMemory', () => {
     await writeFile(path.join(projectDir, 'CLAUDE.local.md'), 'private memory');
 
     const summaries = await canonicalMemoryStatus(stackHome, { claudeHome });
-    expect(summaries.find((s) => s.projectId === projectId)?.imported).toEqual([]);
+    expect(summaries.find((s) => s.projectId === projectId)?.imported).toEqual(
+      [],
+    );
     // Confirm nothing was actually staged.
     const after = await canonicalMemoryStatus(stackHome, { claudeHome });
     expect(after.find((s) => s.projectId === projectId)?.imported).toEqual([]);
@@ -4780,7 +5565,14 @@ export type CanonicalProjectSummary = {
 const planAllBoundProjects = async (
   stackHome: string,
   options: { claudeHome?: string } = {},
-): Promise<Array<{ projectId: string; dir: string; plan: Awaited<ReturnType<typeof planProjectSync>>; scanResult: ScanResult }>> => {
+): Promise<
+  Array<{
+    projectId: string;
+    dir: string;
+    plan: Awaited<ReturnType<typeof planProjectSync>>;
+    scanResult: ScanResult;
+  }>
+> => {
   const bound = await listBoundProjects(stackHome);
   const registry = await readLocalRegistry(stackHome);
   const out = [];
@@ -4788,20 +5580,31 @@ const planAllBoundProjects = async (
     const scanOptions = {
       ...(options.claudeHome ? { claudeHome: options.claudeHome } : {}),
       projects: [{ dir }],
-      resolveProjectId: (item: DiscoveredMemoryItem) => resolveProjectIdForClaudeItem(item, registry),
+      resolveProjectId: (item: DiscoveredMemoryItem) =>
+        resolveProjectIdForClaudeItem(item, registry),
     };
-    const plan = await planProjectSync({ projectId, dir }, stackHome, scanOptions);
+    const plan = await planProjectSync(
+      { projectId, dir },
+      stackHome,
+      scanOptions,
+    );
     const scanResult = await scanClaudeProject({ projectId, dir }, scanOptions);
     out.push({ projectId, dir, plan, scanResult });
   }
   return out;
 };
 
-const toSummary = (entry: Awaited<ReturnType<typeof planAllBoundProjects>>[number], imported: string[]): CanonicalProjectSummary => ({
+const toSummary = (
+  entry: Awaited<ReturnType<typeof planAllBoundProjects>>[number],
+  imported: string[],
+): CanonicalProjectSummary => ({
   projectId: entry.projectId,
   imported,
   conflicts: entry.plan.actions
-    .filter((a): a is Extract<typeof a, { kind: 'conflict' }> => a.kind === 'conflict')
+    .filter(
+      (a): a is Extract<typeof a, { kind: 'conflict' }> =>
+        a.kind === 'conflict',
+    )
     .map((a) => ({ path: a.path, reason: a.reason })),
   sourceConflicts: entry.plan.sourceConflicts.map((c) => c.canonicalPath),
   guardedPaths: entry.plan.guardedPaths,
@@ -4826,7 +5629,12 @@ export const stageCanonicalMemory = async (
   const entries = await planAllBoundProjects(stackHome, options);
   const summaries: CanonicalProjectSummary[] = [];
   for (const entry of entries) {
-    const { imported } = await applyImportActions({ projectId: entry.projectId, dir: entry.dir }, stackHome, entry.scanResult, entry.plan.actions);
+    const { imported } = await applyImportActions(
+      { projectId: entry.projectId, dir: entry.dir },
+      stackHome,
+      entry.scanResult,
+      entry.plan.actions,
+    );
     summaries.push(toSummary(entry, imported));
   }
   return summaries;
@@ -4846,7 +5654,12 @@ In `packages/cli/src/ui/add.ts`, widen the type and render a line per project wi
 export type StagedMemorySummary = {
   files: number;
   projects: number;
-  canonical?: Array<{ projectId: string; imported: number; conflicts: number; guarded: number }>;
+  canonical?: Array<{
+    projectId: string;
+    imported: number;
+    conflicts: number;
+    guarded: number;
+  }>;
 };
 ```
 
@@ -4855,9 +5668,18 @@ Add a short block in `renderSkillAdd` (follow the file's existing `lines.push(..
 ```ts
 if (options.memory?.canonical?.length) {
   for (const project of options.memory.canonical) {
-    if (project.imported > 0) lines.push(`  Memory: imported ${project.imported} change(s) for ${project.projectId}`);
-    if (project.conflicts > 0) lines.push(`  Memory: ${project.conflicts} conflict(s) in ${project.projectId} — resolve with \`stak memory resolve\``);
-    if (project.guarded > 0) lines.push(`  Memory: ${project.guarded} path(s) will be regenerated for ${project.projectId} — run \`stak memory materialize\``);
+    if (project.imported > 0)
+      lines.push(
+        `  Memory: imported ${project.imported} change(s) for ${project.projectId}`,
+      );
+    if (project.conflicts > 0)
+      lines.push(
+        `  Memory: ${project.conflicts} conflict(s) in ${project.projectId} — resolve with \`stak memory resolve\``,
+      );
+    if (project.guarded > 0)
+      lines.push(
+        `  Memory: ${project.guarded} path(s) will be regenerated for ${project.projectId} — run \`stak memory materialize\``,
+      );
   }
 }
 ```
@@ -4914,6 +5736,7 @@ git commit -m "feat(cli): wire canonical Project Memory into stak status and sta
 **Important:** this task REPLACES the Memory half of `stak push`'s wiring (`applyMemoryPush` in `packages/cli/src/program.ts`), it does not add a second upload path alongside it. Once canonical Memory exists (which it now always does — any Memory-touching command runs `migrateLocalStore` first per Task 12), a v2 bundle already carries both the global v1 manifest and canonical Memory together, so there must be exactly ONE `createGeneration` call per `stak push`. The old `pushStagedMemory`/`resolveMemoryPushState` functions (`packages/cli/src/memory/cloud-ops.ts`) become unused by `stak push` after this task — leave them in place (do not delete; `stak memory backup`'s own command currently has independent wiring through `runMemoryCloudBackup`, which this task also repoints, per spec section 9.3's "`memory backup` stays as a deprecated alias") rather than removing exported functions mid-feature.
 
 **Files:**
+
 - Modify: `packages/cli/src/memory/cloud-ops.ts` (add `publishCanonicalGeneration`, repoint `runMemoryCloudBackup`'s Cloud branch)
 - Modify: `packages/cli/src/memory/canonical-ops.ts` (add `pushMemoryViaCanonical`, `pullMemoryViaCanonical`)
 - Test: `packages/cli/src/memory/canonical-ops.test.ts` (add cases)
@@ -4922,6 +5745,7 @@ git commit -m "feat(cli): wire canonical Project Memory into stak status and sta
 - Modify: `packages/cli/src/ui/cloud.ts` (render canonical push/pull outcomes)
 
 **Interfaces:**
+
 - Produces (`cloud-ops.ts`, additive): `publishCanonicalGeneration(deps: MemoryCloudDeps, main: CanonicalMainManifest): Promise<{ generation: number }>` — mirrors `pushStagedMemory`'s mode check + `standardCloudBackup`/`protectedCloudBackup` + `recordRecoveryProvenance`, but NEVER swallows a thrown `RemoteMemoryError` (push.ts's retry loop needs to see `code: 'conflict'` propagate, not be flattened into a `{status:'failed'}` result the way `pushStagedMemory` does for its own unrelated callers).
 - Produces (`canonical-ops.ts`, additive): `type CanonicalPushOutcome = { status: 'up-to-date' | 'pushed' | 'conflict' | 'retry-exhausted'; generation?: number; conflicts?: { projectId: string; path: string; reason: string }[] }`, `pushMemoryViaCanonical(deps: MemoryCloudDeps): Promise<CanonicalPushOutcome>` (runs `pushCanonicalMemory`, Task 9; materializes on any non-conflict outcome), `type CanonicalPullOutcome = { status: 'up-to-date' | 'merged' | 'conflict'; conflicts?: { projectId: string; path: string; reason: string }[] }`, `pullMemoryViaCanonical(deps: MemoryCloudDeps): Promise<CanonicalPullOutcome>` (runs `pullCanonicalMemory`, Task 9A; materializes on any non-conflict outcome).
 
@@ -4951,12 +5775,31 @@ export const publishCanonicalGeneration = async (
   if (mode === 'protected') {
     const mmk = await deps.localKeyStore.loadMmk();
     if (!mmk) throw new Error('Protected Memory is locked on this machine.');
-    const result = await protectedCloudBackup({ stackHome: deps.stackHome, backend: deps.backend, mmk, ...(deps.now ? { now: deps.now } : {}) });
-    await recordRecoveryProvenance(deps, { generation: result.generation, privacyMode: 'protected', cloudLatest: result.generation, ...(semanticDigest ? { semanticDigest } : {}) });
+    const result = await protectedCloudBackup({
+      stackHome: deps.stackHome,
+      backend: deps.backend,
+      mmk,
+      ...(deps.now ? { now: deps.now } : {}),
+    });
+    await recordRecoveryProvenance(deps, {
+      generation: result.generation,
+      privacyMode: 'protected',
+      cloudLatest: result.generation,
+      ...(semanticDigest ? { semanticDigest } : {}),
+    });
     return { generation: result.generation };
   }
-  const result = await standardCloudBackup({ stackHome: deps.stackHome, backend: deps.backend, ...(deps.now ? { now: deps.now } : {}) });
-  await recordRecoveryProvenance(deps, { generation: result.generation, privacyMode: 'standard', cloudLatest: result.generation, ...(semanticDigest ? { semanticDigest } : {}) });
+  const result = await standardCloudBackup({
+    stackHome: deps.stackHome,
+    backend: deps.backend,
+    ...(deps.now ? { now: deps.now } : {}),
+  });
+  await recordRecoveryProvenance(deps, {
+    generation: result.generation,
+    privacyMode: 'standard',
+    cloudLatest: result.generation,
+    ...(semanticDigest ? { semanticDigest } : {}),
+  });
   return { generation: result.generation };
 };
 ```
@@ -4973,7 +5816,10 @@ Expected: PASS (additive change only)
 Append to `packages/cli/src/memory/canonical-ops.test.ts` (reuse this file's existing temp-dir + `bindProject` helpers from Task 12's tests; construct `MemoryCloudDeps` the same way `packages/cli/src/memory/cloud-ops.test.ts` already does — read that file first and copy its exact in-memory backend + `MemoryCloudDeps` construction rather than inventing a new one):
 
 ```ts
-import { pullMemoryViaCanonical, pushMemoryViaCanonical } from './canonical-ops.js';
+import {
+  pullMemoryViaCanonical,
+  pushMemoryViaCanonical,
+} from './canonical-ops.js';
 
 describe('pushMemoryViaCanonical and pullMemoryViaCanonical', () => {
   it('pushes a native edit, then a second machine pulling sees it materialized', async () => {
@@ -5015,9 +5861,16 @@ import {
   applyMaterializeActions,
   planProjectSync,
 } from '@stack/memory';
-import { publishCanonicalGeneration, type MemoryCloudDeps } from './cloud-ops.js';
+import {
+  publishCanonicalGeneration,
+  type MemoryCloudDeps,
+} from './cloud-ops.js';
 
-export type CanonicalConflictEntry = { projectId: string; path: string; reason: string };
+export type CanonicalConflictEntry = {
+  projectId: string;
+  path: string;
+  reason: string;
+};
 export type CanonicalPushOutcome = {
   status: 'up-to-date' | 'pushed' | 'conflict' | 'retry-exhausted';
   generation?: number;
@@ -5031,28 +5884,50 @@ export type CanonicalPullOutcome = {
 /** Materialize canonical Memory into every bound project's native files. Never
  * uploads anything — safe to call after push, pull, or on its own (`stak memory
  * materialize`, Task 14). */
-const materializeAllBoundProjects = async (deps: { stackHome: string; claudeHome?: string }): Promise<void> => {
+const materializeAllBoundProjects = async (deps: {
+  stackHome: string;
+  claudeHome?: string;
+}): Promise<void> => {
   const bound = await listBoundProjects(deps.stackHome);
   const registry = await readLocalRegistry(deps.stackHome);
   for (const { projectId, dir } of bound) {
     const scanOptions = {
       ...(deps.claudeHome ? { claudeHome: deps.claudeHome } : {}),
       projects: [{ dir }],
-      resolveProjectId: (item: DiscoveredMemoryItem) => resolveProjectIdForClaudeItem(item, registry),
+      resolveProjectId: (item: DiscoveredMemoryItem) =>
+        resolveProjectIdForClaudeItem(item, registry),
     };
-    const plan = await planProjectSync({ projectId, dir }, deps.stackHome, scanOptions);
-    await applyMaterializeActions({ projectId, dir }, deps.stackHome, plan.actions, deps.claudeHome);
+    const plan = await planProjectSync(
+      { projectId, dir },
+      deps.stackHome,
+      scanOptions,
+    );
+    await applyMaterializeActions(
+      { projectId, dir },
+      deps.stackHome,
+      plan.actions,
+      deps.claudeHome,
+    );
   }
 };
 
-const remoteOf = (deps: MemoryCloudDeps, mmk: Buffer | undefined) => async () =>
-  deps.backend
-    ? fetchRemoteCanonical({ backend: deps.backend, ...(mmk ? { mmk } : {}), localRegistry: await readLocalRegistry(deps.stackHome) })
-    : null;
+const remoteOf =
+  (deps: MemoryCloudDeps, mmk: Buffer | undefined) => async () =>
+    deps.backend
+      ? fetchRemoteCanonical({
+          backend: deps.backend,
+          ...(mmk ? { mmk } : {}),
+          localRegistry: await readLocalRegistry(deps.stackHome),
+        })
+      : null;
 
-export const pushMemoryViaCanonical = async (deps: MemoryCloudDeps): Promise<CanonicalPushOutcome> => {
+export const pushMemoryViaCanonical = async (
+  deps: MemoryCloudDeps,
+): Promise<CanonicalPushOutcome> => {
   if (!deps.backend) return { status: 'up-to-date' };
-  const mmk = deps.localKeyStore ? await deps.localKeyStore.loadMmk().catch(() => undefined) : undefined;
+  const mmk = deps.localKeyStore
+    ? await deps.localKeyStore.loadMmk().catch(() => undefined)
+    : undefined;
   const outcome = await pushCanonicalMemory({
     getLocalMain: () => readCanonicalMain(deps.stackHome),
     getBase: () => readCanonicalBase(deps.stackHome),
@@ -5062,13 +5937,18 @@ export const pushMemoryViaCanonical = async (deps: MemoryCloudDeps): Promise<Can
     savePendingMerge: (pending) => writePendingMerge(deps.stackHome, pending),
     clearPendingMerge: () => clearPendingMerge(deps.stackHome),
   });
-  if (outcome.status === 'pushed' || outcome.status === 'up-to-date') await materializeAllBoundProjects(deps);
+  if (outcome.status === 'pushed' || outcome.status === 'up-to-date')
+    await materializeAllBoundProjects(deps);
   return outcome;
 };
 
-export const pullMemoryViaCanonical = async (deps: MemoryCloudDeps): Promise<CanonicalPullOutcome> => {
+export const pullMemoryViaCanonical = async (
+  deps: MemoryCloudDeps,
+): Promise<CanonicalPullOutcome> => {
   if (!deps.backend) return { status: 'up-to-date' };
-  const mmk = deps.localKeyStore ? await deps.localKeyStore.loadMmk().catch(() => undefined) : undefined;
+  const mmk = deps.localKeyStore
+    ? await deps.localKeyStore.loadMmk().catch(() => undefined)
+    : undefined;
   const outcome = await pullCanonicalMemory({
     getLocalMain: () => readCanonicalMain(deps.stackHome),
     getBase: () => readCanonicalBase(deps.stackHome),
@@ -5150,6 +6030,7 @@ git commit -m "feat(cli): wire canonical Project Memory into stak push and stak 
 ### Task 14: `stak memory resolve`, `stak memory diff`, `stak memory materialize`
 
 **Files:**
+
 - Modify: `packages/memory/src/canonical/fetch-remote-canonical.ts` (accept an explicit generation)
 - Modify: `packages/cli/src/memory/canonical-ops.ts` (add `resolvePendingConflict`, `diffPendingConflict`, `materializeProject`)
 - Test: `packages/cli/src/memory/canonical-ops.test.ts` (add cases)
@@ -5157,6 +6038,7 @@ git commit -m "feat(cli): wire canonical Project Memory into stak push and stak 
 - Modify: `packages/cli/src/program.ts`
 
 **Interfaces:**
+
 - Produces (`fetch-remote-canonical.ts`, modified): `fetchRemoteCanonical(options: { backend; mmk?; localRegistry; generation?: number })` — when `generation` is given, reads that specific (immutable) generation via `backend.getGeneration(generation)` instead of `getLatest()`.
 - Produces (`canonical-ops.ts`, additive): `type PendingConflictSummary = { projectId: string; path: string; reason: string }`, `listPendingConflicts(stackHome: string): Promise<PendingConflictSummary[]>`, `resolvePendingConflict(stackHome: string, projectId: string, path: string, keep: 'local' | 'cloud' | 'both'): Promise<{ resolvedPath: string; altPath?: string }>`, `diffPendingConflict(stackHome: string, projectId: string, path: string): Promise<{ local: string; cloud: string }>` (decoded UTF-8 text for display — Memory documents are Markdown), `materializeProject(stackHome: string, projectId: string, claudeHome?: string): Promise<{ written: string[]; deleted: string[] }>`.
 
@@ -5186,8 +6068,17 @@ Run `pnpm --filter @stack/memory test -- canonical/fetch-remote-canonical.test.t
 Append to `packages/cli/src/memory/canonical-ops.test.ts`:
 
 ```ts
-import { writeCanonicalBase, writeCanonicalMain, writePendingMerge, readCanonicalMain } from '@stack/memory';
-import { diffPendingConflict, listPendingConflicts, resolvePendingConflict } from './canonical-ops.js';
+import {
+  writeCanonicalBase,
+  writeCanonicalMain,
+  writePendingMerge,
+  readCanonicalMain,
+} from '@stack/memory';
+import {
+  diffPendingConflict,
+  listPendingConflicts,
+  resolvePendingConflict,
+} from './canonical-ops.js';
 
 const h = (n: number) => `sha256:${n.toString().padStart(64, '0')}`;
 
@@ -5196,19 +6087,41 @@ describe('resolvePendingConflict', () => {
     const stackHome = path.join(root, 'stack-home-2');
     await writeCanonicalMain(stackHome, {
       schemaVersion: 2,
-      projects: [{ projectId: 'prj_x', documents: [{ path: 'notes/a.md', state: 'present', contentHash: h(2), importedFrom: 'claude', importedAt: '2026-10-22T00:00:00.000Z' }] }],
+      projects: [
+        {
+          projectId: 'prj_x',
+          documents: [
+            {
+              path: 'notes/a.md',
+              state: 'present',
+              contentHash: h(2),
+              importedFrom: 'claude',
+              importedAt: '2026-10-22T00:00:00.000Z',
+            },
+          ],
+        },
+      ],
     });
     await writePendingMerge(stackHome, {
       basedOnGeneration: 4,
-      merged: { schemaVersion: 2, projects: [{ projectId: 'prj_x', documents: [] }] },
-      conflicts: [{ projectId: 'prj_x', path: 'notes/a.md', reason: 'edit-edit' }],
+      merged: {
+        schemaVersion: 2,
+        projects: [{ projectId: 'prj_x', documents: [] }],
+      },
+      conflicts: [
+        { projectId: 'prj_x', path: 'notes/a.md', reason: 'edit-edit' },
+      ],
     });
 
-    expect(await listPendingConflicts(stackHome)).toEqual([{ projectId: 'prj_x', path: 'notes/a.md', reason: 'edit-edit' }]);
+    expect(await listPendingConflicts(stackHome)).toEqual([
+      { projectId: 'prj_x', path: 'notes/a.md', reason: 'edit-edit' },
+    ]);
     await resolvePendingConflict(stackHome, 'prj_x', 'notes/a.md', 'local');
 
     const main = await readCanonicalMain(stackHome);
-    expect(main.projects[0]?.documents.find((d) => d.path === 'notes/a.md')).toMatchObject({ contentHash: h(2) });
+    expect(
+      main.projects[0]?.documents.find((d) => d.path === 'notes/a.md'),
+    ).toMatchObject({ contentHash: h(2) });
     expect(await listPendingConflicts(stackHome)).toEqual([]);
   });
 });
@@ -5246,21 +6159,35 @@ const pendingMergeFileSchema = z.object({
   conflicts: z.array(mergeConflictSchema),
 });
 
-export type PendingConflictSummary = { projectId: string; path: string; reason: string };
+export type PendingConflictSummary = {
+  projectId: string;
+  path: string;
+  reason: string;
+};
 
-export const listPendingConflicts = async (stackHome: string): Promise<PendingConflictSummary[]> => {
+export const listPendingConflicts = async (
+  stackHome: string,
+): Promise<PendingConflictSummary[]> => {
   const pending = await readPendingMerge(stackHome, pendingMergeFileSchema);
   return pending?.conflicts ?? [];
 };
 
-const docText = (doc: CanonicalDoc | undefined, bytes: Uint8Array | undefined): string =>
+const docText = (
+  doc: CanonicalDoc | undefined,
+  bytes: Uint8Array | undefined,
+): string =>
   doc?.state === 'present' && bytes ? Buffer.from(bytes).toString('utf8') : '';
 
 export const diffPendingConflict = async (
   stackHome: string,
   projectId: string,
   path: string,
-  deps: { readObject(contentHash: string): Promise<Uint8Array>; fetchCloud(generation: number): Promise<{ main: import('@stack/memory').CanonicalMainManifest }> },
+  deps: {
+    readObject(contentHash: string): Promise<Uint8Array>;
+    fetchCloud(
+      generation: number,
+    ): Promise<{ main: import('@stack/memory').CanonicalMainManifest }>;
+  },
 ): Promise<{ local: string; cloud: string }> => {
   const pending = await readPendingMerge(stackHome, pendingMergeFileSchema);
   if (!pending) throw new Error('No pending Memory merge.');
@@ -5269,8 +6196,18 @@ export const diffPendingConflict = async (
   const cloudState = await deps.fetchCloud(pending.basedOnGeneration);
   const cloudDoc = documentOf(cloudState.main, projectId, path);
   return {
-    local: docText(localDoc, localDoc?.state === 'present' ? await deps.readObject(localDoc.contentHash) : undefined),
-    cloud: docText(cloudDoc, cloudDoc?.state === 'present' ? await deps.readObject(cloudDoc.contentHash) : undefined),
+    local: docText(
+      localDoc,
+      localDoc?.state === 'present'
+        ? await deps.readObject(localDoc.contentHash)
+        : undefined,
+    ),
+    cloud: docText(
+      cloudDoc,
+      cloudDoc?.state === 'present'
+        ? await deps.readObject(cloudDoc.contentHash)
+        : undefined,
+    ),
   };
 };
 
@@ -5287,26 +6224,39 @@ export const resolvePendingConflict = async (
   projectId: string,
   path: string,
   keep: 'local' | 'cloud' | 'both',
-  deps: { fetchCloud(generation: number): Promise<{ main: import('@stack/memory').CanonicalMainManifest }> },
+  deps: {
+    fetchCloud(
+      generation: number,
+    ): Promise<{ main: import('@stack/memory').CanonicalMainManifest }>;
+  },
 ): Promise<{ resolvedPath: string; altPath?: string }> => {
   const pending = await readPendingMerge(stackHome, pendingMergeFileSchema);
   if (!pending) throw new Error('No pending Memory merge.');
-  const conflict = pending.conflicts.find((c) => c.projectId === projectId && c.path === path);
-  if (!conflict) throw new Error(`No pending conflict for ${projectId} at ${path}.`);
+  const conflict = pending.conflicts.find(
+    (c) => c.projectId === projectId && c.path === path,
+  );
+  if (!conflict)
+    throw new Error(`No pending conflict for ${projectId} at ${path}.`);
 
   const local = await readCanonicalMain(stackHome);
   const localDoc = documentOf(local, projectId, path);
   const cloudState = await deps.fetchCloud(pending.basedOnGeneration);
   const cloudDoc = documentOf(cloudState.main, projectId, path);
 
-  const mergedProjectIndex = pending.merged.projects.findIndex((p) => p.projectId === projectId);
-  const mergedDocuments = mergedProjectIndex === -1 ? [] : [...pending.merged.projects[mergedProjectIndex]!.documents];
+  const mergedProjectIndex = pending.merged.projects.findIndex(
+    (p) => p.projectId === projectId,
+  );
+  const mergedDocuments =
+    mergedProjectIndex === -1
+      ? []
+      : [...pending.merged.projects[mergedProjectIndex]!.documents];
   let resolvedPath = path;
   let altPath: string | undefined;
 
   const upsert = (doc: CanonicalDoc) => {
     const i = mergedDocuments.findIndex((d) => d.path === doc.path);
-    if (i === -1) mergedDocuments.push(doc); else mergedDocuments[i] = doc;
+    if (i === -1) mergedDocuments.push(doc);
+    else mergedDocuments[i] = doc;
   };
 
   if (keep === 'local' && localDoc) upsert(localDoc);
@@ -5314,7 +6264,9 @@ export const resolvePendingConflict = async (
   else if (keep === 'both') {
     if (cloudDoc) upsert(cloudDoc);
     if (localDoc?.state === 'present') {
-      altPath = keepBothPath(path, localDoc.contentHash, (candidate) => mergedDocuments.some((d) => d.path === candidate));
+      altPath = keepBothPath(path, localDoc.contentHash, (candidate) =>
+        mergedDocuments.some((d) => d.path === candidate),
+      );
       upsert({ ...localDoc, path: altPath });
       resolvedPath = path; // Cloud keeps the original path; see keepBothPath's contract.
     }
@@ -5324,23 +6276,39 @@ export const resolvePendingConflict = async (
     ...pending.merged,
     projects:
       mergedProjectIndex === -1
-        ? [...pending.merged.projects, { projectId, documents: mergedDocuments }]
-        : pending.merged.projects.map((p, i) => (i === mergedProjectIndex ? { ...p, documents: mergedDocuments } : p)),
+        ? [
+            ...pending.merged.projects,
+            { projectId, documents: mergedDocuments },
+          ]
+        : pending.merged.projects.map((p, i) =>
+            i === mergedProjectIndex ? { ...p, documents: mergedDocuments } : p,
+          ),
   };
-  const nextConflicts = pending.conflicts.filter((c) => !(c.projectId === projectId && c.path === path));
+  const nextConflicts = pending.conflicts.filter(
+    (c) => !(c.projectId === projectId && c.path === path),
+  );
 
-  const mainProjectIndex = local.projects.findIndex((p) => p.projectId === projectId);
+  const mainProjectIndex = local.projects.findIndex(
+    (p) => p.projectId === projectId,
+  );
   const nextMain = {
     ...local,
     projects:
       mainProjectIndex === -1
         ? [...local.projects, { projectId, documents: mergedDocuments }]
-        : local.projects.map((p, i) => (i === mainProjectIndex ? { ...p, documents: mergedDocuments } : p)),
+        : local.projects.map((p, i) =>
+            i === mainProjectIndex ? { ...p, documents: mergedDocuments } : p,
+          ),
   };
   await writeCanonicalMain(stackHome, nextMain);
 
   if (nextConflicts.length === 0) await clearPendingMerge(stackHome);
-  else await writePendingMergeFile(stackHome, { basedOnGeneration: pending.basedOnGeneration, merged: nextMerged, conflicts: nextConflicts });
+  else
+    await writePendingMergeFile(stackHome, {
+      basedOnGeneration: pending.basedOnGeneration,
+      merged: nextMerged,
+      conflicts: nextConflicts,
+    });
 
   return altPath ? { resolvedPath, altPath } : { resolvedPath };
 };
@@ -5352,12 +6320,14 @@ export const materializeProject = async (
 ): Promise<{ written: string[]; deleted: string[] }> => {
   const bound = await listBoundProjects(stackHome);
   const record = bound.find((b) => b.projectId === projectId);
-  if (!record) throw new Error(`Project ${projectId} is not mapped on this machine.`);
+  if (!record)
+    throw new Error(`Project ${projectId} is not mapped on this machine.`);
   const registry = await readLocalRegistry(stackHome);
   const scanOptions = {
     ...(claudeHome ? { claudeHome } : {}),
     projects: [{ dir: record.dir }],
-    resolveProjectId: (item: DiscoveredMemoryItem) => resolveProjectIdForClaudeItem(item, registry),
+    resolveProjectId: (item: DiscoveredMemoryItem) =>
+      resolveProjectIdForClaudeItem(item, registry),
   };
   const plan = await planProjectSync(record, stackHome, scanOptions);
   return applyMaterializeActions(record, stackHome, plan.actions, claudeHome);
@@ -5388,35 +6358,61 @@ and register, following this file's existing `memory.command(...)` style exactly
 ```ts
 memory
   .command('resolve [project] [path]')
-  .description('Resolve a Memory sync conflict: keep local, keep cloud, or keep both')
+  .description(
+    'Resolve a Memory sync conflict: keep local, keep cloud, or keep both',
+  )
   .option('--keep <side>', 'local | cloud | both')
-  .action(async (project: string | undefined, path: string | undefined, options: { keep?: string }) => {
-    if (!dependencies.resolvePendingConflict || !dependencies.listPendingConflicts) throw new Error('Memory conflict resolution is not available.');
-    if (!project || !path) {
-      const pending = await dependencies.listPendingConflicts();
-      dependencies.writeOut(
-        pending.length === 0
-          ? 'No pending Memory conflicts.\n'
-          : pending.map((c) => `${c.projectId}  ${c.path}  (${c.reason})\n`).join(''),
+  .action(
+    async (
+      project: string | undefined,
+      path: string | undefined,
+      options: { keep?: string },
+    ) => {
+      if (
+        !dependencies.resolvePendingConflict ||
+        !dependencies.listPendingConflicts
+      )
+        throw new Error('Memory conflict resolution is not available.');
+      if (!project || !path) {
+        const pending = await dependencies.listPendingConflicts();
+        dependencies.writeOut(
+          pending.length === 0
+            ? 'No pending Memory conflicts.\n'
+            : pending
+                .map((c) => `${c.projectId}  ${c.path}  (${c.reason})\n`)
+                .join(''),
+        );
+        return;
+      }
+      if (
+        options.keep !== 'local' &&
+        options.keep !== 'cloud' &&
+        options.keep !== 'both'
+      )
+        throw new Error('--keep must be local, cloud, or both.');
+      const result = await dependencies.resolvePendingConflict(
+        project,
+        path,
+        options.keep,
       );
-      return;
-    }
-    if (options.keep !== 'local' && options.keep !== 'cloud' && options.keep !== 'both')
-      throw new Error('--keep must be local, cloud, or both.');
-    const result = await dependencies.resolvePendingConflict(project, path, options.keep);
-    dependencies.writeOut(
-      result.altPath
-        ? `Resolved: cloud kept at ${result.resolvedPath}, local kept at ${result.altPath}.\n`
-        : `Resolved: kept ${options.keep} at ${result.resolvedPath}.\n`,
-    );
-  });
+      dependencies.writeOut(
+        result.altPath
+          ? `Resolved: cloud kept at ${result.resolvedPath}, local kept at ${result.altPath}.\n`
+          : `Resolved: kept ${options.keep} at ${result.resolvedPath}.\n`,
+      );
+    },
+  );
 
 memory
   .command('diff <project> <path>')
   .description('Show both sides of a pending Memory conflict')
   .action(async (project: string, path: string) => {
-    if (!dependencies.diffPendingConflict) throw new Error('Memory diff is not available.');
-    const { local, cloud } = await dependencies.diffPendingConflict(project, path);
+    if (!dependencies.diffPendingConflict)
+      throw new Error('Memory diff is not available.');
+    const { local, cloud } = await dependencies.diffPendingConflict(
+      project,
+      path,
+    );
     dependencies.writeOut(`--- local ---\n${local}\n--- cloud ---\n${cloud}\n`);
   });
 
@@ -5425,12 +6421,16 @@ memory
   .description('Regenerate agent Memory files from canonical Memory')
   .action(async (project: string | undefined) => {
     if (project) {
-      if (!dependencies.materializeProject) throw new Error('Memory materialize is not available.');
+      if (!dependencies.materializeProject)
+        throw new Error('Memory materialize is not available.');
       const result = await dependencies.materializeProject(project);
-      dependencies.writeOut(`Wrote ${result.written.length}, deleted ${result.deleted.length} file(s) for ${project}.\n`);
+      dependencies.writeOut(
+        `Wrote ${result.written.length}, deleted ${result.deleted.length} file(s) for ${project}.\n`,
+      );
       return;
     }
-    if (!dependencies.materializeAllProjects) throw new Error('Memory materialize is not available.');
+    if (!dependencies.materializeAllProjects)
+      throw new Error('Memory materialize is not available.');
     await dependencies.materializeAllProjects();
     dependencies.writeOut('Materialized Memory for every mapped project.\n');
   });
@@ -5486,6 +6486,7 @@ git commit -m "feat(cli): add stak memory resolve/diff/materialize"
 ### Task 15: Update `docs/memory.md`
 
 **Files:**
+
 - Modify: `docs/memory.md`
 
 **Steps:**
@@ -5522,4 +6523,3 @@ git commit -m "docs(memory): document STAK-native canonical Project Memory"
 **Type consistency check:** `CanonicalDoc`/`CanonicalMainManifest` (Task 1) are used with the same shape throughout Tasks 2–14. `SyncAction` (Task 3) is consumed unchanged by Task 10. `MergeConflict`/`mergeConflictSchema` (Task 4) flow through `push.ts` (Task 9), the pending-merge file (Task 2/9), and `canonical-ops.ts`'s conflict-resolution functions (Task 14) with the same field names (`projectId`, `path`, `reason`). `BoundProject` (Task 5) is the same `{ projectId, dir }` shape used by `project-sync.ts` (Task 10) and every CLI call site (Tasks 12–14). `PushDeps`/`PullDeps` (Tasks 9, 9A) are each used with matching field names at their one real call site (Task 13).
 
 **One known gap, called out rather than silently resolved:** Task 13 Step 1's `publishCanonicalGeneration` does not independently verify `expectedParent` before calling `standardCloudBackup`/`protectedCloudBackup` (those functions compute their own `expectedParent` from a fresh `getLatest()` call). In the narrow window between `pushCanonicalMemory`'s own `fetchRemote()` and the moment `publish` actually calls `createGeneration`, Cloud could in principle move twice in quick succession in a way that makes this inexact. This is the same race window `pushCanonicalMemory`'s retry loop (Task 9) already exists to cover — `createGeneration`'s own `expectedParent` check (unchanged, existing code) is what actually enforces correctness; the retry loop is what makes a detected race transparent to the user instead of a hard failure. No action needed, but an implementer should not "fix" this by adding a second expectedParent check in `publishCanonicalGeneration` — that would be redundant with `createGeneration`'s own check, not a correctness improvement.
-

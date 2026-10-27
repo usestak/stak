@@ -8,8 +8,8 @@
 
 ## 1. The idea in one paragraph
 
-Today STAK *moves Claude's memory around*: it copies the memory files Claude Code
-writes and puts them back on another machine. For 1.0, STAK should *own* each
+Today STAK _moves Claude's memory around_: it copies the memory files Claude Code
+writes and puts them back on another machine. For 1.0, STAK should _own_ each
 project's memory itself, in its own format that doesn't belong to any one agent.
 Claude, Cursor and Codex then become **adapters**: they read from and write to
 STAK's copy, but STAK's copy is the real one. A project's memory belongs to the
@@ -81,11 +81,11 @@ A document is identified by exactly two things:
 The STAK path belongs to STAK's own layout, not to any agent's folders. There are
 three areas:
 
-| STAK area | What goes there | Shared across agents? |
-|---|---|---|
-| `notes/…` | Project knowledge: facts, decisions, workflows | **Yes** |
-| `instructions/private.md` | Private recurring instructions for this project | **Yes** |
-| `agents/<agent>/…` | Memory that genuinely belongs to one specific agent | **No.** Only that agent's adapter writes it out |
+| STAK area                 | What goes there                                     | Shared across agents?                           |
+| ------------------------- | --------------------------------------------------- | ----------------------------------------------- |
+| `notes/…`                 | Project knowledge: facts, decisions, workflows      | **Yes**                                         |
+| `instructions/private.md` | Private recurring instructions for this project     | **Yes**                                         |
+| `agents/<agent>/…`        | Memory that genuinely belongs to one specific agent | **No.** Only that agent's adapter writes it out |
 
 Rule: anything meant to work across Claude, Cursor and Codex lives in `notes/` or
 `instructions/`. `agents/` is reserved for truly agent-specific memory and is never
@@ -101,8 +101,8 @@ that won't change this identity model.
 Two machines can each create a Project ID for the same repository before they
 sync. STAK Cloud then reports that the repository is already known under another ID
 (its Git-based reconciliation), and the machine adopts that ID. When this happens,
-STAK **merges the two projects into one**: the ID Cloud uses (the *surviving* ID)
-keeps everything, and the other ID (the *former* ID) becomes an alias of it.
+STAK **merges the two projects into one**: the ID Cloud uses (the _surviving_ ID)
+keeps everything, and the other ID (the _former_ ID) becomes an alias of it.
 
 What every machine does, in the same way:
 
@@ -129,7 +129,7 @@ What every machine does, in the same way:
 - **Chains resolve.** If A became B and B became C, everything ends up under C.
   When one fold merges several former IDs, they are folded in Project ID order,
   so the same input always gives the same result. One rare case remains (review
-  note, 2026-10-27): when three or more IDs hold *different* content at the same
+  note, 2026-10-27): when three or more IDs hold _different_ content at the same
   path and machines learn the aliases in different orders (for example A→C
   before B→C on one machine, both at once on another), which former version
   keeps the original path can differ, and an extra `.conflict-<hash>` copy can
@@ -153,12 +153,12 @@ Git repository (an older local-only ID adopted into the Git-identified one).
 
 This works like Git:
 
-| Git | STAK Memory |
-|---|---|
-| Your working folder | The agent's own memory files (for example Claude's) |
-| The committed history | STAK Memory |
+| Git                      | STAK Memory                                                             |
+| ------------------------ | ----------------------------------------------------------------------- |
+| Your working folder      | The agent's own memory files (for example Claude's)                     |
+| The committed history    | STAK Memory                                                             |
 | `git status` / `git add` | `stak status` shows agent edits; `stak add` takes them into STAK Memory |
-| `git pull` / checkout | `stak pull` / `stak use` write STAK Memory back out to the agents |
+| `git pull` / checkout    | `stak pull` / `stak use` write STAK Memory back out to the agents       |
 
 Claude keeps writing its memory files during sessions, just as it does today.
 Nothing about Claude's behavior changes. The `stak add` step is what keeps memory
@@ -178,15 +178,15 @@ agent behaves the same way.
 
 ### 4.5 Where Claude's files map to
 
-| STAK path | Claude file on this machine |
-|---|---|
-| `notes/<file>` | `~/.claude/projects/<Claude's folder key>/memory/<file>` |
-| `agents/<agent>/<file>` | `<project folder>/.claude/agent-memory/<agent>/<file>` |
-| `instructions/private.md` | `<project folder>/CLAUDE.local.md` |
+| STAK path                 | Claude file on this machine                              |
+| ------------------------- | -------------------------------------------------------- |
+| `notes/<file>`            | `~/.claude/projects/<Claude's folder key>/memory/<file>` |
+| `agents/<agent>/<file>`   | `<project folder>/.claude/agent-memory/<agent>/<file>`   |
+| `instructions/private.md` | `<project folder>/CLAUDE.local.md`                       |
 
 Claude's `MEMORY.md` index is simply the document `notes/MEMORY.md`.
 
-**Moved projects:** when reading, STAK looks at *every* Claude folder that belongs
+**Moved projects:** when reading, STAK looks at _every_ Claude folder that belongs
 to the same project, including folders left behind at old locations. Identical
 copies count once. Copies that differ are a conflict. When writing, STAK writes
 **only to the project's current location**, so old folders are read for
@@ -228,17 +228,17 @@ For every document, STAK compares three fingerprints:
 - **Last synced**: what that file contained the last time STAK imported or wrote it.
 - **STAK copy**: what STAK Memory currently says.
 
-| Situation | What it means | What STAK does |
-|---|---|---|
-| All three match | Nothing changed | Nothing |
-| Only the agent copy changed | You (or Claude) edited the file | Shown in `stak status`; `stak add` takes it in |
-| Only the STAK copy changed | New memory came from another machine | `stak pull` / `stak use` write it to the file |
-| Both changed to the same thing | They already agree | Just record that they're in sync |
-| Both changed differently | A local conflict | You choose: keep the agent's version, keep STAK's, or keep both |
-| Agent file deleted | You deleted that memory | `stak add` records the deletion |
-| STAK deleted it, file untouched | Deleted on another machine | `stak pull` removes the file |
-| STAK deleted it, file edited | Edit vs delete | Conflict |
-| First time seeing both, and they differ | E.g. a fresh machine that already had files | Conflict (identical copies are just accepted) |
+| Situation                               | What it means                               | What STAK does                                                  |
+| --------------------------------------- | ------------------------------------------- | --------------------------------------------------------------- |
+| All three match                         | Nothing changed                             | Nothing                                                         |
+| Only the agent copy changed             | You (or Claude) edited the file             | Shown in `stak status`; `stak add` takes it in                  |
+| Only the STAK copy changed              | New memory came from another machine        | `stak pull` / `stak use` write it to the file                   |
+| Both changed to the same thing          | They already agree                          | Just record that they're in sync                                |
+| Both changed differently                | A local conflict                            | You choose: keep the agent's version, keep STAK's, or keep both |
+| Agent file deleted                      | You deleted that memory                     | `stak add` records the deletion                                 |
+| STAK deleted it, file untouched         | Deleted on another machine                  | `stak pull` removes the file                                    |
+| STAK deleted it, file edited            | Edit vs delete                              | Conflict                                                        |
+| First time seeing both, and they differ | E.g. a fresh machine that already had files | Conflict (identical copies are just accepted)                   |
 
 ### Two safety rules that are never broken
 
@@ -370,12 +370,14 @@ two machines may disagree on Project IDs until Git-based reconciliation links th
 
 - Once an account has pushed with the new format, the server **refuses pushes in the
   old format**, with the message:
+
   > "This account's Memory was upgraded by a newer STAK CLI. Update with
   > `npm i -g @memstk/cli@beta`."
 
   (This says `@beta` because `latest` intentionally stays at 0.1.2. It switches to
   `@latest` at 1.0.)
-- An old CLI that tries to *read* a new-format version fails safely before changing
+
+- An old CLI that tries to _read_ a new-format version fails safely before changing
   anything on the machine.
 - `stak memory backup` stays as a **deprecated alias** for the memory part of
   `stak push`.
@@ -401,14 +403,14 @@ as in sync, and files not yet written get written. Push crashes are handled as i
 **Errors you might see.** Every error stops the command **before** anything is
 changed:
 
-| Error | Meaning |
-|---|---|
-| Merge pending | Resolve the listed conflicts, then push again |
-| Cloud keeps moving | Three merge attempts lost the race; try again |
-| Name clash | Two documents differ only by upper/lower case and can't both exist on this filesystem |
-| Project not on this machine | Map it with `stak project map` before writing it out |
-| Upgrade can't continue | A genuinely broken old entry (for example a missing content file or a path that can't be converted). Ordinary differing duplicates are **not** errors |
-| Unsupported version | This CLI is too old for the account's memory |
+| Error                       | Meaning                                                                                                                                               |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Merge pending               | Resolve the listed conflicts, then push again                                                                                                         |
+| Cloud keeps moving          | Three merge attempts lost the race; try again                                                                                                         |
+| Name clash                  | Two documents differ only by upper/lower case and can't both exist on this filesystem                                                                 |
+| Project not on this machine | Map it with `stak project map` before writing it out                                                                                                  |
+| Upgrade can't continue      | A genuinely broken old entry (for example a missing content file or a path that can't be converted). Ordinary differing duplicates are **not** errors |
+| Unsupported version         | This CLI is too old for the account's memory                                                                                                          |
 
 Any damaged file, failed fingerprint check or decryption problem stops the command
 without changing anything.
@@ -428,7 +430,7 @@ bookkeeping files stay on this machine and are never uploaded.
   registry snapshot; identical results across two different machines when the
   snapshot is present.
 - **Upgrade:** running twice changes nothing; the backup is never overwritten; an
-  interruption at *each* step is repaired; the starting "last synced" values turn
+  interruption at _each_ step is repaired; the starting "last synced" values turn
   later edits into normal changes.
 - **Claude adapter:** both mapping directions; old folders read but never written;
   symlinks refused; upper/lower-case clashes on Windows.
@@ -472,15 +474,15 @@ bookkeeping files stay on this machine and are never uploaded.
 
 ### A.1 Files (under `$STAK_HOME/memory/`)
 
-| File | Uploaded? | Purpose |
-|---|---|---|
-| `canonical/main.json` | Yes (in bundle) | STAK Memory: `{ schemaVersion: 2, projects: [{ projectId, documents: [Doc] }] }` |
-| `canonical/base.json` | No | Last synced Cloud generation number + its canonical manifest (merge base) |
-| `canonical/merge.json` | No | Pending merge: `basedOnGeneration`, merged-so-far, conflict list |
-| `projections/<adapter>.json` | No | Per `(projectId, path)`: last imported/written native hash |
-| `objects/` | Yes (in bundle) | Existing content-addressed store, reused |
-| `manifests/current.json` | Yes (in bundle) | Existing v1 manifest, global items only after migration |
-| `manifests/current.v1-premigration.json` | No | Write-once (`wx`) pre-migration backup |
+| File                                     | Uploaded?       | Purpose                                                                          |
+| ---------------------------------------- | --------------- | -------------------------------------------------------------------------------- |
+| `canonical/main.json`                    | Yes (in bundle) | STAK Memory: `{ schemaVersion: 2, projects: [{ projectId, documents: [Doc] }] }` |
+| `canonical/base.json`                    | No              | Last synced Cloud generation number + its canonical manifest (merge base)        |
+| `canonical/merge.json`                   | No              | Pending merge: `basedOnGeneration`, merged-so-far, conflict list                 |
+| `projections/<adapter>.json`             | No              | Per `(projectId, path)`: last imported/written native hash                       |
+| `objects/`                               | Yes (in bundle) | Existing content-addressed store, reused                                         |
+| `manifests/current.json`                 | Yes (in bundle) | Existing v1 manifest, global items only after migration                          |
+| `manifests/current.v1-premigration.json` | No              | Write-once (`wx`) pre-migration backup                                           |
 
 `Doc` is either `{ path, state: 'present', contentHash, importedFrom, importedAt }`
 or `{ path, state: 'deleted', lastContentHash, deletedAt }`.
@@ -500,7 +502,7 @@ native hash equal to a tombstone's `lastContentHash` is never imported as new.
 
 ```ts
 interface ProjectMemoryAdapter {
-  readonly id: 'claude';                     // later 'cursor' | 'codex'
+  readonly id: 'claude'; // later 'cursor' | 'codex'
   readonly namespaces: readonly Namespace[]; // claude: notes, instructions, agents
   detect(): Promise<Detection>;
   scan(project: BoundProject): Promise<NativeDoc[]>; // { canonicalPath, bytes, locator }

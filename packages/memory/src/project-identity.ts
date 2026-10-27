@@ -121,7 +121,8 @@ const defaultListChildDirNames = async (dir: string): Promise<string[]> => {
     }
     if (entry.isSymbolicLink()) {
       try {
-        if ((await stat(path.join(dir, entry.name))).isDirectory()) names.push(entry.name);
+        if ((await stat(path.join(dir, entry.name))).isDirectory())
+          names.push(entry.name);
       } catch {
         // Broken symlink (or its target vanished mid-walk) — not a directory,
         // same as any other non-matching entry; never fails the whole walk.
@@ -247,7 +248,10 @@ export const reconstructProjectDirs = async (options: {
       if (normalizedRemaining === normalizedChild) {
         await walk(p.join(base, childName), '');
       } else if (normalizedRemaining.startsWith(`${normalizedChild}-`)) {
-        await walk(p.join(base, childName), remaining.slice(encodedChild.length + 1));
+        await walk(
+          p.join(base, childName),
+          remaining.slice(encodedChild.length + 1),
+        );
       }
     }
   };

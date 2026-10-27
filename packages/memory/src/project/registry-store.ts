@@ -108,12 +108,16 @@ export const writePortableSnapshot = async (
     ownedRoot: paths.manifests,
     proposedPath: paths.projectRegistrySnapshot,
   });
-  await atomicWriteFile(paths.projectRegistrySnapshot, portableSnapshotBytes(snapshot));
+  await atomicWriteFile(
+    paths.projectRegistrySnapshot,
+    portableSnapshotBytes(snapshot),
+  );
 };
 
 /** The exact bytes `writePortableSnapshot` stores (and a bundle carries) for a snapshot. */
-export const portableSnapshotBytes = (snapshot: PortableRegistrySnapshot): Buffer =>
-  canonicalJson(portableRegistrySnapshotSchema.parse(snapshot));
+export const portableSnapshotBytes = (
+  snapshot: PortableRegistrySnapshot,
+): Buffer => canonicalJson(portableRegistrySnapshotSchema.parse(snapshot));
 
 /**
  * Re-derive the portable snapshot from the CURRENT local registry and write it, so
@@ -122,8 +126,13 @@ export const portableSnapshotBytes = (snapshot: PortableRegistrySnapshot): Buffe
  * snapshot, so every canonical bundling path calls this immediately before
  * bundling. `toPortableSnapshot` strips bindings and paths.
  */
-export const refreshPortableSnapshot = async (stackHome: string): Promise<void> =>
-  writePortableSnapshot(stackHome, toPortableSnapshot(await readLocalRegistry(stackHome)));
+export const refreshPortableSnapshot = async (
+  stackHome: string,
+): Promise<void> =>
+  writePortableSnapshot(
+    stackHome,
+    toPortableSnapshot(await readLocalRegistry(stackHome)),
+  );
 
 /** Distinct project identities referenced by the current manifest. */
 const manifestProjectIdentities = async (

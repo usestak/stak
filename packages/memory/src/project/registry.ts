@@ -283,7 +283,8 @@ export const mergePortableSnapshot = (
   };
 
   for (const incoming of vetted.projects) {
-    if (resolveProjectAlias(aliases, incoming.projectId) !== incoming.projectId) continue;
+    if (resolveProjectAlias(aliases, incoming.projectId) !== incoming.projectId)
+      continue;
     const owners = claimOwner();
     const byId = projects.find((r) => r.projectId === incoming.projectId);
     // Does any incoming claim already belong to a DIFFERENT project id?
@@ -355,7 +356,12 @@ export const toPortableSnapshot = (
 export type BundleSnapshotConflict =
   /** A remote claim on a Project ID this machine also knows is held locally by a
    * DIFFERENT Project ID; that one claim is not added (local stays authoritative). */
-  | { kind: 'claim-held-by-other'; projectId: string; claimKey: string; heldBy: string }
+  | {
+      kind: 'claim-held-by-other';
+      projectId: string;
+      claimKey: string;
+      heldBy: string;
+    }
   /** A remote record's claim is already held locally by a DIFFERENT Project ID;
    * the remote record is not carried (local stays authoritative). */
   | { kind: 'claim-held-locally'; projectId: string; heldBy: string };
@@ -385,8 +391,17 @@ export const composeBundleSnapshot = (
   localRegistry: LocalRegistry,
   remote: PortableRegistrySnapshot | undefined,
   publishedProjectIds: Iterable<string>,
-): { snapshot: PortableRegistrySnapshot; carried: string[]; conflicts: BundleSnapshotConflict[] } => {
-  if (!remote) return { snapshot: toPortableSnapshot(localRegistry), carried: [], conflicts: [] };
+): {
+  snapshot: PortableRegistrySnapshot;
+  carried: string[];
+  conflicts: BundleSnapshotConflict[];
+} => {
+  if (!remote)
+    return {
+      snapshot: toPortableSnapshot(localRegistry),
+      carried: [],
+      conflicts: [],
+    };
   // Spec §4.2.1 / review fix C1: never publish a record the fetched snapshot
   // names as a (vetted) former ID, and never drop the surviving record's
   // former IDs. A local record of a former ID is folded first — exactly the
@@ -401,7 +416,8 @@ export const composeBundleSnapshot = (
   const localById = new Map(local.projects.map((p) => [p.projectId, p]));
   const localClaimOwner = new Map<string, string>();
   for (const record of local.projects)
-    for (const claim of record.claims) localClaimOwner.set(claimKey(claim), record.projectId);
+    for (const claim of record.claims)
+      localClaimOwner.set(claimKey(claim), record.projectId);
   const sortClaims = (claims: ProjectClaim[]) =>
     [...claims].sort((x, y) => (claimKey(x) < claimKey(y) ? -1 : 1));
   const unioned = new Map<string, ProjectClaim[]>();
@@ -409,14 +425,19 @@ export const composeBundleSnapshot = (
   const carried: PortableProjectRecord[] = [];
   const conflicts: BundleSnapshotConflict[] = [];
   for (const record of vetted.projects) {
-    if (resolveProjectAlias(aliases, record.projectId) !== record.projectId) continue;
+    if (resolveProjectAlias(aliases, record.projectId) !== record.projectId)
+      continue;
     const mine = localById.get(record.projectId);
     if (mine) {
       const formerIds = sortedFormerIds(
-        [...(formerUnion.get(record.projectId) ?? mine.formerIds ?? []), ...(record.formerIds ?? [])],
+        [
+          ...(formerUnion.get(record.projectId) ?? mine.formerIds ?? []),
+          ...(record.formerIds ?? []),
+        ],
         record.projectId,
       );
-      if (formerIds.length !== (mine.formerIds ?? []).length) formerUnion.set(record.projectId, formerIds);
+      if (formerIds.length !== (mine.formerIds ?? []).length)
+        formerUnion.set(record.projectId, formerIds);
       const claims = [...(unioned.get(record.projectId) ?? mine.claims)];
       const have = new Set(claims.map(claimKey));
       for (const claim of record.claims) {
@@ -424,13 +445,19 @@ export const composeBundleSnapshot = (
         if (have.has(key)) continue;
         const heldBy = localClaimOwner.get(key);
         if (heldBy !== undefined && heldBy !== record.projectId) {
-          conflicts.push({ kind: 'claim-held-by-other', projectId: record.projectId, claimKey: key, heldBy });
+          conflicts.push({
+            kind: 'claim-held-by-other',
+            projectId: record.projectId,
+            claimKey: key,
+            heldBy,
+          });
           continue;
         }
         claims.push(claim);
         have.add(key);
       }
-      if (claims.length !== mine.claims.length) unioned.set(record.projectId, claims);
+      if (claims.length !== mine.claims.length)
+        unioned.set(record.projectId, claims);
       continue;
     }
     if (!published.has(record.projectId)) continue;
@@ -438,7 +465,11 @@ export const composeBundleSnapshot = (
       .map((claim) => localClaimOwner.get(claimKey(claim)))
       .find((owner): owner is string => owner !== undefined);
     if (heldBy) {
-      conflicts.push({ kind: 'claim-held-locally', projectId: record.projectId, heldBy });
+      conflicts.push({
+        kind: 'claim-held-locally',
+        projectId: record.projectId,
+        heldBy,
+      });
       continue;
     }
     carried.push({
@@ -461,7 +492,9 @@ export const composeBundleSnapshot = (
   return {
     snapshot: {
       snapshotVersion: PROJECT_REGISTRY_SNAPSHOT_VERSION,
-      projects: [...ownProjects, ...carried].sort((a, b) => (a.projectId < b.projectId ? -1 : 1)),
+      projects: [...ownProjects, ...carried].sort((a, b) =>
+        a.projectId < b.projectId ? -1 : 1,
+      ),
     },
     carried: carried.map((r) => r.projectId),
     conflicts,
@@ -597,7 +630,11 @@ export const adoptReconciledProjectId = (
   // Spec §4.2.1: the surviving record remembers the retired ID (and any IDs
   // already merged into it) so every machine can fold Memory filed under them.
   const formerIds = sortedFormerIds(
-    [...(toRecord?.formerIds ?? []), fromProjectId, ...(fromRecord.formerIds ?? [])],
+    [
+      ...(toRecord?.formerIds ?? []),
+      fromProjectId,
+      ...(fromRecord.formerIds ?? []),
+    ],
     toProjectId,
   );
   const projects = registry.projects
@@ -674,11 +711,15 @@ export const recordFor = (
 /* -------------------------------------------------------------------------- */
 
 /** Distinct, sorted former IDs, never including the surviving ID itself. */
-const sortedFormerIds = (ids: Iterable<string>, survivingId: string): string[] =>
-  [...new Set(ids)].filter((id) => id !== survivingId).sort();
+const sortedFormerIds = (
+  ids: Iterable<string>,
+  survivingId: string,
+): string[] => [...new Set(ids)].filter((id) => id !== survivingId).sort();
 
 /** `{ formerIds }` when there are any, else nothing (older bytes stay unchanged). */
-const withFormerIds = (formerIds: readonly string[] | undefined): { formerIds?: string[] } =>
+const withFormerIds = (
+  formerIds: readonly string[] | undefined,
+): { formerIds?: string[] } =>
   formerIds && formerIds.length > 0 ? { formerIds: [...formerIds].sort() } : {};
 
 const unionFormerIds = (
@@ -686,7 +727,10 @@ const unionFormerIds = (
   incoming: readonly string[] | undefined,
 ): void => {
   if (!incoming || incoming.length === 0) return;
-  const formerIds = sortedFormerIds([...(record.formerIds ?? []), ...incoming], record.projectId);
+  const formerIds = sortedFormerIds(
+    [...(record.formerIds ?? []), ...incoming],
+    record.projectId,
+  );
   if (formerIds.length > 0) record.formerIds = formerIds;
 };
 
@@ -703,14 +747,17 @@ export type ProjectAliasSource = {
  * lexicographically smaller surviving ID wins. Only direct links are stored;
  * `resolveProjectAlias` follows chains.
  */
-export const projectAliasMap = (...sources: (ProjectAliasSource | null | undefined)[]): Map<string, string> => {
+export const projectAliasMap = (
+  ...sources: (ProjectAliasSource | null | undefined)[]
+): Map<string, string> => {
   const map = new Map<string, string>();
   for (const source of sources)
     for (const record of source?.projects ?? [])
       for (const formerId of record.formerIds ?? []) {
         if (formerId === record.projectId) continue;
         const existing = map.get(formerId);
-        if (existing === undefined || record.projectId < existing) map.set(formerId, record.projectId);
+        if (existing === undefined || record.projectId < existing)
+          map.set(formerId, record.projectId);
       }
   return map;
 };
@@ -725,7 +772,9 @@ export const resolveProjectAlias = (
   projectId: string,
 ): string => {
   const map: ReadonlyMap<string, string> =
-    source instanceof Map ? source : projectAliasMap(source as ProjectAliasSource);
+    source instanceof Map
+      ? source
+      : projectAliasMap(source as ProjectAliasSource);
   const seen: string[] = [];
   let current = projectId;
   for (;;) {
@@ -747,9 +796,15 @@ export const projectAliasResolver = (
 };
 
 /** A snapshot's records (claims included), as `vetSnapshotAliases` needs them. */
-export type ProjectAliasSnapshot = { snapshotVersion?: number; projects: readonly PortableProjectRecord[] };
+export type ProjectAliasSnapshot = {
+  snapshotVersion?: number;
+  projects: readonly PortableProjectRecord[];
+};
 
-const sharesClaim = (a: readonly ProjectClaim[], b: readonly ProjectClaim[]): boolean => {
+const sharesClaim = (
+  a: readonly ProjectClaim[],
+  b: readonly ProjectClaim[],
+): boolean => {
   const keys = new Set(a.map(claimKey));
   return b.some((claim) => keys.has(claimKey(claim)));
 };
@@ -784,14 +839,21 @@ export const vetSnapshotAliases = (
         void _dropped;
         return rest;
       }
-      const survivorClaims = [...record.claims, ...(localSurvivor?.claims ?? [])];
+      const survivorClaims = [
+        ...record.claims,
+        ...(localSurvivor?.claims ?? []),
+      ];
       const survivorBinding = bindingFor(local, record.projectId);
       const formerIds = record.formerIds.filter((formerId) => {
         const localFormer = recordFor(local, formerId);
         if (!localFormer) return true;
         if (!sharesClaim(localFormer.claims, survivorClaims)) return false;
         const formerBinding = bindingFor(local, formerId);
-        return !(formerBinding && survivorBinding && formerBinding.dir !== survivorBinding.dir);
+        return !(
+          formerBinding &&
+          survivorBinding &&
+          formerBinding.dir !== survivorBinding.dir
+        );
       });
       if (formerIds.length === record.formerIds.length) return record;
       const { formerIds: _old, ...rest } = record;
@@ -807,7 +869,8 @@ export const vetSnapshotAliases = (
 export const trustedAliasResolver = (
   local: LocalRegistry,
   snapshot: ProjectAliasSnapshot | null | undefined,
-): ((projectId: string) => string) => projectAliasResolver(local, vetSnapshotAliases(local, snapshot));
+): ((projectId: string) => string) =>
+  projectAliasResolver(local, vetSnapshotAliases(local, snapshot));
 
 /**
  * Spec §4.2.1 "every machine learns them", from a fetched snapshot (vetted:
@@ -834,7 +897,9 @@ export const learnProjectAliases = (
   const map = projectAliasMap(local, vetted);
   let registry = local;
   const adopted: { fromProjectId: string; toProjectId: string }[] = [];
-  for (const record of [...local.projects].sort((a, b) => (a.projectId < b.projectId ? -1 : 1))) {
+  for (const record of [...local.projects].sort((a, b) =>
+    a.projectId < b.projectId ? -1 : 1,
+  )) {
     const survivor = resolveProjectAlias(map, record.projectId);
     if (survivor === record.projectId) continue;
     const fromBinding = bindingFor(registry, record.projectId);
@@ -848,11 +913,16 @@ export const learnProjectAliases = (
     if (!incoming.formerIds || incoming.formerIds.length === 0) continue;
     const mine = recordFor(registry, incoming.projectId);
     if (!mine) continue;
-    const formerIds = sortedFormerIds([...(mine.formerIds ?? []), ...incoming.formerIds], mine.projectId);
+    const formerIds = sortedFormerIds(
+      [...(mine.formerIds ?? []), ...incoming.formerIds],
+      mine.projectId,
+    );
     if (formerIds.length === (mine.formerIds ?? []).length) continue;
     registry = {
       ...registry,
-      projects: registry.projects.map((p) => (p.projectId === mine.projectId ? { ...p, formerIds } : p)),
+      projects: registry.projects.map((p) =>
+        p.projectId === mine.projectId ? { ...p, formerIds } : p,
+      ),
     };
   }
   return { registry, adopted, changed: registry !== local };

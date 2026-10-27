@@ -20,12 +20,18 @@ import {
  */
 
 /** One former Project ID folded into its surviving one, for the user's line. */
-export type ProjectFoldNote = { fromProjectId: string; toProjectId: string; keptBoth: number };
+export type ProjectFoldNote = {
+  fromProjectId: string;
+  toProjectId: string;
+  keptBoth: number;
+};
 
 export const foldNotesOf = (report: ProjectFoldReport): ProjectFoldNote[] =>
   report.merged.map((pair) => ({
     ...pair,
-    keptBoth: report.keptBoth.filter((k) => k.fromProjectId === pair.fromProjectId).length,
+    keptBoth: report.keptBoth.filter(
+      (k) => k.fromProjectId === pair.fromProjectId,
+    ).length,
   }));
 
 export type ProjectMemoryFold = {
@@ -52,7 +58,10 @@ export type ProjectMemoryFold = {
  */
 export const foldProjectMemory = async (
   stackHome: string,
-  options: { remoteSnapshot?: PortableRegistrySnapshot | undefined; persist?: boolean } = {},
+  options: {
+    remoteSnapshot?: PortableRegistrySnapshot | undefined;
+    persist?: boolean;
+  } = {},
 ): Promise<ProjectMemoryFold> => {
   const persist = options.persist ?? true;
   let registry = await readLocalRegistry(stackHome);
@@ -66,7 +75,9 @@ export const foldProjectMemory = async (
     }
   }
   const aliasOf = trustedAliasResolver(registry, options.remoteSnapshot);
-  const result = await foldStoredCanonicalState(stackHome, aliasOf, { persist });
+  const result = await foldStoredCanonicalState(stackHome, aliasOf, {
+    persist,
+  });
   return {
     notes: result.changed ? foldNotesOf(result.report) : [],
     main: result.main,
@@ -84,18 +95,24 @@ export const foldProjectMemory = async (
  * fetching (`pushCanonicalMemory`), so all three sides of every attempt's
  * merge agree. `onNotes` collects what each fold changed.
  */
-export const foldingFetch = <R extends { main: CanonicalMainManifest }>(
-  stackHome: string,
-  fetch: () => Promise<R | null>,
-  snapshotOf: () => PortableRegistrySnapshot | undefined,
-  onNotes: (notes: ProjectFoldNote[]) => void,
-): (() => Promise<R | null>) =>
+export const foldingFetch =
+  <R extends { main: CanonicalMainManifest }>(
+    stackHome: string,
+    fetch: () => Promise<R | null>,
+    snapshotOf: () => PortableRegistrySnapshot | undefined,
+    onNotes: (notes: ProjectFoldNote[]) => void,
+  ): (() => Promise<R | null>) =>
   async () => {
     const result = await fetch();
-    const fold = await foldProjectMemory(stackHome, { remoteSnapshot: snapshotOf() });
+    const fold = await foldProjectMemory(stackHome, {
+      remoteSnapshot: snapshotOf(),
+    });
     onNotes(fold.notes);
     if (!result) return result;
-    return { ...result, main: foldProjectAliases(result.main, fold.aliasOf).main };
+    return {
+      ...result,
+      main: foldProjectAliases(result.main, fold.aliasOf).main,
+    };
   };
 
 /** Accumulates fold notes across several folds in one command (one per pair). */
@@ -105,7 +122,10 @@ export const foldNoteCollector = () => {
     add: (notes: ProjectFoldNote[]) => {
       for (const note of notes) {
         const prior = byFrom.get(note.fromProjectId);
-        byFrom.set(note.fromProjectId, prior ? { ...note, keptBoth: prior.keptBoth + note.keptBoth } : note);
+        byFrom.set(
+          note.fromProjectId,
+          prior ? { ...note, keptBoth: prior.keptBoth + note.keptBoth } : note,
+        );
       }
     },
     notes: (): ProjectFoldNote[] => [...byFrom.values()],

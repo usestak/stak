@@ -2,7 +2,11 @@ import type { Command } from 'commander';
 
 import { LocalEnvironmentConflictError } from '@stack/cloud-client';
 import { MemoryLockError } from '@stack/memory';
-import { StackCompositionError, type ApplyPullResult, type PullPlan } from '@stack/core';
+import {
+  StackCompositionError,
+  type ApplyPullResult,
+  type PullPlan,
+} from '@stack/core';
 
 import type { CloudRecoverOutcome } from '../memory/cloud-ops.js';
 import type { CanonicalPullOutcome } from '../memory/canonical-ops.js';
@@ -49,7 +53,10 @@ export type PullCommandDependencies = {
   writeOut(value: string): void;
 };
 
-const runDirectly = async <T>(_command: string, fn: () => Promise<T>): Promise<T> => fn();
+const runDirectly = async <T>(
+  _command: string,
+  fn: () => Promise<T>,
+): Promise<T> => fn();
 
 export const registerPullCommand = (
   program: Command,
@@ -107,30 +114,38 @@ export const registerPullCommand = (
           // Established machine, no Skills changes: Project Memory still syncs on every
           // `stak pull` (a merge; local changes are kept, conflicts become pending),
           // so there is nothing to confirm. Runs under the Memory lock.
-          let canonicalMemory: PullCanonicalOutcome = { status: 'not-attempted' };
+          let canonicalMemory: PullCanonicalOutcome = {
+            status: 'not-attempted',
+          };
           let lockError: string | undefined;
           try {
-            canonicalMemory = await (dependencies.withMemoryLock ?? runDirectly)(
-              'stak pull',
-              async (): Promise<PullCanonicalOutcome> => {
-                // Re-read under the lock: a machine that became fresh meanwhile must
-                // not run the canonical pull's migration (Task 13 Important-8).
-                if ((await readMemoryPreflight()).eligible) return { status: 'not-attempted' };
-                try {
-                  return { status: 'applied', outcome: await applyCanonicalPull.call(dependencies) };
-                } catch (error) {
-                  return {
-                    status: 'failed',
-                    error: error instanceof Error ? error.message : String(error),
-                  };
-                }
-              },
-            );
+            canonicalMemory = await (
+              dependencies.withMemoryLock ?? runDirectly
+            )('stak pull', async (): Promise<PullCanonicalOutcome> => {
+              // Re-read under the lock: a machine that became fresh meanwhile must
+              // not run the canonical pull's migration (Task 13 Important-8).
+              if ((await readMemoryPreflight()).eligible)
+                return { status: 'not-attempted' };
+              try {
+                return {
+                  status: 'applied',
+                  outcome: await applyCanonicalPull.call(dependencies),
+                };
+              } catch (error) {
+                return {
+                  status: 'failed',
+                  error: error instanceof Error ? error.message : String(error),
+                };
+              }
+            });
           } catch (error) {
             if (!(error instanceof MemoryLockError)) throw error;
             lockError = error.message;
           }
-          const rendered = renderProjectMemoryOnlyPull(canonicalMemory, lockError);
+          const rendered = renderProjectMemoryOnlyPull(
+            canonicalMemory,
+            lockError,
+          );
           // Nothing changed: the same message as before (verbose keeps its detail).
           dependencies.writeOut(
             verbose && rendered === renderPullPlan(plan)
@@ -154,7 +169,10 @@ export const registerPullCommand = (
         if (plan.mode === 'noop') skill = { status: 'noop' };
         else
           try {
-            skill = { status: 'applied', result: await dependencies.cloudApplyPull(plan) };
+            skill = {
+              status: 'applied',
+              result: await dependencies.cloudApplyPull(plan),
+            };
           } catch (error) {
             skill = {
               status: 'failed',
@@ -176,7 +194,10 @@ export const registerPullCommand = (
               : { status: 'not-attempted' };
           else
             try {
-              memory = { status: 'applied', outcome: await dependencies.applyMemoryPull() };
+              memory = {
+                status: 'applied',
+                outcome: await dependencies.applyMemoryPull(),
+              };
             } catch (error) {
               memory = {
                 status: 'failed',
@@ -197,14 +218,23 @@ export const registerPullCommand = (
           const freshRecoverAttemptedButDidNotSucceed =
             memoryPreflight.eligible &&
             !!dependencies.applyMemoryPull &&
-            !(memory.status === 'applied' && memory.outcome.status === 'recovered');
+            !(
+              memory.status === 'applied' &&
+              memory.outcome.status === 'recovered'
+            );
 
           let canonicalMemory: PullCanonicalOutcome;
-          if (!dependencies.applyCanonicalPull || freshRecoverAttemptedButDidNotSucceed)
+          if (
+            !dependencies.applyCanonicalPull ||
+            freshRecoverAttemptedButDidNotSucceed
+          )
             canonicalMemory = { status: 'not-attempted' };
           else
             try {
-              canonicalMemory = { status: 'applied', outcome: await dependencies.applyCanonicalPull() };
+              canonicalMemory = {
+                status: 'applied',
+                outcome: await dependencies.applyCanonicalPull(),
+              };
             } catch (error) {
               canonicalMemory = {
                 status: 'failed',
@@ -222,10 +252,9 @@ export const registerPullCommand = (
           dependencies.applyCanonicalPull !== undefined;
         if (hasMemoryWork)
           try {
-            ({ memory, canonicalMemory } = await (dependencies.withMemoryLock ?? runDirectly)(
-              'stak pull',
-              memoryPart,
-            ));
+            ({ memory, canonicalMemory } = await (
+              dependencies.withMemoryLock ?? runDirectly
+            )('stak pull', memoryPart));
           } catch (error) {
             // A busy lock stops only the Memory part: it reports FAILED with the lock
             // message, like any Memory failure, and changed nothing in Memory.
@@ -233,7 +262,9 @@ export const registerPullCommand = (
             memory = { status: 'failed', error: error.message };
           }
 
-        dependencies.writeOut(renderCombinedPullResult(skill, memory, canonicalMemory));
+        dependencies.writeOut(
+          renderCombinedPullResult(skill, memory, canonicalMemory),
+        );
         if (pullFailed(skill, memory))
           throw new StackCompositionError(
             'pull-partial-failure',

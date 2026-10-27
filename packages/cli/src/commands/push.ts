@@ -4,7 +4,11 @@ import {
   LocalEnvironmentConflictError,
   RemoteEnvironmentConflictError,
 } from '@stack/cloud-client';
-import { StackCompositionError, type ApplyPushResult, type PushPlan } from '@stack/core';
+import {
+  StackCompositionError,
+  type ApplyPushResult,
+  type PushPlan,
+} from '@stack/core';
 
 import {
   pushFailed,
@@ -18,7 +22,11 @@ import {
 
 /** `note`: a one-line notice printed when the push proceeds (spec §8.5: a
  * rollback published by an ordinary push is announced, never silent). */
-export type MemoryPushPreflight = { blocked: boolean; reason?: string; note?: string };
+export type MemoryPushPreflight = {
+  blocked: boolean;
+  reason?: string;
+  note?: string;
+};
 
 export type PushCommandDependencies = {
   cloudPreparePush(): Promise<PushPlan>;
@@ -44,7 +52,10 @@ export type PushCommandDependencies = {
   writeOut(value: string): void;
 };
 
-const runDirectly = async <T>(_command: string, fn: () => Promise<T>): Promise<T> => fn();
+const runDirectly = async <T>(
+  _command: string,
+  fn: () => Promise<T>,
+): Promise<T> => fn();
 
 export const registerPushCommand = (
   program: Command,
@@ -91,7 +102,8 @@ export const registerPushCommand = (
             memoryPreflight.reason ??
               'Memory has a predictable conflict with STAK Cloud. Resolve it before pushing.',
           );
-        if (memoryPreflight.note) dependencies.writeOut(`${memoryPreflight.note}\n`);
+        if (memoryPreflight.note)
+          dependencies.writeOut(`${memoryPreflight.note}\n`);
         if (options.dryRun) {
           dependencies.writeOut(renderPushPlan(plan, true, { verbose }));
           return;
@@ -110,7 +122,10 @@ export const registerPushCommand = (
         if (plan.noop) skill = { status: 'noop' };
         else
           try {
-            skill = { status: 'applied', result: await dependencies.cloudApplyPush(plan) };
+            skill = {
+              status: 'applied',
+              result: await dependencies.cloudApplyPush(plan),
+            };
           } catch (error) {
             skill = {
               status: 'failed',
@@ -128,19 +143,25 @@ export const registerPushCommand = (
         else
           try {
             const lock = dependencies.withMemoryLock ?? runDirectly;
-            memory = await lock('stak push', async (): Promise<PushMemoryOutcome> => {
-              const recheck = dependencies.memoryPushPreflight
-                ? await dependencies.memoryPushPreflight()
-                : { blocked: false };
-              if (recheck.blocked)
+            memory = await lock(
+              'stak push',
+              async (): Promise<PushMemoryOutcome> => {
+                const recheck = dependencies.memoryPushPreflight
+                  ? await dependencies.memoryPushPreflight()
+                  : { blocked: false };
+                if (recheck.blocked)
+                  return {
+                    status: 'failed',
+                    error:
+                      recheck.reason ??
+                      'Memory has a predictable conflict with STAK Cloud. Resolve it before pushing.',
+                  };
                 return {
-                  status: 'failed',
-                  error:
-                    recheck.reason ??
-                    'Memory has a predictable conflict with STAK Cloud. Resolve it before pushing.',
+                  status: 'applied',
+                  outcome: await applyMemoryPush.call(dependencies),
                 };
-              return { status: 'applied', outcome: await applyMemoryPush.call(dependencies) };
-            });
+              },
+            );
           } catch (error) {
             memory = {
               status: 'failed',

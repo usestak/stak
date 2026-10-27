@@ -40,7 +40,13 @@ export type MemoryStatusDisplay = MemoryWorkingTreeStatus & {
   upgradePending?: boolean;
 };
 
-import { agentLabel, block, changes, localMemoryConflictAdvice, skills } from './format.js';
+import {
+  agentLabel,
+  block,
+  changes,
+  localMemoryConflictAdvice,
+  skills,
+} from './format.js';
 
 export type RenderOptions = { verbose?: boolean };
 export type AgentReadiness = { agent: AgentId; ready: boolean };
@@ -126,10 +132,13 @@ const memoryLine = (memory: MemoryWorkingTreeStatus): string => {
  * pending (not-yet-added) changes, conflicts, source conflicts, or guarded
  * (to-be-regenerated) paths. A clean project stays silent, matching this file's
  * existing `'clean'` convention for `MemoryWorkingTreeStatus` itself. */
-const canonicalMemoryLines = (projects: CanonicalMemoryProjectStatus[]): string[] => {
+const canonicalMemoryLines = (
+  projects: CanonicalMemoryProjectStatus[],
+): string[] => {
   const lines: string[] = [];
   for (const project of projects) {
-    const totalConflicts = project.conflicts.length + project.sourceConflicts.length;
+    const totalConflicts =
+      project.conflicts.length + project.sourceConflicts.length;
     if (
       project.pending === 0 &&
       totalConflicts === 0 &&
@@ -147,9 +156,13 @@ const canonicalMemoryLines = (projects: CanonicalMemoryProjectStatus[]): string[
         `  ${project.projectId}: ${totalConflicts} conflict${totalConflicts === 1 ? '' : 's'} between agent files and STAK (nothing was overwritten):`,
       );
       for (const conflict of project.conflicts)
-        lines.push(`    ${conflict.path}: ${localMemoryConflictAdvice(conflict.reason)}`);
+        lines.push(
+          `    ${conflict.path}: ${localMemoryConflictAdvice(conflict.reason)}`,
+        );
       for (const conflictPath of project.sourceConflicts)
-        lines.push(`    ${conflictPath}: ${localMemoryConflictAdvice('source-conflict')}`);
+        lines.push(
+          `    ${conflictPath}: ${localMemoryConflictAdvice('source-conflict')}`,
+        );
     }
     if (project.guardedPaths.length > 0)
       lines.push(
@@ -166,7 +179,9 @@ const renderMemorySection = (memory?: MemoryStatusDisplay): string[] => {
     // Planning against the canonical store before migration has ever run would be
     // meaningless (every claimed project would show as "pending" against an empty
     // store) — a single, distinct line instead of a misleading per-project count.
-    lines.push('  upgrade pending — run `stak add .` to move project Memory into STAK');
+    lines.push(
+      '  upgrade pending — run `stak add .` to move project Memory into STAK',
+    );
     return ['', 'Memory', ...lines];
   }
   if (memory.canonicalProjects?.length)
@@ -345,8 +360,10 @@ export const renderStatus = (
   } else {
     lines.push('Changes not added', '', 'Skills');
     for (const skill of modified) lines.push(`  ~ ${skill.name}`);
-    for (const skill of missing) lines.push(`  ! ${skill.name}  (tracked in main, missing on disk)`);
-    for (const skill of uncertain) lines.push(`  ? ${skill.name}  (could not be verified)`);
+    for (const skill of missing)
+      lines.push(`  ! ${skill.name}  (tracked in main, missing on disk)`);
+    for (const skill of uncertain)
+      lines.push(`  ? ${skill.name}  (could not be verified)`);
     for (const skill of status.untracked) lines.push(`  + ${skill.name}`);
     lines.push(
       '',
@@ -354,7 +371,10 @@ export const renderStatus = (
       summary.untracked > 0 && `${summary.untracked} untracked`,
     );
     if (missing.length > 0)
-      lines.push('', 'Run `stak remove <skill>` to deliberately drop a missing Skill from main.');
+      lines.push(
+        '',
+        'Run `stak remove <skill>` to deliberately drop a missing Skill from main.',
+      );
     lines.push('', 'Run `stak add <skill>` or `stak add .` to stage changes.');
   }
   if (status.invalidSkills.length > 0)

@@ -65,16 +65,21 @@ export class MemorySyncError extends StackCompositionError {
 }
 
 /** Spec §10 "Merge pending: Resolve the listed conflicts, then push again". */
-export const mergePendingMessage = (conflicts: readonly { projectId: string; path: string; reason: string }[]): string =>
+export const mergePendingMessage = (
+  conflicts: readonly { projectId: string; path: string; reason: string }[],
+): string =>
   [
     `Memory merge pending: ${conflicts.length} unresolved conflict(s).`,
     ...conflicts.map((c) => `  ${c.projectId}  ${c.path}  (${c.reason})`),
     'Resolve the listed conflicts, then push again: `stak memory resolve <project> <path> --keep local|cloud|both`.',
   ].join('\n');
 
-export const conflictKey = (projectId: string, docPath: string): string => `${projectId}\u0000${docPath}`;
+export const conflictKey = (projectId: string, docPath: string): string =>
+  `${projectId}\u0000${docPath}`;
 
-export const readPending = async (stackHome: string): Promise<PendingMerge | null> =>
+export const readPending = async (
+  stackHome: string,
+): Promise<PendingMerge | null> =>
   readPendingMerge(stackHome, pendingMergeSchema);
 
 /**
@@ -90,14 +95,18 @@ export const readPending = async (stackHome: string): Promise<PendingMerge | nul
 export const fetchCloudAtGeneration = async (
   deps: MemoryCloudDeps,
   generation: number,
-): Promise<{ main: CanonicalMainManifest; registrySnapshot: PortableRegistrySnapshot | undefined }> => {
+): Promise<{
+  main: CanonicalMainManifest;
+  registrySnapshot: PortableRegistrySnapshot | undefined;
+}> => {
   if (!deps.backend)
     throw new MemoryResolveError(
       'cloud-unavailable',
       `Not signed in. Resolving a Memory conflict needs Cloud's version (generation ${generation}). Run \`stak login\`, then try again. Nothing was changed.`,
     );
   const profile = await deps.backend.getProfile();
-  const mmk = (await deps.localKeyStore.loadMmk().catch(() => null)) ?? undefined;
+  const mmk =
+    (await deps.localKeyStore.loadMmk().catch(() => null)) ?? undefined;
   if ((profile?.privacyMode ?? 'standard') === 'protected' && !mmk)
     throw new MemoryResolveError(
       'cloud-unavailable',
@@ -125,19 +134,28 @@ export const fetchCloudAtGeneration = async (
       `STAK Cloud no longer has generation ${generation}, which this merge was made against. Nothing was changed. Run \`stak push\` (or \`stak pull\`) to merge again against Cloud's current Memory.`,
     );
   for (const object of result.objects)
-    await writeMemoryObject({ stackHome: deps.stackHome, contentHash: object.contentHash, bytes: object.bytes });
+    await writeMemoryObject({
+      stackHome: deps.stackHome,
+      contentHash: object.contentHash,
+      bytes: object.bytes,
+    });
   return { main: result.main, registrySnapshot: result.registrySnapshot };
 };
 
 export const stableDoc = (doc: CanonicalDoc | null | undefined): string =>
   doc === undefined || doc === null
     ? 'absent'
-    : JSON.stringify(Object.fromEntries(Object.entries(doc).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))));
+    : JSON.stringify(
+        Object.fromEntries(
+          Object.entries(doc).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+        ),
+      );
 
 const docsByKey = (main: CanonicalMainManifest): Map<string, CanonicalDoc> => {
   const out = new Map<string, CanonicalDoc>();
   for (const project of main.projects)
-    for (const doc of project.documents) out.set(conflictKey(project.projectId, doc.path), doc);
+    for (const doc of project.documents)
+      out.set(conflictKey(project.projectId, doc.path), doc);
   return out;
 };
 
@@ -160,14 +178,23 @@ export const assertPendingMergeCurrent = async (
   local: CanonicalMainManifest,
   cloudMain: CanonicalMainManifest,
 ): Promise<void> => {
-  const base = await effectiveCanonicalBase(deps.backend, await readCanonicalBase(deps.stackHome));
-  const recomputed = mergeCanonical(base?.main ?? emptyCanonicalMain(), local, cloudMain);
+  const base = await effectiveCanonicalBase(
+    deps.backend,
+    await readCanonicalBase(deps.stackHome),
+  );
+  const recomputed = mergeCanonical(
+    base?.main ?? emptyCanonicalMain(),
+    local,
+    cloudMain,
+  );
   const resolved = pending.resolved ?? [];
   const expectedConflicts = new Set([
     ...pending.conflicts.map((c) => conflictKey(c.projectId, c.path)),
     ...resolved.map((r) => conflictKey(r.projectId, r.path)),
   ]);
-  const actualConflicts = new Set(recomputed.conflicts.map((c) => conflictKey(c.projectId, c.path)));
+  const actualConflicts = new Set(
+    recomputed.conflicts.map((c) => conflictKey(c.projectId, c.path)),
+  );
   const resolvedKeys = new Set(
     resolved.flatMap((r) => [
       conflictKey(r.projectId, r.path),
@@ -179,10 +206,17 @@ export const assertPendingMergeCurrent = async (
   const stale =
     expectedConflicts.size !== actualConflicts.size ||
     [...expectedConflicts].some((key) => !actualConflicts.has(key)) ||
-    [...recomputedDocs].some(([key, doc]) => stableDoc(pendingDocs.get(key)) !== stableDoc(doc)) ||
-    [...pendingDocs.keys()].some((key) => !recomputedDocs.has(key) && !resolvedKeys.has(key)) ||
+    [...recomputedDocs].some(
+      ([key, doc]) => stableDoc(pendingDocs.get(key)) !== stableDoc(doc),
+    ) ||
+    [...pendingDocs.keys()].some(
+      (key) => !recomputedDocs.has(key) && !resolvedKeys.has(key),
+    ) ||
     resolved.some(
-      (r) => r.local === undefined || stableDoc(documentOf(local, r.projectId, r.path)) !== stableDoc(r.local),
+      (r) =>
+        r.local === undefined ||
+        stableDoc(documentOf(local, r.projectId, r.path)) !==
+          stableDoc(r.local),
     );
   if (stale)
     throw new MemoryResolveError(
@@ -202,7 +236,9 @@ export const assertPendingMergeCurrent = async (
  * on (spec §8.3: old decisions are never replayed blindly), or the merge is
  * stale. Call it BEFORE anything that writes (base seeding, merging).
  */
-export const assertNoCurrentPendingMerge = async (deps: MemoryCloudDeps): Promise<void> => {
+export const assertNoCurrentPendingMerge = async (
+  deps: MemoryCloudDeps,
+): Promise<void> => {
   if (!deps.backend) return;
   const pending = await readPending(deps.stackHome);
   if (!pending || pending.conflicts.length === 0) return;
@@ -210,10 +246,20 @@ export const assertNoCurrentPendingMerge = async (deps: MemoryCloudDeps): Promis
   if (!latest || latest.generation !== pending.basedOnGeneration) return;
   const cloud = await fetchCloudAtGeneration(deps, pending.basedOnGeneration);
   try {
-    await assertPendingMergeCurrent(deps, pending, await readCanonicalMain(deps.stackHome), cloud.main);
+    await assertPendingMergeCurrent(
+      deps,
+      pending,
+      await readCanonicalMain(deps.stackHome),
+      cloud.main,
+    );
   } catch (error) {
-    if (error instanceof MemoryResolveError && error.code === 'merge-stale') return;
+    if (error instanceof MemoryResolveError && error.code === 'merge-stale')
+      return;
     throw error;
   }
-  throw new MemorySyncError('merge-pending', mergePendingMessage(pending.conflicts), pending.conflicts);
+  throw new MemorySyncError(
+    'merge-pending',
+    mergePendingMessage(pending.conflicts),
+    pending.conflicts,
+  );
 };

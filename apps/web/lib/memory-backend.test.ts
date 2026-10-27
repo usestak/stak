@@ -7,16 +7,27 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * leaves retired rows behind — so an unfiltered update made Delete Cloud
  * Memory fail permanently. This fake mirrors that trigger.
  */
-type Row = { user_id: string; backup_id: string; state: 'committed' | 'retired' };
+type Row = {
+  user_id: string;
+  backup_id: string;
+  state: 'committed' | 'retired';
+};
 const rows: Row[] = [];
 const removed: string[] = [];
 
 const updateBuilder = (values: Partial<Row>) => {
   const filters: Array<[keyof Row, string]> = [];
   const run = () => {
-    const matched = rows.filter((row) => filters.every(([col, val]) => row[col] === val));
+    const matched = rows.filter((row) =>
+      filters.every(([col, val]) => row[col] === val),
+    );
     if (matched.some((row) => row.state !== 'committed'))
-      return { error: { message: 'memory_backups are immutable except for retiring a committed generation' } };
+      return {
+        error: {
+          message:
+            'memory_backups are immutable except for retiring a committed generation',
+        },
+      };
     for (const row of matched) Object.assign(row, { state: values.state });
     return { error: null };
   };
@@ -25,8 +36,10 @@ const updateBuilder = (values: Partial<Row>) => {
       filters.push([col, val]);
       return chain;
     },
-    then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) =>
-      Promise.resolve(run()).then(resolve, reject),
+    then: (
+      resolve: (value: unknown) => unknown,
+      reject?: (reason: unknown) => unknown,
+    ) => Promise.resolve(run()).then(resolve, reject),
   };
   return chain;
 };
@@ -56,7 +69,9 @@ describe('supabaseRemoteMemoryBackend.retireGeneration (unguarded)', () => {
   it('re-retiring an already-retired row succeeds (no trigger error) and still removes the payload', async () => {
     rows.push({ user_id: 'u1', backup_id: 'b-retired', state: 'retired' });
     const backend = supabaseRemoteMemoryBackend('u1');
-    await expect(backend.retireGeneration('b-retired')).resolves.toBeUndefined();
+    await expect(
+      backend.retireGeneration('b-retired'),
+    ).resolves.toBeUndefined();
     expect(removed).toEqual(['mem/u1/b-retired']);
   });
 

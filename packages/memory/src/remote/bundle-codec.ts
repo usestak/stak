@@ -20,7 +20,10 @@ import {
   readMemoryObject,
   writeMemoryObject,
 } from '../store.js';
-import { canonicalMainManifestSchema, type CanonicalMainManifest } from '../canonical/domain.js';
+import {
+  canonicalMainManifestSchema,
+  type CanonicalMainManifest,
+} from '../canonical/domain.js';
 import { canonicalStorePaths } from '../canonical/store.js';
 import type { PortableRegistrySnapshot } from '../project/registry.js';
 import { portableSnapshotBytes } from '../project/registry-store.js';
@@ -51,7 +54,10 @@ const bundleObjectSchema = z.object({
 });
 
 const bundleSchema = z.object({
-  bundleFormat: z.union([z.literal(BUNDLE_FORMAT), z.literal(BUNDLE_FORMAT_V2)]),
+  bundleFormat: z.union([
+    z.literal(BUNDLE_FORMAT),
+    z.literal(BUNDLE_FORMAT_V2),
+  ]),
   provider: z.literal('claude'),
   manifestSha256: z.string().regex(/^sha256:[a-f0-9]{64}$/),
   manifestB64: z.string(),
@@ -135,7 +141,10 @@ const referencedHashes = (
  * in-memory override hashes identically to the SAME content once it's actually
  * persisted to disk after a successful publish (see `canonicalMainOverride`). */
 const canonicalMainBytes = (main: CanonicalMainManifest): Buffer =>
-  Buffer.from(`${JSON.stringify(canonicalMainManifestSchema.parse(main), null, 2)}\n`, 'utf8');
+  Buffer.from(
+    `${JSON.stringify(canonicalMainManifestSchema.parse(main), null, 2)}\n`,
+    'utf8',
+  );
 
 /** Read the current Phase 14A store into a canonical bundle (parsed + bytes). */
 export const bundleFromStore = async (
@@ -181,7 +190,9 @@ export const bundleFromStore = async (
         },
       );
   const canonicalMain = canonicalBytes
-    ? canonicalMainManifestSchema.parse(JSON.parse(canonicalBytes.toString('utf8')))
+    ? canonicalMainManifestSchema.parse(
+        JSON.parse(canonicalBytes.toString('utf8')),
+      )
     : undefined;
   const objects = [];
   for (const contentHash of referencedHashes(manifest, canonicalMain)) {
@@ -298,7 +309,10 @@ export const restoreBundleToStore = async (options: {
         'manifest-hash-mismatch',
         'The bundled canonical Memory manifest does not match its hash.',
       );
-    await atomicWriteFile(canonicalStorePaths(options.stackHome).main, canonicalBytes);
+    await atomicWriteFile(
+      canonicalStorePaths(options.stackHome).main,
+      canonicalBytes,
+    );
   }
   return {
     objects: bundle.objects.length,

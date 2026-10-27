@@ -196,7 +196,9 @@ export const registerProjectCommand = (
   // registry-writing subcommand holds the Memory lock around its read-modify-write.
   // The confirmation prompts come before any registry read, so they stay outside it.
   const locked = <T>(command: string, fn: () => Promise<T>): Promise<T> =>
-    dependencies.withMemoryLock ? dependencies.withMemoryLock(command, fn) : fn();
+    dependencies.withMemoryLock
+      ? dependencies.withMemoryLock(command, fn)
+      : fn();
 
   project
     .command('list', { isDefault: true })

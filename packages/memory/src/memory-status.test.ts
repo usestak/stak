@@ -15,7 +15,11 @@ const temp = async () => {
   roots.push(root);
   return root;
 };
-afterEach(async () => Promise.all(roots.splice(0).map((r) => rm(r, { recursive: true, force: true }))));
+afterEach(async () =>
+  Promise.all(
+    roots.splice(0).map((r) => rm(r, { recursive: true, force: true })),
+  ),
+);
 
 const hash = (body: string) => hashBytes(Buffer.from(body, 'utf8'));
 const pid = (c: string) => `prj_${c.repeat(26)}`;
@@ -62,9 +66,16 @@ describe('readMemoryStatus counts canonical Project Memory (two-machine Bug B)',
       projects: [
         {
           projectId: pid('a'),
-          documents: [present('notes/MEMORY.md', 'a1'), present('notes/b.md', 'a2'), deleted('notes/old.md', 'x')],
+          documents: [
+            present('notes/MEMORY.md', 'a1'),
+            present('notes/b.md', 'a2'),
+            deleted('notes/old.md', 'x'),
+          ],
         },
-        { projectId: pid('b'), documents: [present('instructions/private.md', 'b1')] },
+        {
+          projectId: pid('b'),
+          documents: [present('instructions/private.md', 'b1')],
+        },
         // Only tombstones: nothing is backed up for this project any more.
         { projectId: pid('c'), documents: [deleted('notes/gone.md', 'c1')] },
       ],
@@ -81,9 +92,15 @@ describe('readMemoryStatus counts canonical Project Memory (two-machine Bug B)',
     const stackHome = await temp();
     await writeCanonicalMain(stackHome, {
       schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
-      projects: [{ projectId: pid('a'), documents: [present('notes/MEMORY.md', 'a1')] }],
+      projects: [
+        { projectId: pid('a'), documents: [present('notes/MEMORY.md', 'a1')] },
+      ],
     });
-    expect(await readMemoryStatus(stackHome)).toMatchObject({ projects: 1, files: 1, lastBackupAt: null });
+    expect(await readMemoryStatus(stackHome)).toMatchObject({
+      projects: 1,
+      files: 1,
+      lastBackupAt: null,
+    });
   });
 
   it('still returns null when nothing is backed up at all', async () => {

@@ -1,18 +1,45 @@
 import { link, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { memoryManifestSchema, type ManifestItem, type MemoryManifest } from '../domain.js';
-import { hashBytes, memoryStorePaths, readMemoryManifest, readMemoryObject, writeMemoryManifest } from '../store.js';
-import { readLocalRecoveryState, v1ManifestFingerprint } from '../local-recovery-state.js';
-import { readLocalRegistry, writeLocalRegistry } from '../project/registry-store.js';
+import {
+  memoryManifestSchema,
+  type ManifestItem,
+  type MemoryManifest,
+} from '../domain.js';
+import {
+  hashBytes,
+  memoryStorePaths,
+  readMemoryManifest,
+  readMemoryObject,
+  writeMemoryManifest,
+} from '../store.js';
+import {
+  readLocalRecoveryState,
+  v1ManifestFingerprint,
+} from '../local-recovery-state.js';
+import {
+  readLocalRegistry,
+  writeLocalRegistry,
+} from '../project/registry-store.js';
 import { resolveOrMintProject } from '../project/registry.js';
-import { claudeCanonicalPathOf, claudeNativeTargetOf } from './claude-project-adapter.js';
+import {
+  claudeCanonicalPathOf,
+  claudeNativeTargetOf,
+} from './claude-project-adapter.js';
 import { groupLegacyItems } from './group-legacy-items.js';
 import type { CanonicalMainManifest } from './domain.js';
-import { readCanonicalMain, writeCanonicalMain, writeProjection } from './store.js';
+import {
+  readCanonicalMain,
+  writeCanonicalMain,
+  writeProjection,
+} from './store.js';
 
 export class MigrationError extends Error {
-  constructor(public readonly code: 'migration-invalid', message: string, options?: ErrorOptions) {
+  constructor(
+    public readonly code: 'migration-invalid',
+    message: string,
+    options?: ErrorOptions,
+  ) {
     super(message, options);
     this.name = 'MigrationError';
   }
@@ -29,7 +56,10 @@ export type MigrationSummary = {
 };
 
 const premigrationBackupPath = (stackHome: string) =>
-  path.join(memoryStorePaths(stackHome).manifests, 'current.v1-premigration.json');
+  path.join(
+    memoryStorePaths(stackHome).manifests,
+    'current.v1-premigration.json',
+  );
 
 // A dedicated completion marker — NOT just "the backup exists" and NOT just
 // "main.json has projects". Both of those are ambiguous: the backup is written
@@ -58,8 +88,9 @@ const markerExists = async (file: string): Promise<boolean> => {
  * must behave differently before vs. after migration (e.g. a status check that
  * would otherwise plan against a canonical store that migration hasn't populated
  * yet) use this to detect "upgrade pending" WITHOUT triggering it themselves. */
-export const isLocalStoreMigrated = async (stackHome: string): Promise<boolean> =>
-  markerExists(migrationCompleteMarkerPath(stackHome));
+export const isLocalStoreMigrated = async (
+  stackHome: string,
+): Promise<boolean> => markerExists(migrationCompleteMarkerPath(stackHome));
 
 /** Step A: write the pre-migration backup exactly once. A pre-existing backup is
  * read back unchanged (never overwritten), which is what makes later steps safe
@@ -72,12 +103,20 @@ const ensureBackup = async (stackHome: string) => {
   await mkdir(dir, { recursive: true }); // a genuinely fresh $STAK_HOME has no manifests/ yet
   try {
     const raw = await readFile(file, 'utf8');
-    return { manifest: memoryManifestSchema.parse(JSON.parse(raw)), alreadyMigrated: true };
+    return {
+      manifest: memoryManifestSchema.parse(JSON.parse(raw)),
+      alreadyMigrated: true,
+    };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
   const current = await readMemoryManifest(stackHome);
-  const manifest = current ?? { schemaVersion: 1 as const, provider: 'claude' as const, createdAt: new Date().toISOString(), items: [] };
+  const manifest = current ?? {
+    schemaVersion: 1 as const,
+    provider: 'claude' as const,
+    createdAt: new Date().toISOString(),
+    items: [],
+  };
   // Write to a temp file, then publish with `link` (not `rename`): `link` fails
   // with EEXIST if `file` already exists instead of silently overwriting it, so
   // two concurrent first-ever migration attempts (e.g. two terminal windows)
@@ -87,14 +126,20 @@ const ensureBackup = async (stackHome: string) => {
   // a larger fix deferred to a later task; this is the narrow, cheap piece of
   // it specific to this one file.)
   const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(temp, `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+  await writeFile(temp, `${JSON.stringify(manifest, null, 2)}\n`, {
+    flag: 'wx',
+    mode: 0o600,
+  });
   try {
     await link(temp, file);
   } catch (error) {
     await unlink(temp).catch(() => undefined);
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
       const raw = await readFile(file, 'utf8');
-      return { manifest: memoryManifestSchema.parse(JSON.parse(raw)), alreadyMigrated: true };
+      return {
+        manifest: memoryManifestSchema.parse(JSON.parse(raw)),
+        alreadyMigrated: true,
+      };
     }
     throw error;
   }
@@ -132,7 +177,10 @@ const buildCanonicalMain = async (
     // e.g. `user-instructions`) must never leave a phantom, document-less
     // project behind in the registry or in `main.json`.
     if (!claudeCanonicalPathOf(item)) continue;
-    const { registry: next, projectId } = resolveOrMintProject(registry, item.project);
+    const { registry: next, projectId } = resolveOrMintProject(
+      registry,
+      item.project,
+    );
     registry = next;
     tagged.push({ ...item, __projectId: projectId });
   }
@@ -153,14 +201,22 @@ const nativeFileState = async (
 ): Promise<'absent' | 'matches' | 'differs' | 'unknown'> => {
   let target: string;
   try {
-    target = claudeNativeTargetOf({ projectId, dir: projectDir }, canonicalPath, claudeHome);
+    target = claudeNativeTargetOf(
+      { projectId, dir: projectDir },
+      canonicalPath,
+      claudeHome,
+    );
   } catch {
     return 'unknown';
   }
   try {
-    return hashBytes(await readFile(target)) === expectedHash ? 'matches' : 'differs';
+    return hashBytes(await readFile(target)) === expectedHash
+      ? 'matches'
+      : 'differs';
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : 'unknown';
+    return (error as NodeJS.ErrnoException).code === 'ENOENT'
+      ? 'absent'
+      : 'unknown';
   }
 };
 
@@ -183,7 +239,9 @@ const v1ManifestOrigin = async (
 ): Promise<'local' | 'cloud-recover'> => {
   const provenance = await readLocalRecoveryState(stackHome).catch(() => null);
   const recorded = provenance?.recoveredManifestFingerprint;
-  return recorded !== undefined && recorded === v1ManifestFingerprint(manifest) ? 'cloud-recover' : 'local';
+  return recorded !== undefined && recorded === v1ManifestFingerprint(manifest)
+    ? 'cloud-recover'
+    : 'local';
 };
 
 /**
@@ -217,14 +275,26 @@ const seedClaudeProjection = async (
   const projects: Record<string, Record<string, string>> = {};
   let restored = 0;
   for (const project of main.projects) {
-    const dir = options.locateProjectDir ? await options.locateProjectDir(project.projectId) : undefined;
+    const dir = options.locateProjectDir
+      ? await options.locateProjectDir(project.projectId)
+      : undefined;
     if (!dir) continue; // can't resolve a directory -> can't confirm native presence -> seed nothing
     const byPath: Record<string, string> = {};
     for (const doc of project.documents) {
       if (doc.state !== 'present') continue;
-      const state = await nativeFileState(dir, project.projectId, doc.path, doc.contentHash, options.claudeHome);
+      const state = await nativeFileState(
+        dir,
+        project.projectId,
+        doc.path,
+        doc.contentHash,
+        options.claudeHome,
+      );
       if (state === 'absent') restored += 1;
-      else if (state === 'matches' || (state === 'differs' && origin === 'local')) byPath[doc.path] = doc.contentHash;
+      else if (
+        state === 'matches' ||
+        (state === 'differs' && origin === 'local')
+      )
+        byPath[doc.path] = doc.contentHash;
     }
     if (Object.keys(byPath).length > 0) projects[project.projectId] = byPath;
   }
@@ -237,7 +307,12 @@ const slimToGlobal = async (stackHome: string, items: ManifestItem[]) => {
   const globalItems = items.filter((item) => item.scope === 'global');
   await writeMemoryManifest({
     stackHome,
-    manifest: { schemaVersion: 1, provider: 'claude', createdAt: new Date().toISOString(), items: globalItems },
+    manifest: {
+      schemaVersion: 1,
+      provider: 'claude',
+      createdAt: new Date().toISOString(),
+      items: globalItems,
+    },
   });
 };
 
@@ -270,7 +345,10 @@ export const migrateLocalStore = async (
   if (await markerExists(markerFile)) {
     const main = await readCanonicalMain(stackHome);
     return {
-      migratedDocuments: main.projects.reduce((n, p) => n + p.documents.length, 0),
+      migratedDocuments: main.projects.reduce(
+        (n, p) => n + p.documents.length,
+        0,
+      ),
       keptBothDuplicates: 0,
       alreadyMigrated: true,
       restoredFromStak: 0,
@@ -290,17 +368,32 @@ export const migrateLocalStore = async (
     }
   }
   const existingMain = await readCanonicalMain(stackHome);
-  const needsBuild = existingMain.projects.length === 0 && manifest.items.some((i: ManifestItem) => i.scope === 'project');
+  const needsBuild =
+    existingMain.projects.length === 0 &&
+    manifest.items.some((i: ManifestItem) => i.scope === 'project');
   const { main, keptBothDuplicates } = needsBuild
     ? await buildCanonicalMain(stackHome, manifest.items)
     : { main: existingMain, keptBothDuplicates: 0 };
   if (needsBuild) await writeCanonicalMain(stackHome, main);
   // Seed by where the migrated v1 manifest came from and what this machine's
   // native files hold right now (see `v1ManifestOrigin`/`seedClaudeProjection`).
-  const { restored } = await seedClaudeProjection(stackHome, main, await v1ManifestOrigin(stackHome, manifest), options);
+  const { restored } = await seedClaudeProjection(
+    stackHome,
+    main,
+    await v1ManifestOrigin(stackHome, manifest),
+    options,
+  );
   await slimToGlobal(stackHome, manifest.items);
   await writeFile(markerFile, new Date().toISOString(), { mode: 0o600 });
 
-  const migratedDocuments = main.projects.reduce((n, p) => n + p.documents.length, 0);
-  return { migratedDocuments, keptBothDuplicates, alreadyMigrated, restoredFromStak: restored };
+  const migratedDocuments = main.projects.reduce(
+    (n, p) => n + p.documents.length,
+    0,
+  );
+  return {
+    migratedDocuments,
+    keptBothDuplicates,
+    alreadyMigrated,
+    restoredFromStak: restored,
+  };
 };

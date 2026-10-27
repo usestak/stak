@@ -117,8 +117,14 @@ describe('recovery-file fallback', () => {
 `;
     expect(parseRecoveryFile(text).equals(artifacts.keyBytes)).toBe(true);
     expect(() => parseRecoveryFile('not json')).toThrowError(/recovery file/i);
-    expect(() => parseRecoveryFile(JSON.stringify({ ...artifacts.file, format: 'other' }))).toThrowError(/recovery file/i);
-    expect(() => parseRecoveryFile(JSON.stringify({ ...artifacts.file, secretB64: 'AAAA' }))).toThrowError(/recovery file/i);
+    expect(() =>
+      parseRecoveryFile(JSON.stringify({ ...artifacts.file, format: 'other' })),
+    ).toThrowError(/recovery file/i);
+    expect(() =>
+      parseRecoveryFile(
+        JSON.stringify({ ...artifacts.file, secretB64: 'AAAA' }),
+      ),
+    ).toThrowError(/recovery file/i);
   });
 
   it('generates a 256-bit key with matching printable + file forms', () => {

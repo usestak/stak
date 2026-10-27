@@ -16,7 +16,10 @@ const deleted = (path: string, n: number): CanonicalDoc => ({
   lastContentHash: h(n),
   deletedAt: '2026-10-22T00:00:00.000Z',
 });
-const native = (path: string, n: number): NativeEntry => ({ path, contentHash: h(n) });
+const native = (path: string, n: number): NativeEntry => ({
+  path,
+  contentHash: h(n),
+});
 
 describe('planSync', () => {
   it('N=P=C: nothing changed -> no action', () => {
@@ -87,7 +90,9 @@ describe('planSync', () => {
       projection: { 'notes/a.md': h(1) },
       canonical: [deleted('notes/a.md', 1)],
     });
-    expect(actions).toEqual([{ kind: 'materialize-delete', path: 'notes/a.md' }]);
+    expect(actions).toEqual([
+      { kind: 'materialize-delete', path: 'notes/a.md' },
+    ]);
   });
 
   // Spec §7: "STAK never treats a missing entry as a deletion." Only a
@@ -102,11 +107,17 @@ describe('planSync', () => {
       projection: { 'notes/a.md': h(1) },
       canonical: [],
     });
-    expect(actions).toEqual([{ kind: 'import-edit', path: 'notes/a.md', contentHash: h(1) }]);
+    expect(actions).toEqual([
+      { kind: 'import-edit', path: 'notes/a.md', contentHash: h(1) },
+    ]);
   });
 
   it('canonical ABSENT, native gone too -> nothing', () => {
-    const actions = planSync({ native: [], projection: { 'notes/a.md': h(1) }, canonical: [] });
+    const actions = planSync({
+      native: [],
+      projection: { 'notes/a.md': h(1) },
+      canonical: [],
+    });
     expect(actions).toEqual([{ kind: 'none' }]);
   });
 

@@ -237,7 +237,8 @@ export const readMemoryStatus = async (
   const canonical = (await readCanonicalMain(stackHome)).projects
     .map((project) => ({
       projectId: project.projectId,
-      present: project.documents.filter((doc) => doc.state === 'present').length,
+      present: project.documents.filter((doc) => doc.state === 'present')
+        .length,
     }))
     .filter((project) => project.present > 0);
   if (!manifest && canonical.length === 0) return null;
@@ -249,11 +250,15 @@ export const readMemoryStatus = async (
         ? item.project.canonical
         : `local:${item.project?.kind === 'local' ? item.project.vendorKey : ''}`,
     );
-  const projects = new Set([...legacyProjects, ...canonical.map((project) => project.projectId)]).size;
+  const projects = new Set([
+    ...legacyProjects,
+    ...canonical.map((project) => project.projectId),
+  ]).size;
   return {
     provider: 'claude',
     projects,
-    files: items.length + canonical.reduce((n, project) => n + project.present, 0),
+    files:
+      items.length + canonical.reduce((n, project) => n + project.present, 0),
     lastBackupAt: manifest?.createdAt ?? null,
   };
 };

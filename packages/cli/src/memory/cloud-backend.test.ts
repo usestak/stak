@@ -18,7 +18,10 @@ describe('stackCloudRemoteMemoryBackend — HTTP conflict normalization (Task 13
   it('normalizes a StackCloudError(memory-conflict) from createGeneration into RemoteMemoryError(conflict)', async () => {
     const client = {
       memoryCreateGeneration: vi.fn(async () => {
-        throw new StackCloudError('memory-conflict', 'Cloud latest generation is 2, not 1.');
+        throw new StackCloudError(
+          'memory-conflict',
+          'Cloud latest generation is 2, not 1.',
+        );
       }),
     } as unknown as CloudMemoryClient;
     const backend = stackCloudRemoteMemoryBackend(client);
@@ -50,7 +53,10 @@ describe('stackCloudRemoteMemoryBackend — HTTP conflict normalization (Task 13
   it('leaves a non-conflict StackCloudError (e.g. too-large) untouched', async () => {
     const client = {
       memoryCreateGeneration: vi.fn(async () => {
-        throw new StackCloudError('memory-too-large', 'Memory payload is too large.');
+        throw new StackCloudError(
+          'memory-too-large',
+          'Memory payload is too large.',
+        );
       }),
     } as unknown as CloudMemoryClient;
     const backend = stackCloudRemoteMemoryBackend(client);
@@ -67,12 +73,14 @@ describe('stackCloudRemoteMemoryBackend — HTTP conflict normalization (Task 13
   });
 
   it('the retry loop actually fires through pushCanonicalMemory over this adapter', async () => {
-    const { pushCanonicalMemory, CANONICAL_MAIN_SCHEMA_VERSION } = await import('@stack/memory');
+    const { pushCanonicalMemory, CANONICAL_MAIN_SCHEMA_VERSION } =
+      await import('@stack/memory');
     let attempts = 0;
     const client = {
       memoryCreateGeneration: vi.fn(async () => {
         attempts += 1;
-        if (attempts === 1) throw new StackCloudError('memory-conflict', 'stale parent');
+        if (attempts === 1)
+          throw new StackCloudError('memory-conflict', 'stale parent');
         return {
           generation: {
             backupId: 'b-ok',

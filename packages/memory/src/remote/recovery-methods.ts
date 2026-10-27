@@ -112,7 +112,11 @@ export const parseRecoveryFile = (text: string): Buffer => {
   }
   if (typeof parsed !== 'object' || parsed === null) throw invalid();
   const file = parsed as Partial<RecoveryFile>;
-  if (file.format !== RECOVERY_FILE_FORMAT || typeof file.secretB64 !== 'string') throw invalid();
+  if (
+    file.format !== RECOVERY_FILE_FORMAT ||
+    typeof file.secretB64 !== 'string'
+  )
+    throw invalid();
   const key = Buffer.from(file.secretB64, 'base64');
   if (key.length !== RECOVERY_KEY_BYTES) throw invalid();
   return key;

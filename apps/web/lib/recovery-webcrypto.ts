@@ -406,7 +406,13 @@ export const mmkOpensWrappedDek = async (options: {
   check: MmkKeyCheck;
 }): Promise<boolean> => {
   try {
-    const key = await subtle().importKey('raw', bs(options.mmk), { name: 'AES-GCM' }, false, ['decrypt']);
+    const key = await subtle().importKey(
+      'raw',
+      bs(options.mmk),
+      { name: 'AES-GCM' },
+      false,
+      ['decrypt'],
+    );
     const combined = new Uint8Array([
       ...fromB64(options.check.wrappedDek.ciphertextB64),
       ...fromB64(options.check.wrappedDek.tagB64),
@@ -457,17 +463,27 @@ export const selectPasskeyMmk = async (options: {
     for (const wrapper of options.wrappers) {
       if (!wrapper.publicIdentifier) continue;
       if (!prfByCredential.has(wrapper.publicIdentifier))
-        prfByCredential.set(wrapper.publicIdentifier, await options.getPrf(wrapper.publicIdentifier));
+        prfByCredential.set(
+          wrapper.publicIdentifier,
+          await options.getPrf(wrapper.publicIdentifier),
+        );
       const prf = prfByCredential.get(wrapper.publicIdentifier) ?? null;
       if (!prf) continue;
       anyPrf = true;
       let mmk: Uint8Array;
       try {
-        mmk = await unwrapMmkWithPrf({ stored: wrapper.mmkWrapper as StoredMmkWrapper, prfOutput: prf });
+        mmk = await unwrapMmkWithPrf({
+          stored: wrapper.mmkWrapper as StoredMmkWrapper,
+          prfOutput: prf,
+        });
       } catch {
         continue; // not this passkey's wrapper
       }
-      if (!options.check || (await mmkOpensWrappedDek({ mmk, check: options.check }))) return { status: 'ok', mmk };
+      if (
+        !options.check ||
+        (await mmkOpensWrappedDek({ mmk, check: options.check }))
+      )
+        return { status: 'ok', mmk };
       mmk.fill(0); // a leftover key that opens nothing — try the next wrapper
     }
   } finally {

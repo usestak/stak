@@ -482,7 +482,11 @@ describe('composeBundleSnapshot', () => {
   const setUp = () => {
     counter = 0;
     // Local machine knows L (its own project) only.
-    const ownMinted = resolveOrMintProject(emptyRegistry(), git('github.com/o/mine'), mint);
+    const ownMinted = resolveOrMintProject(
+      emptyRegistry(),
+      git('github.com/o/mine'),
+      mint,
+    );
     const localReg = setBinding(ownMinted.registry, {
       projectId: ownMinted.projectId,
       dir: '/home/me/mine',
@@ -491,24 +495,50 @@ describe('composeBundleSnapshot', () => {
     });
     // Remote snapshot knows L (with a different claim), X (in main), Y (not in main),
     // and Z (in main, but claims L's repo under another ID).
-    const remoteReg = resolveOrMintProject(emptyRegistry(), git('github.com/o/x'), mint);
+    const remoteReg = resolveOrMintProject(
+      emptyRegistry(),
+      git('github.com/o/x'),
+      mint,
+    );
     const xId = remoteReg.projectId;
-    const y = resolveOrMintProject(remoteReg.registry, git('github.com/o/y'), mint);
-    const z = resolveOrMintProject(emptyRegistry(), git('github.com/o/mine'), mint);
+    const y = resolveOrMintProject(
+      remoteReg.registry,
+      git('github.com/o/y'),
+      mint,
+    );
+    const z = resolveOrMintProject(
+      emptyRegistry(),
+      git('github.com/o/mine'),
+      mint,
+    );
     const remote = toPortableSnapshot({
       ...y.registry,
       projects: [
         ...y.registry.projects,
-        { projectId: ownMinted.projectId, claims: [identityClaim(git('github.com/o/other'))] },
+        {
+          projectId: ownMinted.projectId,
+          claims: [identityClaim(git('github.com/o/other'))],
+        },
         ...z.registry.projects,
       ],
     });
-    return { localReg, ownId: ownMinted.projectId, xId, yId: y.projectId, zId: z.projectId, remote };
+    return {
+      localReg,
+      ownId: ownMinted.projectId,
+      xId,
+      yId: y.projectId,
+      zId: z.projectId,
+      remote,
+    };
   };
 
   it('carries remote records only for projects in main that have no local record, and keeps local records', () => {
     const { localReg, ownId, xId, yId, zId, remote } = setUp();
-    const { snapshot, carried, conflicts } = composeBundleSnapshot(localReg, remote, [ownId, xId, zId]);
+    const { snapshot, carried, conflicts } = composeBundleSnapshot(
+      localReg,
+      remote,
+      [ownId, xId, zId],
+    );
     expect(carried).toEqual([xId]);
     const ids = snapshot.projects.map((p) => p.projectId);
     expect(ids).toContain(ownId);
@@ -516,34 +546,63 @@ describe('composeBundleSnapshot', () => {
     expect(ids).not.toContain(yId); // not in main
     expect(ids).not.toContain(zId); // its claim is held locally by another ID
     // Shared ID: local claims kept, plus the compatible remote claim (union).
-    const ownClaims = snapshot.projects.find((p) => p.projectId === ownId)?.claims.map(claimKey);
-    expect(ownClaims).toEqual(['git:github.com/o/mine', 'git:github.com/o/other']);
-    expect(conflicts).toEqual([{ kind: 'claim-held-locally', projectId: zId, heldBy: ownId }]);
+    const ownClaims = snapshot.projects
+      .find((p) => p.projectId === ownId)
+      ?.claims.map(claimKey);
+    expect(ownClaims).toEqual([
+      'git:github.com/o/mine',
+      'git:github.com/o/other',
+    ]);
+    expect(conflicts).toEqual([
+      { kind: 'claim-held-locally', projectId: zId, heldBy: ownId },
+    ]);
     // The local registry itself is untouched.
-    expect(localReg.projects[0]?.claims.map(claimKey)).toEqual(['git:github.com/o/mine']);
+    expect(localReg.projects[0]?.claims.map(claimKey)).toEqual([
+      'git:github.com/o/mine',
+    ]);
     expect(JSON.stringify(snapshot)).not.toContain('/home/me');
     expect(JSON.stringify(snapshot)).not.toContain('bindings');
   });
 
   it('a remote claim on a shared ID that ANOTHER local project holds is not added, and is reported', () => {
     counter = 0;
-    const a = resolveOrMintProject(emptyRegistry(), git('github.com/o/a'), mint);
+    const a = resolveOrMintProject(
+      emptyRegistry(),
+      git('github.com/o/a'),
+      mint,
+    );
     const b = resolveOrMintProject(a.registry, git('github.com/o/b'), mint);
     const remote = {
       snapshotVersion: 1 as const,
-      projects: [{ projectId: a.projectId, claims: [identityClaim(git('github.com/o/b'))] }],
+      projects: [
+        {
+          projectId: a.projectId,
+          claims: [identityClaim(git('github.com/o/b'))],
+        },
+      ],
     };
-    const { snapshot, conflicts } = composeBundleSnapshot(b.registry, remote, [a.projectId]);
-    expect(snapshot.projects.find((p) => p.projectId === a.projectId)?.claims.map(claimKey)).toEqual([
-      'git:github.com/o/a',
+    const { snapshot, conflicts } = composeBundleSnapshot(b.registry, remote, [
+      a.projectId,
     ]);
+    expect(
+      snapshot.projects
+        .find((p) => p.projectId === a.projectId)
+        ?.claims.map(claimKey),
+    ).toEqual(['git:github.com/o/a']);
     expect(conflicts).toEqual([
-      { kind: 'claim-held-by-other', projectId: a.projectId, claimKey: 'git:github.com/o/b', heldBy: b.projectId },
+      {
+        kind: 'claim-held-by-other',
+        projectId: a.projectId,
+        claimKey: 'git:github.com/o/b',
+        heldBy: b.projectId,
+      },
     ]);
   });
 
   it('without a remote snapshot it is exactly the local snapshot', () => {
     const { localReg, ownId } = setUp();
-    expect(composeBundleSnapshot(localReg, undefined, [ownId]).snapshot).toEqual(toPortableSnapshot(localReg));
+    expect(
+      composeBundleSnapshot(localReg, undefined, [ownId]).snapshot,
+    ).toEqual(toPortableSnapshot(localReg));
   });
 });

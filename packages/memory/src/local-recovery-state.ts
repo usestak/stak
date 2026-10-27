@@ -121,7 +121,8 @@ export const writeLocalRecoveryState = async (
  */
 export const recordedAsHistorical = (state: LocalRecoveryState): boolean =>
   state.historical ??
-  (state.cloudLatestAtRecovery !== null && state.recoveredGeneration < state.cloudLatestAtRecovery);
+  (state.cloudLatestAtRecovery !== null &&
+    state.recoveredGeneration < state.cloudLatestAtRecovery);
 
 /**
  * Whether local Memory is a deliberate historical recovery (spec §8.5): this
@@ -138,4 +139,6 @@ export const isHistoricalRecovery = (
   state: LocalRecoveryState | null,
   cloudLatestGeneration: number | null,
 ): boolean =>
-  state !== null && cloudLatestGeneration !== null && recordedAsHistorical(state);
+  state !== null &&
+  cloudLatestGeneration !== null &&
+  recordedAsHistorical(state);

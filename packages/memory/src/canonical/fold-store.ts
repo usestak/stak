@@ -45,7 +45,10 @@ export const foldStoredCanonicalState = async (
   aliasOf: (projectId: string) => string,
   options: { persist: boolean },
 ): Promise<StoredFoldResult> => {
-  const merged = new Map<string, { fromProjectId: string; toProjectId: string }>();
+  const merged = new Map<
+    string,
+    { fromProjectId: string; toProjectId: string }
+  >();
   const note = (report: ProjectFoldReport) => {
     for (const pair of report.merged) merged.set(pair.fromProjectId, pair);
   };
@@ -59,31 +62,48 @@ export const foldStoredCanonicalState = async (
   if (foldedBase) note(foldedBase.report);
 
   const pending = await readPendingMerge(stackHome, pendingMergeSchema);
-  const foldedPending = pending ? foldPendingMerge(pending, aliasOf) : undefined;
+  const foldedPending = pending
+    ? foldPendingMerge(pending, aliasOf)
+    : undefined;
   if (foldedPending) note(foldedPending.report);
 
   const projection = await readProjection(stackHome, 'claude');
   const foldedProjection = foldProjection(projection, aliasOf);
   if (foldedProjection.changed)
     for (const id of Object.keys(projection.projects))
-      if (aliasOf(id) !== id) merged.set(id, { fromProjectId: id, toProjectId: aliasOf(id) });
+      if (aliasOf(id) !== id)
+        merged.set(id, { fromProjectId: id, toProjectId: aliasOf(id) });
 
   const mainChanged = foldedMain.main !== main;
-  const baseChanged = base !== null && foldedBase !== undefined && foldedBase.main !== base.main;
+  const baseChanged =
+    base !== null && foldedBase !== undefined && foldedBase.main !== base.main;
   const pendingChanged = foldedPending?.changed === true;
-  const changed = mainChanged || baseChanged || pendingChanged || foldedProjection.changed;
+  const changed =
+    mainChanged || baseChanged || pendingChanged || foldedProjection.changed;
 
   if (options.persist && changed) {
     if (mainChanged) await writeCanonicalMain(stackHome, foldedMain.main);
-    if (baseChanged && base && foldedBase) await writeCanonicalBase(stackHome, { ...base, main: foldedBase.main });
-    if (pendingChanged && foldedPending) await writePendingMerge(stackHome, foldedPending.pending);
-    if (foldedProjection.changed) await writeProjection(stackHome, 'claude', foldedProjection.projection);
+    if (baseChanged && base && foldedBase)
+      await writeCanonicalBase(stackHome, { ...base, main: foldedBase.main });
+    if (pendingChanged && foldedPending)
+      await writePendingMerge(stackHome, foldedPending.pending);
+    if (foldedProjection.changed)
+      await writeProjection(stackHome, 'claude', foldedProjection.projection);
   }
 
   const report = emptyProjectFoldReport();
   report.merged = [...merged.values()].sort((a, b) =>
-    a.fromProjectId < b.fromProjectId ? -1 : a.fromProjectId > b.fromProjectId ? 1 : 0,
+    a.fromProjectId < b.fromProjectId
+      ? -1
+      : a.fromProjectId > b.fromProjectId
+        ? 1
+        : 0,
   );
   report.keptBoth = foldedMain.report.keptBoth;
-  return { report, changed, main: foldedMain.main, projection: foldedProjection.projection };
+  return {
+    report,
+    changed,
+    main: foldedMain.main,
+    projection: foldedProjection.projection,
+  };
 };

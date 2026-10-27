@@ -26,7 +26,10 @@ export type AddCommandDependencies = {
   writeOut(value: string): void;
 };
 
-const runDirectly = async <T>(_command: string, fn: () => Promise<T>): Promise<T> => fn();
+const runDirectly = async <T>(
+  _command: string,
+  fn: () => Promise<T>,
+): Promise<T> => fn();
 
 export const registerAddCommand = (
   program: Command,
@@ -47,7 +50,9 @@ export const registerAddCommand = (
           addAll ? '.' : selectors,
         );
         if (proposal.targets.length > 0) await dependencies.applyAdd(proposal);
-        const memory = stageMemory ? await stageMemory.call(dependencies) : undefined;
+        const memory = stageMemory
+          ? await stageMemory.call(dependencies)
+          : undefined;
         return { proposal, memory };
       };
       // `stak add .` holds the Memory lock across its whole staging (spec 2026-10-25

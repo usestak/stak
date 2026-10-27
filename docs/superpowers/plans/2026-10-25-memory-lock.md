@@ -5,6 +5,7 @@
 **Goal:** Stop concurrent STAK commands from interleaving changes to the local Memory store, using one cross-process Memory lock per STAK home (spec `docs/superpowers/specs/2026-10-25-memory-lock-design.md`).
 
 **Architecture:** A self-contained lock module in `@stack/memory` provides `withMemoryLock`, `acquireMemoryLock`, `readMemoryLock` and `unlockMemory`. It works like this:
+
 - The lock is created atomically (temp file + hard link, which fails if the lock already exists).
 - A waiting command polls until it gets the lock or times out.
 - A leftover lock is cleared only under a guard file.
@@ -20,8 +21,8 @@ Each CLI command that changes Memory receives an optional `withMemoryLock` depen
 - Lock file: `<stackHome>/memory/.memory.lock`. Guard file: `<stackHome>/memory/.memory.lock.clearing`.
 - Lock record fields, exactly: `lockId`, `pid`, `hostname`, `startedAt`, `command`.
 - Poll every 200 ms. Wait timeout 10 s. A guard file older than 30 s is a leftover.
-- Busy message, exactly: `` Another STAK command (`<command>`, started <ago> ago) is changing Memory. Try again when it finishes. ``
-- Leftover-cleared note, exactly: `` Cleared a leftover Memory lock from `<command>` (process <pid>, no longer running). ``
+- Busy message, exactly: ``Another STAK command (`<command>`, started <ago> ago) is changing Memory. Try again when it finishes.``
+- Leftover-cleared note, exactly: ``Cleared a leftover Memory lock from `<command>` (process <pid>, no longer running).``
 - Release and every removal path remove the lock only if its `lockId` matches the expected one. Never unlink the path blindly.
 - Never clear a lock automatically when its `hostname` differs from this machine's, or when its `pid` is alive.
 - Error code for the busy timeout: `memory-locked`.
@@ -37,6 +38,7 @@ Each CLI command that changes Memory receives an optional `withMemoryLock` depen
 ### Task 1: The lock module in `@stack/memory`
 
 **Files:**
+
 - Create: `packages/memory/src/memory-lock.ts`
 - Create: `packages/memory/src/memory-lock.test.ts`
 - Create: `packages/memory/src/memory-lock-child.test-helper.mjs` (child-process helper for the race test)
@@ -44,6 +46,7 @@ Each CLI command that changes Memory receives an optional `withMemoryLock` depen
 - Modify: `packages/core/src/state.ts` (add the lock file to `STATE_EXCLUDE_PATHS`)
 
 **Interfaces:**
+
 - Produces:
   - `type MemoryLockRecord = { lockId: string; pid: number; hostname: string; startedAt: string; command: string }`
   - `class MemoryLockError extends Error { code: 'memory-locked'; holder?: MemoryLockRecord }`
@@ -62,7 +65,14 @@ Create `packages/memory/src/memory-lock.test.ts`:
 
 ```ts
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -86,12 +96,21 @@ const temp = async (): Promise<string> => {
   return root;
 };
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((r) => rm(r, { recursive: true, force: true })));
+  await Promise.all(
+    roots.splice(0).map((r) => rm(r, { recursive: true, force: true })),
+  );
 });
 
-const fast = { timeoutMs: 600, pollMs: 20, installSignalHandlers: false } as const;
+const fast = {
+  timeoutMs: 600,
+  pollMs: 20,
+  installSignalHandlers: false,
+} as const;
 
-const plant = async (stackHome: string, record: Partial<MemoryLockRecord> = {}): Promise<MemoryLockRecord> => {
+const plant = async (
+  stackHome: string,
+  record: Partial<MemoryLockRecord> = {},
+): Promise<MemoryLockRecord> => {
   const full: MemoryLockRecord = {
     lockId: 'planted-lock',
     pid: 999_999,
@@ -109,10 +128,15 @@ describe('withMemoryLock', () => {
   it('takes the lock for the duration of fn and releases it afterwards', async () => {
     const stackHome = await temp();
     let seen: unknown;
-    const result = await withMemoryLock(stackHome, 'stak add', async () => {
-      seen = await readMemoryLock(stackHome);
-      return 42;
-    }, fast);
+    const result = await withMemoryLock(
+      stackHome,
+      'stak add',
+      async () => {
+        seen = await readMemoryLock(stackHome);
+        return 42;
+      },
+      fast,
+    );
     expect(result).toBe(42);
     expect(seen).toMatchObject({ command: 'stak add', pid: process.pid });
     expect(await readMemoryLock(stackHome)).toBeNull();
@@ -120,27 +144,47 @@ describe('withMemoryLock', () => {
 
   it('releases the lock when fn throws', async () => {
     const stackHome = await temp();
-    await expect(withMemoryLock(stackHome, 'stak add', async () => { throw new Error('boom'); }, fast)).rejects.toThrow('boom');
+    await expect(
+      withMemoryLock(
+        stackHome,
+        'stak add',
+        async () => {
+          throw new Error('boom');
+        },
+        fast,
+      ),
+    ).rejects.toThrow('boom');
     expect(await readMemoryLock(stackHome)).toBeNull();
   });
 
   it('release never removes a lock whose lockId is not its own', async () => {
     const stackHome = await temp();
     const lock = await acquireMemoryLock(stackHome, 'stak add', fast);
-    await plant(stackHome, { lockId: 'someone-else', pid: process.pid, hostname: lock.record.hostname });
+    await plant(stackHome, {
+      lockId: 'someone-else',
+      pid: process.pid,
+      hostname: lock.record.hostname,
+    });
     await lock.release();
-    expect(await readMemoryLock(stackHome)).toMatchObject({ lockId: 'someone-else' });
+    expect(await readMemoryLock(stackHome)).toMatchObject({
+      lockId: 'someone-else',
+    });
   });
 
   it('serializes two holders in the same process', async () => {
     const stackHome = await temp();
     const order: string[] = [];
     const slow = (name: string) =>
-      withMemoryLock(stackHome, name, async () => {
-        order.push(`${name}:start`);
-        await new Promise((r) => setTimeout(r, 80));
-        order.push(`${name}:end`);
-      }, { ...fast, timeoutMs: 2_000 });
+      withMemoryLock(
+        stackHome,
+        name,
+        async () => {
+          order.push(`${name}:start`);
+          await new Promise((r) => setTimeout(r, 80));
+          order.push(`${name}:end`);
+        },
+        { ...fast, timeoutMs: 2_000 },
+      );
     await Promise.all([slow('a'), slow('b')]);
     expect(order[1]).toMatch(/:end$/);
     expect(order[2]).toMatch(/:start$/);
@@ -149,17 +193,24 @@ describe('withMemoryLock', () => {
   it('waits, then stops with memory-locked and the exact message when a live holder keeps it', async () => {
     const stackHome = await temp();
     await plant(stackHome, { pid: process.pid, hostname: 'this-host' });
-    const error = await withMemoryLock(stackHome, 'stak add', async () => 'never', {
-      ...fast,
-      hostname: 'this-host',
-      isProcessAlive: () => true,
-    }).catch((e: unknown) => e);
+    const error = await withMemoryLock(
+      stackHome,
+      'stak add',
+      async () => 'never',
+      {
+        ...fast,
+        hostname: 'this-host',
+        isProcessAlive: () => true,
+      },
+    ).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(MemoryLockError);
     expect((error as MemoryLockError).code).toBe('memory-locked');
     expect((error as MemoryLockError).message).toMatch(
       /^Another STAK command \(`stak pull`, started \d+s ago\) is changing Memory\. Try again when it finishes\.$/,
     );
-    expect(await readMemoryLock(stackHome)).toMatchObject({ lockId: 'planted-lock' });
+    expect(await readMemoryLock(stackHome)).toMatchObject({
+      lockId: 'planted-lock',
+    });
   });
 
   it('clears a leftover lock whose process is gone on this machine, and reports it', async () => {
@@ -179,9 +230,15 @@ describe('withMemoryLock', () => {
     const stackHome = await temp();
     await plant(stackHome, { hostname: 'other-host' });
     await expect(
-      withMemoryLock(stackHome, 'stak add', async () => undefined, { ...fast, hostname: 'this-host', isProcessAlive: () => false }),
+      withMemoryLock(stackHome, 'stak add', async () => undefined, {
+        ...fast,
+        hostname: 'this-host',
+        isProcessAlive: () => false,
+      }),
     ).rejects.toMatchObject({ code: 'memory-locked' });
-    expect(await readMemoryLock(stackHome)).toMatchObject({ lockId: 'planted-lock' });
+    expect(await readMemoryLock(stackHome)).toMatchObject({
+      lockId: 'planted-lock',
+    });
   });
 
   it('removes a guard file older than guardStaleMs, then clears the leftover', async () => {
@@ -205,11 +262,15 @@ describe('withMemoryLock', () => {
     // Use this machine's real hostname so the children treat it as a local leftover.
     const { hostname } = await import('node:os');
     await plant(stackHome, { hostname: hostname(), pid: 999_999 });
-    const helper = fileURLToPath(new URL('./memory-lock-child.test-helper.mjs', import.meta.url));
+    const helper = fileURLToPath(
+      new URL('./memory-lock-child.test-helper.mjs', import.meta.url),
+    );
     const log = path.join(stackHome, 'log.txt');
     const run = (name: string) =>
       new Promise<number>((resolve) => {
-        const child = spawn(process.execPath, [helper, stackHome, name, log], { stdio: 'inherit' });
+        const child = spawn(process.execPath, [helper, stackHome, name, log], {
+          stdio: 'inherit',
+        });
         child.on('exit', (code) => resolve(code ?? 1));
       });
     const codes = await Promise.all([run('a'), run('b')]);
@@ -223,21 +284,37 @@ describe('withMemoryLock', () => {
   });
 
   // Windows cannot deliver SIGINT to a child process (child.kill terminates it outright), so this runs on POSIX only.
-  it.skipIf(process.platform === 'win32')('a holder interrupted with SIGINT removes its own lock', async () => {
-    const stackHome = await temp();
-    const helper = fileURLToPath(new URL('./memory-lock-child.test-helper.mjs', import.meta.url));
-    const child = spawn(process.execPath, [helper, stackHome, 'sig', path.join(stackHome, 'log.txt'), 'hold'], {
-      stdio: ['ignore', 'pipe', 'inherit'],
-    });
-    await new Promise<void>((resolve) => child.stdout!.on('data', (d) => String(d).includes('ready') && resolve()));
-    expect(await readMemoryLock(stackHome)).toMatchObject({ command: 'child sig' });
-    const code = await new Promise<number | null>((resolve) => {
-      child.on('exit', (c) => resolve(c));
-      child.kill('SIGINT');
-    });
-    expect(code).toBe(130);
-    expect(await readMemoryLock(stackHome)).toBeNull();
-  });
+  it.skipIf(process.platform === 'win32')(
+    'a holder interrupted with SIGINT removes its own lock',
+    async () => {
+      const stackHome = await temp();
+      const helper = fileURLToPath(
+        new URL('./memory-lock-child.test-helper.mjs', import.meta.url),
+      );
+      const child = spawn(
+        process.execPath,
+        [helper, stackHome, 'sig', path.join(stackHome, 'log.txt'), 'hold'],
+        {
+          stdio: ['ignore', 'pipe', 'inherit'],
+        },
+      );
+      await new Promise<void>((resolve) =>
+        child.stdout!.on(
+          'data',
+          (d) => String(d).includes('ready') && resolve(),
+        ),
+      );
+      expect(await readMemoryLock(stackHome)).toMatchObject({
+        command: 'child sig',
+      });
+      const code = await new Promise<number | null>((resolve) => {
+        child.on('exit', (c) => resolve(c));
+        child.kill('SIGINT');
+      });
+      expect(code).toBe(130);
+      expect(await readMemoryLock(stackHome)).toBeNull();
+    },
+  );
 });
 
 describe('unlockMemory', () => {
@@ -248,7 +325,10 @@ describe('unlockMemory', () => {
   it('removes a lock whose process is not running', async () => {
     const stackHome = await temp();
     await plant(stackHome, { hostname: 'this-host' });
-    const result = await unlockMemory(stackHome, { hostname: 'this-host', isProcessAlive: () => false });
+    const result = await unlockMemory(stackHome, {
+      hostname: 'this-host',
+      isProcessAlive: () => false,
+    });
     expect(result).toMatchObject({ status: 'removed', wasAlive: false });
     expect(await readMemoryLock(stackHome)).toBeNull();
   });
@@ -256,9 +336,22 @@ describe('unlockMemory', () => {
   it('refuses when the recorded process is running, and --force removes it', async () => {
     const stackHome = await temp();
     await plant(stackHome, { hostname: 'this-host' });
-    expect(await unlockMemory(stackHome, { hostname: 'this-host', isProcessAlive: () => true })).toMatchObject({ status: 'refused' });
-    expect(await readMemoryLock(stackHome)).toMatchObject({ lockId: 'planted-lock' });
-    expect(await unlockMemory(stackHome, { hostname: 'this-host', isProcessAlive: () => true, force: true })).toMatchObject({
+    expect(
+      await unlockMemory(stackHome, {
+        hostname: 'this-host',
+        isProcessAlive: () => true,
+      }),
+    ).toMatchObject({ status: 'refused' });
+    expect(await readMemoryLock(stackHome)).toMatchObject({
+      lockId: 'planted-lock',
+    });
+    expect(
+      await unlockMemory(stackHome, {
+        hostname: 'this-host',
+        isProcessAlive: () => true,
+        force: true,
+      }),
+    ).toMatchObject({
       status: 'removed',
       wasAlive: true,
     });
@@ -268,14 +361,22 @@ describe('unlockMemory', () => {
   it('treats a lock from another machine as possibly running (refuses without --force)', async () => {
     const stackHome = await temp();
     await plant(stackHome, { hostname: 'other-host' });
-    expect(await unlockMemory(stackHome, { hostname: 'this-host', isProcessAlive: () => false })).toMatchObject({ status: 'refused' });
+    expect(
+      await unlockMemory(stackHome, {
+        hostname: 'this-host',
+        isProcessAlive: () => false,
+      }),
+    ).toMatchObject({ status: 'refused' });
   });
 
   it('removes an unreadable lock file', async () => {
     const stackHome = await temp();
     await mkdir(path.dirname(memoryLockPath(stackHome)), { recursive: true });
     await writeFile(memoryLockPath(stackHome), 'not json');
-    expect(await unlockMemory(stackHome)).toMatchObject({ status: 'removed', holder: 'corrupt' });
+    expect(await unlockMemory(stackHome)).toMatchObject({
+      status: 'removed',
+      holder: 'corrupt',
+    });
   });
 });
 ```
@@ -289,16 +390,26 @@ import { withMemoryLock } from '../dist/memory-lock.js';
 const [stackHome, name, log, mode] = process.argv.slice(2);
 if (mode === 'hold') {
   // Signal test: hold the lock with real signal handlers until killed.
-  await withMemoryLock(stackHome, `child ${name}`, async () => {
-    process.stdout.write('ready\n');
-    await new Promise(() => {});
-  }, { timeoutMs: 5_000, pollMs: 20 });
+  await withMemoryLock(
+    stackHome,
+    `child ${name}`,
+    async () => {
+      process.stdout.write('ready\n');
+      await new Promise(() => {});
+    },
+    { timeoutMs: 5_000, pollMs: 20 },
+  );
 } else {
-  await withMemoryLock(stackHome, `child ${name}`, async () => {
-    await appendFile(log, `${name}:start\n`);
-    await new Promise((r) => setTimeout(r, 150));
-    await appendFile(log, `${name}:end\n`);
-  }, { timeoutMs: 5_000, pollMs: 20, installSignalHandlers: false });
+  await withMemoryLock(
+    stackHome,
+    `child ${name}`,
+    async () => {
+      await appendFile(log, `${name}:start\n`);
+      await new Promise((r) => setTimeout(r, 150));
+      await appendFile(log, `${name}:end\n`);
+    },
+    { timeoutMs: 5_000, pollMs: 20, installSignalHandlers: false },
+  );
 }
 ```
 
@@ -316,7 +427,15 @@ Create `packages/memory/src/memory-lock.ts`:
 ```ts
 import { randomUUID } from 'node:crypto';
 import { readFileSync, unlinkSync } from 'node:fs';
-import { link, mkdir, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  link,
+  mkdir,
+  open,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { hostname as osHostname } from 'node:os';
 import path from 'node:path';
 
@@ -330,7 +449,10 @@ export type MemoryLockRecord = {
 
 export class MemoryLockError extends Error {
   readonly code = 'memory-locked' as const;
-  constructor(message: string, readonly holder?: MemoryLockRecord) {
+  constructor(
+    message: string,
+    readonly holder?: MemoryLockRecord,
+  ) {
     super(message);
     this.name = 'MemoryLockError';
   }
@@ -350,17 +472,24 @@ export type MemoryLockOptions = {
 
 export type UnlockResult =
   | { status: 'no-lock' }
-  | { status: 'removed'; holder: MemoryLockRecord | 'corrupt'; wasAlive: boolean }
+  | {
+      status: 'removed';
+      holder: MemoryLockRecord | 'corrupt';
+      wasAlive: boolean;
+    }
   | { status: 'refused'; holder: MemoryLockRecord };
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_POLL_MS = 200;
 const DEFAULT_GUARD_STALE_MS = 30_000;
 
-export const memoryLockPath = (stackHome: string): string => path.join(stackHome, 'memory', '.memory.lock');
-const guardPath = (stackHome: string): string => path.join(stackHome, 'memory', '.memory.lock.clearing');
+export const memoryLockPath = (stackHome: string): string =>
+  path.join(stackHome, 'memory', '.memory.lock');
+const guardPath = (stackHome: string): string =>
+  path.join(stackHome, 'memory', '.memory.lock.clearing');
 
-const errno = (error: unknown): string | undefined => (error as NodeJS.ErrnoException | undefined)?.code;
+const errno = (error: unknown): string | undefined =>
+  (error as NodeJS.ErrnoException | undefined)?.code;
 
 /** EPERM means the process exists but belongs to another user, so it is alive. */
 export const isProcessAlive = (pid: number): boolean => {
@@ -391,7 +520,9 @@ const parseRecord = (text: string): MemoryLockRecord | undefined => {
 };
 
 /** null = no lock; 'corrupt' = a lock file exists but cannot be read as a record. */
-export const readMemoryLock = async (stackHome: string): Promise<MemoryLockRecord | 'corrupt' | null> => {
+export const readMemoryLock = async (
+  stackHome: string,
+): Promise<MemoryLockRecord | 'corrupt' | null> => {
   let text: string;
   try {
     text = await readFile(memoryLockPath(stackHome), 'utf8');
@@ -403,10 +534,16 @@ export const readMemoryLock = async (stackHome: string): Promise<MemoryLockRecor
 };
 
 /** Atomic create-with-content: write a private temp file, then hard-link it into place (fails with EEXIST if held). */
-const tryCreate = async (stackHome: string, record: MemoryLockRecord): Promise<boolean> => {
+const tryCreate = async (
+  stackHome: string,
+  record: MemoryLockRecord,
+): Promise<boolean> => {
   const target = memoryLockPath(stackHome);
   const temporary = `${target}.${record.lockId}.tmp`;
-  await writeFile(temporary, JSON.stringify(record), { flag: 'wx', mode: 0o600 });
+  await writeFile(temporary, JSON.stringify(record), {
+    flag: 'wx',
+    mode: 0o600,
+  });
   try {
     await link(temporary, target);
     return true;
@@ -418,17 +555,25 @@ const tryCreate = async (stackHome: string, record: MemoryLockRecord): Promise<b
   }
 };
 
-const removeIfLockId = async (stackHome: string, lockId: string): Promise<boolean> => {
+const removeIfLockId = async (
+  stackHome: string,
+  lockId: string,
+): Promise<boolean> => {
   const current = await readMemoryLock(stackHome);
-  if (current === null || current === 'corrupt' || current.lockId !== lockId) return false;
+  if (current === null || current === 'corrupt' || current.lockId !== lockId)
+    return false;
   await rm(memoryLockPath(stackHome), { force: true });
   return true;
 };
 
-const removeStaleGuard = async (stackHome: string, guardStaleMs: number): Promise<void> => {
+const removeStaleGuard = async (
+  stackHome: string,
+  guardStaleMs: number,
+): Promise<void> => {
   try {
     const info = await stat(guardPath(stackHome));
-    if (Date.now() - info.mtimeMs > guardStaleMs) await rm(guardPath(stackHome), { force: true });
+    if (Date.now() - info.mtimeMs > guardStaleMs)
+      await rm(guardPath(stackHome), { force: true });
   } catch (error) {
     if (errno(error) !== 'ENOENT') throw error;
   }
@@ -438,7 +583,8 @@ const removeStaleGuard = async (stackHome: string, guardStaleMs: number): Promis
 const clearLeftover = async (
   stackHome: string,
   inspected: MemoryLockRecord,
-  options: Required<Pick<MemoryLockOptions, 'guardStaleMs'>> & Pick<MemoryLockOptions, 'onLeftoverCleared'>,
+  options: Required<Pick<MemoryLockOptions, 'guardStaleMs'>> &
+    Pick<MemoryLockOptions, 'onLeftoverCleared'>,
 ): Promise<void> => {
   let guard;
   try {
@@ -449,7 +595,8 @@ const clearLeftover = async (
     return;
   }
   try {
-    if (await removeIfLockId(stackHome, inspected.lockId)) options.onLeftoverCleared?.(inspected);
+    if (await removeIfLockId(stackHome, inspected.lockId))
+      options.onLeftoverCleared?.(inspected);
   } finally {
     await guard.close();
     await rm(guardPath(stackHome), { force: true });
@@ -457,11 +604,17 @@ const clearLeftover = async (
 };
 
 const ago = (startedAt: string, now: Date): string => {
-  const seconds = Math.max(0, Math.round((now.getTime() - Date.parse(startedAt)) / 1000));
+  const seconds = Math.max(
+    0,
+    Math.round((now.getTime() - Date.parse(startedAt)) / 1000),
+  );
   return seconds < 120 ? `${seconds}s` : `${Math.round(seconds / 60)}m`;
 };
 
-export const busyMessage = (holder: MemoryLockRecord, now: Date = new Date()): string =>
+export const busyMessage = (
+  holder: MemoryLockRecord,
+  now: Date = new Date(),
+): string =>
   `Another STAK command (\`${holder.command}\`, started ${ago(holder.startedAt, now)} ago) is changing Memory. Try again when it finishes.`;
 
 export const leftoverClearedMessage = (holder: MemoryLockRecord): string =>
@@ -495,8 +648,15 @@ export const acquireMemoryLock = async (
     if (await tryCreate(stackHome, record)) break;
     const holder = await readMemoryLock(stackHome);
     if (holder === null) continue; // released between our attempt and our read
-    if (holder !== 'corrupt' && holder.hostname === host && !alive(holder.pid)) {
-      await clearLeftover(stackHome, holder, { guardStaleMs, onLeftoverCleared: options.onLeftoverCleared });
+    if (
+      holder !== 'corrupt' &&
+      holder.hostname === host &&
+      !alive(holder.pid)
+    ) {
+      await clearLeftover(stackHome, holder, {
+        guardStaleMs,
+        onLeftoverCleared: options.onLeftoverCleared,
+      });
       continue;
     }
     if (Date.now() >= deadline) {
@@ -559,7 +719,11 @@ export const withMemoryLock = async <T>(
 
 export const unlockMemory = async (
   stackHome: string,
-  options: { force?: boolean; isProcessAlive?: (pid: number) => boolean; hostname?: string } = {},
+  options: {
+    force?: boolean;
+    isProcessAlive?: (pid: number) => boolean;
+    hostname?: string;
+  } = {},
 ): Promise<UnlockResult> => {
   const holder = await readMemoryLock(stackHome);
   if (holder === null) return { status: 'no-lock' };
@@ -568,7 +732,9 @@ export const unlockMemory = async (
     return { status: 'removed', holder, wasAlive: false };
   }
   const host = options.hostname ?? osHostname();
-  const alive = holder.hostname !== host || (options.isProcessAlive ?? isProcessAlive)(holder.pid);
+  const alive =
+    holder.hostname !== host ||
+    (options.isProcessAlive ?? isProcessAlive)(holder.pid);
   if (alive && options.force !== true) return { status: 'refused', holder };
   await removeIfLockId(stackHome, holder.lockId);
   return { status: 'removed', holder, wasAlive: alive };
@@ -607,12 +773,14 @@ git commit -m "feat(memory): cross-process Memory lock"
 ### Task 2: Wrap every Memory-changing command in the lock
 
 **Files:**
+
 - Modify: `packages/cli/src/commands/add.ts`, `push.ts`, `pull.ts`, `memory.ts` (backup, recover, restore, resolve, materialize, protect), `project.ts` (map, name, archive, unarchive; these write the registry, which spec §1 includes in the store)
 - Modify: `packages/cli/src/program.ts` (wire the dependency)
 - Modify: `packages/cli/src/ui/*.ts` only if needed to render `MemoryLockError` messages and the leftover note
 - Test: the existing per-command test files (`packages/cli/src/program.test.ts` and/or `commands/*.test.ts`, following where each command is tested today)
 
 **Interfaces:**
+
 - Consumes: `withMemoryLock`, `MemoryLockError`, `leftoverClearedMessage` from `@stack/memory` (Task 1).
 - Produces: an optional dependency on each affected command's `*CommandDependencies` type:
 
@@ -627,6 +795,7 @@ git commit -m "feat(memory): cross-process Memory lock"
 - [ ] **Step 1: Write the failing tests**
 
 For each command, add a test using its existing test harness. The test passes a `withMemoryLock` spy that records `command` and calls `fn`. Assert three things:
+
 - the spy is called exactly once, with the exact command string (`'stak add'`, `'stak push'`, `'stak pull'`, `'stak memory backup'`, `'stak memory recover'`, `'stak memory restore'`, `'stak memory resolve'`, `'stak memory materialize'`, `'stak memory protect'`, `'stak project map'`, `'stak project name'`, `'stak project archive'`, `'stak project unarchive'`);
 - every Memory dependency of that command (for example `applyCanonicalPull`, `memoryPullPreflight`, `applyMemoryPull`, the push/stage Memory functions) is called inside `fn`;
 - read-only commands (`stak status`, `stak memory status`, `stak memory diff`, `stak memory history`, `stak memory scan`, `stak memory resolve` with no arguments, which only lists) do not call the spy.
@@ -637,15 +806,30 @@ Example for pull, adapting to the actual harness and names in the existing pull 
 it('runs all Memory work for stak pull inside the Memory lock', async () => {
   const events: string[] = [];
   const deps = basePullDeps({
-    memoryPullPreflight: async () => { events.push('preflight'); return { eligible: false }; },
-    applyCanonicalPull: async () => { events.push('canonical'); return { status: 'up-to-date' } as never; },
+    memoryPullPreflight: async () => {
+      events.push('preflight');
+      return { eligible: false };
+    },
+    applyCanonicalPull: async () => {
+      events.push('canonical');
+      return { status: 'up-to-date' } as never;
+    },
     withMemoryLock: async (command, fn) => {
       events.push(`lock:${command}`);
-      try { return await fn(); } finally { events.push('unlock'); }
+      try {
+        return await fn();
+      } finally {
+        events.push('unlock');
+      }
     },
   });
   await runPull(deps, ['pull', '--yes']);
-  expect(events).toEqual(['lock:stak pull', 'preflight', 'canonical', 'unlock']);
+  expect(events).toEqual([
+    'lock:stak pull',
+    'preflight',
+    'canonical',
+    'unlock',
+  ]);
 });
 ```
 
@@ -661,13 +845,16 @@ Expected: the new tests FAIL, because the spy is never called.
 In each command action, find the span from the first Memory read to the last Memory write, and wrap exactly that span:
 
 ```ts
-const lock = dependencies.withMemoryLock ?? (async <T>(_command: string, fn: () => Promise<T>) => fn());
+const lock =
+  dependencies.withMemoryLock ??
+  (async <T>(_command: string, fn: () => Promise<T>) => fn());
 const memoryOutcome = await lock('stak pull', async () => {
   // ...the existing Memory section, unchanged: preflight, recover, canonical pull...
 });
 ```
 
 Rules:
+
 - **Push.** Wrap the Memory part only. The Skills part runs outside the lock, as today.
 - **Pull.** The Memory preflight read is inside the lock, so the decision and the action see the same state.
 - **Inner functions** (`canonical-ops.ts`, `cloud-ops.ts`, `@stack/memory`) are never changed to take the lock.
@@ -701,12 +888,14 @@ git commit -m "feat(cli): hold the Memory lock in every Memory-changing command"
 ### Task 3: `stak memory unlock`
 
 **Files:**
+
 - Modify: `packages/cli/src/commands/memory.ts`
 - Modify: `packages/cli/src/program.ts`
 - Modify: `docs/commands.md`, `docs/memory.md`
 - Test: wherever the `memory` subcommands are tested today
 
 **Interfaces:**
+
 - Consumes: `unlockMemory`, `UnlockResult`, `MemoryLockRecord` from `@stack/memory`.
 - Produces, on `MemoryCommandDependencies`: `unlockMemory?(options: { force: boolean }): Promise<UnlockResult>`
 
@@ -718,10 +907,12 @@ Test these four outputs, using the existing memory-command test harness:
 // no lock
 expect(out).toBe('No Memory lock is held.\n');
 // removed (process not running)
-expect(out).toBe('Removed the Memory lock held by `stak pull` (process 1234, started 3m ago, no longer running).\n');
+expect(out).toBe(
+  'Removed the Memory lock held by `stak pull` (process 1234, started 3m ago, no longer running).\n',
+);
 // refused
 // -> command exits non-zero with:
-'The Memory lock is held by `stak pull` (process 1234 on this-host, started 12s ago), which may still be running.\nWait for it to finish. If you are sure it is not a STAK command, run `stak memory unlock --force`.'
+('The Memory lock is held by `stak pull` (process 1234 on this-host, started 12s ago), which may still be running.\nWait for it to finish. If you are sure it is not a STAK command, run `stak memory unlock --force`.');
 // forced while possibly running
 expect(out).toBe(
   'Warning: removing a Memory lock that may belong to a running STAK command. If one is running, its Memory changes can be lost.\nRemoved the Memory lock held by `stak pull` (process 1234).\n',
@@ -744,11 +935,19 @@ Register the subcommand, following the file's existing `memory.command(...)` sty
 ```ts
 memory
   .command('unlock')
-  .description('Remove a leftover Memory lock left behind by a crashed STAK command')
-  .option('--force', 'remove the lock even if its process may still be running (can lose Memory changes)')
+  .description(
+    'Remove a leftover Memory lock left behind by a crashed STAK command',
+  )
+  .option(
+    '--force',
+    'remove the lock even if its process may still be running (can lose Memory changes)',
+  )
   .action(async (options: { force?: boolean }) => {
-    if (!dependencies.unlockMemory) throw new Error('Memory unlock is not available.');
-    const result = await dependencies.unlockMemory({ force: options.force === true });
+    if (!dependencies.unlockMemory)
+      throw new Error('Memory unlock is not available.');
+    const result = await dependencies.unlockMemory({
+      force: options.force === true,
+    });
     // render each UnlockResult status with the exact strings from Step 1;
     // 'refused' throws an Error with the refused message, so the exit code is non-zero
   });
@@ -757,6 +956,7 @@ memory
 Wire `unlockMemory: (options) => unlockMemory(stackHome, options)` in `program.ts`. `stak memory unlock` must NOT itself take the Memory lock.
 
 Docs:
+
 - In `docs/commands.md`, add `stak memory unlock [--force]` in the existing format.
 - In `docs/memory.md`, add two plain sentences:
   - Memory commands now run one at a time. If another is running, a command waits up to 10 seconds, then asks you to try again.
@@ -779,12 +979,15 @@ git commit -m "feat(cli): add stak memory unlock"
 ### Task 4: Concurrency tests for the real command pairings
 
 **Files:**
+
 - Create: `packages/cli/src/memory/memory-lock-concurrency.test.ts`
 
 **Interfaces:**
+
 - Consumes: the real CLI Memory functions used by the commands, from `canonical-ops.ts`, `cloud-ops.ts` and `program.ts` wiring, together with the InMemory backend fixtures already used in `canonical-ops.test.ts` and `cloud-ops.test.ts`, plus `withMemoryLock` from `@stack/memory`.
 
 **Note on the spec's "separate Node processes":** the InMemory backend can't be shared across processes. So:
+
 - The **lock primitive** gets its genuine multi-process test in Task 1.
 - These **pairing tests** run both commands concurrently in one process, each wrapped in the real file-based `withMemoryLock`, exactly as `program.ts` wires it.
 
@@ -793,12 +996,14 @@ The file lock behaves the same inside one process: the second acquire sees a liv
 - [ ] **Step 1: Write the tests**
 
 For each pairing, set up a STAK home, a Claude home and a project, using the existing two-machine fixture helpers in `canonical-ops.test.ts`:
+
 1. `add + pull`
 2. `add + push`
 3. `pull + push`
 4. `materialize + pull`
 
 Then:
+
 - Arrange state where the two commands touch overlapping Memory. For add + pull: Cloud has a doc that pull will merge in, while add stages a native edit.
 - Start both through `withMemoryLock(stackHome, '<command>', fn)` with `Promise.all`. Force interleaving by injecting a delay hook, or an awaited `setTimeout(0)` yield, at the points where the commands read and write. If the functions have no hook, run the race many times (for example 25 iterations) and assert the invariant holds on every iteration.
 - Assert:

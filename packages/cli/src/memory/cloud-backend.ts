@@ -130,7 +130,9 @@ export const stackCloudRemoteMemoryBackend = (
         bundleFormatVersion: input.bundleFormatVersion,
         ...(input.cryptoVersion ? { cryptoVersion: input.cryptoVersion } : {}),
         ...(input.wrappedDek ? { wrappedDek: input.wrappedDek } : {}),
-        ...(input.replicaOf !== undefined ? { replicaOf: input.replicaOf } : {}),
+        ...(input.replicaOf !== undefined
+          ? { replicaOf: input.replicaOf }
+          : {}),
       })
       .catch(normalizeConflict);
     return toGeneration(result.generation);

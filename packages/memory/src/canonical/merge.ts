@@ -34,7 +34,9 @@ export const pendingMergeResolutionSchema = z.object({
    * otherwise finalizing would write the recorded choice over a newer edit. */
   local: canonicalDocSchema.nullable().optional(),
 });
-export type PendingMergeResolution = z.infer<typeof pendingMergeResolutionSchema>;
+export type PendingMergeResolution = z.infer<
+  typeof pendingMergeResolutionSchema
+>;
 
 /** `canonical/merge.json` (spec Appendix A.1): written by push/pull on a
  * conflict as `{ basedOnGeneration, merged, conflicts }`; `resolved` is added
@@ -52,10 +54,15 @@ export type MergeOutcome = {
   conflicts: MergeConflict[];
 };
 
-const docsByPath = (project: CanonicalProjectMemory | undefined): Map<string, CanonicalDoc> =>
+const docsByPath = (
+  project: CanonicalProjectMemory | undefined,
+): Map<string, CanonicalDoc> =>
   new Map((project?.documents ?? []).map((doc) => [doc.path, doc]));
 
-const sameDoc = (a: CanonicalDoc | undefined, b: CanonicalDoc | undefined): boolean => {
+const sameDoc = (
+  a: CanonicalDoc | undefined,
+  b: CanonicalDoc | undefined,
+): boolean => {
   if (a === undefined && b === undefined) return true;
   if (a === undefined || b === undefined) return false;
   if (a.state !== b.state) return false;
@@ -86,7 +93,11 @@ const mergeProject = (
   const baseDocs = docsByPath(base);
   const localDocs = docsByPath(local);
   const remoteDocs = docsByPath(remote);
-  const paths = new Set<string>([...baseDocs.keys(), ...localDocs.keys(), ...remoteDocs.keys()]);
+  const paths = new Set<string>([
+    ...baseDocs.keys(),
+    ...localDocs.keys(),
+    ...remoteDocs.keys(),
+  ]);
 
   const documents: CanonicalDoc[] = [];
   const conflicts: MergeConflict[] = [];
@@ -114,11 +125,12 @@ const mergeProject = (
       if (L) documents.push(L);
       continue;
     }
-    const reason: MergeConflict['reason'] = isGone(L) && isGone(R)
-      ? 'delete-delete'
-      : isGone(L) || isGone(R)
-        ? 'edit-delete'
-        : 'edit-edit';
+    const reason: MergeConflict['reason'] =
+      isGone(L) && isGone(R)
+        ? 'delete-delete'
+        : isGone(L) || isGone(R)
+          ? 'edit-delete'
+          : 'edit-edit';
     conflicts.push({ projectId, path, reason });
     // Conflicted documents are omitted from `merged` entirely until resolved.
   }
@@ -169,7 +181,8 @@ export const keepBothPath = (
   const hex = localContentHash.replace(/^sha256:/, '');
   const lastSlash = originalPath.lastIndexOf('/');
   const dir = lastSlash === -1 ? '' : originalPath.slice(0, lastSlash + 1);
-  const base = lastSlash === -1 ? originalPath : originalPath.slice(lastSlash + 1);
+  const base =
+    lastSlash === -1 ? originalPath : originalPath.slice(lastSlash + 1);
   const dot = base.lastIndexOf('.');
   const stem = dot <= 0 ? base : base.slice(0, dot);
   const ext = dot <= 0 ? '' : base.slice(dot); // includes leading "."
@@ -209,7 +222,10 @@ export const resolveConflictDocs = (
     lastContentHash,
     deletedAt,
   });
-  const take = (chosen: CanonicalDoc | undefined, other: CanonicalDoc | undefined): CanonicalDoc => {
+  const take = (
+    chosen: CanonicalDoc | undefined,
+    other: CanonicalDoc | undefined,
+  ): CanonicalDoc => {
     if (chosen) return chosen;
     if (other?.state === 'present') return tombstone(other.contentHash);
     if (other) return other;
@@ -218,5 +234,8 @@ export const resolveConflictDocs = (
   if (keep === 'local') return { primary: take(local, cloud) };
   const primary = take(cloud, local);
   if (keep === 'cloud' || local?.state !== 'present') return { primary };
-  return { primary, alt: { ...local, path: keepBothPath(path, local.contentHash, isTaken) } };
+  return {
+    primary,
+    alt: { ...local, path: keepBothPath(path, local.contentHash, isTaken) },
+  };
 };

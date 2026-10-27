@@ -31,13 +31,13 @@ of interleaving.
 
 `<STAK home>/memory/.memory.lock` is a small JSON file:
 
-| Field | Meaning |
-|---|---|
-| `lockId` | Random unique value generated when the lock is taken. It identifies this specific holding of the lock. |
-| `pid` | Process ID of the holder |
-| `hostname` | Machine name of the holder |
-| `startedAt` | When the lock was taken (ISO time) |
-| `command` | The STAK command holding it, for example `stak pull` |
+| Field       | Meaning                                                                                                |
+| ----------- | ------------------------------------------------------------------------------------------------------ |
+| `lockId`    | Random unique value generated when the lock is taken. It identifies this specific holding of the lock. |
+| `pid`       | Process ID of the holder                                                                               |
+| `hostname`  | Machine name of the holder                                                                             |
+| `startedAt` | When the lock was taken (ISO time)                                                                     |
+| `command`   | The STAK command holding it, for example `stak pull`                                                   |
 
 The lock is taken by creating the file with exclusive-create, so the create fails if
 the file already exists. This is the same mechanism `withMainMutationLock` uses for
@@ -167,6 +167,7 @@ exits successfully.
   Each pair must run one after the other, never interleaved. No Memory document may
   be lost, and the final state must equal running the two commands back to back in
   some order.
+
 - **Signal test:** a child process holding the lock gets SIGINT, and the lock is
   removed.
 

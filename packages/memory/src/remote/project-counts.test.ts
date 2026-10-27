@@ -137,7 +137,11 @@ describe('standardProjectCountsFromBundle (P3 §2)', () => {
     // below relied on that gap and would now fail with `store-object-missing`.
     const presentBytes = Buffer.from('present doc body', 'utf8');
     const presentContentHash = hashBytes(presentBytes);
-    await writeMemoryObject({ stackHome, contentHash: presentContentHash, bytes: presentBytes });
+    await writeMemoryObject({
+      stackHome,
+      contentHash: presentContentHash,
+      bytes: presentBytes,
+    });
     await writeCanonicalMain(stackHome, {
       schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
       projects: [

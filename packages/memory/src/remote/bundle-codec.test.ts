@@ -7,7 +7,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { writeMemoryManifest } from '../store.js';
 import { CANONICAL_MAIN_SCHEMA_VERSION } from '../canonical/domain.js';
 import { readCanonicalMain, writeCanonicalMain } from '../canonical/store.js';
-import { BUNDLE_FORMAT_V2, bundleFromStore, restoreBundleToStore } from './bundle-codec.js';
+import {
+  BUNDLE_FORMAT_V2,
+  bundleFromStore,
+  restoreBundleToStore,
+} from './bundle-codec.js';
 
 const roots: string[] = [];
 const temp = async (): Promise<string> => {
@@ -16,7 +20,9 @@ const temp = async (): Promise<string> => {
   return root;
 };
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((r) => rm(r, { recursive: true, force: true })));
+  await Promise.all(
+    roots.splice(0).map((r) => rm(r, { recursive: true, force: true })),
+  );
 });
 
 describe('v2 canonical bundling', () => {
@@ -24,11 +30,18 @@ describe('v2 canonical bundling', () => {
     const stackHome = await temp();
     await writeMemoryManifest({
       stackHome,
-      manifest: { schemaVersion: 1, provider: 'claude', createdAt: '2026-10-22T00:00:00.000Z', items: [] },
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-22T00:00:00.000Z',
+        items: [],
+      },
     });
     await writeCanonicalMain(stackHome, {
       schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
-      projects: [{ projectId: 'prj_aaaaaaaaaaaaaaaaaaaaaaaaaa', documents: [] }],
+      projects: [
+        { projectId: 'prj_aaaaaaaaaaaaaaaaaaaaaaaaaa', documents: [] },
+      ],
     });
     const { bundle } = await bundleFromStore(stackHome);
     expect(bundle.bundleFormat).toBe(BUNDLE_FORMAT_V2);
@@ -39,11 +52,18 @@ describe('v2 canonical bundling', () => {
     const source = await temp();
     await writeMemoryManifest({
       stackHome: source,
-      manifest: { schemaVersion: 1, provider: 'claude', createdAt: '2026-10-22T00:00:00.000Z', items: [] },
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-22T00:00:00.000Z',
+        items: [],
+      },
     });
     const canonical = {
       schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,
-      projects: [{ projectId: 'prj_aaaaaaaaaaaaaaaaaaaaaaaaaa', documents: [] }],
+      projects: [
+        { projectId: 'prj_aaaaaaaaaaaaaaaaaaaaaaaaaa', documents: [] },
+      ],
     };
     await writeCanonicalMain(source, canonical);
     const { bytes } = await bundleFromStore(source);
@@ -57,7 +77,12 @@ describe('v2 canonical bundling', () => {
     const stackHome = await temp();
     await writeMemoryManifest({
       stackHome,
-      manifest: { schemaVersion: 1, provider: 'claude', createdAt: '2026-10-22T00:00:00.000Z', items: [] },
+      manifest: {
+        schemaVersion: 1,
+        provider: 'claude',
+        createdAt: '2026-10-22T00:00:00.000Z',
+        items: [],
+      },
     });
     const { bundle } = await bundleFromStore(stackHome);
     expect(bundle.bundleFormat).toBe('stack-mem-bundle-v1');

@@ -306,7 +306,10 @@ export const renderRemoteStackUse = (
     row('New desired Skills', proposal.summary.newSkills).trimEnd(),
     row('References to restore', proposal.summary.references).trimEnd(),
     row('Hard conflicts', proposal.summary.hardConflicts).trimEnd(),
-    row('Renamed (same name, different content)', proposal.summary.renamed).trimEnd(),
+    row(
+      'Renamed (same name, different content)',
+      proposal.summary.renamed,
+    ).trimEnd(),
     '',
     'main will become:',
     row('STAK layers', proposal.summary.stackLayers).trimEnd(),
@@ -346,7 +349,10 @@ export const renderOwnedStackUse = (
     row('New desired Skills', proposal.summary.newSkills).trimEnd(),
     row('References to restore', proposal.summary.references).trimEnd(),
     row('Hard conflicts', proposal.summary.hardConflicts).trimEnd(),
-    row('Renamed (same name, different content)', proposal.summary.renamed).trimEnd(),
+    row(
+      'Renamed (same name, different content)',
+      proposal.summary.renamed,
+    ).trimEnd(),
     '',
     'main will become:',
     row('STAK layers', proposal.summary.stackLayers).trimEnd(),
@@ -381,8 +387,7 @@ export type PushSkillOutcome =
  * (no local Memory manifest — `stak add .` has never run) — distinct from `skipped`
  * (not signed in), since the fix is different (`stak add .` vs. `stak login`). */
 export type MemoryPushOutcome =
-  | CloudBackupOutcome
-  | { status: 'nothing-staged' };
+  CloudBackupOutcome | { status: 'nothing-staged' };
 
 export type PushMemoryOutcome =
   | { status: 'not-attempted' }
@@ -433,7 +438,9 @@ export const renderCombinedPushResult = (
   else {
     const outcome = memory.outcome;
     if (outcome.status === 'nothing-staged')
-      lines.push('  nothing staged yet — run `stak add .` to stage Memory changes.');
+      lines.push(
+        '  nothing staged yet — run `stak add .` to stage Memory changes.',
+      );
     else if (outcome.status === 'up-to-date') {
       const notes = canonicalExtraNotes({
         unavailable: outcome.unavailable,
@@ -459,7 +466,9 @@ export const renderCombinedPushResult = (
     // type completeness since `CloudBackupOutcome` (shared with `stak memory
     // backup`) now includes it.
     else if (outcome.status === 'conflict')
-      lines.push(`  ${outcome.conflicts.length} unresolved conflict(s) with Cloud.`);
+      lines.push(
+        `  ${outcome.conflicts.length} unresolved conflict(s) with Cloud.`,
+      );
     else {
       const notes = canonicalExtraNotes({
         unavailable: outcome.unavailable,
@@ -524,11 +533,15 @@ export type PullCanonicalOutcome =
 
 /** Spec §4.2.1's one line per folded project, e.g. "Merged project prj_rvznx…
  * into prj_4f68… (same repository); 1 file kept both". */
-export const projectFoldNotes = (folded: readonly ProjectFoldNote[] | undefined): string[] =>
+export const projectFoldNotes = (
+  folded: readonly ProjectFoldNote[] | undefined,
+): string[] =>
   (folded ?? []).map(
     (note) =>
       `Merged project ${shortProjectId(note.fromProjectId)} into ${shortProjectId(note.toProjectId)} (same repository)` +
-      (note.keptBoth > 0 ? `; ${note.keptBoth} file${note.keptBoth === 1 ? '' : 's'} kept both` : ''),
+      (note.keptBoth > 0
+        ? `; ${note.keptBoth} file${note.keptBoth === 1 ? '' : 's'} kept both`
+        : ''),
   );
 
 /** A short, terse line for a non-`up-to-date` canonical outcome — `null` when
@@ -546,7 +559,9 @@ export const canonicalExtraNotes = (outcome: {
   // Task 13 fix round 4: files the upgrade found missing natively and wrote
   // back from STAK (never silently recorded as deletions).
   if (outcome.restoredFromStak && outcome.restoredFromStak > 0)
-    notes.push(`${outcome.restoredFromStak} Memory file(s) will be restored from STAK`);
+    notes.push(
+      `${outcome.restoredFromStak} Memory file(s) will be restored from STAK`,
+    );
   if (outcome.unavailable && outcome.unavailable.length > 0)
     notes.push(
       `${outcome.unavailable.length} project(s) not available on this machine (${outcome.unavailable
@@ -560,7 +575,8 @@ export const canonicalExtraNotes = (outcome: {
     // generic "N native conflict(s)" count meant for ordinary sync conflicts.
     const materializeErrors = outcome.conflicts.filter((c) => c.path === '');
     const syncConflicts = outcome.conflicts.filter((c) => c.path !== '');
-    for (const error of materializeErrors) notes.push(`materialize warning: ${error.reason}`);
+    for (const error of materializeErrors)
+      notes.push(`materialize warning: ${error.reason}`);
     // Final review I4: these are local agent-vs-STAK conflicts (`stak add .`
     // alone doesn't clear them); `stak status` gives the fix for each.
     if (syncConflicts.length > 0)
@@ -584,7 +600,10 @@ const canonicalPullLine = (canonical: PullCanonicalOutcome): string | null => {
     return '  Project Memory sync needs this device unlocked (`stak memory recover --passkey` or `--recovery-file <path>`).';
   const notes = canonicalExtraNotes(outcome);
   if (outcome.status === 'up-to-date' && notes.length === 0) return null;
-  const head = outcome.status === 'up-to-date' ? 'Project Memory up to date' : 'Project Memory synced';
+  const head =
+    outcome.status === 'up-to-date'
+      ? 'Project Memory up to date'
+      : 'Project Memory synced';
   return notes.length > 0 ? `  ${head}; ${notes.join('; ')}.` : `  ${head}.`;
 };
 
@@ -597,7 +616,9 @@ export const renderProjectMemoryOnlyPull = (
   canonical: PullCanonicalOutcome,
   lockError?: string,
 ): string => {
-  const line = lockError ? `  FAILED: ${lockError}` : canonicalPullLine(canonical);
+  const line = lockError
+    ? `  FAILED: ${lockError}`
+    : canonicalPullLine(canonical);
   if (line === null) return block(['Everything is already up to date.']);
   return block([
     'Skills',
@@ -651,7 +672,9 @@ export const renderCombinedPullResult = (
   }
   lines.push(
     '',
-    pullFailed(skill, memory) ? 'Pull did not fully succeed.' : 'Pull complete.',
+    pullFailed(skill, memory)
+      ? 'Pull did not fully succeed.'
+      : 'Pull complete.',
   );
   if (
     !pullFailed(skill, memory) &&

@@ -72,7 +72,12 @@ const machine = async (base: string, tag: string): Promise<Machine> => {
   return m;
 };
 const fakeBackup = (): Promise<BackupResult> =>
-  Promise.resolve({ provider: 'claude', files: 0, projects: 0, createdAt: '2026-10-25T00:00:00.000Z' });
+  Promise.resolve({
+    provider: 'claude',
+    files: 0,
+    projects: 0,
+    createdAt: '2026-10-25T00:00:00.000Z',
+  });
 const depsOf = (m: Machine, backend: RemoteMemoryBackend) => ({
   stackHome: m.home,
   backend,
@@ -102,7 +107,13 @@ const bindAt = async (m: Machine, fixedProjectId?: string) => {
   return minted.projectId;
 };
 const nativeOf = (m: Machine, name: string) =>
-  path.join(m.claude, 'projects', encodeClaudeProjectKey(path.resolve(m.dir)), 'memory', name);
+  path.join(
+    m.claude,
+    'projects',
+    encodeClaudeProjectKey(path.resolve(m.dir)),
+    'memory',
+    name,
+  );
 const writeNative = async (m: Machine, name: string, body: string) => {
   await mkdir(path.dirname(nativeOf(m, name)), { recursive: true });
   await writeFile(nativeOf(m, name), body, 'utf8');
@@ -123,7 +134,10 @@ const hashOf = (body: string) => hashBytes(Buffer.from(body, 'utf8'));
  */
 const synced = async (tag: string) => {
   const base = path.join(root, tag);
-  const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), `lock-${tag}`);
+  const backend = inMemoryRemoteMemoryBackend(
+    new InMemoryRemoteMemoryStore(),
+    `lock-${tag}`,
+  );
   const X = await machine(base, 'x');
   const Y = await machine(base, 'y');
   const projectId = await bindAt(X);
@@ -131,12 +145,18 @@ const synced = async (tag: string) => {
   await writeNative(X, 'keep.md', 'kept');
   await writeNative(X, 'MEMORY.md', 'a');
   await stageCanonicalMemory(X.home, discoveryOf(X));
-  expect((await pushMemoryViaCanonical(depsOf(X, backend), discoveryOf(X))).status).toBe('pushed');
-  expect((await pullMemoryViaCanonical(depsOf(Y, backend), discoveryOf(Y))).status).toBe('merged');
+  expect(
+    (await pushMemoryViaCanonical(depsOf(X, backend), discoveryOf(X))).status,
+  ).toBe('pushed');
+  expect(
+    (await pullMemoryViaCanonical(depsOf(Y, backend), discoveryOf(Y))).status,
+  ).toBe('merged');
   expect(await readNative(Y, 'MEMORY.md')).toBe('a');
   await writeNative(X, 'new.md', 'from X');
   await stageCanonicalMemory(X.home, discoveryOf(X));
-  expect((await pushMemoryViaCanonical(depsOf(X, backend), discoveryOf(X))).status).toBe('pushed');
+  expect(
+    (await pushMemoryViaCanonical(depsOf(X, backend), discoveryOf(X))).status,
+  ).toBe('pushed');
   const yBase = await readCanonicalBase(Y.home);
   if (!yBase) throw new Error('test setup: Y has no sync base');
   return { backend, X, Y, projectId, yBaseGeneration: yBase.generation };
@@ -165,19 +185,26 @@ const stallingBackend = (
           }
           return target.getGeneration(generation);
         };
-      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+      return typeof value === 'function'
+        ? (value as (...args: unknown[]) => unknown).bind(target)
+        : value;
     },
   });
   return { backend: wrapped, stalled: () => used };
 };
 
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /* ------------------------------ commands ------------------------------ */
 /* The exact functions program.ts wires for each command's Memory part.    */
 
 type CommandName = 'add' | 'pull' | 'push' | 'materialize';
-const commandFn = (f: Fixture, name: CommandName, backend: RemoteMemoryBackend): (() => Promise<unknown>) => {
+const commandFn = (
+  f: Fixture,
+  name: CommandName,
+  backend: RemoteMemoryBackend,
+): (() => Promise<unknown>) => {
   const { Y } = f;
   switch (name) {
     case 'add': // program.ts `stageMemory`
@@ -192,10 +219,12 @@ const commandFn = (f: Fixture, name: CommandName, backend: RemoteMemoryBackend):
 };
 
 /** `withMemoryLock` exactly as program.ts wires it (leftover notes captured, not printed). */
-const programLock = (stackHome: string, leftovers: string[]) =>
-  <T,>(command: string, fn: () => Promise<T>): Promise<T> =>
+const programLock =
+  (stackHome: string, leftovers: string[]) =>
+  <T>(command: string, fn: () => Promise<T>): Promise<T> =>
     withMemoryLock(stackHome, command, fn, {
-      onLeftoverCleared: (holder) => leftovers.push(leftoverClearedMessage(holder)),
+      onLeftoverCleared: (holder) =>
+        leftovers.push(leftoverClearedMessage(holder)),
     });
 
 /* ------------------------------ snapshots ----------------------------- */
@@ -205,10 +234,21 @@ type Snapshot = {
   cloud: Record<string, string>;
   native: Record<string, string | null>;
 };
-const docsOf = (main: Awaited<ReturnType<typeof readCanonicalMain>>, projectId: string) =>
+const docsOf = (
+  main: Awaited<ReturnType<typeof readCanonicalMain>>,
+  projectId: string,
+) =>
   Object.fromEntries(
     (main.projects.find((p) => p.projectId === projectId)?.documents ?? [])
-      .map((d) => [d.path, d.state === 'present' ? `present:${d.contentHash}` : `deleted:${d.lastContentHash}`] as const)
+      .map(
+        (d) =>
+          [
+            d.path,
+            d.state === 'present'
+              ? `present:${d.contentHash}`
+              : `deleted:${d.lastContentHash}`,
+          ] as const,
+      )
       .sort(([a], [b]) => (a < b ? -1 : 1)),
   );
 const snapshot = async (f: Fixture): Promise<Snapshot> => {
@@ -244,7 +284,11 @@ const pairings: Pairing[] = [
     name: 'add + pull',
     commands: ['add', 'pull'],
     arrange: (f) => writeNative(f.Y, 'MEMORY.md', 'b'),
-    mustKeep: { 'notes/MEMORY.md': 'b', 'notes/new.md': 'from X', 'notes/keep.md': 'kept' },
+    mustKeep: {
+      'notes/MEMORY.md': 'b',
+      'notes/new.md': 'from X',
+      'notes/keep.md': 'kept',
+    },
   },
   {
     // An already-staged edit is being pushed while add stages a second one.
@@ -255,7 +299,11 @@ const pairings: Pairing[] = [
       await stageCanonicalMemory(f.Y.home, discoveryOf(f.Y));
       await writeNative(f.Y, 'MEMORY.md', 'b');
     },
-    mustKeep: { 'notes/MEMORY.md': 'b', 'notes/new.md': 'from X', 'notes/keep.md': 'kept 2' },
+    mustKeep: {
+      'notes/MEMORY.md': 'b',
+      'notes/new.md': 'from X',
+      'notes/keep.md': 'kept 2',
+    },
   },
   {
     // A staged edit is pushed while pull merges Cloud's new doc.
@@ -265,19 +313,31 @@ const pairings: Pairing[] = [
       await writeNative(f.Y, 'keep.md', 'kept 2');
       await stageCanonicalMemory(f.Y.home, discoveryOf(f.Y));
     },
-    mustKeep: { 'notes/MEMORY.md': 'a', 'notes/new.md': 'from X', 'notes/keep.md': 'kept 2' },
+    mustKeep: {
+      'notes/MEMORY.md': 'a',
+      'notes/new.md': 'from X',
+      'notes/keep.md': 'kept 2',
+    },
   },
   {
     // Materialize rewrites agent files while pull merges and materializes Cloud's new doc.
     name: 'materialize + pull',
     commands: ['materialize', 'pull'],
     arrange: async () => undefined,
-    mustKeep: { 'notes/MEMORY.md': 'a', 'notes/new.md': 'from X', 'notes/keep.md': 'kept' },
+    mustKeep: {
+      'notes/MEMORY.md': 'a',
+      'notes/new.md': 'from X',
+      'notes/keep.md': 'kept',
+    },
   },
 ];
 
 /** Run the two commands one after the other, unlocked, on a fresh fixture. */
-const sequential = async (p: Pairing, order: [CommandName, CommandName], tag: string): Promise<Snapshot> => {
+const sequential = async (
+  p: Pairing,
+  order: [CommandName, CommandName],
+  tag: string,
+): Promise<Snapshot> => {
   const f = await synced(tag);
   await p.arrange(f);
   for (const name of order) await commandFn(f, name, f.backend)();
@@ -303,7 +363,11 @@ describe('the Memory lock serializes real command pairings (spec 2026-10-25 §5)
         const events: string[] = [];
         // Hold each command's read-to-write window open, so an unserialized pair would
         // interleave inside it.
-        const { backend, stalled } = stallingBackend(f.backend, f.yBaseGeneration, () => sleep(40));
+        const { backend, stalled } = stallingBackend(
+          f.backend,
+          f.yBaseGeneration,
+          () => sleep(40),
+        );
         const run = (name: CommandName) => {
           events.push(`${name}:request`);
           return lock(`stak ${name}`, async () => {
@@ -324,17 +388,26 @@ describe('the Memory lock serializes real command pairings (spec 2026-10-25 §5)
 
         // Both asked before either finished (genuine contention), and the critical
         // sections never overlapped.
-        expect(events.slice(0, 2).sort()).toEqual([`${a}:request`, `${b}:request`].sort());
+        expect(events.slice(0, 2).sort()).toEqual(
+          [`${a}:request`, `${b}:request`].sort(),
+        );
         const sections = events.filter((e) => !e.endsWith(':request'));
         const winner = sections[0]?.split(':')[0] as CommandName;
         const loser = winner === a ? b : a;
-        expect(sections).toEqual([`${winner}:enter`, `${winner}:exit`, `${loser}:enter`, `${loser}:exit`]);
+        expect(sections).toEqual([
+          `${winner}:enter`,
+          `${winner}:exit`,
+          `${loser}:enter`,
+          `${loser}:exit`,
+        ]);
         expect(leftovers).toEqual([]);
 
         // No document lost.
         const final = await snapshot(f);
         for (const [docPath, body] of Object.entries(p.mustKeep))
-          expect(final.local[docPath], `${p.name}: ${docPath}`).toBe(`present:${hashOf(body)}`);
+          expect(final.local[docPath], `${p.name}: ${docPath}`).toBe(
+            `present:${hashOf(body)}`,
+          );
 
         // Equal to running the two commands back to back, in one order or the other.
         expect(orders).toContainEqual(final);
@@ -363,10 +436,14 @@ describe('the race is real: without the lock, the same schedule loses Memory', (
     // Add starts only once pull has reached that stall (no timing guesses).
     const pullStalled = deferred();
     const addFinished = deferred();
-    const { backend, stalled } = stallingBackend(f.backend, f.yBaseGeneration, async () => {
-      pullStalled.resolve();
-      await addFinished.promise;
-    });
+    const { backend, stalled } = stallingBackend(
+      f.backend,
+      f.yBaseGeneration,
+      async () => {
+        pullStalled.resolve();
+        await addFinished.promise;
+      },
+    );
     const pull = commandFn(f, 'pull', backend)();
     const add = (async () => {
       await pullStalled.promise;
@@ -394,10 +471,14 @@ describe('the race is real: without the lock, the same schedule loses Memory', (
     const addFinished = deferred();
     // Same schedule; the stall is bounded because, with the lock, add can't finish
     // while pull (stalled inside the lock) holds it.
-    const { backend, stalled } = stallingBackend(f.backend, f.yBaseGeneration, async () => {
-      pullStalled.resolve();
-      await Promise.race([addFinished.promise, sleep(300)]);
-    });
+    const { backend, stalled } = stallingBackend(
+      f.backend,
+      f.yBaseGeneration,
+      async () => {
+        pullStalled.resolve();
+        await Promise.race([addFinished.promise, sleep(300)]);
+      },
+    );
     const pull = lock('stak pull', commandFn(f, 'pull', backend));
     const add = (async () => {
       await pullStalled.promise;

@@ -1,6 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, unlinkSync } from 'node:fs';
-import { link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  link,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { hostname as osHostname } from 'node:os';
 import path from 'node:path';
 
@@ -14,7 +24,11 @@ export type MemoryLockRecord = {
 
 export class MemoryLockError extends Error {
   readonly code = 'memory-locked' as const;
-  constructor(message: string, readonly holder?: MemoryLockRecord, options?: { cause?: unknown }) {
+  constructor(
+    message: string,
+    readonly holder?: MemoryLockRecord,
+    options?: { cause?: unknown },
+  ) {
     super(message, options);
     this.name = 'MemoryLockError';
   }
@@ -34,7 +48,11 @@ export type MemoryLockOptions = {
 
 export type UnlockResult =
   | { status: 'no-lock' }
-  | { status: 'removed'; holder: MemoryLockRecord | 'corrupt'; wasAlive: boolean }
+  | {
+      status: 'removed';
+      holder: MemoryLockRecord | 'corrupt';
+      wasAlive: boolean;
+    }
   /** `reason: 'changing'`: the lock was replaced on every look (other STAK commands kept
    * taking it), so nothing was removed — not even with `force`. */
   | { status: 'refused'; holder: MemoryLockRecord; reason?: 'changing' };
@@ -43,10 +61,13 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_POLL_MS = 200;
 const DEFAULT_GUARD_STALE_MS = 30_000;
 
-export const memoryLockPath = (stackHome: string): string => path.join(stackHome, 'memory', '.memory.lock');
-const guardPath = (stackHome: string): string => path.join(stackHome, 'memory', '.memory.lock.clearing');
+export const memoryLockPath = (stackHome: string): string =>
+  path.join(stackHome, 'memory', '.memory.lock');
+const guardPath = (stackHome: string): string =>
+  path.join(stackHome, 'memory', '.memory.lock.clearing');
 
-const errno = (error: unknown): string | undefined => (error as NodeJS.ErrnoException | undefined)?.code;
+const errno = (error: unknown): string | undefined =>
+  (error as NodeJS.ErrnoException | undefined)?.code;
 
 /** EPERM means the process exists but belongs to another user, so it is alive. */
 export const isProcessAlive = (pid: number): boolean => {
@@ -92,7 +113,9 @@ const isTransient = (error: unknown): boolean => {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** One read of the raw lock bytes: null = no lock; 'busy' = transiently unreadable (see isTransient). */
-const readLockBytes = async (stackHome: string): Promise<Buffer | null | { busy: unknown }> => {
+const readLockBytes = async (
+  stackHome: string,
+): Promise<Buffer | null | { busy: unknown }> => {
   try {
     return await readFile(memoryLockPath(stackHome));
   } catch (error) {
@@ -109,7 +132,9 @@ const READ_RETRY_MS = 25;
  * null = no lock; 'corrupt' = a lock file exists but cannot be read as a record.
  * Retries briefly (about 0.5 s) through a transient delete-pending window before giving up.
  */
-export const readMemoryLock = async (stackHome: string): Promise<MemoryLockRecord | 'corrupt' | null> => {
+export const readMemoryLock = async (
+  stackHome: string,
+): Promise<MemoryLockRecord | 'corrupt' | null> => {
   for (let attempt = 0; ; attempt += 1) {
     try {
       const text = await readFile(memoryLockPath(stackHome), 'utf8');
@@ -142,7 +167,10 @@ const tryCreate = async (
   const target = memoryLockPath(stackHome);
   const temporary = `${target}.${record.lockId}.tmp`;
   try {
-    await writeFile(temporary, JSON.stringify(record), { flag: 'wx', mode: 0o600 });
+    await writeFile(temporary, JSON.stringify(record), {
+      flag: 'wx',
+      mode: 0o600,
+    });
     try {
       await link(temporary, target);
       return 'acquired';
@@ -167,7 +195,8 @@ const sweepStaleTemps = async (stackHome: string): Promise<void> => {
       if (!name.startsWith('.memory.lock.') || !name.endsWith('.tmp')) continue;
       try {
         const info = await stat(path.join(dir, name));
-        if (Date.now() - info.mtimeMs > TMP_STALE_MS) await rmQuiet(path.join(dir, name));
+        if (Date.now() - info.mtimeMs > TMP_STALE_MS)
+          await rmQuiet(path.join(dir, name));
       } catch {
         // gone or busy: skip
       }
@@ -185,15 +214,22 @@ const sweepStaleTemps = async (stackHome: string): Promise<void> => {
  * can be replaced between the read and the rm. Release only targets its own live lock (nobody
  * else may replace it), so the practical exposure is `unlockMemory` racing a fresh acquire.
  */
-const removeIfLockId = async (stackHome: string, lockId: string): Promise<boolean> => {
+const removeIfLockId = async (
+  stackHome: string,
+  lockId: string,
+): Promise<boolean> => {
   const current = await readMemoryLock(stackHome);
-  if (current === null || current === 'corrupt' || current.lockId !== lockId) return false;
+  if (current === null || current === 'corrupt' || current.lockId !== lockId)
+    return false;
   await rm(memoryLockPath(stackHome), { force: true });
   return true;
 };
 
 /** Rename a stale guard to a unique name first, so exactly one remover wins, then delete the renamed file. */
-const removeStaleGuard = async (stackHome: string, guardStaleMs: number): Promise<void> => {
+const removeStaleGuard = async (
+  stackHome: string,
+  guardStaleMs: number,
+): Promise<void> => {
   const guard = guardPath(stackHome);
   try {
     const info = await stat(guard);
@@ -210,7 +246,11 @@ const removeStaleGuard = async (stackHome: string, guardStaleMs: number): Promis
  * Run `fn` while holding the clearing guard. Returns false without running it when the guard is
  * held by someone else (after removing that guard if it is stale) or is transiently busy.
  */
-const underGuard = async (stackHome: string, guardStaleMs: number, fn: () => Promise<boolean>): Promise<boolean> => {
+const underGuard = async (
+  stackHome: string,
+  guardStaleMs: number,
+  fn: () => Promise<boolean>,
+): Promise<boolean> => {
   const guard = guardPath(stackHome);
   const token = randomUUID();
   let handle;
@@ -249,7 +289,10 @@ const underGuard = async (stackHome: string, guardStaleMs: number, fn: () => Pro
 const clearLeftover = async (
   stackHome: string,
   inspected: MemoryLockRecord,
-  options: { guardStaleMs: number; onLeftoverCleared?: ((holder: MemoryLockRecord) => void) | undefined },
+  options: {
+    guardStaleMs: number;
+    onLeftoverCleared?: ((holder: MemoryLockRecord) => void) | undefined;
+  },
 ): Promise<boolean> =>
   underGuard(stackHome, options.guardStaleMs, async () => {
     if (!(await removeIfLockId(stackHome, inspected.lockId))) return false;
@@ -258,12 +301,21 @@ const clearLeftover = async (
   });
 
 /** How long ago a lock was taken, e.g. `12s` or `3m` (used as "started 12s ago"). */
-export const formatLockAge = (startedAt: string, now: Date = new Date()): string => {
-  const seconds = Math.max(0, Math.round((now.getTime() - Date.parse(startedAt)) / 1000));
+export const formatLockAge = (
+  startedAt: string,
+  now: Date = new Date(),
+): string => {
+  const seconds = Math.max(
+    0,
+    Math.round((now.getTime() - Date.parse(startedAt)) / 1000),
+  );
   return seconds < 120 ? `${seconds}s` : `${Math.round(seconds / 60)}m`;
 };
 
-export const busyMessage = (holder: MemoryLockRecord, now: Date = new Date()): string =>
+export const busyMessage = (
+  holder: MemoryLockRecord,
+  now: Date = new Date(),
+): string =>
   `Another STAK command (\`${holder.command}\`, started ${formatLockAge(holder.startedAt, now)} ago) is changing Memory. Try again when it finishes.`;
 
 export const leftoverClearedMessage = (holder: MemoryLockRecord): string =>
@@ -271,7 +323,8 @@ export const leftoverClearedMessage = (holder: MemoryLockRecord): string =>
 
 const CORRUPT_MESSAGE =
   'Another STAK command is changing Memory (its lock file is unreadable). Try again when it finishes, or run `stak memory unlock`.';
-const UNKNOWN_HOLDER_MESSAGE = 'Another STAK command is changing Memory. Try again when it finishes.';
+const UNKNOWN_HOLDER_MESSAGE =
+  'Another STAK command is changing Memory. Try again when it finishes.';
 
 const deadlineError = (
   lastHolder: MemoryLockRecord | 'corrupt' | undefined,
@@ -279,7 +332,8 @@ const deadlineError = (
   at: Date,
 ): MemoryLockError => {
   if (lastHolder === 'corrupt') return new MemoryLockError(CORRUPT_MESSAGE);
-  if (lastHolder) return new MemoryLockError(busyMessage(lastHolder, at), lastHolder);
+  if (lastHolder)
+    return new MemoryLockError(busyMessage(lastHolder, at), lastHolder);
   return new MemoryLockError(
     UNKNOWN_HOLDER_MESSAGE,
     undefined,
@@ -327,8 +381,15 @@ export const acquireMemoryLock = async (
         const holder = parseRecord(bytes.toString('utf8')) ?? 'corrupt';
         lastHolder = holder;
         // A corrupt lock is never auto-cleared: only a record whose pid is known dead on this host is.
-        if (holder !== 'corrupt' && holder.hostname === host && !alive(holder.pid))
-          retryNow = await clearLeftover(stackHome, holder, { guardStaleMs, onLeftoverCleared: options.onLeftoverCleared });
+        if (
+          holder !== 'corrupt' &&
+          holder.hostname === host &&
+          !alive(holder.pid)
+        )
+          retryNow = await clearLeftover(stackHome, holder, {
+            guardStaleMs,
+            onLeftoverCleared: options.onLeftoverCleared,
+          });
       } else {
         lastTransient = bytes.busy;
       }
@@ -396,7 +457,11 @@ export const withMemoryLock = async <T>(
 
 export const unlockMemory = async (
   stackHome: string,
-  options: { force?: boolean; isProcessAlive?: (pid: number) => boolean; hostname?: string } = {},
+  options: {
+    force?: boolean;
+    isProcessAlive?: (pid: number) => boolean;
+    hostname?: string;
+  } = {},
 ): Promise<UnlockResult> => {
   const host = options.hostname ?? osHostname();
   const isAlive = options.isProcessAlive ?? isProcessAlive;
@@ -412,7 +477,8 @@ export const unlockMemory = async (
     }
     const alive = holder.hostname !== host || isAlive(holder.pid);
     if (alive && options.force !== true) return { status: 'refused', holder };
-    if (await removeIfLockId(stackHome, holder.lockId)) return { status: 'removed', holder, wasAlive: alive };
+    if (await removeIfLockId(stackHome, holder.lockId))
+      return { status: 'removed', holder, wasAlive: alive };
   }
   // Still changing under us after several looks: other STAK commands are actively taking
   // the lock, so report the current holder as possibly running and remove nothing.

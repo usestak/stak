@@ -92,7 +92,10 @@ export const renderMemoryCloudBackup = (
 ): string => {
   const { local, cloud } = outcome;
   // Spec §4.2.1: a project merged before syncing is reported once, up front.
-  const folded = 'folded' in cloud ? projectFoldNotes(cloud.folded).map((note) => `${note}.`) : [];
+  const folded =
+    'folded' in cloud
+      ? projectFoldNotes(cloud.folded).map((note) => `${note}.`)
+      : [];
   const head = [`${files(local.files)} saved locally.`, ...folded, ''];
   if (cloud.status === 'skipped')
     return block([

@@ -44,9 +44,7 @@ export const canonicalMainManifestSchema = z.object({
   schemaVersion: z.literal(CANONICAL_MAIN_SCHEMA_VERSION),
   projects: z.array(canonicalProjectMemorySchema),
 });
-export type CanonicalMainManifest = z.infer<
-  typeof canonicalMainManifestSchema
->;
+export type CanonicalMainManifest = z.infer<typeof canonicalMainManifestSchema>;
 
 export const emptyCanonicalMain = (): CanonicalMainManifest => ({
   schemaVersion: CANONICAL_MAIN_SCHEMA_VERSION,

@@ -12,7 +12,10 @@ import {
 
 import { reconcileNativeWithStagedMemory } from './canonical-identity.js';
 
-export type StageMemoryOptions = Omit<ClaudeMemoryAdapterOptions, 'stackHome'> & {
+export type StageMemoryOptions = Omit<
+  ClaudeMemoryAdapterOptions,
+  'stackHome'
+> & {
   stackHome: string;
 };
 
@@ -70,6 +73,10 @@ export const stageMemoryWithProjectDedup = async (
     carryForward: composition.carriedForward,
     ...(options.now ? { now: options.now } : {}),
   });
-  await syncRegistryForBackup({ stackHome: options.stackHome, nameHints, vendorKeys });
+  await syncRegistryForBackup({
+    stackHome: options.stackHome,
+    nameHints,
+    vendorKeys,
+  });
   return result;
 };

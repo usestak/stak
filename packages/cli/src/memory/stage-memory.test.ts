@@ -137,7 +137,7 @@ describe('stageMemoryWithProjectDedup — `stak add .` after relocation', () => 
     expect(result.files).toBe(0);
   });
 
-  it('what used to be the exact production regression (relocation dedup) now stays a no-op across relocation and repeat runs — project-scope auto-memory never reaches the v1 manifest or this path\'s registry sync at all', async () => {
+  it("what used to be the exact production regression (relocation dedup) now stays a no-op across relocation and repeat runs — project-scope auto-memory never reaches the v1 manifest or this path's registry sync at all", async () => {
     const stackHome = await temp('stack-stage-');
     const claudeHome = await temp('claude-home-');
     const oldProjectDir = await temp('swft-original-');

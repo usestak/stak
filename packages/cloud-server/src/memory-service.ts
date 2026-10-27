@@ -223,7 +223,9 @@ export const createMemoryMethods = (config: MemoryServiceConfig) => {
             bundleFormatVersion: request.bundleFormatVersion,
             privacyMode: request.privacyMode,
             payloadBytes: payload.byteLength,
-            ...(request.replicaOf !== undefined ? { replicaOf: request.replicaOf } : {}),
+            ...(request.replicaOf !== undefined
+              ? { replicaOf: request.replicaOf }
+              : {}),
           },
           {
             profile: await backend.getProfile(),
@@ -240,7 +242,9 @@ export const createMemoryMethods = (config: MemoryServiceConfig) => {
           privacyMode: request.privacyMode,
           payload,
           bundleFormatVersion: request.bundleFormatVersion,
-          ...(request.replicaOf !== undefined ? { replicaOf: request.replicaOf } : {}),
+          ...(request.replicaOf !== undefined
+            ? { replicaOf: request.replicaOf }
+            : {}),
           ...(request.cryptoVersion
             ? { cryptoVersion: request.cryptoVersion }
             : {}),
@@ -265,7 +269,9 @@ export const createMemoryMethods = (config: MemoryServiceConfig) => {
         // the last committed copy of a Standard original's content (see
         // `assertRetireAllowed`). Delete Cloud Memory retires server-side via
         // the product service, unguarded, and is unaffected.
-        await backendFor(user.userId).retireGeneration(backupId, now, { guarded: true });
+        await backendFor(user.userId).retireGeneration(backupId, now, {
+          guarded: true,
+        });
         return { ok: true as const };
       }),
 

@@ -34,13 +34,21 @@ export const latestKeyCheck = async (
   wrappedDek: { nonceB64: string; ciphertextB64: string; tagB64: string };
 } | null> => {
   const { generation } = await service.memoryGetLatest({ userId: user.id });
-  if (!generation || generation.privacyMode !== 'protected' || !generation.wrappedDek) return null;
+  if (
+    !generation ||
+    generation.privacyMode !== 'protected' ||
+    !generation.wrappedDek
+  )
+    return null;
   const { nonceB64, ciphertextB64, tagB64 } = generation.wrappedDek as {
     nonceB64: string;
     ciphertextB64: string;
     tagB64: string;
   };
-  return { backupId: generation.backupId, wrappedDek: { nonceB64, ciphertextB64, tagB64 } };
+  return {
+    backupId: generation.backupId,
+    wrappedDek: { nonceB64, ciphertextB64, tagB64 },
+  };
 };
 
 export type FetchSessionResult =

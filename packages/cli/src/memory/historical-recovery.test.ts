@@ -307,7 +307,9 @@ describe('historical memory generation recovery (15B.6)', () => {
     // like `stak push` — and publishes nothing.
     const outcome = await runMemoryCloudBackup(deps);
     expect(outcome.cloud).toMatchObject({ status: 'failed' });
-    expect(outcome.cloud.status === 'failed' && outcome.cloud.message).toContain('stak memory recover');
+    expect(
+      outcome.cloud.status === 'failed' && outcome.cloud.message,
+    ).toContain('stak memory recover');
     expect(await backend.getGeneration(2)).toBeNull();
     const status = await readMemoryCloudStatus(deps);
     expect(status.historicalRecovery).toBe(true);

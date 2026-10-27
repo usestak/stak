@@ -91,7 +91,9 @@ describe('reconstructProjectDir', () => {
       platform: process.platform,
     });
     expect(resolved).not.toBeNull();
-    expect(path.resolve(resolved as string)).toBe(path.resolve(linkedProjectDir));
+    expect(path.resolve(resolved as string)).toBe(
+      path.resolve(linkedProjectDir),
+    );
   });
 
   it('returns null when the path cannot be reconstructed', async () => {
@@ -134,7 +136,8 @@ describe('reconstructProjectDir ambiguity (15B.4 closure)', () => {
       const names = new Set<string>();
       for (const candidate of allDirs) {
         if (candidate === parent) continue;
-        if (win.dirname(candidate) === parent) names.add(win.basename(candidate));
+        if (win.dirname(candidate) === parent)
+          names.add(win.basename(candidate));
       }
       return [...names];
     };
@@ -201,8 +204,14 @@ describe('reconstructProjectDir ambiguity (15B.4 closure)', () => {
     ];
     for (const name of realWorldNames) {
       const listDirs = fakeListDirs([win.join('C:\\', 'Users', 'NT', name)]);
-      const vendorKey = encodeClaudeProjectKey(win.join('C:\\', 'Users', 'NT', name));
-      const resolved = await reconstructProjectDir({ vendorKey, listDirs, platform: 'win32' });
+      const vendorKey = encodeClaudeProjectKey(
+        win.join('C:\\', 'Users', 'NT', name),
+      );
+      const resolved = await reconstructProjectDir({
+        vendorKey,
+        listDirs,
+        platform: 'win32',
+      });
       expect(resolved).toBe(win.join('C:\\', 'Users', 'NT', name));
     }
   });
@@ -216,11 +225,17 @@ describe('reconstructProjectDir ambiguity (15B.4 closure)', () => {
       win.join('C:\\', 'proj', 'a_b'),
     ]);
     const vendorKey = 'C--proj-a-b';
-    const all = await reconstructProjectDirs({ vendorKey, listDirs, platform: 'win32' });
+    const all = await reconstructProjectDirs({
+      vendorKey,
+      listDirs,
+      platform: 'win32',
+    });
     expect(all.sort()).toEqual(
       [win.join('C:\\', 'proj', 'a.b'), win.join('C:\\', 'proj', 'a_b')].sort(),
     );
-    expect(await reconstructProjectDir({ vendorKey, listDirs, platform: 'win32' })).toBeNull();
+    expect(
+      await reconstructProjectDir({ vendorKey, listDirs, platform: 'win32' }),
+    ).toBeNull();
   });
 
   it('4/5. ambiguous decodings never authorize a Git identity (probe is not consulted)', async () => {
@@ -314,27 +329,30 @@ describe('reconstructProjectDir ambiguity (15B.4 closure)', () => {
   });
 
   // Uses the real file system's case-insensitivity, which only Windows/NTFS has.
-  it.skipIf(process.platform !== 'win32')('10. a differently-cased real-machine key (`c--users-nt-desktop-stack`, as PowerShell can record it) decodes to the real, naturally-cased directory on win32', async () => {
-    const base = await tempDir('case-');
-    const projectDir = path.join(base, 'Stack');
-    await mkdir(projectDir, { recursive: true });
-    const naturalKey = encodeClaudeProjectKey(projectDir);
-    const differentlyCasedKey = naturalKey.toLowerCase();
-    expect(differentlyCasedKey).not.toBe(naturalKey); // sanity: the key actually differs
-    const resolved = await reconstructProjectDir({
-      vendorKey: differentlyCasedKey,
-      isDirectory,
-      platform: 'win32',
-    });
-    expect(resolved).not.toBeNull();
-    // Case-INSENSITIVE comparison is the whole point here: `differentlyCasedKey`
-    // lowercased the DRIVE LETTER too, so the walk's own root string is `c:\`, not
-    // `C:\` — a different STRING, but the identical real directory on NTFS. The
-    // walk's job is proving it's the same directory, never canonicalizing casing.
-    expect(path.resolve(resolved as string).toLowerCase()).toBe(
-      path.resolve(projectDir).toLowerCase(),
-    );
-  });
+  it.skipIf(process.platform !== 'win32')(
+    '10. a differently-cased real-machine key (`c--users-nt-desktop-stack`, as PowerShell can record it) decodes to the real, naturally-cased directory on win32',
+    async () => {
+      const base = await tempDir('case-');
+      const projectDir = path.join(base, 'Stack');
+      await mkdir(projectDir, { recursive: true });
+      const naturalKey = encodeClaudeProjectKey(projectDir);
+      const differentlyCasedKey = naturalKey.toLowerCase();
+      expect(differentlyCasedKey).not.toBe(naturalKey); // sanity: the key actually differs
+      const resolved = await reconstructProjectDir({
+        vendorKey: differentlyCasedKey,
+        isDirectory,
+        platform: 'win32',
+      });
+      expect(resolved).not.toBeNull();
+      // Case-INSENSITIVE comparison is the whole point here: `differentlyCasedKey`
+      // lowercased the DRIVE LETTER too, so the walk's own root string is `c:\`, not
+      // `C:\` — a different STRING, but the identical real directory on NTFS. The
+      // walk's job is proving it's the same directory, never canonicalizing casing.
+      expect(path.resolve(resolved as string).toLowerCase()).toBe(
+        path.resolve(projectDir).toLowerCase(),
+      );
+    },
+  );
 });
 
 describe('Git identity continuity across restored native memory (15B.4)', () => {

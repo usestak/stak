@@ -191,14 +191,14 @@ describe('remote Memory routes', () => {
     });
     expect(rejected.status).toBe(409);
     expect(
-      (rejected.jsonBody as { error: { code: string; message: string } })
-        .error.code,
+      (rejected.jsonBody as { error: { code: string; message: string } }).error
+        .code,
     ).toBe('memory-incompatible-format');
     // Task 13 fix round 2 (Minor): assert the FULL message, ASCII apostrophe,
     // matching the spec's exact wording (§9.3).
     expect(
-      (rejected.jsonBody as { error: { code: string; message: string } })
-        .error.message,
+      (rejected.jsonBody as { error: { code: string; message: string } }).error
+        .message,
     ).toBe(
       "This account's Memory was upgraded by a newer STAK CLI. Update with `npm i -g @memstk/cli@beta`.",
     );
@@ -232,8 +232,13 @@ describe('remote Memory routes', () => {
     // Real backups use UUID ids (the Supabase column is uuid) — and the DTO now
     // requires `replicaOf` to be one (Task 13 fix round 4).
     const ID = {
-      v10: randomUUID(), v20: randomUUID(), v1r: randomUUID(), v2r: randomUUID(),
-      old: randomUUID(), after: randomUUID(), missing: randomUUID(),
+      v10: randomUUID(),
+      v20: randomUUID(),
+      v1r: randomUUID(),
+      v2r: randomUUID(),
+      old: randomUUID(),
+      after: randomUUID(),
+      missing: randomUUID(),
     };
     const V2 = 'stack-mem-bundle-v2';
     const protectedFields = {
@@ -246,11 +251,23 @@ describe('remote Memory routes', () => {
     // Account history: v1 then v2, both Standard (original payloads 9 bytes each).
     await call('POST', 'memory/generations', {
       token,
-      body: { backupId: ID.v10, expectedParent: null, privacyMode: 'standard', payloadB64: b64('v1-bundle'), bundleFormatVersion: V1 },
+      body: {
+        backupId: ID.v10,
+        expectedParent: null,
+        privacyMode: 'standard',
+        payloadB64: b64('v1-bundle'),
+        bundleFormatVersion: V1,
+      },
     });
     await call('POST', 'memory/generations', {
       token,
-      body: { backupId: ID.v20, expectedParent: 0, privacyMode: 'standard', payloadB64: b64('v2-bundle'), bundleFormatVersion: V2 },
+      body: {
+        backupId: ID.v20,
+        expectedParent: 0,
+        privacyMode: 'standard',
+        payloadB64: b64('v2-bundle'),
+        bundleFormatVersion: V2,
+      },
     });
     const replicaBody = (overrides: Record<string, unknown>) => ({
       backupId: randomUUID(),
@@ -263,7 +280,10 @@ describe('remote Memory routes', () => {
     });
 
     // No replicaOf at all: an ordinary v1 create after v2 -> the @beta gate.
-    const unclaimed = await call('POST', 'memory/generations', { token, body: replicaBody({ replicaOf: undefined }) });
+    const unclaimed = await call('POST', 'memory/generations', {
+      token,
+      body: replicaBody({ replicaOf: undefined }),
+    });
     expect(unclaimed.status).toBe(409);
     expect(errorOf(unclaimed).code).toBe('memory-incompatible-format');
 
@@ -274,26 +294,44 @@ describe('remote Memory routes', () => {
       { payloadB64: b64('r'.repeat(9 + 27)) },
       { privacyMode: 'standard' },
     ]) {
-      const forged = await call('POST', 'memory/generations', { token, body: replicaBody(overrides) });
+      const forged = await call('POST', 'memory/generations', {
+        token,
+        body: replicaBody(overrides),
+      });
       expect(forged.status).toBe(400);
       expect(errorOf(forged).code).toBe('memory-invalid-replica');
     }
     // A malformed replicaOf is a 400 refused replica, never a 500 from a uuid cast.
-    const malformed = await call('POST', 'memory/generations', { token, body: replicaBody({ replicaOf: 'not-a-uuid' }) });
+    const malformed = await call('POST', 'memory/generations', {
+      token,
+      body: replicaBody({ replicaOf: 'not-a-uuid' }),
+    });
     expect(malformed.status).toBe(400);
     expect(errorOf(malformed).code).toBe('memory-invalid-replica');
 
     // The genuine replica of v1-0 is accepted and carries `replicaOf`.
-    const replica = await call('POST', 'memory/generations', { token, body: replicaBody({ backupId: ID.v1r }) });
+    const replica = await call('POST', 'memory/generations', {
+      token,
+      body: replicaBody({ backupId: ID.v1r }),
+    });
     expect(replica.status).toBe(200);
     const latest = await call('GET', 'memory/latest', { token });
-    expect((latest.jsonBody as { generation: { backupId: string; replicaOf?: string } }).generation).toMatchObject({
+    expect(
+      (
+        latest.jsonBody as {
+          generation: { backupId: string; replicaOf?: string };
+        }
+      ).generation,
+    ).toMatchObject({
       backupId: ID.v1r,
       replicaOf: ID.v10,
     });
 
     // A second replica of the same original is refused.
-    const second = await call('POST', 'memory/generations', { token, body: replicaBody({ expectedParent: 2 }) });
+    const second = await call('POST', 'memory/generations', {
+      token,
+      body: replicaBody({ expectedParent: 2 }),
+    });
     expect(second.status).toBe(400);
     expect(errorOf(second).code).toBe('memory-invalid-replica');
 
@@ -301,7 +339,13 @@ describe('remote Memory routes', () => {
     // STILL refused: the gate is sticky (a v2 generation was ever committed).
     const oldCli = await call('POST', 'memory/generations', {
       token,
-      body: { backupId: ID.old, expectedParent: 2, privacyMode: 'standard', payloadB64: b64('v1-bundle-2'), bundleFormatVersion: V1 },
+      body: {
+        backupId: ID.old,
+        expectedParent: 2,
+        privacyMode: 'standard',
+        payloadB64: b64('v1-bundle-2'),
+        bundleFormatVersion: V1,
+      },
     });
     expect(oldCli.status).toBe(409);
     expect(errorOf(oldCli).message).toBe(
@@ -311,13 +355,27 @@ describe('remote Memory routes', () => {
     // Replicate v2-0 too, finalize, and no replica exemption exists any more.
     const v2Replica = await call('POST', 'memory/generations', {
       token,
-      body: replicaBody({ backupId: ID.v2r, expectedParent: 2, bundleFormatVersion: V2, replicaOf: ID.v20 }),
+      body: replicaBody({
+        backupId: ID.v2r,
+        expectedParent: 2,
+        bundleFormatVersion: V2,
+        replicaOf: ID.v20,
+      }),
     });
     expect(v2Replica.status).toBe(200);
-    await call('POST', 'memory/privacy', { token, body: { privacyMode: 'protected' } });
+    await call('POST', 'memory/privacy', {
+      token,
+      body: { privacyMode: 'protected' },
+    });
     const afterFinalized = await call('POST', 'memory/generations', {
       token,
-      body: { backupId: ID.after, expectedParent: 3, ...protectedFields, payloadB64: b64('v1-bundle'), bundleFormatVersion: V1 },
+      body: {
+        backupId: ID.after,
+        expectedParent: 3,
+        ...protectedFields,
+        payloadB64: b64('v1-bundle'),
+        bundleFormatVersion: V1,
+      },
     });
     expect(afterFinalized.status).toBe(409);
     expect(errorOf(afterFinalized).code).toBe('memory-incompatible-format');
@@ -329,7 +387,13 @@ describe('remote Memory routes', () => {
     const original = randomUUID();
     await call('POST', 'memory/generations', {
       token,
-      body: { backupId: original, expectedParent: null, privacyMode: 'standard', payloadB64: b64('v1-bundle'), bundleFormatVersion: 'stack-mem-bundle-v1' },
+      body: {
+        backupId: original,
+        expectedParent: null,
+        privacyMode: 'standard',
+        payloadB64: b64('v1-bundle'),
+        bundleFormatVersion: 'stack-mem-bundle-v1',
+      },
     });
     // The old protect's copy: Protected, same format, no replicaOf.
     const oldCopy = await call('POST', 'memory/generations', {
@@ -345,13 +409,23 @@ describe('remote Memory routes', () => {
       },
     });
     expect(oldCopy.status).toBe(409);
-    const error = (oldCopy.jsonBody as { error: { code: string; message: string } }).error;
+    const error = (
+      oldCopy.jsonBody as { error: { code: string; message: string } }
+    ).error;
     expect(error.code).toBe('memory-incompatible-format');
     expect(error.message).toContain('@memstk/cli@beta');
     const list = await call('GET', 'memory/generations', { token });
-    const generations = (list.jsonBody as { generations: { backupId: string; privacyMode: string; state: string }[] }).generations;
+    const generations = (
+      list.jsonBody as {
+        generations: { backupId: string; privacyMode: string; state: string }[];
+      }
+    ).generations;
     expect(generations).toHaveLength(1);
-    expect(generations[0]).toMatchObject({ backupId: original, privacyMode: 'standard', state: 'committed' });
+    expect(generations[0]).toMatchObject({
+      backupId: original,
+      privacyMode: 'standard',
+      state: 'committed',
+    });
   });
 
   it('retire over the HTTP route is GUARDED: a Standard original with no committed Protected copy is refused (Task 13 fix round 5)', async () => {
@@ -360,13 +434,26 @@ describe('remote Memory routes', () => {
     const id = randomUUID();
     await call('POST', 'memory/generations', {
       token,
-      body: { backupId: id, expectedParent: null, privacyMode: 'standard', payloadB64: b64('only-copy'), bundleFormatVersion: 'stack-mem-bundle-v2' },
+      body: {
+        backupId: id,
+        expectedParent: null,
+        privacyMode: 'standard',
+        payloadB64: b64('only-copy'),
+        bundleFormatVersion: 'stack-mem-bundle-v2',
+      },
     });
-    const refused = await call('POST', `memory/generations/${id}/retire`, { token });
+    const refused = await call('POST', `memory/generations/${id}/retire`, {
+      token,
+    });
     expect(refused.status).toBe(409);
-    expect((refused.jsonBody as { error: { code: string } }).error.code).toBe('memory-conflict');
+    expect((refused.jsonBody as { error: { code: string } }).error.code).toBe(
+      'memory-conflict',
+    );
     const latest = await call('GET', 'memory/latest', { token });
-    expect((latest.jsonBody as { generation: { backupId: string; state: string } }).generation).toMatchObject({
+    expect(
+      (latest.jsonBody as { generation: { backupId: string; state: string } })
+        .generation,
+    ).toMatchObject({
       backupId: id,
       state: 'committed',
     });

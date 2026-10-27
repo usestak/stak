@@ -67,9 +67,22 @@ import {
 } from '@stack/memory';
 
 import { resolveCanonicalProjectId } from './canonical-identity.js';
-import { foldingFetch, foldNoteCollector, foldProjectMemory, type ProjectFoldNote } from './project-fold.js';
-import { stageMemoryWithProjectDedup, type StageMemoryOptions } from './stage-memory.js';
-import { hasNothingToPush, publishCanonicalGeneration, recordInSyncWithCloud, type MemoryCloudDeps } from './cloud-ops.js';
+import {
+  foldingFetch,
+  foldNoteCollector,
+  foldProjectMemory,
+  type ProjectFoldNote,
+} from './project-fold.js';
+import {
+  stageMemoryWithProjectDedup,
+  type StageMemoryOptions,
+} from './stage-memory.js';
+import {
+  hasNothingToPush,
+  publishCanonicalGeneration,
+  recordInSyncWithCloud,
+  type MemoryCloudDeps,
+} from './cloud-ops.js';
 import {
   assertNoCurrentPendingMerge,
   assertPendingMergeCurrent,
@@ -122,7 +135,10 @@ export type CanonicalDiscoveryOptions = {
  * win32 folder as `encodeClaudeProjectKey` independently computes; without
  * normalizing the GROUPING key too, these would split into two distinct identities
  * instead of being proven, by the filesystem's own case-insensitivity, to be one). */
-const groupKeyOf = (identity: ProjectIdentity, platform: NodeJS.Platform): string =>
+const groupKeyOf = (
+  identity: ProjectIdentity,
+  platform: NodeJS.Platform,
+): string =>
   identity.kind === 'git'
     ? projectIdentityKey(identity)
     : `local:${normalizeVendorKey(identity.vendorKey ?? 'unresolved', platform)}`;
@@ -174,9 +190,13 @@ const dedupeCandidates = (
 ): ClaudeProjectInput[] => {
   const byKey = new Map<string, ClaudeProjectInput>();
   for (const candidate of candidates) {
-    const key = normalizeVendorKey(encodeClaudeProjectKey(path.resolve(candidate.dir)), platform);
+    const key = normalizeVendorKey(
+      encodeClaudeProjectKey(path.resolve(candidate.dir)),
+      platform,
+    );
     const existing = byKey.get(key);
-    if (!existing || (!existing.gitRemote && candidate.gitRemote)) byKey.set(key, candidate);
+    if (!existing || (!existing.gitRemote && candidate.gitRemote))
+      byKey.set(key, candidate);
   }
   return [...byKey.values()];
 };
@@ -186,7 +206,9 @@ const findCandidateDir = (
   candidates: ClaudeProjectInput[],
   platform: NodeJS.Platform,
 ): ClaudeProjectInput | undefined => {
-  const targets = new Set([...vendorKeys].map((key) => normalizeVendorKey(key, platform)));
+  const targets = new Set(
+    [...vendorKeys].map((key) => normalizeVendorKey(key, platform)),
+  );
   for (const candidate of candidates) {
     const candidateKey = normalizeVendorKey(
       encodeClaudeProjectKey(path.resolve(candidate.dir)),
@@ -211,7 +233,11 @@ const findReconstructedDir = async (
 ): Promise<string | undefined> => {
   if (!isDirectory) return undefined;
   for (const vendorKey of vendorKeys) {
-    const dir = await reconstructProjectDir({ vendorKey, isDirectory, platform });
+    const dir = await reconstructProjectDir({
+      vendorKey,
+      isDirectory,
+      platform,
+    });
     if (dir) return dir;
   }
   return undefined;
@@ -241,13 +267,21 @@ const resolveProjectDir = async (
     const binding = bindingFor(registry, knownProjectId);
     if (binding) return { dir: binding.dir };
   }
-  const candidate = findCandidateDir(group.vendorKeys, candidates, options.platform);
+  const candidate = findCandidateDir(
+    group.vendorKeys,
+    candidates,
+    options.platform,
+  );
   if (candidate)
     return {
       dir: path.resolve(candidate.dir),
       ...(candidate.gitRemote ? { gitRemote: candidate.gitRemote } : {}),
     };
-  const reconstructed = await findReconstructedDir(group.vendorKeys, options.isDirectory, options.platform);
+  const reconstructed = await findReconstructedDir(
+    group.vendorKeys,
+    options.isDirectory,
+    options.platform,
+  );
   if (reconstructed) return { dir: reconstructed };
   return undefined;
 };
@@ -281,11 +315,20 @@ const legacyVendorKeysForGroup = (
   platform: NodeJS.Platform,
 ): string[] => {
   const dirs = new Set<string>();
-  const candidateMatch = findCandidateDir(group.vendorKeys, candidates, platform);
+  const candidateMatch = findCandidateDir(
+    group.vendorKeys,
+    candidates,
+    platform,
+  );
   if (candidateMatch) dirs.add(path.resolve(candidateMatch.dir));
-  const targets = new Set([...group.vendorKeys].map((key) => normalizeVendorKey(key, platform)));
+  const targets = new Set(
+    [...group.vendorKeys].map((key) => normalizeVendorKey(key, platform)),
+  );
   for (const binding of registry.bindings) {
-    const bindingKey = normalizeVendorKey(encodeClaudeProjectKey(path.resolve(binding.dir)), platform);
+    const bindingKey = normalizeVendorKey(
+      encodeClaudeProjectKey(path.resolve(binding.dir)),
+      platform,
+    );
     if (targets.has(bindingKey)) dirs.add(path.resolve(binding.dir));
   }
   return [...dirs].map((dir) => oldEncodeClaudeProjectKey(dir));
@@ -300,12 +343,17 @@ const resolveClaimedIds = (
   const claimedIds = new Set<string>();
   let conflict = false;
   for (const vendorKey of vendorKeys) {
-    const resolution = resolveProjectForIdentity(registry, { kind: 'local', vendorKey });
+    const resolution = resolveProjectForIdentity(registry, {
+      kind: 'local',
+      vendorKey,
+    });
     if (resolution.status === 'resolved') claimedIds.add(resolution.projectId);
     if (resolution.status === 'conflict') conflict = true;
   }
-  if (conflict || claimedIds.size > 1) return { projectId: undefined, conflict: true };
-  if (claimedIds.size === 1) return { projectId: [...claimedIds][0] as string, conflict: false };
+  if (conflict || claimedIds.size > 1)
+    return { projectId: undefined, conflict: true };
+  if (claimedIds.size === 1)
+    return { projectId: [...claimedIds][0] as string, conflict: false };
   return { projectId: undefined, conflict: false };
 };
 
@@ -347,25 +395,40 @@ const resolveKnownProjectId = (
   const claimResolution =
     group.identity.kind === 'git'
       ? (() => {
-          const resolution = resolveProjectForIdentity(registry, group.identity);
-          if (resolution.status === 'resolved') return { projectId: resolution.projectId, conflict: false };
-          if (resolution.status === 'conflict') return { projectId: undefined, conflict: true };
+          const resolution = resolveProjectForIdentity(
+            registry,
+            group.identity,
+          );
+          if (resolution.status === 'resolved')
+            return { projectId: resolution.projectId, conflict: false };
+          if (resolution.status === 'conflict')
+            return { projectId: undefined, conflict: true };
           return { projectId: undefined, conflict: false };
         })()
       : resolveClaimedIds(registry, group.vendorKeys);
-  if (claimResolution.conflict || claimResolution.projectId) return claimResolution;
+  if (claimResolution.conflict || claimResolution.projectId)
+    return claimResolution;
 
-  const targets = new Set([...group.vendorKeys].map((key) => normalizeVendorKey(key, platform)));
+  const targets = new Set(
+    [...group.vendorKeys].map((key) => normalizeVendorKey(key, platform)),
+  );
   const boundIds = new Set<string>();
   for (const binding of registry.bindings) {
-    const bindingKey = normalizeVendorKey(encodeClaudeProjectKey(path.resolve(binding.dir)), platform);
+    const bindingKey = normalizeVendorKey(
+      encodeClaudeProjectKey(path.resolve(binding.dir)),
+      platform,
+    );
     if (targets.has(bindingKey)) boundIds.add(binding.projectId);
   }
   if (boundIds.size > 1) return { projectId: undefined, conflict: true };
-  if (boundIds.size === 1) return { projectId: [...boundIds][0] as string, conflict: false };
+  if (boundIds.size === 1)
+    return { projectId: [...boundIds][0] as string, conflict: false };
 
   if (group.identity.kind === 'local')
-    return resolveClaimedIds(registry, legacyVendorKeysForGroup(group, registry, candidates, platform));
+    return resolveClaimedIds(
+      registry,
+      legacyVendorKeysForGroup(group, registry, candidates, platform),
+    );
 
   return { projectId: undefined, conflict: false };
 };
@@ -438,7 +501,10 @@ const enumerateSyncableProjects = async (
   // no auto-memory folder would never be (re)discovered by this enumeration pass at
   // all, even though its binding (priority (a)) already tells us exactly where it is.
   const candidates = dedupeCandidates(
-    [...(options.projects ?? []), ...registry.bindings.map((binding) => ({ dir: binding.dir }))],
+    [
+      ...(options.projects ?? []),
+      ...registry.bindings.map((binding) => ({ dir: binding.dir })),
+    ],
     platform,
   );
   const discovered = await discoverClaudeMemory({
@@ -466,11 +532,17 @@ const enumerateSyncableProjects = async (
       continue;
     }
 
-    const location = await resolveProjectDir(group, known.projectId, registry, candidates, {
-      ...(options.gitRemoteOf ? { gitRemoteOf: options.gitRemoteOf } : {}),
-      ...(options.isDirectory ? { isDirectory: options.isDirectory } : {}),
-      platform,
-    });
+    const location = await resolveProjectDir(
+      group,
+      known.projectId,
+      registry,
+      candidates,
+      {
+        ...(options.gitRemoteOf ? { gitRemoteOf: options.gitRemoteOf } : {}),
+        ...(options.isDirectory ? { isDirectory: options.isDirectory } : {}),
+        platform,
+      },
+    );
     if (!location) {
       // Not locatable on this machine — skip entirely, never mint (spec §4.5), but
       // still worth telling the user about: split by whether this is a REGISTERED
@@ -478,7 +550,9 @@ const enumerateSyncableProjects = async (
       if (known.projectId)
         unlocatableProjects.push({
           projectId: known.projectId,
-          name: nameHintFor(registry, known.projectId) ?? shortProjectId(known.projectId),
+          name:
+            nameHintFor(registry, known.projectId) ??
+            shortProjectId(known.projectId),
         });
       else untrackedFolderCount += 1;
       continue;
@@ -499,10 +573,15 @@ const enumerateSyncableProjects = async (
     groupProjectIds.set(group.identityKey, projectId);
     if (seen.has(projectId)) continue; // dedup: first-resolved group for this Project ID wins
     seen.add(projectId);
-    resolved.push({ projectId, dir: location.dir, ...(location.gitRemote ? { gitRemote: location.gitRemote } : {}) });
+    resolved.push({
+      projectId,
+      dir: location.dir,
+      ...(location.gitRemote ? { gitRemote: location.gitRemote } : {}),
+    });
   }
 
-  if (mode === 'stage' && mintedAny) await writeLocalRegistry(stackHome, registry);
+  if (mode === 'stage' && mintedAny)
+    await writeLocalRegistry(stackHome, registry);
   return {
     resolved,
     registry,
@@ -531,7 +610,9 @@ const planResolvedProjects = async (
 ): Promise<PlannedEntry[]> => {
   const platform = options.platform ?? process.platform;
   const resolveProjectId = (item: DiscoveredMemoryItem): string | undefined =>
-    item.project ? groupProjectIds.get(groupKeyOf(item.project, platform)) : undefined;
+    item.project
+      ? groupProjectIds.get(groupKeyOf(item.project, platform))
+      : undefined;
   const out: PlannedEntry[] = [];
   for (const { projectId, dir, gitRemote } of resolvedProjects) {
     const scanOptions = {
@@ -542,26 +623,40 @@ const planResolvedProjects = async (
       ...(options.isDirectory ? { isDirectory: options.isDirectory } : {}),
       resolveProjectId,
     };
-    const plan = await planProjectSync({ projectId, dir }, stackHome, scanOptions, state);
+    const plan = await planProjectSync(
+      { projectId, dir },
+      stackHome,
+      scanOptions,
+      state,
+    );
     const scanResult = await scanClaudeProject({ projectId, dir }, scanOptions);
     out.push({ projectId, dir, plan, scanResult });
   }
   return out;
 };
 
-const toSummary = (entry: PlannedEntry, imported: string[], pending: number): CanonicalProjectSummary => ({
+const toSummary = (
+  entry: PlannedEntry,
+  imported: string[],
+  pending: number,
+): CanonicalProjectSummary => ({
   projectId: entry.projectId,
   imported,
   pending,
   conflicts: entry.plan.actions
-    .filter((a): a is Extract<typeof a, { kind: 'conflict' }> => a.kind === 'conflict')
+    .filter(
+      (a): a is Extract<typeof a, { kind: 'conflict' }> =>
+        a.kind === 'conflict',
+    )
     .map((a) => ({ path: a.path, reason: a.reason })),
   sourceConflicts: entry.plan.sourceConflicts.map((c) => c.canonicalPath),
   guardedPaths: entry.plan.guardedPaths,
 });
 
 const pendingCountOf = (plan: PlannedEntry['plan']): number =>
-  plan.actions.filter((a) => a.kind === 'import-edit' || a.kind === 'import-delete').length;
+  plan.actions.filter(
+    (a) => a.kind === 'import-edit' || a.kind === 'import-delete',
+  ).length;
 
 export type CanonicalMemoryStatusResult = {
   projects: CanonicalProjectSummary[];
@@ -596,7 +691,9 @@ export type CanonicalMemoryStatusResult = {
   upgradePending: boolean;
 };
 
-const emptyStatusResult = (upgradePending: boolean): CanonicalMemoryStatusResult => ({
+const emptyStatusResult = (
+  upgradePending: boolean,
+): CanonicalMemoryStatusResult => ({
   projects: [],
   newProjects: 0,
   conflictedProjects: 0,
@@ -618,20 +715,35 @@ export const canonicalMemoryStatus = async (
   // instead of a misleading per-project pending count.
   if (!(await isLocalStoreMigrated(stackHome))) {
     const manifest = await readMemoryManifest(stackHome);
-    const hasProjectItems = manifest?.items.some((item) => item.scope === 'project') ?? false;
+    const hasProjectItems =
+      manifest?.items.some((item) => item.scope === 'project') ?? false;
     if (hasProjectItems) return emptyStatusResult(true);
   }
 
   // Spec §4.2.1: plan against folded Memory, in memory only (status never writes).
   const fold = await foldProjectMemory(stackHome, { persist: false });
-  const { resolved, newProjectCount, conflictedCount, unlocatableProjects, untrackedFolderCount, groupProjectIds } =
-    await enumerateSyncableProjects(stackHome, options, 'status');
-  const entries = await planResolvedProjects(stackHome, resolved, groupProjectIds, options, {
-    main: fold.main,
-    projection: fold.projection,
-  });
+  const {
+    resolved,
+    newProjectCount,
+    conflictedCount,
+    unlocatableProjects,
+    untrackedFolderCount,
+    groupProjectIds,
+  } = await enumerateSyncableProjects(stackHome, options, 'status');
+  const entries = await planResolvedProjects(
+    stackHome,
+    resolved,
+    groupProjectIds,
+    options,
+    {
+      main: fold.main,
+      projection: fold.projection,
+    },
+  );
   return {
-    projects: entries.map((entry) => toSummary(entry, [], pendingCountOf(entry.plan))),
+    projects: entries.map((entry) =>
+      toSummary(entry, [], pendingCountOf(entry.plan)),
+    ),
     upgradePending: false,
     newProjects: newProjectCount,
     conflictedProjects: conflictedCount,
@@ -680,12 +792,17 @@ export const migrateWithProjectionSeed = async (
   const summary = await migrateLocalStore(stackHome, {
     locateProjectDir: async (projectId) => {
       if (!dirByProjectId) {
-        const { resolved } = await enumerateSyncableProjects(stackHome, options, 'status');
+        const { resolved } = await enumerateSyncableProjects(
+          stackHome,
+          options,
+          'status',
+        );
         dirByProjectId = new Map(resolved.map((r) => [r.projectId, r.dir]));
         // Also every bound directory (`stak project map`), for a project whose
         // native folder discovery can't see yet.
         for (const binding of (await readLocalRegistry(stackHome)).bindings)
-          if (!dirByProjectId.has(binding.projectId)) dirByProjectId.set(binding.projectId, path.resolve(binding.dir));
+          if (!dirByProjectId.has(binding.projectId))
+            dirByProjectId.set(binding.projectId, path.resolve(binding.dir));
       }
       return dirByProjectId.get(projectId);
     },
@@ -707,19 +824,35 @@ export const stageCanonicalMemory = async (
   // Also covers a Local -> Git identity strengthening the legacy staging step
   // (`syncRegistryForBackup`) just recorded.
   const { notes: folded } = await foldProjectMemory(stackHome);
-  const { resolved, conflictedCount, unlocatableProjects, untrackedFolderCount, groupProjectIds } =
-    await enumerateSyncableProjects(stackHome, options, 'stage');
-  const entries = await planResolvedProjects(stackHome, resolved, groupProjectIds, options);
+  const {
+    resolved,
+    conflictedCount,
+    unlocatableProjects,
+    untrackedFolderCount,
+    groupProjectIds,
+  } = await enumerateSyncableProjects(stackHome, options, 'stage');
+  const entries = await planResolvedProjects(
+    stackHome,
+    resolved,
+    groupProjectIds,
+    options,
+  );
   const summaries: CanonicalProjectSummary[] = [];
   for (const entry of entries) {
-    const { imported } = await applyImportActions({ projectId: entry.projectId, dir: entry.dir }, stackHome, entry.scanResult, entry.plan.actions);
+    const { imported } = await applyImportActions(
+      { projectId: entry.projectId, dir: entry.dir },
+      stackHome,
+      entry.scanResult,
+      entry.plan.actions,
+    );
     summaries.push(toSummary(entry, imported, 0));
   }
   // Two-machine fix: staging may have minted Project IDs or learned claims after
   // the legacy staging step last wrote the portable snapshot. Keep the local
   // snapshot current (publishing refreshes it again right before bundling).
   // Skipped when the registry is empty so a Memory-less machine gets no new file.
-  if ((await readLocalRegistry(stackHome)).projects.length > 0) await refreshPortableSnapshot(stackHome);
+  if ((await readLocalRegistry(stackHome)).projects.length > 0)
+    await refreshPortableSnapshot(stackHome);
   return {
     projects: summaries,
     conflictedProjects: conflictedCount,
@@ -760,7 +893,10 @@ export const stageAllMemory = async (
  * attributed to exactly the Project ID enumeration decided — see
  * `EnumerationResult.groupProjectIds`'s doc comment for why that matters). */
 export const resolveProjectIdForClaudeItem = (
-  item: Pick<DiscoveredMemoryItem | ManifestItem, 'project' | 'kind' | 'logicalId' | 'restoreTarget'>,
+  item: Pick<
+    DiscoveredMemoryItem | ManifestItem,
+    'project' | 'kind' | 'logicalId' | 'restoreTarget'
+  >,
   registry: LocalRegistry,
 ): string | undefined => resolveCanonicalProjectId(item, registry);
 
@@ -772,7 +908,11 @@ export const resolveProjectIdForClaudeItem = (
  * this same shape also carries a native-vs-canonical materialize conflict
  * (`planProjectSync`'s wider conflict reasons, or a moved-folder
  * `source-conflict`) alongside a Cloud three-way-merge conflict. */
-export type CanonicalConflictEntry = { projectId: string; path: string; reason: string };
+export type CanonicalConflictEntry = {
+  projectId: string;
+  path: string;
+  reason: string;
+};
 export type CanonicalPushOutcome = {
   status:
     | 'up-to-date'
@@ -843,8 +983,14 @@ const locateMaterializeTargets = async (
 }> => {
   const registry = await readLocalRegistry(stackHome);
   const main = await readCanonicalMain(stackHome);
-  const { resolved } = await enumerateSyncableProjects(stackHome, options, 'status');
-  const targets = new Map<string, string>(resolved.map((r) => [r.projectId, r.dir]));
+  const { resolved } = await enumerateSyncableProjects(
+    stackHome,
+    options,
+    'status',
+  );
+  const targets = new Map<string, string>(
+    resolved.map((r) => [r.projectId, r.dir]),
+  );
   const locatedViaRemoteClaim = new Map<string, PortableProjectRecord>();
 
   for (const project of main.projects) {
@@ -876,20 +1022,32 @@ const locateMaterializeTargets = async (
       // one directory must never receive two projects' Memory.
       if (viaSnapshotOnly) {
         const candidateDir = path.resolve(candidate.dir);
-        if ([...targets].some(([otherId, dir]) => otherId !== project.projectId && dir === candidateDir)) continue;
+        if (
+          [...targets].some(
+            ([otherId, dir]) =>
+              otherId !== project.projectId && dir === candidateDir,
+          )
+        )
+          continue;
       }
       const remote =
-        candidate.gitRemote ?? (options.gitRemoteOf ? await options.gitRemoteOf(candidate.dir) : undefined);
+        candidate.gitRemote ??
+        (options.gitRemoteOf
+          ? await options.gitRemoteOf(candidate.dir)
+          : undefined);
       const identity = canonicalGitIdentity(remote);
       if (identity && identity.canonical.toLowerCase() === claimCanonical) {
         targets.set(project.projectId, path.resolve(candidate.dir));
-        if (!localClaim && remoteRecord) locatedViaRemoteClaim.set(project.projectId, remoteRecord);
+        if (!localClaim && remoteRecord)
+          locatedViaRemoteClaim.set(project.projectId, remoteRecord);
         break;
       }
     }
   }
 
-  const unavailable = main.projects.filter((p) => !targets.has(p.projectId)).map((p) => p.projectId);
+  const unavailable = main.projects
+    .filter((p) => !targets.has(p.projectId))
+    .map((p) => p.projectId);
   return { targets, unavailable, locatedViaRemoteClaim };
 };
 
@@ -936,7 +1094,11 @@ const nativeHashAt = async (
 ): Promise<string | undefined> => {
   let target: string;
   try {
-    target = claudeNativeTargetOf({ projectId, dir }, canonicalPath, claudeHome);
+    target = claudeNativeTargetOf(
+      { projectId, dir },
+      canonicalPath,
+      claudeHome,
+    );
   } catch {
     return undefined;
   }
@@ -966,7 +1128,8 @@ export const materializeCanonicalProjects = async (
   let unavailable: string[];
   let locatedViaRemoteClaim: Map<string, PortableProjectRecord>;
   try {
-    ({ targets, unavailable, locatedViaRemoteClaim } = await locateMaterializeTargets(stackHome, options));
+    ({ targets, unavailable, locatedViaRemoteClaim } =
+      await locateMaterializeTargets(stackHome, options));
   } catch (error) {
     // Task 13 fix round 2 (Minor): a failure here must never propagate past
     // this function — a Cloud publish/merge that already succeeded must be
@@ -976,49 +1139,96 @@ export const materializeCanonicalProjects = async (
     return {
       materialized: 0,
       unavailable: [],
-      conflicts: [{ projectId: '', path: '', reason: error instanceof Error ? error.message : 'materialize failed' }],
+      conflicts: [
+        {
+          projectId: '',
+          path: '',
+          reason: error instanceof Error ? error.message : 'materialize failed',
+        },
+      ],
       written: 0,
       deleted: 0,
     };
   }
-  if (only) unavailable = unavailable.filter((projectId) => only.has(projectId));
+  if (only)
+    unavailable = unavailable.filter((projectId) => only.has(projectId));
   for (const [projectId, dir] of targets) {
     if (only && !only.has(projectId)) continue;
     // Task 13 fix round 4: scan with the candidate's own git remote (exactly as
     // enumeration does), so native items resolve to the same identity.
-    const candidate = (options.projects ?? []).find((c) => path.resolve(c.dir) === path.resolve(dir));
+    const candidate = (options.projects ?? []).find(
+      (c) => path.resolve(c.dir) === path.resolve(dir),
+    );
     const scanOptions = {
       ...(options.claudeHome ? { claudeHome: options.claudeHome } : {}),
-      projects: [{ dir, ...(candidate?.gitRemote ? { gitRemote: candidate.gitRemote } : {}) }],
+      projects: [
+        {
+          dir,
+          ...(candidate?.gitRemote ? { gitRemote: candidate.gitRemote } : {}),
+        },
+      ],
       platform: options.platform ?? process.platform,
       ...(options.gitRemoteOf ? { gitRemoteOf: options.gitRemoteOf } : {}),
       ...(options.isDirectory ? { isDirectory: options.isDirectory } : {}),
-      resolveProjectId: (item: DiscoveredMemoryItem) => resolveProjectIdForClaudeItem(item, registry),
+      resolveProjectId: (item: DiscoveredMemoryItem) =>
+        resolveProjectIdForClaudeItem(item, registry),
     };
     try {
-      const plan = await planProjectSync({ projectId, dir }, stackHome, scanOptions);
+      const plan = await planProjectSync(
+        { projectId, dir },
+        stackHome,
+        scanOptions,
+      );
       for (const action of plan.actions)
-        if (action.kind === 'conflict') conflicts.push({ projectId, path: action.path, reason: action.reason });
+        if (action.kind === 'conflict')
+          conflicts.push({
+            projectId,
+            path: action.path,
+            reason: action.reason,
+          });
       for (const sourceConflict of plan.sourceConflicts)
-        conflicts.push({ projectId, path: sourceConflict.canonicalPath, reason: 'source-conflict' });
+        conflicts.push({
+          projectId,
+          path: sourceConflict.canonicalPath,
+          reason: 'source-conflict',
+        });
       // Task 13 fix rounds 4-5 — spec §6 safety rule 1 enforced at WRITE time:
       // overwrite a native file only when it still holds what STAK last synced
       // there (P — a normal remote edit, N = P != C) or already holds C. A file
       // that exists with any OTHER content was not accounted for by the scan
       // (e.g. it could not be attributed to this project) — never overwrite it.
-      const synced = (await readProjection(stackHome, 'claude')).projects[projectId] ?? {};
+      const synced =
+        (await readProjection(stackHome, 'claude')).projects[projectId] ?? {};
       const actions = [];
       for (const action of plan.actions) {
         if (action.kind === 'materialize-write') {
-          const existing = await nativeHashAt(projectId, dir, action.path, options.claudeHome);
-          if (existing !== undefined && existing !== action.contentHash && existing !== synced[action.path]) {
-            conflicts.push({ projectId, path: action.path, reason: 'adopt-mismatch' });
+          const existing = await nativeHashAt(
+            projectId,
+            dir,
+            action.path,
+            options.claudeHome,
+          );
+          if (
+            existing !== undefined &&
+            existing !== action.contentHash &&
+            existing !== synced[action.path]
+          ) {
+            conflicts.push({
+              projectId,
+              path: action.path,
+              reason: 'adopt-mismatch',
+            });
             continue;
           }
         }
         actions.push(action);
       }
-      const applied = await applyMaterializeActions({ projectId, dir }, stackHome, actions, options.claudeHome);
+      const applied = await applyMaterializeActions(
+        { projectId, dir },
+        stackHome,
+        actions,
+        options.claudeHome,
+      );
       written += applied.written.length;
       deleted += applied.deleted.length;
       materialized += 1;
@@ -1032,7 +1242,10 @@ export const materializeCanonicalProjects = async (
       // registry.
       const remoteRecord = locatedViaRemoteClaim.get(projectId);
       if (remoteRecord) {
-        const merged = mergePortableSnapshot(registry, { snapshotVersion: 1, projects: [remoteRecord] });
+        const merged = mergePortableSnapshot(registry, {
+          snapshotVersion: 1,
+          projects: [remoteRecord],
+        });
         registry = merged.registry;
         await writeLocalRegistry(stackHome, registry);
       }
@@ -1094,7 +1307,11 @@ const remoteOf = (deps: MemoryCloudDeps, mmk: Buffer | undefined) => {
     });
     if (!result) return null;
     for (const object of result.objects)
-      await writeMemoryObject({ stackHome: deps.stackHome, contentHash: object.contentHash, bytes: object.bytes });
+      await writeMemoryObject({
+        stackHome: deps.stackHome,
+        contentHash: object.contentHash,
+        bytes: object.bytes,
+      });
     lastRegistrySnapshot = result.registrySnapshot;
     return {
       generation: result.generation,
@@ -1112,7 +1329,13 @@ const remoteOf = (deps: MemoryCloudDeps, mmk: Buffer | undefined) => {
    * merge-pending gate and any other sync decision). */
   const prefetchAndFold = async () => {
     prefetched = await fetchNow();
-    collector.add((await foldProjectMemory(deps.stackHome, { remoteSnapshot: lastRegistrySnapshot })).notes);
+    collector.add(
+      (
+        await foldProjectMemory(deps.stackHome, {
+          remoteSnapshot: lastRegistrySnapshot,
+        })
+      ).notes,
+    );
   };
   const cachedFetch = async () => {
     if (prefetched !== undefined) {
@@ -1125,12 +1348,22 @@ const remoteOf = (deps: MemoryCloudDeps, mmk: Buffer | undefined) => {
   // Review fix C1: every engine fetch, including a retry's, re-learns and
   // re-folds local/base with that fetch's alias map before returning the
   // remote folded with the same map.
-  const fetch = foldingFetch(deps.stackHome, cachedFetch, () => lastRegistrySnapshot, collector.add);
+  const fetch = foldingFetch(
+    deps.stackHome,
+    cachedFetch,
+    () => lastRegistrySnapshot,
+    collector.add,
+  );
   const foldedExtra = () => {
     const folded = collector.notes();
     return folded.length > 0 ? { folded } : {};
   };
-  return { fetch, prefetchAndFold, foldedExtra, lastRegistrySnapshot: () => lastRegistrySnapshot };
+  return {
+    fetch,
+    prefetchAndFold,
+    foldedExtra,
+    lastRegistrySnapshot: () => lastRegistrySnapshot,
+  };
 };
 
 /**
@@ -1181,7 +1414,10 @@ const seedBaseFromLastKnownV1Generation = async (
       generation: knownGeneration,
     });
     if (!result) return; // that generation is gone/unreadable -> leave base empty
-    await writeCanonicalBase(deps.stackHome, { generation: result.generation, main: result.main });
+    await writeCanonicalBase(deps.stackHome, {
+      generation: result.generation,
+      main: result.main,
+    });
   } catch {
     // Any failure (network, integrity, missing MMK, …) -> leave base empty —
     // the documented safe fallback, never a guessed source.
@@ -1206,18 +1442,28 @@ export const pushMemoryViaCanonical = async (
   deps: MemoryCloudDeps,
   discovery: CanonicalDiscoveryOptions = {},
 ): Promise<CanonicalPushOutcome> => {
-  const { restoredFromStak } = await migrateWithProjectionSeed(deps.stackHome, discovery);
+  const { restoredFromStak } = await migrateWithProjectionSeed(
+    deps.stackHome,
+    discovery,
+  );
   // Not signed in: Memory stays staged locally only (Task 13 Minor fix — this
   // used to fall through to `up-to-date`, rendering a nonsensical "already up
   // to date (generation 0)" for an account that was never even authenticated).
   if (!deps.backend) {
     const { notes } = await foldProjectMemory(deps.stackHome);
-    return { status: 'skipped', ...(notes.length > 0 ? { folded: notes } : {}) };
+    return {
+      status: 'skipped',
+      ...(notes.length > 0 ? { folded: notes } : {}),
+    };
   }
   const profile = await deps.backend.getProfile();
-  if ((profile?.privacyMode ?? 'standard') === 'protected' && !(await deps.localKeyStore.loadMmk().catch(() => null)))
+  if (
+    (profile?.privacyMode ?? 'standard') === 'protected' &&
+    !(await deps.localKeyStore.loadMmk().catch(() => null))
+  )
     return { status: 'protected-locked' };
-  const mmk = (await deps.localKeyStore.loadMmk().catch(() => undefined)) ?? undefined;
+  const mmk =
+    (await deps.localKeyStore.loadMmk().catch(() => undefined)) ?? undefined;
   const remote = remoteOf(deps, mmk);
   // Spec §4.2.1: fold before ANY sync decision (including the pending-merge
   // gate below), with the alias map local registry ∪ Cloud latest's snapshot.
@@ -1239,24 +1485,40 @@ export const pushMemoryViaCanonical = async (
   const outcome = await pushCanonicalMemory({
     getLocalMain: () => readCanonicalMain(deps.stackHome),
     // Final review I1: a global-only Memory change is published too.
-    getLocalGlobalDigest: async () => globalManifestDigest(await readMemoryManifest(deps.stackHome)),
+    getLocalGlobalDigest: async () =>
+      globalManifestDigest(await readMemoryManifest(deps.stackHome)),
     // Task 13 fix round 7: a base Cloud no longer holds merges as empty.
-    getBase: async () => effectiveCanonicalBase(deps.backend, await readCanonicalBase(deps.stackHome)),
+    getBase: async () =>
+      effectiveCanonicalBase(
+        deps.backend,
+        await readCanonicalBase(deps.stackHome),
+      ),
     setLocalMain: (main) => writeCanonicalMain(deps.stackHome, main),
     setBase: (base) => writeCanonicalBase(deps.stackHome, base),
     fetchRemote: remote.fetch,
     publish: async (main, expectedParent) => {
       // Carry the fetched generation's registry records for projects in `main`
       // this machine has no record of (read-only, bundle only).
-      const result = await publishCanonicalGeneration(deps, main, expectedParent, remote.lastRegistrySnapshot());
+      const result = await publishCanonicalGeneration(
+        deps,
+        main,
+        expectedParent,
+        remote.lastRegistrySnapshot(),
+      );
       return { generation: result.generation };
     },
     savePendingMerge: (pending) => writePendingMerge(deps.stackHome, pending),
     clearPendingMerge: () => clearPendingMerge(deps.stackHome),
   });
-  if (outcome.status === 'conflict') return { status: 'conflict', conflicts: outcome.conflicts, ...remote.foldedExtra() };
+  if (outcome.status === 'conflict')
+    return {
+      status: 'conflict',
+      conflicts: outcome.conflicts,
+      ...remote.foldedExtra(),
+    };
   // Final review T15-2: up to date means local equals Cloud — record it.
-  if (outcome.status === 'up-to-date') await recordInSyncWithCloud(deps, outcome.generation);
+  if (outcome.status === 'up-to-date')
+    await recordInSyncWithCloud(deps, outcome.generation);
   // Materializes on any non-conflict outcome, including `retry-exhausted` —
   // Cloud may have moved during the retries, and whatever is now locally
   // canonical should still reach native files.
@@ -1268,12 +1530,17 @@ export const pushMemoryViaCanonical = async (
   // materialize conflicts — surface them alongside a successful/no-op Cloud
   // outcome rather than reporting a flat "synced".
   const extras = {
-    ...(materialize.unavailable.length > 0 ? { unavailable: materialize.unavailable } : {}),
-    ...(materialize.conflicts.length > 0 ? { conflicts: materialize.conflicts } : {}),
+    ...(materialize.unavailable.length > 0
+      ? { unavailable: materialize.unavailable }
+      : {}),
+    ...(materialize.conflicts.length > 0
+      ? { conflicts: materialize.conflicts }
+      : {}),
     ...(restoredFromStak > 0 ? { restoredFromStak } : {}),
     ...remote.foldedExtra(),
   };
-  if (outcome.status === 'retry-exhausted') return { status: 'retry-exhausted', ...extras };
+  if (outcome.status === 'retry-exhausted')
+    return { status: 'retry-exhausted', ...extras };
   return { status: outcome.status, generation: outcome.generation, ...extras };
 };
 
@@ -1292,11 +1559,19 @@ export const pushMemoryViaCanonical = async (
  *    the recorded provenance stays as it is.
  * Never fails the pull (nothing in Cloud or Memory depends on it).
  */
-const recordPullSync = async (deps: MemoryCloudDeps, merged: boolean): Promise<void> => {
+const recordPullSync = async (
+  deps: MemoryCloudDeps,
+  merged: boolean,
+): Promise<void> => {
   try {
-    const base = await effectiveCanonicalBase(deps.backend, await readCanonicalBase(deps.stackHome));
+    const base = await effectiveCanonicalBase(
+      deps.backend,
+      await readCanonicalBase(deps.stackHome),
+    );
     if (!base) return;
-    const localDiffers = canonicalDigest(await readCanonicalMain(deps.stackHome)) !== canonicalDigest(base.main);
+    const localDiffers =
+      canonicalDigest(await readCanonicalMain(deps.stackHome)) !==
+      canonicalDigest(base.main);
     if (merged && localDiffers) {
       // A historical recover whose rollback diff is still unpushed after the
       // merge stays historical (the next push keeps its rollback note and the
@@ -1307,7 +1582,10 @@ const recordPullSync = async (deps: MemoryCloudDeps, merged: boolean): Promise<v
         await writeLocalRecoveryState(deps.stackHome, {
           ...provenance,
           historical: true,
-          cloudLatestAtRecovery: Math.max(base.generation, provenance.cloudLatestAtRecovery ?? base.generation),
+          cloudLatestAtRecovery: Math.max(
+            base.generation,
+            provenance.cloudLatestAtRecovery ?? base.generation,
+          ),
         });
         return;
       }
@@ -1316,7 +1594,8 @@ const recordPullSync = async (deps: MemoryCloudDeps, merged: boolean): Promise<v
       if (localDiffers) return;
       if (
         base.globalDigest !== undefined &&
-        base.globalDigest !== globalManifestDigest(await readMemoryManifest(deps.stackHome))
+        base.globalDigest !==
+          globalManifestDigest(await readMemoryManifest(deps.stackHome))
       )
         return;
     }
@@ -1341,15 +1620,25 @@ export const pullMemoryViaCanonical = async (
   deps: MemoryCloudDeps,
   discovery: CanonicalDiscoveryOptions = {},
 ): Promise<CanonicalPullOutcome> => {
-  const { restoredFromStak } = await migrateWithProjectionSeed(deps.stackHome, discovery);
+  const { restoredFromStak } = await migrateWithProjectionSeed(
+    deps.stackHome,
+    discovery,
+  );
   if (!deps.backend) {
     const { notes } = await foldProjectMemory(deps.stackHome);
-    return { status: 'up-to-date', ...(notes.length > 0 ? { folded: notes } : {}) };
+    return {
+      status: 'up-to-date',
+      ...(notes.length > 0 ? { folded: notes } : {}),
+    };
   }
   const profile = await deps.backend.getProfile();
-  if ((profile?.privacyMode ?? 'standard') === 'protected' && !(await deps.localKeyStore.loadMmk().catch(() => null)))
+  if (
+    (profile?.privacyMode ?? 'standard') === 'protected' &&
+    !(await deps.localKeyStore.loadMmk().catch(() => null))
+  )
     return { status: 'protected-locked' };
-  const mmk = (await deps.localKeyStore.loadMmk().catch(() => undefined)) ?? undefined;
+  const mmk =
+    (await deps.localKeyStore.loadMmk().catch(() => undefined)) ?? undefined;
   const remote = remoteOf(deps, mmk);
   // Spec §4.2.1: fold before any sync decision — see `pushMemoryViaCanonical`.
   // A machine that never got Cloud's reconciliation learns it here, from the
@@ -1364,24 +1653,38 @@ export const pullMemoryViaCanonical = async (
   await seedBaseFromLastKnownV1Generation(deps, mmk);
   const outcome = await pullCanonicalMemory({
     getLocalMain: () => readCanonicalMain(deps.stackHome),
-    getLocalGlobalDigest: async () => globalManifestDigest(await readMemoryManifest(deps.stackHome)),
+    getLocalGlobalDigest: async () =>
+      globalManifestDigest(await readMemoryManifest(deps.stackHome)),
     // Task 13 fix round 7: a base Cloud no longer holds merges as empty.
-    getBase: async () => effectiveCanonicalBase(deps.backend, await readCanonicalBase(deps.stackHome)),
+    getBase: async () =>
+      effectiveCanonicalBase(
+        deps.backend,
+        await readCanonicalBase(deps.stackHome),
+      ),
     setLocalMain: (main) => writeCanonicalMain(deps.stackHome, main),
     setBase: (base) => writeCanonicalBase(deps.stackHome, base),
     fetchRemote: remote.fetch,
     savePendingMerge: (pending) => writePendingMerge(deps.stackHome, pending),
     clearPendingMerge: () => clearPendingMerge(deps.stackHome),
   });
-  if (outcome.status === 'conflict') return { status: 'conflict', conflicts: outcome.conflicts, ...remote.foldedExtra() };
+  if (outcome.status === 'conflict')
+    return {
+      status: 'conflict',
+      conflicts: outcome.conflicts,
+      ...remote.foldedExtra(),
+    };
   await recordPullSync(deps, outcome.status === 'merged-local');
   const materialize = await materializeCanonicalProjects(deps.stackHome, {
     ...discovery,
     remoteRegistrySnapshot: remote.lastRegistrySnapshot(),
   });
   const extras = {
-    ...(materialize.unavailable.length > 0 ? { unavailable: materialize.unavailable } : {}),
-    ...(materialize.conflicts.length > 0 ? { conflicts: materialize.conflicts } : {}),
+    ...(materialize.unavailable.length > 0
+      ? { unavailable: materialize.unavailable }
+      : {}),
+    ...(materialize.conflicts.length > 0
+      ? { conflicts: materialize.conflicts }
+      : {}),
     ...(restoredFromStak > 0 ? { restoredFromStak } : {}),
     ...remote.foldedExtra(),
   };
@@ -1394,9 +1697,12 @@ export const pullMemoryViaCanonical = async (
 /* Task 14: `stak memory resolve` / `stak memory diff` / `stak memory materialize` */
 /* -------------------------------------------------------------------------- */
 
-export { MemoryResolveError, MemorySyncError, type MemoryResolveErrorCode } from './pending-merge.js';
+export {
+  MemoryResolveError,
+  MemorySyncError,
+  type MemoryResolveErrorCode,
+} from './pending-merge.js';
 export type { KeepSide } from '@stack/memory';
-
 
 export type PendingConflictSummary = {
   projectId: string;
@@ -1412,28 +1718,46 @@ const projectNameOf = (registry: LocalRegistry, projectId: string): string =>
 const requirePending = async (stackHome: string): Promise<PendingMerge> => {
   const pending = await readPending(stackHome);
   if (!pending || pending.conflicts.length === 0)
-    throw new MemoryResolveError('no-pending-merge', 'No pending Memory conflicts. Nothing to resolve.');
+    throw new MemoryResolveError(
+      'no-pending-merge',
+      'No pending Memory conflicts. Nothing to resolve.',
+    );
   return pending;
 };
 
 /** A full Project ID or a unique prefix of one — the same selector rule `stak
  * project map|name|archive` use (they accept no display names either). */
-const selectProjectId = (selector: string, projectIds: Iterable<string>): string => {
+const selectProjectId = (
+  selector: string,
+  projectIds: Iterable<string>,
+): string => {
   const ids = [...new Set(projectIds)];
   if (ids.includes(selector)) return selector;
   const matches = ids.filter((id) => id.startsWith(selector));
   if (matches.length === 1) return matches[0] as string;
   if (matches.length === 0)
-    throw new MemoryResolveError('project-not-found', `No project matches "${selector}".`);
+    throw new MemoryResolveError(
+      'project-not-found',
+      `No project matches "${selector}".`,
+    );
   throw new MemoryResolveError(
     'ambiguous-project',
     `"${selector}" matches more than one project (${matches.join(', ')}). Use a longer Project ID.`,
   );
 };
 
-const findPendingConflict = (pending: PendingMerge, selector: string, docPath: string) => {
-  const projectId = selectProjectId(selector, pending.conflicts.map((c) => c.projectId));
-  const conflict = pending.conflicts.find((c) => c.projectId === projectId && c.path === docPath);
+const findPendingConflict = (
+  pending: PendingMerge,
+  selector: string,
+  docPath: string,
+) => {
+  const projectId = selectProjectId(
+    selector,
+    pending.conflicts.map((c) => c.projectId),
+  );
+  const conflict = pending.conflicts.find(
+    (c) => c.projectId === projectId && c.path === docPath,
+  );
   if (!conflict)
     throw new MemoryResolveError(
       'conflict-not-found',
@@ -1443,7 +1767,9 @@ const findPendingConflict = (pending: PendingMerge, selector: string, docPath: s
 };
 
 /** `stak memory resolve` with no arguments: the pending conflicts, in merge order. */
-export const listPendingConflicts = async (stackHome: string): Promise<PendingConflictSummary[]> => {
+export const listPendingConflicts = async (
+  stackHome: string,
+): Promise<PendingConflictSummary[]> => {
   const pending = await readPending(stackHome);
   if (!pending) return [];
   const registry = await readLocalRegistry(stackHome);
@@ -1455,14 +1781,26 @@ export const listPendingConflicts = async (stackHome: string): Promise<PendingCo
   }));
 };
 
-const projectsWithChangedDocs = (before: CanonicalMainManifest, after: CanonicalMainManifest): string[] => {
-  const ids = new Set([...before.projects, ...after.projects].map((p) => p.projectId));
+const projectsWithChangedDocs = (
+  before: CanonicalMainManifest,
+  after: CanonicalMainManifest,
+): string[] => {
+  const ids = new Set(
+    [...before.projects, ...after.projects].map((p) => p.projectId),
+  );
   const digestOf = (main: CanonicalMainManifest, projectId: string) =>
     canonicalDigest({
       schemaVersion: main.schemaVersion,
-      projects: [{ projectId, documents: projectMemoryOf(main, projectId)?.documents ?? [] }],
+      projects: [
+        {
+          projectId,
+          documents: projectMemoryOf(main, projectId)?.documents ?? [],
+        },
+      ],
     });
-  return [...ids].filter((id) => digestOf(before, id) !== digestOf(after, id)).sort();
+  return [...ids]
+    .filter((id) => digestOf(before, id) !== digestOf(after, id))
+    .sort();
 };
 
 export type ResolveConflictOutcome = {
@@ -1513,7 +1851,9 @@ export const resolvePendingConflict = async (
   const unfolded = await requirePending(deps.stackHome);
   findPendingConflict(unfolded, projectSelector, docPath);
   const cloud = await fetchCloudAtGeneration(deps, unfolded.basedOnGeneration);
-  const secondFold = await foldProjectMemory(deps.stackHome, { remoteSnapshot: cloud.registrySnapshot });
+  const secondFold = await foldProjectMemory(deps.stackHome, {
+    remoteSnapshot: cloud.registrySnapshot,
+  });
   const folded = [...firstFold.notes, ...secondFold.notes];
   const pending = await requirePending(deps.stackHome);
   const conflict = findPendingConflict(pending, projectSelector, docPath);
@@ -1521,10 +1861,14 @@ export const resolvePendingConflict = async (
   const local = await readCanonicalMain(deps.stackHome);
   await assertPendingMergeCurrent(deps, pending, local, cloud.main);
 
-  const documents = [...(projectMemoryOf(pending.merged, projectId)?.documents ?? [])];
+  const documents = [
+    ...(projectMemoryOf(pending.merged, projectId)?.documents ?? []),
+  ];
   const taken = new Set([
     ...documents.map((d) => d.path),
-    ...pending.conflicts.filter((c) => c.projectId === projectId).map((c) => c.path),
+    ...pending.conflicts
+      .filter((c) => c.projectId === projectId)
+      .map((c) => c.path),
   ]);
   const now = (deps.now ?? (() => new Date()))().toISOString();
   const localDoc = documentOf(local, projectId, docPath);
@@ -1536,13 +1880,19 @@ export const resolvePendingConflict = async (
     now,
     (candidate) => taken.has(candidate),
   );
-  const nextDocuments = [...documents.filter((d) => d.path !== docPath && d.path !== alt?.path), primary, ...(alt ? [alt] : [])].sort(
-    (a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
-  );
+  const nextDocuments = [
+    ...documents.filter((d) => d.path !== docPath && d.path !== alt?.path),
+    primary,
+    ...(alt ? [alt] : []),
+  ].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const nextMerged: CanonicalMainManifest = {
     ...pending.merged,
     projects: projectMemoryOf(pending.merged, projectId)
-      ? pending.merged.projects.map((p) => (p.projectId === projectId ? { projectId, documents: nextDocuments } : p))
+      ? pending.merged.projects.map((p) =>
+          p.projectId === projectId
+            ? { projectId, documents: nextDocuments }
+            : p,
+        )
       : [...pending.merged.projects, { projectId, documents: nextDocuments }],
   };
   const nextConflicts = pending.conflicts.filter((c) => c !== conflict);
@@ -1567,7 +1917,13 @@ export const resolvePendingConflict = async (
         ...(pending.resolved ?? []),
         // `local`: what this choice was made against — a later edit there makes
         // the merge stale (see `assertPendingMergeCurrent`).
-        { projectId, path: docPath, keep, ...(alt ? { altPath: alt.path } : {}), local: localDoc ?? null },
+        {
+          projectId,
+          path: docPath,
+          keep,
+          ...(alt ? { altPath: alt.path } : {}),
+          local: localDoc ?? null,
+        },
       ],
     } satisfies PendingMerge);
     return outcome;
@@ -1597,7 +1953,13 @@ export const resolvePendingConflict = async (
     materialize = {
       materialized: 0,
       unavailable: [],
-      conflicts: [{ projectId: '', path: '', reason: error instanceof Error ? error.message : 'materialize failed' }],
+      conflicts: [
+        {
+          projectId: '',
+          path: '',
+          reason: error instanceof Error ? error.message : 'materialize failed',
+        },
+      ],
       written: 0,
       deleted: 0,
     };
@@ -1605,7 +1967,10 @@ export const resolvePendingConflict = async (
   return { ...outcome, materialize };
 };
 
-export type ConflictSide = { state: 'present'; text: string } | { state: 'deleted' } | { state: 'absent' };
+export type ConflictSide =
+  | { state: 'present'; text: string }
+  | { state: 'deleted' }
+  | { state: 'absent' };
 
 export type ConflictDiff = {
   projectId: string;
@@ -1642,15 +2007,23 @@ export const diffPendingConflict = async (
   const pending = foldPendingMerge(stored, fold.aliasOf).pending;
   const conflict = findPendingConflict(pending, projectSelector, docPath);
   const local = fold.main;
-  const sideOf = async (doc: CanonicalDoc | undefined): Promise<ConflictSide> => {
+  const sideOf = async (
+    doc: CanonicalDoc | undefined,
+  ): Promise<ConflictSide> => {
     if (!doc) return { state: 'absent' };
     if (doc.state === 'deleted') return { state: 'deleted' };
-    const bytes = await readMemoryObject({ stackHome: deps.stackHome, contentHash: doc.contentHash });
+    const bytes = await readMemoryObject({
+      stackHome: deps.stackHome,
+      contentHash: doc.contentHash,
+    });
     return { state: 'present', text: Buffer.from(bytes).toString('utf8') };
   };
   return {
     projectId: conflict.projectId,
-    name: projectNameOf(await readLocalRegistry(deps.stackHome), conflict.projectId),
+    name: projectNameOf(
+      await readLocalRegistry(deps.stackHome),
+      conflict.projectId,
+    ),
     path: docPath,
     reason: conflict.reason,
     generation: pending.basedOnGeneration,
@@ -1679,7 +2052,8 @@ export const materializeMemory = async (
   const { notes } = await foldProjectMemory(stackHome);
   const withFolded = (outcome: MaterializeOutcome): MaterializeOutcome =>
     notes.length > 0 ? { ...outcome, folded: notes } : outcome;
-  if (options.project === undefined) return withFolded(await materializeCanonicalProjects(stackHome, discovery));
+  if (options.project === undefined)
+    return withFolded(await materializeCanonicalProjects(stackHome, discovery));
   const main = await readCanonicalMain(stackHome);
   const registry = await readLocalRegistry(stackHome);
   // A former Project ID selects the project it was merged into.
@@ -1699,5 +2073,9 @@ export const materializeMemory = async (
       `${name} is not available on this machine. Map it with \`stak project map ${projectId} <dir>\` before writing it out. Nothing was written.`,
     );
   }
-  return withFolded(await materializeCanonicalProjects(stackHome, discovery, { projectIds: [projectId] }));
+  return withFolded(
+    await materializeCanonicalProjects(stackHome, discovery, {
+      projectIds: [projectId],
+    }),
+  );
 };

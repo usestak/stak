@@ -1,7 +1,11 @@
 import { CIPHER_VERSION, open } from '../remote/cipher.js';
 import { unwrapDekWithMmk } from '../remote/mmk.js';
 import { parseBundle } from '../remote/bundle-codec.js';
-import { RemoteMemoryError, type MemoryGenerationMeta, type RemoteMemoryBackend } from '../remote/backend.js';
+import {
+  RemoteMemoryError,
+  type MemoryGenerationMeta,
+  type RemoteMemoryBackend,
+} from '../remote/backend.js';
 import { protectInProgressMessage } from '../remote/modes.js';
 import { hashBytes } from '../store.js';
 import { memoryManifestSchema } from '../domain.js';
@@ -14,16 +18,27 @@ import {
 } from '../project/registry.js';
 import { foldProjectAliases } from './project-fold.js';
 import { convertV1Bundle } from './convert-v1.js';
-import { canonicalMainManifestSchema, emptyCanonicalMain, type CanonicalMainManifest } from './domain.js';
+import {
+  canonicalMainManifestSchema,
+  emptyCanonicalMain,
+  type CanonicalMainManifest,
+} from './domain.js';
 import type { CanonicalBase } from './store.js';
 
 const splitPayload = (payload: Uint8Array) => {
   const buf = Buffer.from(payload);
-  return { nonce: buf.subarray(0, 12), ciphertext: buf.subarray(12, buf.length - 16), tag: buf.subarray(buf.length - 16) };
+  return {
+    nonce: buf.subarray(0, 12),
+    ciphertext: buf.subarray(12, buf.length - 16),
+    tag: buf.subarray(buf.length - 16),
+  };
 };
 
 const protectedAad = (backupId: string): Buffer =>
-  Buffer.from(JSON.stringify({ v: CIPHER_VERSION, mode: 'protected', backupId }), 'utf8');
+  Buffer.from(
+    JSON.stringify({ v: CIPHER_VERSION, mode: 'protected', backupId }),
+    'utf8',
+  );
 
 export type RemoteCanonicalObject = { contentHash: string; bytes: Uint8Array };
 
@@ -39,7 +54,11 @@ export const replicaOfRetiredGeneration = async (
   generation: number,
 ): Promise<MemoryGenerationMeta | null> => {
   for (const candidate of await backend.listGenerations()) {
-    if (candidate.privacyMode !== 'protected' || typeof candidate.replicaOf !== 'string') continue;
+    if (
+      candidate.privacyMode !== 'protected' ||
+      typeof candidate.replicaOf !== 'string'
+    )
+      continue;
     const original = await backend.getGenerationById(candidate.replicaOf);
     if (original && original.generation === generation) return candidate;
   }
@@ -102,8 +121,10 @@ export const effectiveCanonicalBase = async (
 ): Promise<CanonicalBase | null> => {
   if (!base || !backend) return base;
   if ((await backend.getGeneration(base.generation)) !== null) return base;
-  if ((await backend.getProfile())?.latestGeneration === base.generation) return base;
-  if ((await replicaOfRetiredGeneration(backend, base.generation)) !== null) return base;
+  if ((await backend.getProfile())?.latestGeneration === base.generation)
+    return base;
+  if ((await replicaOfRetiredGeneration(backend, base.generation)) !== null)
+    return base;
   return null;
 };
 
@@ -145,51 +166,86 @@ export const fetchRemoteCanonical = async (options: {
   // latest committed generation's own number — i.e. the highest generation was
   // retired but others remain. Content still comes from the latest committed one.
   const head =
-    options.generation === undefined ? ((await options.backend.getProfile())?.latestGeneration ?? null) : null;
+    options.generation === undefined
+      ? ((await options.backend.getProfile())?.latestGeneration ?? null)
+      : null;
   // Task 13 fix round 3: Cloud latest is a Protected replica while the account
   // is still Standard -> `stak memory protect` was interrupted mid-migration.
   // Fail closed (no merge, no materialize, no native deletes) until protect is
   // re-run and finalizes.
-  if (options.generation === undefined && meta.privacyMode === 'protected' && typeof meta.replicaOf === 'string') {
+  if (
+    options.generation === undefined &&
+    meta.privacyMode === 'protected' &&
+    typeof meta.replicaOf === 'string'
+  ) {
     const profile = await options.backend.getProfile();
     if ((profile?.privacyMode ?? 'standard') === 'standard')
-      throw new RemoteMemoryError('protect-in-progress', await protectInProgressMessage(options.backend));
+      throw new RemoteMemoryError(
+        'protect-in-progress',
+        await protectInProgressMessage(options.backend),
+      );
   }
   const payload = await options.backend.getPayload(meta.backupId);
   if (hashBytes(payload) !== meta.payloadSha256)
-    throw new RemoteMemoryError('integrity', 'Payload failed its integrity hash.');
+    throw new RemoteMemoryError(
+      'integrity',
+      'Payload failed its integrity hash.',
+    );
 
   let bundleBytes: Uint8Array;
   if (meta.privacyMode === 'standard') {
     bundleBytes = payload;
   } else {
-    if (!options.mmk) throw new RemoteMemoryError('mmk-required', 'Protected recovery requires the Memory Master Key.');
-    if (!meta.wrappedDek) throw new RemoteMemoryError('not-protected', 'Protected generation is missing its wrapped DEK.');
+    if (!options.mmk)
+      throw new RemoteMemoryError(
+        'mmk-required',
+        'Protected recovery requires the Memory Master Key.',
+      );
+    if (!meta.wrappedDek)
+      throw new RemoteMemoryError(
+        'not-protected',
+        'Protected generation is missing its wrapped DEK.',
+      );
     const dek = unwrapDekWithMmk(meta.wrappedDek, options.mmk, meta.backupId);
     bundleBytes = open(splitPayload(payload), dek, protectedAad(meta.backupId));
   }
 
   const bundle = parseBundle(bundleBytes);
   const main = bundle.canonicalB64
-    ? canonicalMainManifestSchema.parse(JSON.parse(Buffer.from(bundle.canonicalB64, 'base64').toString('utf8')))
+    ? canonicalMainManifestSchema.parse(
+        JSON.parse(Buffer.from(bundle.canonicalB64, 'base64').toString('utf8')),
+      )
     : convertV1Bundle(bundle, { localRegistry: options.localRegistry });
   const objects: RemoteCanonicalObject[] = bundle.objects.map((object) => {
     const bytes = Buffer.from(object.bytesB64, 'base64');
     if (hashBytes(bytes) !== object.contentHash)
-      throw new RemoteMemoryError('integrity', 'A bundled object does not match its content hash.');
+      throw new RemoteMemoryError(
+        'integrity',
+        'A bundled object does not match its content hash.',
+      );
     return { contentHash: object.contentHash, bytes };
   });
   let registrySnapshot: PortableRegistrySnapshot | undefined;
   if (bundle.registryB64 && bundle.registrySha256) {
     const registryBytes = Buffer.from(bundle.registryB64, 'base64');
     if (hashBytes(registryBytes) !== bundle.registrySha256)
-      throw new RemoteMemoryError('integrity', 'The bundled project registry does not match its hash.');
-    registrySnapshot = portableRegistrySnapshotSchema.parse(JSON.parse(registryBytes.toString('utf8')));
+      throw new RemoteMemoryError(
+        'integrity',
+        'The bundled project registry does not match its hash.',
+      );
+    registrySnapshot = portableRegistrySnapshotSchema.parse(
+      JSON.parse(registryBytes.toString('utf8')),
+    );
   }
   const manifestBytes = Buffer.from(bundle.manifestB64, 'base64');
   if (hashBytes(manifestBytes) !== bundle.manifestSha256)
-    throw new RemoteMemoryError('integrity', 'The bundled manifest does not match its hash.');
-  const globalDigest = globalManifestDigest(memoryManifestSchema.parse(JSON.parse(manifestBytes.toString('utf8'))));
+    throw new RemoteMemoryError(
+      'integrity',
+      'The bundled manifest does not match its hash.',
+    );
+  const globalDigest = globalManifestDigest(
+    memoryManifestSchema.parse(JSON.parse(manifestBytes.toString('utf8'))),
+  );
   // Spec §4.2.1: every Cloud version read is folded with the same alias map a
   // sync uses for local Memory and the base (local registry ∪ this
   // generation's snapshot), so a merged project never looks like a deletion
@@ -200,7 +256,8 @@ export const fetchRemoteCanonical = async (options: {
     trustedAliasResolver(options.localRegistry, registrySnapshot),
   ).main;
   return {
-    generation: head !== null && head > meta.generation ? head : meta.generation,
+    generation:
+      head !== null && head > meta.generation ? head : meta.generation,
     contentGeneration: meta.generation,
     main: folded,
     globalDigest,

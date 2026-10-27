@@ -40,6 +40,8 @@ describe('groupLegacyItems', () => {
     const documents = result.main.projects[0]?.documents ?? [];
     const original = documents.find((d) => d.path === 'notes/a.md');
     expect(original).toMatchObject({ contentHash: h(2) });
-    expect(documents.some((d) => d.path.startsWith('notes/a.conflict-'))).toBe(true);
+    expect(documents.some((d) => d.path.startsWith('notes/a.conflict-'))).toBe(
+      true,
+    );
   });
 });

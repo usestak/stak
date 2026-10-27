@@ -211,35 +211,55 @@ describe('passkey bridge flows (CLI ↔ relay ↔ simulated browser)', () => {
     expect(result.status).toBe('not-authenticated');
   });
 
-  describe('protect moves this machine\'s sync provenance to the Protected replica', () => {
-    const passkeyProtectBrowser = (backend: RemoteMemoryBackend) => async (url: string) => {
-      const record = await backend.getRecoverySession(sessionIdFrom(url));
-      const session = record?.session as RecoverySession;
-      const mmk = generateMmk();
-      const keyring = newKeyring();
-      const { wrapper } = addPasskeyWrapper({ keyring, mmk, prfOutput: randomBytes(32) });
-      await backend.addRecoveryMethod({
-        type: 'passkey',
-        label: 'Passkey',
-        publicIdentifier: 'cred-1',
-        mmkWrapper: { mmkId: keyring.mmkId, wrapper },
-        cryptoVersion: 'stack-mem-cipher-v1',
-      });
-      await backend.submitRecoveryEnvelope(session.sessionId, await sealMmkForPeer({ session, mmk }));
-    };
+  describe("protect moves this machine's sync provenance to the Protected replica", () => {
+    const passkeyProtectBrowser =
+      (backend: RemoteMemoryBackend) => async (url: string) => {
+        const record = await backend.getRecoverySession(sessionIdFrom(url));
+        const session = record?.session as RecoverySession;
+        const mmk = generateMmk();
+        const keyring = newKeyring();
+        const { wrapper } = addPasskeyWrapper({
+          keyring,
+          mmk,
+          prfOutput: randomBytes(32),
+        });
+        await backend.addRecoveryMethod({
+          type: 'passkey',
+          label: 'Passkey',
+          publicIdentifier: 'cred-1',
+          mmkWrapper: { mmkId: keyring.mmkId, wrapper },
+          cryptoVersion: 'stack-mem-cipher-v1',
+        });
+        await backend.submitRecoveryEnvelope(
+          session.sessionId,
+          await sealMmkForPeer({ session, mmk }),
+        );
+      };
     const setup = async () => {
       const source = await writeStore();
-      const backend = inMemoryRemoteMemoryBackend(new InMemoryRemoteMemoryStore(), USER);
+      const backend = inMemoryRemoteMemoryBackend(
+        new InMemoryRemoteMemoryStore(),
+        USER,
+      );
       const deps = {
         stackHome: source.stackHome,
         backend,
         localKeyStore: secureKeys(await temp('stack-pk-prov-')),
-        runLocalBackup: () => Promise.resolve({ provider: 'claude' as const, files: 2, projects: 1, createdAt: '2026-10-26T00:00:00.000Z' }),
+        runLocalBackup: () =>
+          Promise.resolve({
+            provider: 'claude' as const,
+            files: 2,
+            projects: 1,
+            createdAt: '2026-10-26T00:00:00.000Z',
+          }),
         webBaseUrl: 'http://localhost:3000',
         openBrowser: passkeyProtectBrowser(backend),
         sleep: immediateSleep,
       };
-      expect((await runMemoryCloudBackup(deps)).cloud).toMatchObject({ status: 'standard', generation: 0 });
+      expect((await runMemoryCloudBackup(deps)).cloud).toMatchObject({
+        status: 'standard',
+        generation: 0,
+      });
       return { backend, deps };
     };
 
@@ -250,16 +270,31 @@ describe('passkey bridge flows (CLI ↔ relay ↔ simulated browser)', () => {
       const status = await readMemoryCloudStatus(deps);
       expect(status.historicalRecovery).toBe(false);
       expect(status.localRecoveredGeneration).toBe(1);
-      expect(await readLocalRecoveryState(deps.stackHome)).toMatchObject({ recoveredGeneration: 1, privacyMode: 'protected' });
+      expect(await readLocalRecoveryState(deps.stackHome)).toMatchObject({
+        recoveredGeneration: 1,
+        privacyMode: 'protected',
+      });
     });
 
     it('resuming an interrupted passkey protect moves the provenance too', async () => {
       const { backend, deps } = await setup();
       const interrupted: RemoteMemoryBackend = Object.create(backend);
-      interrupted.setPrivacyMode = () => Promise.reject(new Error('connection reset'));
-      await expect(runPasskeyProtect({ ...deps, backend: interrupted })).rejects.toThrow('connection reset');
+      interrupted.setPrivacyMode = () =>
+        Promise.reject(new Error('connection reset'));
+      await expect(
+        runPasskeyProtect({ ...deps, backend: interrupted }),
+      ).rejects.toThrow('connection reset');
       // The resume uses this device's key; no browser ceremony.
-      expect((await runPasskeyProtect({ ...deps, openBrowser: () => { throw new Error('no browser on resume'); } })).status).toBe('protected');
+      expect(
+        (
+          await runPasskeyProtect({
+            ...deps,
+            openBrowser: () => {
+              throw new Error('no browser on resume');
+            },
+          })
+        ).status,
+      ).toBe('protected');
       const status = await readMemoryCloudStatus(deps);
       expect(status.historicalRecovery).toBe(false);
       expect(status.localRecoveredGeneration).toBe(1);
@@ -479,7 +514,10 @@ describe('C1: passkey protect refuses an already-Protected account', () => {
         mmkWrapper: { mmkId: keyring.mmkId, wrapper },
         cryptoVersion: 'stack-mem-cipher-v1',
       });
-      await backend.submitRecoveryEnvelope(session.sessionId, await sealMmkForPeer({ session, mmk }));
+      await backend.submitRecoveryEnvelope(
+        session.sessionId,
+        await sealMmkForPeer({ session, mmk }),
+      );
     };
     const deps = {
       stackHome: source.stackHome,

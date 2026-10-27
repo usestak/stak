@@ -1,4 +1,8 @@
-import type { CanonicalDoc, CanonicalMainManifest, CanonicalProjectMemory } from './domain.js';
+import type {
+  CanonicalDoc,
+  CanonicalMainManifest,
+  CanonicalProjectMemory,
+} from './domain.js';
 import { keepBothPath, type PendingMerge } from './merge.js';
 import type { ProjectionFile } from './store.js';
 
@@ -26,13 +30,22 @@ export type ProjectFoldReport = {
   merged: { fromProjectId: string; toProjectId: string }[];
   /** Every document kept both: the surviving ID's version stayed at `path`, the
    * former ID's (`fromProjectId`) version was kept at `keptAt`. */
-  keptBoth: { projectId: string; path: string; keptAt: string; fromProjectId: string }[];
+  keptBoth: {
+    projectId: string;
+    path: string;
+    keptAt: string;
+    fromProjectId: string;
+  }[];
 };
 
-export const emptyProjectFoldReport = (): ProjectFoldReport => ({ merged: [], keptBoth: [] });
+export const emptyProjectFoldReport = (): ProjectFoldReport => ({
+  merged: [],
+  keptBoth: [],
+});
 
 const byString = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
-const byPath = (a: { path: string }, b: { path: string }): number => byString(a.path, b.path);
+const byPath = (a: { path: string }, b: { path: string }): number =>
+  byString(a.path, b.path);
 
 /** Fold one former document into the surviving project's documents (by path). */
 const foldDoc = (
@@ -56,7 +69,11 @@ const foldDoc = (
   // (an earlier fold of the same pair already kept it).
   const isTaken = (candidate: string): boolean => {
     const at = docs.get(candidate);
-    return at !== undefined && at.state === 'present' && at.contentHash !== doc.contentHash;
+    return (
+      at !== undefined &&
+      at.state === 'present' &&
+      at.contentHash !== doc.contentHash
+    );
   };
   const keptAt = keepBothPath(doc.path, doc.contentHash, isTaken);
   docs.set(keptAt, { ...doc, path: keptAt });
@@ -67,7 +84,9 @@ export const foldProjectAliases = (
   main: CanonicalMainManifest,
   aliasOf: (projectId: string) => string,
 ): { main: CanonicalMainManifest; report: ProjectFoldReport } => {
-  const formers = main.projects.filter((p) => aliasOf(p.projectId) !== p.projectId);
+  const formers = main.projects.filter(
+    (p) => aliasOf(p.projectId) !== p.projectId,
+  );
   if (formers.length === 0) return { main, report: emptyProjectFoldReport() };
 
   const report = emptyProjectFoldReport();
@@ -76,7 +95,9 @@ export const foldProjectAliases = (
   const docsFor = (projectId: string): Map<string, CanonicalDoc> => {
     let docs = survivors.get(projectId);
     if (!docs) {
-      const own = main.projects.filter((p) => p.projectId === projectId).flatMap((p) => p.documents);
+      const own = main.projects
+        .filter((p) => p.projectId === projectId)
+        .flatMap((p) => p.documents);
       docs = new Map([...own].sort(byPath).map((d) => [d.path, d]));
       survivors.set(projectId, docs);
     }
@@ -86,13 +107,21 @@ export const foldProjectAliases = (
   // each former project in Project ID order, its documents in path order.
   const formerDocs = new Map<string, CanonicalDoc[]>();
   for (const project of formers)
-    formerDocs.set(project.projectId, [...(formerDocs.get(project.projectId) ?? []), ...project.documents]);
+    formerDocs.set(project.projectId, [
+      ...(formerDocs.get(project.projectId) ?? []),
+      ...project.documents,
+    ]);
   for (const fromProjectId of [...formerDocs.keys()].sort(byString)) {
     const toProjectId = aliasOf(fromProjectId);
     const docs = docsFor(toProjectId);
     for (const doc of [...(formerDocs.get(fromProjectId) ?? [])].sort(byPath))
       foldDoc(docs, doc, (keptAt) =>
-        report.keptBoth.push({ projectId: toProjectId, path: doc.path, keptAt, fromProjectId }),
+        report.keptBoth.push({
+          projectId: toProjectId,
+          path: doc.path,
+          keptAt,
+          fromProjectId,
+        }),
       );
     report.merged.push({ fromProjectId, toProjectId });
   }
@@ -110,7 +139,10 @@ export const foldProjectAliases = (
     }
     if (placed.has(target)) continue;
     placed.add(target);
-    projects.push({ projectId: target, documents: [...(survivors.get(target)?.values() ?? [])].sort(byPath) });
+    projects.push({
+      projectId: target,
+      documents: [...(survivors.get(target)?.values() ?? [])].sort(byPath),
+    });
   }
   return { main: { ...main, projects }, report };
 };
@@ -126,13 +158,17 @@ export const foldProjection = (
   aliasOf: (projectId: string) => string,
 ): { projection: ProjectionFile; changed: boolean } => {
   const ids = Object.keys(file.projects);
-  if (ids.every((id) => aliasOf(id) === id)) return { projection: file, changed: false };
+  if (ids.every((id) => aliasOf(id) === id))
+    return { projection: file, changed: false };
   const projects: Record<string, Record<string, string>> = {};
-  for (const id of ids) if (aliasOf(id) === id) projects[id] = { ...file.projects[id] };
+  for (const id of ids)
+    if (aliasOf(id) === id) projects[id] = { ...file.projects[id] };
   for (const id of ids.filter((x) => aliasOf(x) !== x).sort(byString)) {
     const target = aliasOf(id);
     const entries = (projects[target] ??= {});
-    for (const [docPath, hash] of Object.entries(file.projects[id] ?? {}).sort(([a], [b]) => byString(a, b)))
+    for (const [docPath, hash] of Object.entries(file.projects[id] ?? {}).sort(
+      ([a], [b]) => byString(a, b),
+    ))
       if (entries[docPath] === undefined) entries[docPath] = hash;
   }
   return { projection: { ...file, projects }, changed: true };
@@ -149,8 +185,11 @@ export const foldPendingMerge = (
   aliasOf: (projectId: string) => string,
 ): { pending: PendingMerge; report: ProjectFoldReport; changed: boolean } => {
   const { main: merged, report } = foldProjectAliases(pending.merged, aliasOf);
-  const idsChange = [...pending.conflicts, ...(pending.resolved ?? [])].some((c) => aliasOf(c.projectId) !== c.projectId);
-  if (merged === pending.merged && !idsChange) return { pending, report, changed: false };
+  const idsChange = [...pending.conflicts, ...(pending.resolved ?? [])].some(
+    (c) => aliasOf(c.projectId) !== c.projectId,
+  );
+  if (merged === pending.merged && !idsChange)
+    return { pending, report, changed: false };
   const seen = new Set<string>();
   const conflicts = pending.conflicts
     .map((c) => ({ ...c, projectId: aliasOf(c.projectId) }))
@@ -166,7 +205,12 @@ export const foldPendingMerge = (
       merged,
       conflicts,
       ...(pending.resolved
-        ? { resolved: pending.resolved.map((r) => ({ ...r, projectId: aliasOf(r.projectId) })) }
+        ? {
+            resolved: pending.resolved.map((r) => ({
+              ...r,
+              projectId: aliasOf(r.projectId),
+            })),
+          }
         : {}),
     },
     report,

@@ -24,7 +24,12 @@ const issueLine = (issue: SkillAddIssue): string => {
 export type StagedMemorySummary = {
   files: number;
   projects: number;
-  canonical?: Array<{ projectId: string; imported: number; conflicts: number; guarded: number }>;
+  canonical?: Array<{
+    projectId: string;
+    imported: number;
+    conflicts: number;
+    guarded: number;
+  }>;
   /** Project identities with genuinely ambiguous resolution (more than one existing
    * Project ID claims or is bound to the same identity) — never staged. No existing
    * `stak project` subcommand can merge/remove a claim, so this is reported as a
@@ -70,13 +75,23 @@ export const renderSkillAdd = (
       `  staged ${options.memory.files} file${options.memory.files === 1 ? '' : 's'}` +
         ` across ${options.memory.projects} project${options.memory.projects === 1 ? '' : 's'}`,
     );
-    for (const note of projectFoldNotes(options.memory.folded)) lines.push(`  Memory: ${note}.`);
+    for (const note of projectFoldNotes(options.memory.folded))
+      lines.push(`  Memory: ${note}.`);
     if (options.memory.canonical?.length) {
       for (const project of options.memory.canonical) {
-        if (project.imported > 0) lines.push(`  Memory: imported ${project.imported} change(s) for ${project.projectId}`);
+        if (project.imported > 0)
+          lines.push(
+            `  Memory: imported ${project.imported} change(s) for ${project.projectId}`,
+          );
         // Final review I4: local agent-vs-STAK conflicts; `stak status` lists each with its fix.
-        if (project.conflicts > 0) lines.push(`  Memory: ${project.conflicts} conflict(s) between agent files and STAK in ${project.projectId}, not added — run \`stak status\` for how to fix each`);
-        if (project.guarded > 0) lines.push(`  Memory: ${project.guarded} path(s) will be regenerated for ${project.projectId} — run \`stak memory materialize\``);
+        if (project.conflicts > 0)
+          lines.push(
+            `  Memory: ${project.conflicts} conflict(s) between agent files and STAK in ${project.projectId}, not added — run \`stak status\` for how to fix each`,
+          );
+        if (project.guarded > 0)
+          lines.push(
+            `  Memory: ${project.guarded} path(s) will be regenerated for ${project.projectId} — run \`stak memory materialize\``,
+          );
       }
     }
     if (options.memory.conflictedProjects)

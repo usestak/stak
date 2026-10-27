@@ -1,7 +1,15 @@
 import { memoryManifestSchema, type ManifestItem } from '../domain.js';
 import { projectIdentityKey } from '../project-identity.js';
-import { resolveOrMintProject, resolveProjectForIdentity, type LocalRegistry } from '../project/registry.js';
-import { emptyRegistry, mergePortableSnapshot, portableRegistrySnapshotSchema } from '../project/registry.js';
+import {
+  resolveOrMintProject,
+  resolveProjectForIdentity,
+  type LocalRegistry,
+} from '../project/registry.js';
+import {
+  emptyRegistry,
+  mergePortableSnapshot,
+  portableRegistrySnapshotSchema,
+} from '../project/registry.js';
 import type { MemoryBackupBundle } from '../remote/bundle-codec.js';
 import { claudeCanonicalPathOf } from './claude-project-adapter.js';
 import { groupLegacyItems } from './group-legacy-items.js';
@@ -104,10 +112,21 @@ export const convertV1BundleForRecover = (
   }
   if (conflicts.size > 0)
     throw new V1ConversionError(
-      `This backup uses the old Memory format, and ${conflicts.size} of its project(s) match more than one project on this machine (${[...conflicts]
+      `This backup uses the old Memory format, and ${conflicts.size} of its project(s) match more than one project on this machine (${[
+        ...conflicts,
+      ]
         .map(([identity, ids]) => `${identity}: ${ids.join(', ')}`)
         .join('; ')}). Nothing was recovered.`,
-      [...conflicts].map(([identity, projectIds]) => ({ identity, projectIds })),
+      [...conflicts].map(([identity, projectIds]) => ({
+        identity,
+        projectIds,
+      })),
     );
-  return { main: tagged.length === 0 ? emptyCanonicalMain() : groupLegacyItems(tagged).main, registry };
+  return {
+    main:
+      tagged.length === 0
+        ? emptyCanonicalMain()
+        : groupLegacyItems(tagged).main,
+    registry,
+  };
 };
