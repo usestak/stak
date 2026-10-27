@@ -14,6 +14,7 @@ import type { SkillTreeEntry } from '@stack/shared';
 import {
   ArchiveIntegrityError,
   ArchivePathError,
+  assertExtractedSymlinksContained,
   extractSnapshotArchiveToStore,
   ingestSkill,
   packSkillTreeEntries,
@@ -179,5 +180,242 @@ describe('snapshot archive', () => {
       bytes: archive.bytes,
     });
     expect(result.contentHash).toBe(contentHash);
+  });
+});
+
+describe('snapshot archive: crafted symlink layouts', () => {
+  const file = (relativePath: string, text = 'x'): SkillTreeEntry => ({
+    relativePath,
+    type: 'file',
+    content: Buffer.from(text),
+  });
+  const link = (relativePath: string, target: string): SkillTreeEntry => ({
+    relativePath,
+    type: 'symlink',
+    target,
+  });
+
+  /** Packs entries exactly as an attacker would, with a self-consistent content hash. */
+  const extract = async (stackHome: string, entries: SkillTreeEntry[]) => {
+    const archive = packSkillTreeEntries(entries);
+    return extractSnapshotArchiveToStore({
+      stackHome,
+      contentHash: hashSkillTreeEntries(entries),
+      archiveHash: archive.archiveHash,
+      bytes: archive.bytes,
+    });
+  };
+
+  it('rejects a symlink chain that would write a file outside the store (regression)', async () => {
+    // `x -> .` then `x/x/x/y -> ../../..` each look in-tree on their own, but writing
+    // `x/x/x/y/pwn` follows both links and lands three levels above the staging root.
+    const root = await temp();
+    const stackHome = path.join(root, 'a', 'b', 'c', 'stack');
+    await mkdir(stackHome, { recursive: true });
+    await expect(
+      extract(stackHome, [
+        link('x', '.'),
+        link('x/x/x/y', '../../..'),
+        file('x/x/x/y/pwn', 'owned'),
+      ]),
+    ).rejects.toBeInstanceOf(ArchivePathError);
+    const escaped = await enumerateSkillTree(root).catch(() => []);
+    expect(escaped.map((entry) => entry.relativePath)).not.toContainEqual(
+      expect.stringMatching(/(^|\/)pwn$/),
+    );
+  });
+
+  it('rejects any entry nested beneath a symlink entry', () => {
+    const archive = packSkillTreeEntries([
+      link('docs', 'real'),
+      file('docs/SKILL.md'),
+      file('real/keep.md'),
+    ]);
+    expect(() => unpackSkillTreeEntries(archive.bytes)).toThrow(
+      ArchivePathError,
+    );
+  });
+
+  it('rejects a symlink target that resolves through another symlink', () => {
+    // Lexically `d/s/../victim` is `d/victim`, but the OS follows `d/s` (-> the tree
+    // root) before applying `..`, which leaves the tree.
+    const archive = packSkillTreeEntries([
+      link('d/s', '..'),
+      link('e', 'd/s/../victim'),
+      file('SKILL.md'),
+    ]);
+    expect(() => unpackSkillTreeEntries(archive.bytes)).toThrow(
+      ArchivePathError,
+    );
+  });
+
+  it('rejects two entries naming the same path on case-insensitive filesystems', () => {
+    const archive = packSkillTreeEntries([
+      link('Notes', 'SKILL.md'),
+      file('notes', 'overwrite through the link'),
+      file('SKILL.md'),
+    ]);
+    expect(() => unpackSkillTreeEntries(archive.bytes)).toThrow(
+      ArchivePathError,
+    );
+  });
+
+  const ordinaryLinks = () => [
+    file('SKILL.md', '---\nname: demo\ndescription: demo\n---\nbody\n'),
+    file('docs/guide.md', 'guide'),
+    link('guide', 'docs/guide.md'),
+    link('alias', 'guide'),
+    link('docs/up', '../SKILL.md'),
+    link('docs/self', '../docs/guide.md'),
+  ];
+
+  it('parses ordinary in-tree symlinks, including a link to a link', () => {
+    const archive = packSkillTreeEntries(ordinaryLinks());
+    expect(() => unpackSkillTreeEntries(archive.bytes)).not.toThrow();
+  });
+
+  it('still accepts ordinary in-tree symlinks, including a link to a link', async (context) => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const entries = ordinaryLinks();
+    let result: { contentHash: string };
+    try {
+      result = await extract(stackHome, entries);
+    } catch (error) {
+      const cause = (error as { cause?: NodeJS.ErrnoException }).cause;
+      if (cause?.code === 'EPERM') context.skip();
+      throw error;
+    }
+    expect(result.contentHash).toBe(hashSkillTreeEntries(entries));
+  });
+
+  const rejects = (entries: SkillTreeEntry[]) => {
+    const archive = packSkillTreeEntries(entries);
+    expect(() => unpackSkillTreeEntries(archive.bytes)).toThrow(
+      ArchivePathError,
+    );
+  };
+
+  it.each([
+    ['long s (U+017F), folded to s by APFS', 's', '\u017F'],
+    ['final sigma, folded to sigma by APFS', '\u03C3', '\u03C2'],
+    ['plain case difference', 's', 'S'],
+  ])(
+    'rejects a walk through an unknown segment that a case-folding filesystem maps onto a symlink: %s',
+    (_label, linkName, walkedName) => {
+      // On macOS `d/<walkedName>` is `d/<linkName>` (-> `..`), so `d/L` would land above
+      // the tree. The walk must not trust a name the archive never created as a directory.
+      rejects([
+        link(`d/${linkName}`, '..'),
+        link('d/L', `${walkedName}/../..`),
+        file('SKILL.md'),
+      ]);
+    },
+  );
+
+  it.each(['nope/../x', 'SKILL.md/../x', 'docs/nope/../guide.md'])(
+    'rejects a target walking through %s, which is not a directory in the archive',
+    (target) => {
+      rejects([
+        file('SKILL.md'),
+        file('docs/guide.md'),
+        file('x'),
+        link('l', target),
+      ]);
+    },
+  );
+
+  it.each(['C:', 'C:foo', 'C:/x', 'a:b', 'docs/file:stream'])(
+    'rejects the drive-relative or stream symlink target %s',
+    (target) => {
+      rejects([file('SKILL.md'), link('l', target)]);
+    },
+  );
+
+  it.each(['a:b', 'C:', 'C:foo', 'docs/file:stream'])(
+    'rejects the entry path %s',
+    (unsafe) => {
+      // The packer refuses these, so craft the header by hand: pack a same-length safe
+      // name, then patch the bytes (the reader does not verify the header checksum).
+      const safe = unsafe.replaceAll(':', '_');
+      const archive = packSkillTreeEntries([file('SKILL.md'), file(safe)]);
+      const bytes = new Uint8Array(archive.bytes);
+      const encoded = new TextEncoder().encode(unsafe);
+      for (let offset = 0; offset < bytes.length; offset += 512) {
+        const name = new TextDecoder().decode(
+          bytes.subarray(offset, offset + 100),
+        );
+        if (name.startsWith(`${safe}\0`)) bytes.set(encoded, offset);
+      }
+      expect(() => unpackSkillTreeEntries(bytes)).toThrow(ArchivePathError);
+    },
+  );
+
+  it('rejects a path that is both a file and a directory, with a clear reason', () => {
+    const archive = packSkillTreeEntries([
+      file('a'),
+      file('a/b'),
+      file('SKILL.md'),
+    ]);
+    expect(() => unpackSkillTreeEntries(archive.bytes)).toThrow(
+      /both a file and a directory/,
+    );
+  });
+
+  it('explains why case-duplicate names are refused', () => {
+    const archive = packSkillTreeEntries([
+      file('SKILL.md'),
+      file('notes'),
+      file('Notes'),
+    ]);
+    expect(() => unpackSkillTreeEntries(archive.bytes)).toThrow(
+      /letter case or Unicode form.*macOS or Windows/,
+    );
+  });
+});
+
+describe('assertExtractedSymlinksContained', () => {
+  const tryLink = async (
+    context: { skip: () => void },
+    target: string,
+    at: string,
+  ) => {
+    try {
+      await symlink(target, at);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EPERM') context.skip();
+      throw error;
+    }
+  };
+
+  it('rejects a link the filesystem resolves outside the tree', async (context) => {
+    const root = await temp();
+    const tree = path.join(root, 'tree');
+    await mkdir(path.join(root, 'outside'), { recursive: true });
+    await mkdir(tree, { recursive: true });
+    await tryLink(context, '../outside', path.join(tree, 'l'));
+    await expect(
+      assertExtractedSymlinksContained(tree, [
+        { relativePath: 'l', type: 'symlink', target: '../outside' },
+      ]),
+    ).rejects.toBeInstanceOf(ArchivePathError);
+  });
+
+  it('allows a dangling link only when it stays inside the tree', async (context) => {
+    const root = await temp();
+    const tree = path.join(root, 'tree');
+    await mkdir(tree, { recursive: true });
+    await tryLink(context, 'missing.md', path.join(tree, 'inside'));
+    await tryLink(context, '../missing.md', path.join(tree, 'outside'));
+    await expect(
+      assertExtractedSymlinksContained(tree, [
+        { relativePath: 'inside', type: 'symlink', target: 'missing.md' },
+      ]),
+    ).resolves.toBeUndefined();
+    await expect(
+      assertExtractedSymlinksContained(tree, [
+        { relativePath: 'outside', type: 'symlink', target: '../missing.md' },
+      ]),
+    ).rejects.toBeInstanceOf(ArchivePathError);
   });
 });

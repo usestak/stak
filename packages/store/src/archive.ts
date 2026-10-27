@@ -1,11 +1,16 @@
-import { createHash } from 'node:crypto';
-import { mkdir, rm } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  assertSafeTreeLayout,
   copySkillTreeEntries,
   enumerateSkillTree,
+  hasColonSegment,
   hashSkillTreeEntries,
+  isPathWithin,
+  treePathKey,
+  UnsafeTreePathError,
   validateTreePath,
 } from '@stack/shared';
 import type { SkillTreeEntry } from '@stack/shared';
@@ -38,10 +43,11 @@ export class ArchivePathError extends StackStoreError {
   constructor(
     public readonly entryPath: string,
     options?: ErrorOptions,
+    public readonly reason?: string,
   ) {
     super(
       'archive-path-unsafe',
-      `Archive entry path is unsafe or unsupported: ${entryPath}`,
+      `Archive entry path is unsafe or unsupported: ${entryPath}${reason ? ` (${reason})` : ''}`,
       options,
     );
     this.name = 'ArchivePathError';
@@ -199,7 +205,6 @@ export const unpackSkillTreeEntries = (bytes: Uint8Array): SkillTreeEntry[] => {
     }
     if (typeFlag === '2') {
       const target = readField(block, 157, 100);
-      assertSafeSymlinkTarget(relativePath, target);
       entries.push({ relativePath, type: 'symlink', target });
     } else if (typeFlag === '0' || typeFlag === '\0' || typeFlag === '') {
       const content = Buffer.from(bytes.subarray(offset, offset + size));
@@ -213,22 +218,124 @@ export const unpackSkillTreeEntries = (bytes: Uint8Array): SkillTreeEntry[] => {
       );
     }
   }
+  // Archives are untrusted: check the whole entry set, not each entry in isolation.
+  try {
+    assertSafeTreeLayout(entries);
+  } catch (error) {
+    if (error instanceof UnsafeTreePathError)
+      throw new ArchivePathError(
+        error.relativePath,
+        { cause: error } as ErrorOptions,
+        error.reason,
+      );
+    throw error;
+  }
+  const symlinkKeys = new Set(
+    entries
+      .filter((entry) => entry.type === 'symlink')
+      .map((entry) => treePathKey(entry.relativePath)),
+  );
+  // Every directory the archive implies, spelled exactly as its entries spell it ('' is
+  // the tree root). Symlinks are not directories here: walking through one is refused.
+  const directories = new Set<string>(['']);
+  for (const entry of entries) {
+    const segments = entry.relativePath.split('/');
+    for (let depth = 1; depth < segments.length; depth += 1)
+      directories.add(segments.slice(0, depth).join('/'));
+  }
+  for (const entry of entries)
+    if (entry.type === 'symlink')
+      assertSafeSymlinkTarget(
+        entry.relativePath,
+        entry.target,
+        symlinkKeys,
+        directories,
+      );
   return entries;
 };
 
-const assertSafeSymlinkTarget = (relativePath: string, target: string) => {
+/**
+ * A symlink target must resolve inside the tree by walking it one segment at a time from
+ * the link's own directory, the way the OS does — not just after lexical normalization.
+ * `d/s/../victim` normalizes to `d/victim`, but if `d/s` is itself a symlink the OS follows
+ * it before applying `..`, landing wherever `d/s` points. So the walk may not pass THROUGH
+ * any symlink in the archive (pointing AT one is fine: that link's own target is checked
+ * the same way).
+ *
+ * Every non-final segment must also name, exactly, a directory the archive itself
+ * creates. Anything else is a name the filesystem interprets for us: `nope/..` and
+ * `SKILL.md/..` are not real directories, and a case-folding filesystem (APFS folds `ſ`
+ * with `s`) can turn an unknown name into an existing symlink that was never checked.
+ * The final segment may name anything; a dangling in-tree link is harmless.
+ */
+const assertSafeSymlinkTarget = (
+  relativePath: string,
+  target: string,
+  symlinkKeys: ReadonlySet<string>,
+  directories: ReadonlySet<string>,
+) => {
   const normalized = target.replaceAll('\\', '/');
   if (
     normalized.length === 0 ||
     normalized.startsWith('/') ||
-    /^[A-Za-z]:\//.test(normalized)
+    hasColonSegment(normalized)
   )
     throw new ArchivePathError(relativePath);
-  const resolved = path.posix.normalize(
-    path.posix.join(path.posix.dirname(relativePath), normalized),
-  );
-  if (resolved.startsWith('..') || resolved === '..')
-    throw new ArchivePathError(relativePath);
+  const resolved = relativePath.split('/').slice(0, -1);
+  const segments = normalized.split('/').filter((s) => s !== '' && s !== '.');
+  for (const [index, segment] of segments.entries()) {
+    if (segment === '..') {
+      if (resolved.length === 0) throw new ArchivePathError(relativePath);
+      resolved.pop();
+      continue;
+    }
+    resolved.push(segment);
+    const isLast = index === segments.length - 1;
+    if (isLast) continue;
+    const walked = resolved.join('/');
+    if (symlinkKeys.has(treePathKey(walked)) || !directories.has(walked))
+      throw new ArchivePathError(relativePath);
+  }
+};
+
+/**
+ * Filesystem truth check, run on the extracted tree: every created symlink must really
+ * resolve inside `root`, as the OS resolves it (including its own case and Unicode
+ * folding, which a parser can only approximate). A dangling link is allowed only when its
+ * lexical resolution stays inside the tree.
+ */
+export const assertExtractedSymlinksContained = async (
+  root: string,
+  entries: SkillTreeEntry[],
+): Promise<void> => {
+  const lexicalRoot = path.resolve(root);
+  const realRoot = await realpath(lexicalRoot);
+  for (const entry of entries) {
+    if (entry.type !== 'symlink') continue;
+    const linkPath = path.join(lexicalRoot, ...entry.relativePath.split('/'));
+    let resolved: string;
+    try {
+      resolved = await realpath(linkPath);
+    } catch (error) {
+      const lexical = path.resolve(path.dirname(linkPath), entry.target);
+      if (
+        (error as NodeJS.ErrnoException).code === 'ENOENT' &&
+        isPathWithin(lexicalRoot, lexical)
+      )
+        continue;
+      throw new ArchivePathError(
+        entry.relativePath,
+        { cause: error } as ErrorOptions,
+        'symlink does not resolve inside the Skill tree',
+      );
+    }
+    if (!isPathWithin(realRoot, resolved))
+      throw new ArchivePathError(
+        entry.relativePath,
+        undefined,
+        'symlink resolves outside the Skill tree',
+      );
+  }
 };
 
 export type PackStoreObjectOptions = { stackHome: string; contentHash: string };
@@ -272,10 +379,15 @@ export const extractSnapshotArchiveToStore = async (
   if (treeHash !== options.contentHash)
     throw new ArchiveIntegrityError(options.contentHash, treeHash);
   const paths = contentObjectPaths(options.stackHome, options.contentHash);
-  const staging = `${paths.objectDirectory}.extract.${treeHash.slice(7, 23)}.tmp`;
+  // Unique per call: concurrent pulls of the same Skill must not share (and delete) one
+  // staging directory, and a leftover from a crash must not block extraction.
+  const staging = `${paths.objectDirectory}.extract.${randomUUID()}.tmp`;
   try {
     await mkdir(path.dirname(paths.objectDirectory), { recursive: true });
     await copySkillTreeEntries(entries, staging);
+    // The parser's walk is a model of the filesystem; this asks the filesystem itself.
+    // On failure the `finally` below removes the staging directory.
+    await assertExtractedSymlinksContained(staging, entries);
     const ingested = await ingestSkill({
       stackHome: options.stackHome,
       sourcePath: staging,

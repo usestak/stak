@@ -1,7 +1,9 @@
-name: Memory tests (Linux)
+name: Tests (Linux + macOS)
 
-# Runs the Memory and CLI test suites on Linux. Its main job is the Memory lock's
-# Ctrl+C (SIGINT) cleanup test, which can't run on Windows and is skipped there.
+# Runs the Memory, CLI, Cloud and Skill-tree test suites on Linux and macOS. It covers
+# the Memory lock's Ctrl+C (SIGINT) cleanup test, which can't run on Windows, and the
+# symlink and case-folding tests for Skill archives and trees, which skip on Windows
+# machines without symlink privilege. macOS runners use case-insensitive APFS.
 on:
   pull_request:
   push:
@@ -17,13 +19,18 @@ concurrency:
 
 jobs:
   test:
-    name: Node ${{ matrix.node }}
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} / Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest]
         node: [22, 24]
+        exclude:
+          # One Node version is enough on macOS (APFS coverage) and keeps the run cheap.
+          - os: macos-latest
+            node: 24
     steps:
       - uses: actions/checkout@v4
 
@@ -45,11 +52,11 @@ jobs:
       - name: Memory lock tests (incl. Ctrl+C cleanup)
         run: pnpm --filter @stack/memory exec vitest run src/memory-lock.test.ts --reporter=verbose
 
-      - name: Memory, CLI and Cloud test suites
+      - name: Memory, CLI, Cloud and Skill-tree test suites
         # Run every suite even if one fails, then fail the step at the end.
         run: |
           status=0
-          for pkg in @stack/memory @memstk/cli @stack/cloud-server @stack/cloud-client @stack/spec; do
+          for pkg in @stack/memory @memstk/cli @stack/cloud-server @stack/cloud-client @stack/spec @stack/shared @stack/store @stack/scanner; do
             echo "::group::$pkg"
             pnpm --filter "$pkg" test || { echo "::error::$pkg tests failed"; status=1; }
             echo "::endgroup::"

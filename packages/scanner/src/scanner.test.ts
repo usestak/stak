@@ -1,10 +1,10 @@
 import {
   cp,
-  lstat,
   mkdtemp,
   mkdir,
   readFile,
   readdir,
+  realpath,
   symlink,
   writeFile,
 } from 'node:fs/promises';
@@ -277,7 +277,9 @@ describe('scanSkills', () => {
     expect(location).toMatchObject({
       isSymlink: true,
       path: path.join(visibleRoot, 'linked'),
-      realPath: await lstat(target).then(() => target),
+      // The resolved path, which differs from `target` when the temp dir itself sits
+      // behind a symlink (macOS: /var -> /private/var).
+      realPath: await realpath(target),
     });
   });
 
