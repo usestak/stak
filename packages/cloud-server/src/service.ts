@@ -56,6 +56,7 @@ import {
 const USER_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const DEFAULT_SESSION_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_TICKET_TTL_MS = 10 * 60 * 1000;
+const TOKEN_LAST_USED_GRANULARITY_MS = 60 * 1000;
 const DEFAULT_POLL_INTERVAL_MS = 2000;
 const DEFAULT_MAX_SNAPSHOT_BYTES = 200 * 1024 * 1024;
 
@@ -298,9 +299,20 @@ export const createCloudService = (config: CloudServiceConfig) => {
           401,
           'Invalid or revoked token.',
         );
-      await config.repository.updateToken(token.tokenId, {
-        lastUsedAt: nowIso(),
-      });
+      // Every CLI request authenticates; recording last use at minute granularity spares a
+      // database write on all but the first request of a burst (e.g. one `stak push`).
+      // A missing or unparseable lastUsedAt (NaN) is always due for an update, rather than
+      // silently never updating again.
+      const lastUsedMs = token.lastUsedAt
+        ? new Date(token.lastUsedAt).getTime()
+        : Number.NaN;
+      if (
+        !Number.isFinite(lastUsedMs) ||
+        nowMs() - lastUsedMs >= TOKEN_LAST_USED_GRANULARITY_MS
+      )
+        await config.repository.updateToken(token.tokenId, {
+          lastUsedAt: nowIso(),
+        });
       return { userId: token.userId, tokenId: token.tokenId };
     },
 
