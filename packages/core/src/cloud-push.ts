@@ -5,6 +5,7 @@ import type {
   GetEnvironmentResponse,
 } from '@stack/spec';
 import {
+  CloudUnauthorizedError,
   CloudVersionCommitFailedError,
   LocalEnvironmentConflictError,
   RemoteEnvironmentConflictError,
@@ -24,7 +25,13 @@ import {
 const DEFAULT_MAX_SNAPSHOT_BYTES = 200 * 1024 * 1024;
 /** Snapshot existence checks / uploads in flight at once. Each is a full Cloud round trip. */
 const SNAPSHOT_CONCURRENCY = 6;
-/** Reuse a plan-time upload ticket in apply while comfortably inside the server's 10-minute TTL. */
+/**
+ * Reuse a plan-time upload ticket in apply only while it is younger than this. Cloud signs
+ * upload tickets with a 10-minute TTL (checked by both upload and finalize), so a ticket
+ * reused at this age still has >= 5 minutes left for the upload itself. Anything older is
+ * re-prepared right before upload; an upload/finalize that still hits an expired ticket
+ * (slow link, clock skew) re-prepares once and retries — see `uploadPending`.
+ */
 const UPLOAD_TICKET_REUSE_MS = 5 * 60 * 1000;
 
 export type PushConflict = {
@@ -223,37 +230,64 @@ export const applyPush = async (
     );
 
   const nowMs = options.nowMs ?? Date.now;
+  const { client } = options;
+
+  /** A fresh upload ticket, or null if Cloud already has the content (e.g. another
+   *  Machine uploaded it since planning). */
+  const prepareTicket = async (
+    pending: PendingUpload,
+  ): Promise<string | null> => {
+    const prepared = await client.prepareSnapshot({
+      contentHash: pending.contentHash,
+      archiveHash: pending.archive.archiveHash,
+      byteSize: pending.archive.byteSize,
+    });
+    return prepared.status === 'upload' ? prepared.uploadTicket : null;
+  };
+  const uploadWithTicket = async (
+    pending: PendingUpload,
+    uploadTicket: string,
+  ): Promise<void> => {
+    await client.uploadSnapshot(uploadTicket, pending.archive.bytes);
+    await client.finalizeSnapshot({
+      contentHash: pending.contentHash,
+      archiveHash: pending.archive.archiveHash,
+      byteSize: pending.archive.byteSize,
+      uploadTicket,
+    });
+  };
+  /** Returns true if this call uploaded the content, false if Cloud already had it. */
+  const uploadPending = async (pending: PendingUpload): Promise<boolean> => {
+    // Checked here, right before the upload starts (not when the plan was made), so time
+    // spent at the confirmation prompt or queued behind other uploads counts.
+    const reusable =
+      pending.uploadTicket !== undefined &&
+      pending.ticketIssuedAt !== undefined &&
+      nowMs() - pending.ticketIssuedAt < UPLOAD_TICKET_REUSE_MS;
+    // A stale plan re-checks, which also catches content uploaded in the meantime.
+    const ticket = reusable
+      ? (pending.uploadTicket as string)
+      : await prepareTicket(pending);
+    if (ticket === null) return false;
+    try {
+      await uploadWithTicket(pending, ticket);
+      return true;
+    } catch (error) {
+      // Cloud answers an expired (or otherwise unusable) ticket with cloud-unauthorized.
+      // Get a new ticket and retry exactly once; a second failure (or a genuine
+      // authorization problem, which prepare will also hit) propagates unchanged.
+      if (!(error instanceof CloudUnauthorizedError)) throw error;
+      const retryTicket = await prepareTicket(pending);
+      if (retryTicket === null) return false;
+      await uploadWithTicket(pending, retryTicket);
+      return true;
+    }
+  };
+
   const results = await mapWithConcurrency(
     plan.pendingUploads,
     SNAPSHOT_CONCURRENCY,
-    async (pending): Promise<boolean> => {
-      let uploadTicket: string;
-      if (
-        pending.uploadTicket !== undefined &&
-        pending.ticketIssuedAt !== undefined &&
-        nowMs() - pending.ticketIssuedAt < UPLOAD_TICKET_REUSE_MS
-      )
-        uploadTicket = pending.uploadTicket;
-      else {
-        // The plan is stale (e.g. a long confirmation prompt): re-check, which also
-        // catches content another Machine uploaded in the meantime.
-        const prepared = await options.client.prepareSnapshot({
-          contentHash: pending.contentHash,
-          archiveHash: pending.archive.archiveHash,
-          byteSize: pending.archive.byteSize,
-        });
-        if (prepared.status !== 'upload') return false;
-        uploadTicket = prepared.uploadTicket;
-      }
-      await options.client.uploadSnapshot(uploadTicket, pending.archive.bytes);
-      await options.client.finalizeSnapshot({
-        contentHash: pending.contentHash,
-        archiveHash: pending.archive.archiveHash,
-        byteSize: pending.archive.byteSize,
-        uploadTicket,
-      });
-      return true;
-    },
+    uploadPending,
   );
   const uploaded = results.filter(Boolean).length;
 
