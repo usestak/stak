@@ -26,6 +26,8 @@ stak status
 
 `npm` `latest` intentionally still points at `0.1.2` — the Public Beta lives on the `@beta` dist-tag.
 
+The CLI tells you when an update is available, and `stak upgrade` installs it.
+
 (`npx stack` is an unrelated project — not Memory STAK.)
 
 ## 60-second quick start
