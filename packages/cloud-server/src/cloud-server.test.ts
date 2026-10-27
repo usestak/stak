@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 
 import { sha256CanonicalJson } from '@stack/shared';
@@ -155,6 +157,80 @@ describe('cloud auth', () => {
     const { call } = setup();
     expect((await call('GET', 'me')).status).toBe(401);
     expect((await call('GET', 'environments/main')).status).toBe(401);
+  });
+});
+
+describe('token lastUsedAt throttle', () => {
+  const tokenHash = (token: string): string =>
+    createHash('sha256').update(token).digest('hex');
+
+  it('records lastUsedAt on first use', async () => {
+    const { call, repository, signIn } = setup();
+    const token = await signIn(USER_A, 'temi');
+    const before = await repository.findTokenByHash(tokenHash(token));
+    expect(before?.lastUsedAt).toBeUndefined();
+
+    expect((await call('GET', 'me', { token })).status).toBe(200);
+
+    const after = await repository.findTokenByHash(tokenHash(token));
+    expect(after?.lastUsedAt).toBe('2026-09-19T00:00:00.000Z');
+  });
+
+  it('does not update lastUsedAt again within 60 seconds', async () => {
+    const { call, advance, repository, signIn } = setup();
+    const token = await signIn(USER_A, 'temi');
+    expect((await call('GET', 'me', { token })).status).toBe(200);
+    const first = await repository.findTokenByHash(tokenHash(token));
+
+    advance(59_000);
+    expect((await call('GET', 'me', { token })).status).toBe(200);
+    const second = await repository.findTokenByHash(tokenHash(token));
+
+    expect(second?.lastUsedAt).toBe(first?.lastUsedAt);
+  });
+
+  it('updates lastUsedAt once 60 seconds have elapsed', async () => {
+    const { call, advance, repository, signIn } = setup();
+    const token = await signIn(USER_A, 'temi');
+    expect((await call('GET', 'me', { token })).status).toBe(200);
+    const first = await repository.findTokenByHash(tokenHash(token));
+
+    advance(60_000);
+    expect((await call('GET', 'me', { token })).status).toBe(200);
+    const second = await repository.findTokenByHash(tokenHash(token));
+
+    expect(second?.lastUsedAt).not.toBe(first?.lastUsedAt);
+    expect(second?.lastUsedAt).toBe('2026-09-19T00:01:00.000Z');
+  });
+
+  it('treats a malformed stored lastUsedAt as due for an update', async () => {
+    const { call, repository, signIn } = setup();
+    const token = await signIn(USER_A, 'temi');
+    const stored = await repository.findTokenByHash(tokenHash(token));
+    if (!stored) throw new Error('token not found');
+    // Simulate a corrupted/unparseable timestamp already on the record. `new
+    // Date('not-a-timestamp').getTime()` is NaN, and NaN comparisons are always false, so a
+    // naive "elapsed >= granularity" check would never fire again once corrupted.
+    await repository.updateToken(stored.tokenId, {
+      lastUsedAt: 'not-a-timestamp',
+    });
+
+    expect((await call('GET', 'me', { token })).status).toBe(200);
+
+    const after = await repository.findTokenByHash(tokenHash(token));
+    expect(after?.lastUsedAt).toBe('2026-09-19T00:00:00.000Z');
+  });
+
+  it('still rejects a revoked token immediately, even within the throttle window', async () => {
+    const { call, advance, signIn } = setup();
+    const token = await signIn(USER_A, 'temi');
+    expect((await call('GET', 'me', { token })).status).toBe(200);
+
+    expect((await call('POST', 'cli/auth/revoke', { token })).status).toBe(200);
+
+    // Still inside the 60s lastUsedAt throttle window: revocation must not be skipped.
+    advance(1_000);
+    expect((await call('GET', 'me', { token })).status).toBe(401);
   });
 });
 

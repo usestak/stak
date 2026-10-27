@@ -301,9 +301,14 @@ export const createCloudService = (config: CloudServiceConfig) => {
         );
       // Every CLI request authenticates; recording last use at minute granularity spares a
       // database write on all but the first request of a burst (e.g. one `stak push`).
+      // A missing or unparseable lastUsedAt (NaN) is always due for an update, rather than
+      // silently never updating again.
+      const lastUsedMs = token.lastUsedAt
+        ? new Date(token.lastUsedAt).getTime()
+        : Number.NaN;
       if (
-        !token.lastUsedAt ||
-        nowMs() - new Date(token.lastUsedAt).getTime() >= TOKEN_LAST_USED_GRANULARITY_MS
+        !Number.isFinite(lastUsedMs) ||
+        nowMs() - lastUsedMs >= TOKEN_LAST_USED_GRANULARITY_MS
       )
         await config.repository.updateToken(token.tokenId, {
           lastUsedAt: nowIso(),
