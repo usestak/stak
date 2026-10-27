@@ -70,7 +70,8 @@ export const deriveOnboardingChecklist = (input: {
     {
       key: 'agents-found',
       label: 'Find your agents',
-      detail: '`stak init` discovers Claude Code, Codex, and other agents automatically.',
+      detail:
+        '`stak init` discovers Claude Code, Codex, and other agents automatically.',
       done: agentsFound,
     },
     {

@@ -1,19 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
 
-const { getAdminUserMock, notFoundMock, loadUsageMetricsMock } = vi.hoisted(() => ({
-  getAdminUserMock: vi.fn(),
-  notFoundMock: vi.fn(() => {
-    throw new Error('NEXT_NOT_FOUND');
+const { getAdminUserMock, notFoundMock, loadUsageMetricsMock } = vi.hoisted(
+  () => ({
+    getAdminUserMock: vi.fn(),
+    notFoundMock: vi.fn(() => {
+      throw new Error('NEXT_NOT_FOUND');
+    }),
+    loadUsageMetricsMock: vi.fn().mockResolvedValue({
+      pushesPerDay: [],
+      pullsPerDay: [],
+      activeMachines: 0,
+      memoryBackupsCount: 0,
+      memoryRecoveriesCount: 0,
+      publicStakPublications: 0,
+    }),
   }),
-  loadUsageMetricsMock: vi.fn().mockResolvedValue({
-    pushesPerDay: [],
-    pullsPerDay: [],
-    activeMachines: 0,
-    memoryBackupsCount: 0,
-    memoryRecoveriesCount: 0,
-    publicStakPublications: 0,
-  }),
-}));
+);
 
 vi.mock('@/lib/admin', () => ({ getAdminUser: getAdminUserMock }));
 vi.mock('next/navigation', () => ({ notFound: notFoundMock }));
@@ -25,9 +27,9 @@ import AdminUsagePage from './page';
 describe('AdminUsagePage', () => {
   it('calls notFound (its own gate) when there is no admin user', async () => {
     getAdminUserMock.mockResolvedValue(null);
-    await expect(AdminUsagePage({ searchParams: Promise.resolve({}) })).rejects.toThrow(
-      'NEXT_NOT_FOUND',
-    );
+    await expect(
+      AdminUsagePage({ searchParams: Promise.resolve({}) }),
+    ).rejects.toThrow('NEXT_NOT_FOUND');
     expect(loadUsageMetricsMock).not.toHaveBeenCalled();
   });
 

@@ -40,7 +40,9 @@ describe('getAdminUser', () => {
 
   it('returns the admin user with role when present in admin_users', async () => {
     getSessionUserMock.mockResolvedValue({ id: 'user-1', displayName: 'Ada' });
-    const maybeSingle = vi.fn().mockResolvedValue({ data: { role: 'owner' }, error: null });
+    const maybeSingle = vi
+      .fn()
+      .mockResolvedValue({ data: { role: 'owner' }, error: null });
     const eq = vi.fn().mockReturnValue({ maybeSingle });
     const select = vi.fn().mockReturnValue({ eq });
     fromMock.mockReturnValue({ select });
@@ -51,7 +53,9 @@ describe('getAdminUser', () => {
 
   it('returns null (never throws) when the admin_users query returns an error', async () => {
     getSessionUserMock.mockResolvedValue({ id: 'user-1', displayName: 'Ada' });
-    const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: { message: 'boom' } });
+    const maybeSingle = vi
+      .fn()
+      .mockResolvedValue({ data: null, error: { message: 'boom' } });
     const eq = vi.fn().mockReturnValue({ maybeSingle });
     const select = vi.fn().mockReturnValue({ eq });
     fromMock.mockReturnValue({ select });
@@ -61,7 +65,9 @@ describe('getAdminUser', () => {
   });
 
   it('returns null (never throws) when getSessionUser itself throws', async () => {
-    getSessionUserMock.mockRejectedValue(new Error('supabaseServerClient misconfigured'));
+    getSessionUserMock.mockRejectedValue(
+      new Error('supabaseServerClient misconfigured'),
+    );
     const result = await getAdminUser();
     expect(result).toBeNull();
   });

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-export type FeedbackFilter = 'all' | 'new' | 'bugs' | 'confusing' | 'ideas' | 'resolved';
+export type FeedbackFilter =
+  'all' | 'new' | 'bugs' | 'confusing' | 'ideas' | 'resolved';
 
 export type FeedbackListRow = {
   id: string;
@@ -16,7 +17,9 @@ export type FeedbackListRow = {
 const PREVIEW_LENGTH = 140;
 
 const previewOf = (message: string): string =>
-  message.length > PREVIEW_LENGTH ? `${message.slice(0, PREVIEW_LENGTH)}…` : message;
+  message.length > PREVIEW_LENGTH
+    ? `${message.slice(0, PREVIEW_LENGTH)}…`
+    : message;
 
 type FeedbackRow = {
   id: string;
@@ -41,7 +44,9 @@ export const loadFeedbackList = async (
 ): Promise<FeedbackListRow[]> => {
   let query = db
     .from('feedback')
-    .select('id, type, message, email, page_url, app_version, created_at, status')
+    .select(
+      'id, type, message, email, page_url, app_version, created_at, status',
+    )
     .order('created_at', { ascending: false })
     .limit(MAX_ROWS);
 

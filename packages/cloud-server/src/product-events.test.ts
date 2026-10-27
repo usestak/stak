@@ -76,12 +76,18 @@ describe('push/pull event recording', () => {
     });
     expect(result.createdNew).toBe(true);
     expect(recordEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-1', eventName: 'cloud.push.succeeded', success: true }),
+      expect.objectContaining({
+        userId: 'user-1',
+        eventName: 'cloud.push.succeeded',
+        success: true,
+      }),
     );
   });
 
   it('commitEnvironmentVersion still succeeds even if recordEvent throws', async () => {
-    const recordEvent = vi.fn().mockRejectedValue(new Error('analytics db down'));
+    const recordEvent = vi
+      .fn()
+      .mockRejectedValue(new Error('analytics db down'));
     const service = createCloudService({
       repository: createInMemoryRepository(),
       blobStore: createInMemoryBlobStore(),
@@ -148,7 +154,11 @@ describe('push/pull event recording', () => {
     recordEvent.mockClear();
     await service.getEnvironment(user, 'main');
     expect(recordEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-1', eventName: 'cloud.pull.succeeded', success: true }),
+      expect.objectContaining({
+        userId: 'user-1',
+        eventName: 'cloud.pull.succeeded',
+        success: true,
+      }),
     );
   });
 
@@ -168,7 +178,9 @@ describe('push/pull event recording', () => {
       recordEvent,
     });
     const user = { userId: 'user-1', tokenId: 'token-1' };
-    await expect(service.getEnvironment(user, 'does-not-exist')).rejects.toThrow();
+    await expect(
+      service.getEnvironment(user, 'does-not-exist'),
+    ).rejects.toThrow();
     expect(recordEvent).not.toHaveBeenCalled();
   });
 
@@ -186,7 +198,9 @@ describe('push/pull event recording', () => {
       recordEvent,
     });
     const user = { userId: 'user-1', tokenId: 'token-1' };
-    await expect(service.getEnvironment(user, 'main')).rejects.toThrow('simulated repository failure');
+    await expect(service.getEnvironment(user, 'main')).rejects.toThrow(
+      'simulated repository failure',
+    );
     expect(recordEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: 'user-1',

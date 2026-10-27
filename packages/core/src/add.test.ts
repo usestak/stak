@@ -99,7 +99,9 @@ describe('prepareSkillAdd / applySkillAdd', () => {
     const after = await loadMainEnvironment({ stackHome });
     expect(Object.keys(after.lock.skills)).toEqual([beforeEntryId]);
     const locked = after.lock.skills[beforeEntryId as string];
-    expect(locked?.contentHash).not.toBe(before.lock.skills[beforeEntryId as string]?.contentHash);
+    expect(locked?.contentHash).not.toBe(
+      before.lock.skills[beforeEntryId as string]?.contentHash,
+    );
   });
 
   it('reports already-satisfied when content matches what is already tracked', async () => {

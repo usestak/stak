@@ -11,7 +11,10 @@ function fakeDb(opts: { connects: boolean; failureCount: number }) {
           then: (resolve: (v: unknown) => void) =>
             opts.connects
               ? resolve({ data: [], error: null })
-              : resolve({ data: null, error: { message: 'connection refused' } }),
+              : resolve({
+                  data: null,
+                  error: { message: 'connection refused' },
+                }),
         }),
         eq: () => ({
           gte: () => ({

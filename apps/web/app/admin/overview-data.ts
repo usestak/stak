@@ -1,7 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { rangeStart, type AdminDateRange } from '@/lib/admin-date-range';
-import { countPortableUsers, loadActiveMachinesByUser } from '@/lib/admin-metrics';
+import {
+  countPortableUsers,
+  loadActiveMachinesByUser,
+} from '@/lib/admin-metrics';
 
 export type OverviewMetrics = {
   totalUsers: number;
@@ -41,7 +44,9 @@ export const loadOverviewMetrics = async (
     .select('user_id', { count: 'exact', head: true });
   if (totalUsersError) throw totalUsersError;
 
-  const newUsersQuery = db.from('profiles').select('user_id', { count: 'exact', head: true });
+  const newUsersQuery = db
+    .from('profiles')
+    .select('user_id', { count: 'exact', head: true });
   const { count: newUsers, error: newUsersError } = await (since
     ? newUsersQuery.gte('created_at', since.toISOString())
     : newUsersQuery);
@@ -51,7 +56,9 @@ export const loadOverviewMetrics = async (
     .from('environment_versions')
     .select('user_id');
   if (pushRowsError) throw pushRowsError;
-  const activatedUserIds = new Set(((pushRows ?? []) as { user_id: string }[]).map((r) => r.user_id));
+  const activatedUserIds = new Set(
+    ((pushRows ?? []) as { user_id: string }[]).map((r) => r.user_id),
+  );
 
   const machinesByUser = await loadActiveMachinesByUser(db);
   const portableUsers = countPortableUsers(machinesByUser);

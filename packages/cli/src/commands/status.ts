@@ -47,9 +47,11 @@ export const registerStatusCommand = (
         await dependencies.scan({ project: false }),
       );
       const cloud = dependencies.checkCloud
-        ? await dependencies.checkCloud().catch(
-            () => ({ status: 'not-checked', reason: 'offline' }) as const,
-          )
+        ? await dependencies
+            .checkCloud()
+            .catch(
+              () => ({ status: 'not-checked', reason: 'offline' }) as const,
+            )
         : undefined;
       const memory = dependencies.checkMemory
         ? await dependencies.checkMemory().catch(() => undefined)

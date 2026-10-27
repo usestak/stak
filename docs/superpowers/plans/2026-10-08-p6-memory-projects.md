@@ -20,43 +20,45 @@
 - Archive/unarchive is explicit lifecycle intent only — never triggered by discovery sync, never deletes Memory/files/mapping/history (contract §16).
 - No real-account mutation during dogfood: never call `setProjectLifecycle`, `syncProjects`, or any Memory write RPC against the real signed-in account while verifying pages in the browser. Use the injected-fake-service Vitest tests for all mutation-path testing.
 - Migration `0006_skill_review_checks.sql` is P5a's schema (Skill source-check), unrelated to Memory/Projects — P6 depends only on migrations `0001`–`0005`, already applied to the dev Supabase project (confirmed in prior session).
-- Settings/P8-owned surfaces (Delete Cloud Memory, privacy-mode change button, full Machines page, onboarding) stay **out of scope** — Memory page only *shows* status/mode/recovery read-only plus CLI guidance.
+- Settings/P8-owned surfaces (Delete Cloud Memory, privacy-mode change button, full Machines page, onboarding) stay **out of scope** — Memory page only _shows_ status/mode/recovery read-only plus CLI guidance.
 
 ---
 
 ## File Structure
 
-| File | Responsibility |
-| --- | --- |
-| `apps/web/lib/project-presentation.ts` | New. Shared Project presentation helpers (CLI selector, presence/lifecycle label) — the Projects-page equivalent of `lib/skill-presentation.ts`, so list/detail pages can't drift. |
-| `apps/web/lib/project-presentation.test.ts` | New. Unit tests for the above. |
-| `apps/web/app/memory/(dashboard)/layout.tsx` | New. `.stak` shell wrapper, scoped via a route group so it does **not** also wrap the existing `app/memory/protect/` and `app/memory/recover/` pages (which keep their own `SiteHeader`/`globals.css` shell). |
-| `apps/web/app/memory/(dashboard)/memory.css` | New. Memory-page-only CSS extending `shell.css` tokens (backup-history rows, Standard per-project table, Protected block). |
-| `apps/web/app/memory/memory-data.ts` | New. Pure `loadMemoryView(service, user, requestedMachine)` view-model builder. (Lives at `app/memory/`, not inside the route group, so it's a plain importable module, matching `overview-data.ts`'s placement one level up from its `page.tsx`'s own segment is irrelevant here — kept beside the route group for easy relative imports.) |
-| `apps/web/app/memory/memory-data.test.ts` | New. Vitest unit tests (fake injected service). |
-| `apps/web/app/memory/(dashboard)/page.tsx` | New. The `/memory` page — status sentence, fact strip, backup history, Standard/Protected treatment, recovery state, CommandDock. |
-| `apps/web/app/projects/layout.tsx` | New. `.stak` shell wrapper (no conflicting nested routes exist under `/projects` today — plain layout, no route group needed). |
-| `apps/web/app/projects/projects.css` | New. Projects-list CSS mirroring `apps/web/app/skills/skills.css`'s toolbar/table structure. |
-| `apps/web/app/projects/projects-data.ts` | New. Pure `loadProjectsList(service, user, requestedMachine)` view-model builder. |
-| `apps/web/app/projects/projects-data.test.ts` | New. Vitest unit tests. |
-| `apps/web/app/projects/page.tsx` | New. The `/projects` list page. |
-| `apps/web/app/projects/actions.ts` | New. `'use server'` `setProjectLifecycleAction`, mirrors `apps/web/app/skills/actions.ts`. |
-| `apps/web/app/projects/_components/projects-table.tsx` | New. Client component: filter chips + search + table, mirrors `apps/web/app/skills/_components/skills-table.tsx`. |
-| `apps/web/app/projects/_components/project-lifecycle-button.tsx` | New. Client component: Archive/Unarchive button, mirrors `apps/web/app/skills/_components/skill-actions.tsx`. |
-| `apps/web/app/projects/[projectId]/project-detail-data.ts` | New. Pure `loadProjectDetail(service, user, projectId, requestedMachine)` view-model builder. |
-| `apps/web/app/projects/[projectId]/project-detail-data.test.ts` | New. Vitest unit tests. |
-| `apps/web/app/projects/[projectId]/page.tsx` | New. The Project detail/mapping page. |
-| `apps/web/app/_components/app-sidebar.tsx` | Modify. Flip `memory`/`projects` nav items from `aria-disabled` placeholders to real `<Link>`s (lines ~82-98). |
+| File                                                             | Responsibility                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web/lib/project-presentation.ts`                           | New. Shared Project presentation helpers (CLI selector, presence/lifecycle label) — the Projects-page equivalent of `lib/skill-presentation.ts`, so list/detail pages can't drift.                                                                                                                                                          |
+| `apps/web/lib/project-presentation.test.ts`                      | New. Unit tests for the above.                                                                                                                                                                                                                                                                                                              |
+| `apps/web/app/memory/(dashboard)/layout.tsx`                     | New. `.stak` shell wrapper, scoped via a route group so it does **not** also wrap the existing `app/memory/protect/` and `app/memory/recover/` pages (which keep their own `SiteHeader`/`globals.css` shell).                                                                                                                               |
+| `apps/web/app/memory/(dashboard)/memory.css`                     | New. Memory-page-only CSS extending `shell.css` tokens (backup-history rows, Standard per-project table, Protected block).                                                                                                                                                                                                                  |
+| `apps/web/app/memory/memory-data.ts`                             | New. Pure `loadMemoryView(service, user, requestedMachine)` view-model builder. (Lives at `app/memory/`, not inside the route group, so it's a plain importable module, matching `overview-data.ts`'s placement one level up from its `page.tsx`'s own segment is irrelevant here — kept beside the route group for easy relative imports.) |
+| `apps/web/app/memory/memory-data.test.ts`                        | New. Vitest unit tests (fake injected service).                                                                                                                                                                                                                                                                                             |
+| `apps/web/app/memory/(dashboard)/page.tsx`                       | New. The `/memory` page — status sentence, fact strip, backup history, Standard/Protected treatment, recovery state, CommandDock.                                                                                                                                                                                                           |
+| `apps/web/app/projects/layout.tsx`                               | New. `.stak` shell wrapper (no conflicting nested routes exist under `/projects` today — plain layout, no route group needed).                                                                                                                                                                                                              |
+| `apps/web/app/projects/projects.css`                             | New. Projects-list CSS mirroring `apps/web/app/skills/skills.css`'s toolbar/table structure.                                                                                                                                                                                                                                                |
+| `apps/web/app/projects/projects-data.ts`                         | New. Pure `loadProjectsList(service, user, requestedMachine)` view-model builder.                                                                                                                                                                                                                                                           |
+| `apps/web/app/projects/projects-data.test.ts`                    | New. Vitest unit tests.                                                                                                                                                                                                                                                                                                                     |
+| `apps/web/app/projects/page.tsx`                                 | New. The `/projects` list page.                                                                                                                                                                                                                                                                                                             |
+| `apps/web/app/projects/actions.ts`                               | New. `'use server'` `setProjectLifecycleAction`, mirrors `apps/web/app/skills/actions.ts`.                                                                                                                                                                                                                                                  |
+| `apps/web/app/projects/_components/projects-table.tsx`           | New. Client component: filter chips + search + table, mirrors `apps/web/app/skills/_components/skills-table.tsx`.                                                                                                                                                                                                                           |
+| `apps/web/app/projects/_components/project-lifecycle-button.tsx` | New. Client component: Archive/Unarchive button, mirrors `apps/web/app/skills/_components/skill-actions.tsx`.                                                                                                                                                                                                                               |
+| `apps/web/app/projects/[projectId]/project-detail-data.ts`       | New. Pure `loadProjectDetail(service, user, projectId, requestedMachine)` view-model builder.                                                                                                                                                                                                                                               |
+| `apps/web/app/projects/[projectId]/project-detail-data.test.ts`  | New. Vitest unit tests.                                                                                                                                                                                                                                                                                                                     |
+| `apps/web/app/projects/[projectId]/page.tsx`                     | New. The Project detail/mapping page.                                                                                                                                                                                                                                                                                                       |
+| `apps/web/app/_components/app-sidebar.tsx`                       | Modify. Flip `memory`/`projects` nav items from `aria-disabled` placeholders to real `<Link>`s (lines ~82-98).                                                                                                                                                                                                                              |
 
 ---
 
 ### Task 1: Shared Project presentation helpers
 
 **Files:**
+
 - Create: `apps/web/lib/project-presentation.ts`
 - Test: `apps/web/lib/project-presentation.test.ts`
 
 **Interfaces:**
+
 - Produces: `cliProjectSelector(projectId: string, name: string | undefined, allProjects: readonly { projectId: string; name?: string }[]): string`, `presenceLabel(presentOn: readonly string[], viewingMachineId: string): 'On this machine' | 'Not on this machine'`, `lifecycleLabel(lifecycle: 'active' | 'archived'): 'Active' | 'Archived'`.
 - Consumes: nothing (pure, no project imports beyond types it defines inline — avoids a dependency on `@stack/spec` just for two string literals).
 
@@ -180,10 +182,12 @@ git commit -m "feat(p6): shared Project presentation helpers"
 ### Task 2: Memory view-model (`memory-data.ts`)
 
 **Files:**
+
 - Create: `apps/web/app/memory/memory-data.ts`
 - Test: `apps/web/app/memory/memory-data.test.ts`
 
 **Interfaces:**
+
 - Consumes: `CloudService['getMachinesReadModel' | 'getMemoryReadModel' | 'getProjectsReadModel']`, `MachineOption`/`resolveViewingMachineId`/`sortMachinesForSelection`/`machineOption`/`checkedIn`/`displayName`/`statusLabel`/`machineDot`/`relative` from `../../lib/machine-context.js`, `SidebarCounts` type from `../overview/overview-data.js`, `WebUser` from `../../lib/session.js`.
 - Produces: `MemoryService` type, `loadMemoryView(service, user, requestedMachine): Promise<MemoryView>` where `MemoryView` is the discriminated union `{ kind: 'error' } | { kind: 'no-machines' } | { kind: 'choose-machine'; machines; anyCheckedIn } | { kind: 'ready'; ...}` — later tasks (`page.tsx`) render on these exact field names.
 
@@ -223,9 +227,7 @@ const machine = (over: Partial<MachineSummary> = {}): MachineSummary => ({
   ...over,
 });
 
-const memoryModel = (
-  over: Partial<MemoryReadModel> = {},
-): MemoryReadModel => ({
+const memoryModel = (over: Partial<MemoryReadModel> = {}): MemoryReadModel => ({
   mode: 'standard',
   latestBackupAt: nowIso(60 * 24),
   backups: [
@@ -329,7 +331,11 @@ describe('loadMemoryView', () => {
       await loadMemoryView(
         service({
           machines: [
-            machine({ memoryBackedUp: false, lastCheckinAt: null, status: 'never-checked-in' }),
+            machine({
+              memoryBackedUp: false,
+              lastCheckinAt: null,
+              status: 'never-checked-in',
+            }),
           ],
         }),
         USER,
@@ -414,7 +420,9 @@ describe('loadMemoryView', () => {
   it('never surfaces needsRecoveryMethod for Standard', async () => {
     const view = ready(
       await loadMemoryView(
-        service({ memory: memoryModel({ mode: 'standard', hasRecoveryMethod: false }) }),
+        service({
+          memory: memoryModel({ mode: 'standard', hasRecoveryMethod: false }),
+        }),
         USER,
         A1,
       ),
@@ -440,11 +448,7 @@ describe('loadMemoryView', () => {
   });
 
   it('returns error when getMemoryReadModel throws', async () => {
-    const view = await loadMemoryView(
-      service({ throwMemory: true }),
-      USER,
-      A1,
-    );
+    const view = await loadMemoryView(service({ throwMemory: true }), USER, A1);
     expect(view.kind).toBe('error');
   });
 });
@@ -624,7 +628,9 @@ export const loadMemoryView = async (
     sidebar: {
       overview: { n: '', tone: 'neutral' },
       skills: '',
-      memory: backedUp ? { n: 'Backed up', tone: 'ready' } : { n: '', tone: 'neutral' },
+      memory: backedUp
+        ? { n: 'Backed up', tone: 'ready' }
+        : { n: '', tone: 'neutral' },
       projects: '',
       machines: String(active.length),
       stacks: '',
@@ -664,11 +670,13 @@ git commit -m "feat(p6): Memory view-model (loadMemoryView)"
 ### Task 3: Memory page shell + route
 
 **Files:**
+
 - Create: `apps/web/app/memory/(dashboard)/layout.tsx`
 - Create: `apps/web/app/memory/(dashboard)/memory.css`
 - Create: `apps/web/app/memory/(dashboard)/page.tsx`
 
 **Interfaces:**
+
 - Consumes: `loadMemoryView` from `../memory-data.js` (Task 2), `AppSidebar`/`CommandDock`/`MachineChooser`/`ShellNotice` from `../../_components/*`, `getCloudService` from `../../../lib/cloud-service`, `getSessionUser`/`displayNameOf` from `../../../lib/session`.
 - Produces: the `/memory` route.
 
@@ -696,10 +704,7 @@ export default function MemoryDashboardLayout({
 }) {
   return (
     <>
-      <link
-        rel="preconnect"
-        href="https://fonts.googleapis.com"
-      />
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
       <link
         href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
         rel="stylesheet"
@@ -1020,10 +1025,12 @@ git commit -m "feat(p6): /memory page — status, mode, recovery, backup history
 ### Task 4: Projects view-model (`projects-data.ts`)
 
 **Files:**
+
 - Create: `apps/web/app/projects/projects-data.ts`
 - Test: `apps/web/app/projects/projects-data.test.ts`
 
 **Interfaces:**
+
 - Consumes: `CloudService['getMachinesReadModel' | 'getProjectsReadModel']`, `cliProjectSelector`/`presenceLabel`/`lifecycleLabel` from `../../lib/project-presentation.js` (Task 1), machine-context helpers, `SidebarCounts`, `WebUser`.
 - Produces: `ProjectsService` type, `ProjectRow` type, `STATUS_FILTERS`/`filterProjectRows`, `loadProjectsList(service, user, requestedMachine): Promise<ProjectsListView>`.
 
@@ -1033,7 +1040,11 @@ git commit -m "feat(p6): /memory page — status, mode, recovery, backup history
 // apps/web/app/projects/projects-data.test.ts
 import { describe, expect, it } from 'vitest';
 
-import type { MachineSummary, MachinesReadModel, ProjectSummary } from '@stack/spec';
+import type {
+  MachineSummary,
+  MachinesReadModel,
+  ProjectSummary,
+} from '@stack/spec';
 
 import {
   filterProjectRows,
@@ -1361,7 +1372,9 @@ export const loadProjectsList = async (
       lifecycleLabel: lifecycleLabel(p.lifecycle),
       presence: presenceLabel(p.presentOn, viewingId),
       fileCountLabel:
-        p.fileCount === null ? 'Unavailable' : `${p.fileCount} file${p.fileCount === 1 ? '' : 's'}`,
+        p.fileCount === null
+          ? 'Unavailable'
+          : `${p.fileCount} file${p.fileCount === 1 ? '' : 's'}`,
       cliSelector: cliProjectSelector(p.projectId, p.name, allForSelector),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -1373,7 +1386,7 @@ export const loadProjectsList = async (
 
   const statusSentence =
     rows.length === 0
-      ? "No Projects yet. STAK learns about Projects when a machine checks in and reports them — run `stak status` on a machine with Projects STAK can see."
+      ? 'No Projects yet. STAK learns about Projects when a machine checks in and reports them — run `stak status` on a machine with Projects STAK can see.'
       : notHereCount === 0
         ? `${activeCount} active Project${activeCount === 1 ? '' : 's'}, all on ${displayName(viewing)}.`
         : `${activeCount} active Project${activeCount === 1 ? '' : 's'}; ${notHereCount} not on ${displayName(viewing)}.`;
@@ -1418,9 +1431,11 @@ git commit -m "feat(p6): Projects list view-model (loadProjectsList)"
 ### Task 5: Projects lifecycle server action
 
 **Files:**
+
 - Create: `apps/web/app/projects/actions.ts`
 
 **Interfaces:**
+
 - Consumes: `getCloudService` from `../../lib/cloud-service`, `getSessionUser` from `../../lib/session`, `CloudServiceError` from `@stack/cloud-server`.
 - Produces: `setProjectLifecycleAction(input: { projectId: string; lifecycle: 'active' | 'archived' }): Promise<{ ok: true } | { ok: false; error: string }>` — consumed by Task 6's client component and Task 7's detail page.
 
@@ -1453,8 +1468,14 @@ export async function setProjectLifecycleAction(input: {
     );
     return { ok: true };
   } catch (error) {
-    if (error instanceof CloudServiceError && error.code === 'project-not-found')
-      return { ok: false, error: 'This Project no longer exists in your account.' };
+    if (
+      error instanceof CloudServiceError &&
+      error.code === 'project-not-found'
+    )
+      return {
+        ok: false,
+        error: 'This Project no longer exists in your account.',
+      };
     return {
       ok: false,
       error:
@@ -1483,6 +1504,7 @@ git commit -m "feat(p6): Project archive/unarchive server action"
 ### Task 6: Projects list page + table + lifecycle button
 
 **Files:**
+
 - Create: `apps/web/app/projects/layout.tsx`
 - Create: `apps/web/app/projects/projects.css`
 - Create: `apps/web/app/projects/_components/project-lifecycle-button.tsx`
@@ -1490,6 +1512,7 @@ git commit -m "feat(p6): Project archive/unarchive server action"
 - Create: `apps/web/app/projects/page.tsx`
 
 **Interfaces:**
+
 - Consumes: `loadProjectsList`/`filterProjectRows`/`STATUS_FILTERS` (Task 4), `setProjectLifecycleAction` (Task 5), `AppSidebar`/`CommandDock`/`MachineChooser`/`ShellNotice`.
 - Produces: the `/projects` route.
 
@@ -1544,7 +1567,10 @@ export function ProjectLifecycleButton({
     setPending(true);
     setError(null);
     const next = lifecycle === 'active' ? 'archived' : 'active';
-    const result = await setProjectLifecycleAction({ projectId, lifecycle: next });
+    const result = await setProjectLifecycleAction({
+      projectId,
+      lifecycle: next,
+    });
     setPending(false);
     if (!result.ok) {
       setError(result.error);
@@ -1554,17 +1580,32 @@ export function ProjectLifecycleButton({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+        alignItems: 'flex-start',
+      }}
+    >
       <button
         type="button"
         className="stak-pill"
         onClick={toggle}
         disabled={pending}
-        aria-label={lifecycle === 'active' ? 'Archive this Project' : 'Unarchive this Project'}
+        aria-label={
+          lifecycle === 'active'
+            ? 'Archive this Project'
+            : 'Unarchive this Project'
+        }
       >
         {pending ? '…' : lifecycle === 'active' ? 'Archive' : 'Unarchive'}
       </button>
-      <span role="status" aria-live="polite" style={{ fontSize: 12.5, color: error ? '#e5776a' : 'transparent' }}>
+      <span
+        role="status"
+        aria-live="polite"
+        style={{ fontSize: 12.5, color: error ? '#e5776a' : 'transparent' }}
+      >
         {error ?? ''}
       </span>
     </div>
@@ -1610,15 +1651,27 @@ export function ProjectsTable({
   );
 
   const counts = useMemo(() => {
-    const c: Record<ProjectStatusFilter, number> = { all: rows.length, active: 0, archived: 0 };
+    const c: Record<ProjectStatusFilter, number> = {
+      all: rows.length,
+      active: 0,
+      archived: 0,
+    };
     for (const r of rows) c[r.lifecycle] += 1;
     return c;
   }, [rows]);
 
   return (
     <div className="stak-projects">
-      <div className="stak-projects-toolbar" role="group" aria-label="Filter Projects">
-        <div className="stak-projects-filters" role="radiogroup" aria-label="Lifecycle">
+      <div
+        className="stak-projects-toolbar"
+        role="group"
+        aria-label="Filter Projects"
+      >
+        <div
+          className="stak-projects-filters"
+          role="radiogroup"
+          aria-label="Lifecycle"
+        >
           {STATUS_FILTERS.map((f) => (
             <button
               key={f}
@@ -1652,22 +1705,28 @@ export function ProjectsTable({
 
       {rows.length === 0 ? (
         <p className="stak-projects-empty">
-          No Projects yet. STAK learns about Projects when a machine checks
-          in and reports them — run <code>stak status</code> on a machine
-          with Projects STAK can see.
+          No Projects yet. STAK learns about Projects when a machine checks in
+          and reports them — run <code>stak status</code> on a machine with
+          Projects STAK can see.
         </p>
       ) : filtered.length === 0 ? (
         <p className="stak-projects-empty">No Projects match this filter.</p>
       ) : (
         filtered.map((r) => (
           <div key={r.projectId} className="stak-projects-row">
-            <Link href={`/projects/${r.projectId}`} className="stak-projects-name">
+            <Link
+              href={`/projects/${r.projectId}`}
+              className="stak-projects-name"
+            >
               <span className="n">{r.name}</span>
             </Link>
             <span className="stak-projects-lifecycle">{r.lifecycleLabel}</span>
             <span className="stak-projects-presence">{r.presence}</span>
             <span className="stak-projects-memory">{r.fileCountLabel}</span>
-            <ProjectLifecycleButton projectId={r.projectId} lifecycle={r.lifecycle} />
+            <ProjectLifecycleButton
+              projectId={r.projectId}
+              lifecycle={r.lifecycle}
+            />
           </div>
         ))
       )}
@@ -1817,7 +1876,11 @@ export default async function ProjectsPage({
 
   if (view.kind === 'error')
     return (
-      <ShellNotice active="projects" handle={handle} title="Couldn't load your Projects">
+      <ShellNotice
+        active="projects"
+        handle={handle}
+        title="Couldn't load your Projects"
+      >
         <p>
           STAK Cloud didn&apos;t respond. This is a temporary problem, not a
           change to your data. Reload to try again.
@@ -1838,8 +1901,8 @@ export default async function ProjectsPage({
     return (
       <ShellNotice active="projects" handle={handle} title="Choose a machine">
         <p>
-          Projects shows presence from that machine&apos;s last check-in.
-          Pick the machine you want to view.
+          Projects shows presence from that machine&apos;s last check-in. Pick
+          the machine you want to view.
         </p>
         {!view.anyCheckedIn ? (
           <p>
@@ -1896,11 +1959,13 @@ git commit -m "feat(p6): /projects list page — lifecycle, presence, archive/un
 ### Task 7: Project detail/mapping page
 
 **Files:**
+
 - Create: `apps/web/app/projects/[projectId]/project-detail-data.ts`
 - Test: `apps/web/app/projects/[projectId]/project-detail-data.test.ts`
 - Create: `apps/web/app/projects/[projectId]/page.tsx`
 
 **Interfaces:**
+
 - Consumes: `CloudService['getMachinesReadModel' | 'getProjectsReadModel' | 'getMemoryReadModel']`, `cliProjectSelector`/`presenceLabel`/`lifecycleLabel`, machine-context helpers, `setProjectLifecycleAction` (Task 5), `ProjectLifecycleButton` (Task 6).
 - Produces: `ProjectDetailService` type, `loadProjectDetail(service, user, projectId, requestedMachine): Promise<ProjectDetailView>` — discriminated union adding a `not-found` kind beyond the list page's kinds.
 
@@ -1973,7 +2038,9 @@ const service = (opts: {
     if (opts.throwMachines) throw new Error('offline');
     return { machines: opts.machines ?? [machine()] };
   },
-  getProjectsReadModel: async () => ({ projects: opts.projects ?? [project()] }),
+  getProjectsReadModel: async () => ({
+    projects: opts.projects ?? [project()],
+  }),
   getMemoryReadModel: async () => opts.memory ?? memoryModel(),
 });
 
@@ -2022,7 +2089,12 @@ describe('loadProjectDetail', () => {
   it('shows Standard Memory file count for this one Project', async () => {
     const view = ready(
       await loadProjectDetail(
-        service({ memory: memoryModel({ mode: 'standard', perProject: [{ projectId: 'prj_abc', fileCount: 9 }] }) }),
+        service({
+          memory: memoryModel({
+            mode: 'standard',
+            perProject: [{ projectId: 'prj_abc', fileCount: 9 }],
+          }),
+        }),
         USER,
         'prj_abc',
         A1,
@@ -2034,7 +2106,9 @@ describe('loadProjectDetail', () => {
   it('never fabricates a Protected per-project file count', async () => {
     const view = ready(
       await loadProjectDetail(
-        service({ memory: memoryModel({ mode: 'protected', perProject: null }) }),
+        service({
+          memory: memoryModel({ mode: 'protected', perProject: null }),
+        }),
         USER,
         'prj_abc',
         A1,
@@ -2121,10 +2195,7 @@ export type ProjectDetailView =
       technical: { projectId: string };
     };
 
-const memoryFactFor = (
-  memory: MemoryReadModel,
-  projectId: string,
-): string => {
+const memoryFactFor = (memory: MemoryReadModel, projectId: string): string => {
   if (memory.mode === 'protected') return 'Unavailable — Protected Memory';
   if (memory.mode !== 'standard' || !memory.perProject) return 'Not available';
   const row = memory.perProject.find((p) => p.projectId === projectId);
@@ -2194,7 +2265,11 @@ export const loadProjectDetail = async (
     lifecycleLabel: lifecycleLabel(project.lifecycle),
     presence: presenceLabel(project.presentOn, viewingId),
     memoryFact: memoryFactFor(memory, projectId),
-    cliSelector: cliProjectSelector(project.projectId, project.name, allForSelector),
+    cliSelector: cliProjectSelector(
+      project.projectId,
+      project.name,
+      allForSelector,
+    ),
     technical: { projectId: project.projectId },
   };
 };
@@ -2246,11 +2321,20 @@ export default async function ProjectDetailPage({
   const { projectId } = await params;
   const { machine } = await searchParams;
   const handle = user.githubUsername ?? displayNameOf(user);
-  const view = await loadProjectDetail(getCloudService(), user, projectId, machine);
+  const view = await loadProjectDetail(
+    getCloudService(),
+    user,
+    projectId,
+    machine,
+  );
 
   if (view.kind === 'error')
     return (
-      <ShellNotice active="projects" handle={handle} title="Couldn't load this Project">
+      <ShellNotice
+        active="projects"
+        handle={handle}
+        title="Couldn't load this Project"
+      >
         <p>
           STAK Cloud didn&apos;t respond. This is a temporary problem, not a
           change to your data. Reload to try again.
@@ -2279,7 +2363,10 @@ export default async function ProjectDetailPage({
   if (view.kind === 'choose-machine')
     return (
       <ShellNotice active="projects" handle={handle} title="Choose a machine">
-        <p>This Project&apos;s presence is shown relative to one machine. Pick the machine you want to view.</p>
+        <p>
+          This Project&apos;s presence is shown relative to one machine. Pick
+          the machine you want to view.
+        </p>
         {!view.anyCheckedIn ? (
           <p>
             None of your machines has checked in yet. Run{' '}
@@ -2287,7 +2374,10 @@ export default async function ProjectDetailPage({
             the machine you want, then pick it here.
           </p>
         ) : null}
-        <MachineChooser options={view.machines} basePath={`/projects/${projectId}`} />
+        <MachineChooser
+          options={view.machines}
+          basePath={`/projects/${projectId}`}
+        />
       </ShellNotice>
     );
 
@@ -2317,17 +2407,25 @@ export default async function ProjectDetailPage({
         <div className="stak-summaries">
           <div className="stak-sum">
             <span className="k">LIFECYCLE</span>
-            <span className="v" style={{ fontSize: 15 }}>{view.lifecycleLabel}</span>
-            <span className="d">Archive is organizational only — Memory is preserved.</span>
+            <span className="v" style={{ fontSize: 15 }}>
+              {view.lifecycleLabel}
+            </span>
+            <span className="d">
+              Archive is organizational only — Memory is preserved.
+            </span>
           </div>
           <div className="stak-sum">
             <span className="k">ON {view.viewing.name.toUpperCase()}</span>
-            <span className="v" style={{ fontSize: 15 }}>{view.presence}</span>
+            <span className="v" style={{ fontSize: 15 }}>
+              {view.presence}
+            </span>
             <span className="d">{view.viewing.statusLabel}</span>
           </div>
           <div className="stak-sum">
             <span className="k">MEMORY</span>
-            <span className="v" style={{ fontSize: 15 }}>{view.memoryFact}</span>
+            <span className="v" style={{ fontSize: 15 }}>
+              {view.memoryFact}
+            </span>
             <span className="d"> </span>
           </div>
         </div>
@@ -2336,24 +2434,47 @@ export default async function ProjectDetailPage({
           <div className="stak-col">
             <section className="stak-mem-section">
               <h2>Mapping</h2>
-              <p style={{ fontSize: 13, color: 'var(--muted)', maxWidth: 560, lineHeight: 1.6 }}>
-                Mapping a Project to a local folder happens only on the machine itself — STAK
-                Cloud never stores or chooses a folder path. If {view.viewing.name} already
-                resolves this Project automatically through its Git remote, no mapping command is
-                needed there.
+              <p
+                style={{
+                  fontSize: 13,
+                  color: 'var(--muted)',
+                  maxWidth: 560,
+                  lineHeight: 1.6,
+                }}
+              >
+                Mapping a Project to a local folder happens only on the machine
+                itself — STAK Cloud never stores or chooses a folder path. If{' '}
+                {view.viewing.name} already resolves this Project automatically
+                through its Git remote, no mapping command is needed there.
               </p>
             </section>
 
             <section className="stak-mem-section">
               <h2>Actions</h2>
-              <ProjectLifecycleButton projectId={view.technical.projectId} lifecycle={view.lifecycle} />
+              <ProjectLifecycleButton
+                projectId={view.technical.projectId}
+                lifecycle={view.lifecycle}
+              />
             </section>
 
             <details style={{ fontSize: 12.5 }}>
-              <summary style={{ cursor: 'pointer', color: 'var(--faint)', fontSize: 12.5, fontWeight: 600 }}>
+              <summary
+                style={{
+                  cursor: 'pointer',
+                  color: 'var(--faint)',
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                }}
+              >
                 Technical details
               </summary>
-              <div style={{ marginTop: 10, font: '11.5px var(--mono)', color: 'var(--faint)' }}>
+              <div
+                style={{
+                  marginTop: 10,
+                  font: '11.5px var(--mono)',
+                  color: 'var(--faint)',
+                }}
+              >
                 <span>projectId: {view.technical.projectId}</span>
               </div>
             </details>
@@ -2388,9 +2509,11 @@ git commit -m "feat(p6): Project detail/mapping page"
 ### Task 8: Sidebar — flip Memory/Projects to real links
 
 **Files:**
+
 - Modify: `apps/web/app/_components/app-sidebar.tsx:82-98`
 
 **Interfaces:**
+
 - Consumes: nothing new.
 - Produces: Memory and Projects nav items become real `<Link>`s with correct `href`s; Machines and Stacks remain `aria-disabled` placeholders.
 
@@ -2399,54 +2522,50 @@ git commit -m "feat(p6): Project detail/mapping page"
 In `apps/web/app/_components/app-sidebar.tsx`, change the item-render condition (currently `item.key === 'overview' || item.key === 'skills'`) and the `href` ternary to include `memory` and `projects`:
 
 ```tsx
-        {items.map((item) =>
-          item.key === 'overview' ||
-          item.key === 'skills' ||
-          item.key === 'memory' ||
-          item.key === 'projects' ? (
-            <Link
-              key={item.key}
-              href={
-                item.key === 'overview'
-                  ? '/overview'
-                  : item.key === 'skills'
-                    ? '/skills'
-                    : item.key === 'memory'
-                      ? '/memory'
-                      : '/projects'
-              }
-              className="stak-nav-item"
-              aria-current={active === item.key ? 'page' : undefined}
-            >
-              <span>{item.label}</span>
-              {item.n ? (
-                <span
-                  className="n"
-                  style={{ color: DOT[item.tone] ?? '#85817a' }}
-                >
-                  {item.n}
-                </span>
-              ) : null}
-            </Link>
-          ) : (
-            <div
-              key={item.key}
-              className="stak-nav-item"
-              aria-disabled="true"
-              title="Arrives in a later phase"
-            >
-              <span>{item.label}</span>
-              {item.n ? (
-                <span
-                  className="n"
-                  style={{ color: DOT[item.tone] ?? '#85817a' }}
-                >
-                  {item.n}
-                </span>
-              ) : null}
-            </div>
-          ),
-        )}
+{
+  items.map((item) =>
+    item.key === 'overview' ||
+    item.key === 'skills' ||
+    item.key === 'memory' ||
+    item.key === 'projects' ? (
+      <Link
+        key={item.key}
+        href={
+          item.key === 'overview'
+            ? '/overview'
+            : item.key === 'skills'
+              ? '/skills'
+              : item.key === 'memory'
+                ? '/memory'
+                : '/projects'
+        }
+        className="stak-nav-item"
+        aria-current={active === item.key ? 'page' : undefined}
+      >
+        <span>{item.label}</span>
+        {item.n ? (
+          <span className="n" style={{ color: DOT[item.tone] ?? '#85817a' }}>
+            {item.n}
+          </span>
+        ) : null}
+      </Link>
+    ) : (
+      <div
+        key={item.key}
+        className="stak-nav-item"
+        aria-disabled="true"
+        title="Arrives in a later phase"
+      >
+        <span>{item.label}</span>
+        {item.n ? (
+          <span className="n" style={{ color: DOT[item.tone] ?? '#85817a' }}>
+            {item.n}
+          </span>
+        ) : null}
+      </div>
+    ),
+  );
+}
 ```
 
 Also update the component doc comment (currently "P4 builds only Overview; the other five are shell destinations rendered as placeholders") to say Machines and Stacks remain placeholders, since Memory/Projects/Skills/Overview are now real.
@@ -2497,6 +2616,7 @@ Expected: build succeeds with no new type/lint errors from the P6 routes.
 - [ ] **Step 6: Read-only real-account browser dogfood**
 
 Using the signed-in real account (read-only — **never** click Archive/Unarchive or run any CLI mutation against it during this step):
+
 - Visit `/memory`: expect Protected mode, latest Cloud backup generation 6, DELL showing a Memory-changes-not-backed-up gap if that's still the live state, recovery-method state rendered honestly, no fabricated per-project counts.
 - Visit `/projects`: expect the current real project count (0 or whatever is live) rendered with the real empty/populated copy — no fake rows.
 - If any real Project exists, visit its detail page and confirm no local path, Git remote, or Memory plaintext ever renders.

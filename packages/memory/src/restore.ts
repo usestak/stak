@@ -131,7 +131,10 @@ const resolveProjectDir = (
   if (reg.status === 'resolved') {
     const liveGitMatch = resolved.find((project) => {
       if (project.identity.kind !== 'git') return false;
-      const candidateReg = resolveProjectForIdentity(registry, project.identity);
+      const candidateReg = resolveProjectForIdentity(
+        registry,
+        project.identity,
+      );
       return (
         candidateReg.status === 'resolved' &&
         candidateReg.projectId === reg.projectId
@@ -305,7 +308,8 @@ export const runMemoryRestore = async (
     if (existingHash !== null) {
       applied.push({
         ...result,
-        status: item && existingHash === item.contentHash ? 'identical' : 'conflict',
+        status:
+          item && existingHash === item.contentHash ? 'identical' : 'conflict',
       });
       continue;
     }

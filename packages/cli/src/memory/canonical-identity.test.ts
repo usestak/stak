@@ -20,7 +20,11 @@ import {
 } from './canonical-identity.js';
 
 const item = (
-  overrides: Partial<DiscoveredMemoryItem> & { vendorKey: string; rel: string; hash: string },
+  overrides: Partial<DiscoveredMemoryItem> & {
+    vendorKey: string;
+    rel: string;
+    hash: string;
+  },
 ): DiscoveredMemoryItem => ({
   provider: 'claude',
   kind: 'auto-memory',
@@ -36,7 +40,11 @@ const item = (
 });
 
 const manifestItem = (
-  overrides: Partial<ManifestItem> & { vendorKey: string; rel: string; hash: string },
+  overrides: Partial<ManifestItem> & {
+    vendorKey: string;
+    rel: string;
+    hash: string;
+  },
 ): ManifestItem => ({
   provider: 'claude',
   kind: 'auto-memory',
@@ -116,7 +124,10 @@ describe('resolveCanonicalProjectId', () => {
 });
 
 describe('reconcileNativeWithStagedMemory — `stak add .` idempotent staging after relocation', () => {
-  const reconciledRegistryWithBinding = (oldVendorKey: string, newDir: string) => {
+  const reconciledRegistryWithBinding = (
+    oldVendorKey: string,
+    newDir: string,
+  ) => {
     const minted = resolveOrMintProject(
       emptyRegistry(),
       { kind: 'local', vendorKey: oldVendorKey },
@@ -139,8 +150,16 @@ describe('reconcileNativeWithStagedMemory — `stak add .` idempotent staging af
 
   it('A: MAIN has the OLD-locator record, MACHINE now only discovers the NEW location (via binding) — no-op, nothing staged', () => {
     const { registry } = reconciledRegistryWithBinding(oldVendorKey, newDir);
-    const staged = [manifestItem({ vendorKey: oldVendorKey, rel: 'feedback.md', hash: 'sha256:a' })];
-    const native = [item({ vendorKey: newVendorKey, rel: 'feedback.md', hash: 'sha256:a' })];
+    const staged = [
+      manifestItem({
+        vendorKey: oldVendorKey,
+        rel: 'feedback.md',
+        hash: 'sha256:a',
+      }),
+    ];
+    const native = [
+      item({ vendorKey: newVendorKey, rel: 'feedback.md', hash: 'sha256:a' }),
+    ];
 
     const plan = reconcileNativeWithStagedMemory(native, staged, registry);
     expect(plan.items).toHaveLength(0);
@@ -149,7 +168,13 @@ describe('reconcileNativeWithStagedMemory — `stak add .` idempotent staging af
 
   it('B: MAIN has OLD-locator, MACHINE discovers BOTH old + new (same hash) — no-op, no duplicate, no new identity', () => {
     const { registry } = reconciledRegistryWithBinding(oldVendorKey, newDir);
-    const staged = [manifestItem({ vendorKey: oldVendorKey, rel: 'feedback.md', hash: 'sha256:a' })];
+    const staged = [
+      manifestItem({
+        vendorKey: oldVendorKey,
+        rel: 'feedback.md',
+        hash: 'sha256:a',
+      }),
+    ];
     const native = [
       item({ vendorKey: oldVendorKey, rel: 'feedback.md', hash: 'sha256:a' }),
       item({ vendorKey: newVendorKey, rel: 'feedback.md', hash: 'sha256:a' }),
@@ -162,7 +187,13 @@ describe('reconcileNativeWithStagedMemory — `stak add .` idempotent staging af
 
   it('C: same as B but old vs new DIFFER in content — fails closed (conflict), never silently chooses either, never staged', () => {
     const { registry } = reconciledRegistryWithBinding(oldVendorKey, newDir);
-    const staged = [manifestItem({ vendorKey: oldVendorKey, rel: 'feedback.md', hash: 'sha256:old' })];
+    const staged = [
+      manifestItem({
+        vendorKey: oldVendorKey,
+        rel: 'feedback.md',
+        hash: 'sha256:old',
+      }),
+    ];
     const native = [
       item({ vendorKey: oldVendorKey, rel: 'feedback.md', hash: 'sha256:old' }),
       item({ vendorKey: newVendorKey, rel: 'feedback.md', hash: 'sha256:new' }),
@@ -180,8 +211,16 @@ describe('reconcileNativeWithStagedMemory — `stak add .` idempotent staging af
     const { registry } = reconciledRegistryWithBinding(oldVendorKey, newDir);
     // "restore" already wrote the canonical entry (new vendor key payload, same logical
     // identity/content as before) into MAIN.
-    const staged = [manifestItem({ vendorKey: newVendorKey, rel: 'feedback.md', hash: 'sha256:a' })];
-    const native = [item({ vendorKey: newVendorKey, rel: 'feedback.md', hash: 'sha256:a' })];
+    const staged = [
+      manifestItem({
+        vendorKey: newVendorKey,
+        rel: 'feedback.md',
+        hash: 'sha256:a',
+      }),
+    ];
+    const native = [
+      item({ vendorKey: newVendorKey, rel: 'feedback.md', hash: 'sha256:a' }),
+    ];
 
     const plan = reconcileNativeWithStagedMemory(native, staged, registry);
     expect(plan.items).toHaveLength(0);
@@ -190,8 +229,16 @@ describe('reconcileNativeWithStagedMemory — `stak add .` idempotent staging af
 
   it('F: running the reconcile twice in a row is idempotent (content genuinely changed once, then settles)', () => {
     const { registry } = reconciledRegistryWithBinding(oldVendorKey, newDir);
-    const staged = [manifestItem({ vendorKey: oldVendorKey, rel: 'feedback.md', hash: 'sha256:old' })];
-    const native = [item({ vendorKey: newVendorKey, rel: 'feedback.md', hash: 'sha256:new' })];
+    const staged = [
+      manifestItem({
+        vendorKey: oldVendorKey,
+        rel: 'feedback.md',
+        hash: 'sha256:old',
+      }),
+    ];
+    const native = [
+      item({ vendorKey: newVendorKey, rel: 'feedback.md', hash: 'sha256:new' }),
+    ];
 
     const first = reconcileNativeWithStagedMemory(native, staged, registry);
     expect(first.items).toHaveLength(1);
@@ -204,13 +251,20 @@ describe('reconcileNativeWithStagedMemory — `stak add .` idempotent staging af
       { ...staged[0], contentHash: firstPlanItem.contentHash } as ManifestItem,
     ];
 
-    const second = reconcileNativeWithStagedMemory(native, updatedStaged, registry);
+    const second = reconcileNativeWithStagedMemory(
+      native,
+      updatedStaged,
+      registry,
+    );
     expect(second.items).toHaveLength(0);
     expect(second.conflicts).toHaveLength(0);
   });
 
   it('G: a genuinely new identity prefers whichever native copy already carries a registry CLAIM, never a bare binding-only copy', () => {
-    const { registry, projectId } = reconciledRegistryWithBinding(oldVendorKey, newDir);
+    const { registry, projectId } = reconciledRegistryWithBinding(
+      oldVendorKey,
+      newDir,
+    );
     // Nothing staged yet for this logical path at all.
     const native = [
       item({ vendorKey: oldVendorKey, rel: 'brand-new.md', hash: 'sha256:a' }),
@@ -257,16 +311,36 @@ describe('reconcileNativeWithStagedMemory — `stak add .` idempotent staging af
       }),
     ];
 
-    const plan = reconcileNativeWithStagedMemory(native, staged, minted.registry);
+    const plan = reconcileNativeWithStagedMemory(
+      native,
+      staged,
+      minted.registry,
+    );
     expect(plan.items).toHaveLength(0);
     expect(plan.conflicts).toHaveLength(0);
   });
 
   it('I: unrelated Projects with the same filename/hash never merge, even against an existing staged record', () => {
-    const staged = [manifestItem({ vendorKey: 'C--project-one', rel: 'notes.md', hash: 'sha256:same' })];
-    const native = [item({ vendorKey: 'C--project-two', rel: 'notes.md', hash: 'sha256:same' })];
+    const staged = [
+      manifestItem({
+        vendorKey: 'C--project-one',
+        rel: 'notes.md',
+        hash: 'sha256:same',
+      }),
+    ];
+    const native = [
+      item({
+        vendorKey: 'C--project-two',
+        rel: 'notes.md',
+        hash: 'sha256:same',
+      }),
+    ];
 
-    const plan = reconcileNativeWithStagedMemory(native, staged, emptyRegistry());
+    const plan = reconcileNativeWithStagedMemory(
+      native,
+      staged,
+      emptyRegistry(),
+    );
     // The native item has no staged counterpart under its OWN (unrelated) canonical
     // key — a genuinely new, distinct identity, staged as its own record.
     expect(plan.items).toHaveLength(1);
@@ -281,8 +355,16 @@ describe('reconcileNativeWithStagedMemory — `stak add .` idempotent staging af
 
   it('J: an existing historical manifest entry under the OLD locator is reused unchanged (never rewritten) when native content merely confirms it', () => {
     const { registry } = reconciledRegistryWithBinding(oldVendorKey, newDir);
-    const staged = [manifestItem({ vendorKey: oldVendorKey, rel: 'feedback.md', hash: 'sha256:a' })];
-    const native = [item({ vendorKey: newVendorKey, rel: 'feedback.md', hash: 'sha256:a' })];
+    const staged = [
+      manifestItem({
+        vendorKey: oldVendorKey,
+        rel: 'feedback.md',
+        hash: 'sha256:a',
+      }),
+    ];
+    const native = [
+      item({ vendorKey: newVendorKey, rel: 'feedback.md', hash: 'sha256:a' }),
+    ];
 
     const plan = reconcileNativeWithStagedMemory(native, staged, registry);
     // Nothing staged: the existing OLD-locator entry is left exactly as-is via the

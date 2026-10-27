@@ -20,7 +20,10 @@ export const loadSystemStatus = async (
   // in this project (which deliberately throws on error). This is the one
   // intentional exception, because "is the DB reachable" is itself the
   // thing being measured.
-  const { error: connectError } = await db.from('profiles').select('user_id').limit(1);
+  const { error: connectError } = await db
+    .from('profiles')
+    .select('user_id')
+    .limit(1);
   const dbConnected = !connectError;
 
   let recentFailureCount = 0;

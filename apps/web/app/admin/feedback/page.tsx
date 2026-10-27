@@ -7,7 +7,14 @@ import { serviceClient } from '@/lib/supabase';
 import { AdminSidebar } from '../_components/admin-sidebar';
 import { loadFeedbackList, type FeedbackFilter } from './feedback-data';
 
-const FILTERS: FeedbackFilter[] = ['all', 'new', 'bugs', 'confusing', 'ideas', 'resolved'];
+const FILTERS: FeedbackFilter[] = [
+  'all',
+  'new',
+  'bugs',
+  'confusing',
+  'ideas',
+  'resolved',
+];
 
 const isFeedbackFilter = (value: string | undefined): value is FeedbackFilter =>
   FILTERS.includes(value as FeedbackFilter);
@@ -21,7 +28,9 @@ export default async function AdminFeedbackPage({
   if (!admin) notFound();
 
   const params = await searchParams;
-  const filter: FeedbackFilter = isFeedbackFilter(params.filter) ? params.filter : 'all';
+  const filter: FeedbackFilter = isFeedbackFilter(params.filter)
+    ? params.filter
+    : 'all';
   const items = await loadFeedbackList(serviceClient(), filter);
 
   return (
@@ -61,7 +70,9 @@ export default async function AdminFeedbackPage({
                   <tr key={item.id}>
                     <td>{item.type}</td>
                     <td>
-                      <Link href={`/admin/feedback/${item.id}`}>{item.messagePreview}</Link>
+                      <Link href={`/admin/feedback/${item.id}`}>
+                        {item.messagePreview}
+                      </Link>
                     </td>
                     <td>{item.contact ?? '—'}</td>
                     <td>{item.pageUrl ?? '—'}</td>

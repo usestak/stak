@@ -103,7 +103,9 @@ describe('computeMemoryWorkingTreeStatus — MACHINE vs MAIN, read-only', () => 
     // bytes — a read-only status check must never silently re-stage.
     const { readMemoryManifest } = await import('@stack/memory');
     const manifest = await readMemoryManifest(stackHome);
-    expect(manifest?.items[0]?.contentHash).toBe(hashBytes(Buffer.from('hello\n')));
+    expect(manifest?.items[0]?.contentHash).toBe(
+      hashBytes(Buffer.from('hello\n')),
+    );
   });
 
   it('does not count a manifest item missing from native scan (carried-forward/unavailable) as a change', async () => {
@@ -115,7 +117,10 @@ describe('computeMemoryWorkingTreeStatus — MACHINE vs MAIN, read-only', () => 
 
     // Native scan now finds nothing (e.g. an unavailable project) — this is not a "change
     // not added", it's a presence question `add .`'s composition already handles elsewhere.
-    const status = await computeMemoryWorkingTreeStatus({ stackHome, nativeItems: [] });
+    const status = await computeMemoryWorkingTreeStatus({
+      stackHome,
+      nativeItems: [],
+    });
     expect(status).toEqual({ state: 'clean' });
   });
 });
@@ -175,7 +180,9 @@ describe('computeMemoryWorkingTreeStatus — relocated/re-cloned Project identit
     const newVendorKey = encodeClaudeProjectKey(path.resolve(newDir));
     const status = await computeMemoryWorkingTreeStatus({
       stackHome,
-      nativeItems: [await projectItem(newVendorKey, newDir, 'feedback content')],
+      nativeItems: [
+        await projectItem(newVendorKey, newDir, 'feedback content'),
+      ],
       registry,
     });
     expect(status).toEqual({ state: 'clean' });
@@ -249,7 +256,9 @@ describe('computeMemoryWorkingTreeStatus — relocated/re-cloned Project identit
     const secondVendorKey = encodeClaudeProjectKey(path.resolve(secondDir));
     const status = await computeMemoryWorkingTreeStatus({
       stackHome,
-      nativeItems: [await projectItem(secondVendorKey, secondDir, 'feedback content')],
+      nativeItems: [
+        await projectItem(secondVendorKey, secondDir, 'feedback content'),
+      ],
       registry,
     });
     expect(status).toEqual({ state: 'clean' });
@@ -266,7 +275,9 @@ describe('computeMemoryWorkingTreeStatus — relocated/re-cloned Project identit
 
     const status = await computeMemoryWorkingTreeStatus({
       stackHome,
-      nativeItems: [await projectItem('C--project-two', twoDir, 'shared content')],
+      nativeItems: [
+        await projectItem('C--project-two', twoDir, 'shared content'),
+      ],
       registry: emptyRegistry(),
     });
     // Different, unrelated local identities with no registry relationship: the staged

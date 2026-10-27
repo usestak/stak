@@ -86,7 +86,8 @@ export const resolveEnvironment = (
   const disambiguate = (name: string, stackName: string): string => {
     let candidateName = `${stackName}-${name}`;
     let suffix = 2;
-    while (selected.has(candidateName)) candidateName = `${stackName}-${name}-${suffix++}`;
+    while (selected.has(candidateName))
+      candidateName = `${stackName}-${name}-${suffix++}`;
     return candidateName;
   };
   for (const candidate of candidates) {
@@ -124,7 +125,10 @@ export const resolveEnvironment = (
       // already kept unique — has no such name to borrow, so it still falls back to a
       // reported conflict rather than inventing one.
       if (candidate.origin.type === 'stack') {
-        const renamedTo = disambiguate(candidate.name, candidate.origin.stackName);
+        const renamedTo = disambiguate(
+          candidate.name,
+          candidate.origin.stackName,
+        );
         renamed.push({
           name: candidate.name,
           renamedTo,

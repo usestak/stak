@@ -2,7 +2,11 @@ import { notFound } from 'next/navigation';
 
 import { getAdminUser } from '@/lib/admin';
 import { serviceClient } from '@/lib/supabase';
-import { ADMIN_DATE_RANGES, isAdminDateRange, type AdminDateRange } from '@/lib/admin-date-range';
+import {
+  ADMIN_DATE_RANGES,
+  isAdminDateRange,
+  type AdminDateRange,
+} from '@/lib/admin-date-range';
 
 import { AdminSidebar } from '../_components/admin-sidebar';
 import { loadUsageMetrics } from './usage-data';
@@ -16,7 +20,9 @@ export default async function AdminUsagePage({
   if (!admin) notFound();
 
   const params = await searchParams;
-  const range: AdminDateRange = isAdminDateRange(params.range) ? params.range : '30d';
+  const range: AdminDateRange = isAdminDateRange(params.range)
+    ? params.range
+    : '30d';
   const metrics = await loadUsageMetrics(serviceClient(), range);
 
   return (
@@ -46,7 +52,11 @@ export default async function AdminUsagePage({
           </div>
           <div>
             <dt>Memory recoveries</dt>
-            <dd>{metrics.memoryRecoveriesCount === 'not-instrumented' ? 'Not instrumented yet' : metrics.memoryRecoveriesCount}</dd>
+            <dd>
+              {metrics.memoryRecoveriesCount === 'not-instrumented'
+                ? 'Not instrumented yet'
+                : metrics.memoryRecoveriesCount}
+            </dd>
           </div>
           <div>
             <dt>Public STAK publications</dt>
@@ -68,8 +78,8 @@ export default async function AdminUsagePage({
         <h2>Environment reads per day</h2>
         <p style={{ color: 'var(--muted)', fontSize: '13px' }}>
           Includes pull, push, and <code>stak status</code> checks — the server
-          can&apos;t yet tell these apart (no CLI signal distinguishes them). Not a
-          pure pull count.
+          can&apos;t yet tell these apart (no CLI signal distinguishes them).
+          Not a pure pull count.
         </p>
         {metrics.pullsPerDay.length === 0 ? (
           <p>No environment reads in this period.</p>

@@ -16,7 +16,8 @@ function fakeDb(rows: unknown[]) {
       builder.in = (...a: unknown[]) => record('in', ...a);
       builder.order = (...a: unknown[]) => record('order', ...a);
       builder.limit = (...a: unknown[]) => record('limit', ...a);
-      builder.then = (resolve: (v: unknown) => void) => resolve({ data: rows, error: null });
+      builder.then = (resolve: (v: unknown) => void) =>
+        resolve({ data: rows, error: null });
       return builder;
     },
     __calls: calls,
@@ -77,11 +78,13 @@ describe('loadFeedbackList', () => {
   it('maps the "bugs"/"confusing"/"ideas" filters onto the real `type` column values', async () => {
     const db = fakeDb([]);
     await loadFeedbackList(db, 'bugs');
-    const inCall = (db as unknown as { __calls: Record<string, unknown>[] }).__calls.find((c) => 'in' in c);
+    const inCall = (
+      db as unknown as { __calls: Record<string, unknown>[] }
+    ).__calls.find((c) => 'in' in c);
     expect(inCall).toBeUndefined(); // bugs maps to .eq('type','bug'), not .in()
-    const eqCall = (db as unknown as { __calls: Record<string, unknown>[] }).__calls.find(
-      (c) => Array.isArray(c.eq) && c.eq[0] === 'type',
-    );
+    const eqCall = (
+      db as unknown as { __calls: Record<string, unknown>[] }
+    ).__calls.find((c) => Array.isArray(c.eq) && c.eq[0] === 'type');
     expect(eqCall).toEqual({ eq: ['type', 'bug'] });
   });
 });

@@ -18,9 +18,9 @@ import AdminUsersPage from './page';
 describe('AdminUsersPage', () => {
   it('calls notFound (its own gate) when there is no admin user, before fetching users', async () => {
     getAdminUserMock.mockResolvedValue(null);
-    await expect(AdminUsersPage({ searchParams: Promise.resolve({}) })).rejects.toThrow(
-      'NEXT_NOT_FOUND',
-    );
+    await expect(
+      AdminUsersPage({ searchParams: Promise.resolve({}) }),
+    ).rejects.toThrow('NEXT_NOT_FOUND');
     expect(loadUsersMock).not.toHaveBeenCalled();
   });
 

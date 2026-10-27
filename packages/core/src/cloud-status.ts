@@ -41,7 +41,8 @@ export const checkEnvironmentCloudSync = async (
   // on another machine) — never guess which side should win.
   if (!sync) return { status: 'diverged' };
 
-  const remoteChanged = remote.latest.version.versionId !== sync.lastSyncedVersionId;
+  const remoteChanged =
+    remote.latest.version.versionId !== sync.lastSyncedVersionId;
   const localChanged = bundle.digest !== sync.lastSyncedDigest;
   if (!remoteChanged && !localChanged) return { status: 'up-to-date' };
   if (remoteChanged && !localChanged)

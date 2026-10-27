@@ -23,13 +23,16 @@ export default async function AdminActivationPage() {
         <ol>
           <li>Accounts: {funnel.accounts}</li>
           <li>
-            CLI-authenticated: {funnel.cliAuthenticated} ({pct(funnel.cliAuthenticated, funnel.accounts)})
+            CLI-authenticated: {funnel.cliAuthenticated} (
+            {pct(funnel.cliAuthenticated, funnel.accounts)})
           </li>
           <li>
-            First push: {funnel.firstPush} ({pct(funnel.firstPush, funnel.accounts)})
+            First push: {funnel.firstPush} (
+            {pct(funnel.firstPush, funnel.accounts)})
           </li>
           <li>
-            Portable: {funnel.portable} ({pct(funnel.portable, funnel.accounts)})
+            Portable: {funnel.portable} ({pct(funnel.portable, funnel.accounts)}
+            )
           </li>
         </ol>
       </main>

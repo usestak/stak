@@ -31,7 +31,12 @@ function fakeDb() {
 describe('loadActivationFunnel', () => {
   it('counts distinct users at each funnel stage', async () => {
     const result = await loadActivationFunnel(fakeDb());
-    expect(result).toEqual({ accounts: 3, cliAuthenticated: 2, firstPush: 1, portable: 1 });
+    expect(result).toEqual({
+      accounts: 3,
+      cliAuthenticated: 2,
+      firstPush: 1,
+      portable: 1,
+    });
   });
 
   it('throws when a query returns an error, instead of silently reporting zero', async () => {

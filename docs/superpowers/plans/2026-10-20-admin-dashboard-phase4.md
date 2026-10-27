@@ -21,11 +21,13 @@
 ### Task 1: Feedback list loader + page
 
 **Files:**
+
 - Create: `apps/web/app/admin/feedback/feedback-data.ts`
 - Create: `apps/web/app/admin/feedback/page.tsx`
 - Test: `apps/web/app/admin/feedback/feedback-data.test.ts`
 
 **Interfaces:**
+
 - Consumes: `getAdminUser()`, `serviceClient()`, `AdminSidebar` (AdminNavKey already includes `'feedback'`).
 - Produces: `export type FeedbackFilter = 'all' | 'new' | 'bugs' | 'confusing' | 'ideas' | 'resolved'`, `export type FeedbackListRow = { id: string; type: string; messagePreview: string; contact: string | null; pageUrl: string | null; appVersion: string | null; createdAt: string; status: string }`, `export async function loadFeedbackList(db: SupabaseClient, filter: FeedbackFilter): Promise<FeedbackListRow[]>` — consumed by Task 2's detail page link structure (no shared types beyond the row shape).
 
@@ -51,7 +53,8 @@ function fakeDb(rows: unknown[]) {
       builder.in = (...a: unknown[]) => record('in', ...a);
       builder.order = (...a: unknown[]) => record('order', ...a);
       builder.limit = (...a: unknown[]) => record('limit', ...a);
-      builder.then = (resolve: (v: unknown) => void) => resolve({ data: rows, error: null });
+      builder.then = (resolve: (v: unknown) => void) =>
+        resolve({ data: rows, error: null });
       return builder;
     },
     __calls: calls,
@@ -112,11 +115,13 @@ describe('loadFeedbackList', () => {
   it('maps the "bugs"/"confusing"/"ideas" filters onto the real `type` column values', async () => {
     const db = fakeDb([]);
     await loadFeedbackList(db, 'bugs');
-    const inCall = (db as unknown as { __calls: Record<string, unknown>[] }).__calls.find((c) => 'in' in c);
+    const inCall = (
+      db as unknown as { __calls: Record<string, unknown>[] }
+    ).__calls.find((c) => 'in' in c);
     expect(inCall).toBeUndefined(); // bugs maps to .eq('type','bug'), not .in()
-    const eqCall = (db as unknown as { __calls: Record<string, unknown>[] }).__calls.find(
-      (c) => Array.isArray(c.eq) && c.eq[0] === 'type',
-    );
+    const eqCall = (
+      db as unknown as { __calls: Record<string, unknown>[] }
+    ).__calls.find((c) => Array.isArray(c.eq) && c.eq[0] === 'type');
     expect(eqCall).toEqual({ eq: ['type', 'bug'] });
   });
 });
@@ -133,7 +138,8 @@ Expected: FAIL — module does not exist.
 // apps/web/app/admin/feedback/feedback-data.ts
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-export type FeedbackFilter = 'all' | 'new' | 'bugs' | 'confusing' | 'ideas' | 'resolved';
+export type FeedbackFilter =
+  'all' | 'new' | 'bugs' | 'confusing' | 'ideas' | 'resolved';
 
 export type FeedbackListRow = {
   id: string;
@@ -149,7 +155,9 @@ export type FeedbackListRow = {
 const PREVIEW_LENGTH = 140;
 
 const previewOf = (message: string): string =>
-  message.length > PREVIEW_LENGTH ? `${message.slice(0, PREVIEW_LENGTH)}…` : message;
+  message.length > PREVIEW_LENGTH
+    ? `${message.slice(0, PREVIEW_LENGTH)}…`
+    : message;
 
 type FeedbackRow = {
   id: string;
@@ -174,7 +182,9 @@ export const loadFeedbackList = async (
 ): Promise<FeedbackListRow[]> => {
   let query = db
     .from('feedback')
-    .select('id, type, message, email, page_url, app_version, created_at, status')
+    .select(
+      'id, type, message, email, page_url, app_version, created_at, status',
+    )
     .order('created_at', { ascending: false })
     .limit(MAX_ROWS);
 
@@ -297,13 +307,15 @@ export default async function AdminFeedbackPage({
 // apps/web/app/admin/feedback/page.test.tsx
 import { describe, expect, it, vi } from 'vitest';
 
-const { getAdminUserMock, notFoundMock, loadFeedbackListMock } = vi.hoisted(() => ({
-  getAdminUserMock: vi.fn(),
-  notFoundMock: vi.fn(() => {
-    throw new Error('NEXT_NOT_FOUND');
+const { getAdminUserMock, notFoundMock, loadFeedbackListMock } = vi.hoisted(
+  () => ({
+    getAdminUserMock: vi.fn(),
+    notFoundMock: vi.fn(() => {
+      throw new Error('NEXT_NOT_FOUND');
+    }),
+    loadFeedbackListMock: vi.fn().mockResolvedValue([]),
   }),
-  loadFeedbackListMock: vi.fn().mockResolvedValue([]),
-}));
+);
 
 vi.mock('@/lib/admin', () => ({ getAdminUser: getAdminUserMock }));
 vi.mock('next/navigation', () => ({ notFound: notFoundMock }));
@@ -315,9 +327,9 @@ import AdminFeedbackPage from './page';
 describe('AdminFeedbackPage', () => {
   it('calls notFound (its own gate) when there is no admin user, before fetching feedback', async () => {
     getAdminUserMock.mockResolvedValue(null);
-    await expect(AdminFeedbackPage({ searchParams: Promise.resolve({}) })).rejects.toThrow(
-      'NEXT_NOT_FOUND',
-    );
+    await expect(
+      AdminFeedbackPage({ searchParams: Promise.resolve({}) }),
+    ).rejects.toThrow('NEXT_NOT_FOUND');
     expect(loadFeedbackListMock).not.toHaveBeenCalled();
   });
 
@@ -346,12 +358,14 @@ git commit -m "feat(web): add admin Feedback list page"
 ### Task 2: Feedback detail loader + page (security tests E, F)
 
 **Files:**
+
 - Create: `apps/web/app/admin/feedback/[id]/feedback-detail-data.ts`
 - Create: `apps/web/app/admin/feedback/[id]/page.tsx`
 - Test: `apps/web/app/admin/feedback/[id]/feedback-detail-data.test.ts`
 - Test: `apps/web/app/admin/feedback/[id]/page.test.tsx` (this is where security tests E and F live, naturally — the page's own gate IS the "non-admin can't read feedback" / "admin can read feedback" boundary)
 
 **Interfaces:**
+
 - Produces: `export type FeedbackDetail = { id: string; type: string; message: string; goal: string | null; email: string | null; pageUrl: string | null; userId: string | null; appVersion: string | null; createdAt: string; status: string; adminNote: string | null; resolvedAt: string | null }` and `export async function loadFeedbackDetail(db: SupabaseClient, id: string): Promise<FeedbackDetail | null>` (null when the id doesn't exist — the page should `notFound()` on null, same pattern as a missing admin resource anywhere else).
 
 - [ ] **Step 1: Write the failing test**
@@ -578,18 +592,22 @@ export default async function AdminFeedbackDetailPage({
 // apps/web/app/admin/feedback/[id]/page.test.tsx
 import { describe, expect, it, vi } from 'vitest';
 
-const { getAdminUserMock, notFoundMock, loadFeedbackDetailMock } = vi.hoisted(() => ({
-  getAdminUserMock: vi.fn(),
-  notFoundMock: vi.fn(() => {
-    throw new Error('NEXT_NOT_FOUND');
+const { getAdminUserMock, notFoundMock, loadFeedbackDetailMock } = vi.hoisted(
+  () => ({
+    getAdminUserMock: vi.fn(),
+    notFoundMock: vi.fn(() => {
+      throw new Error('NEXT_NOT_FOUND');
+    }),
+    loadFeedbackDetailMock: vi.fn(),
   }),
-  loadFeedbackDetailMock: vi.fn(),
-}));
+);
 
 vi.mock('@/lib/admin', () => ({ getAdminUser: getAdminUserMock }));
 vi.mock('next/navigation', () => ({ notFound: notFoundMock }));
 vi.mock('@/lib/supabase', () => ({ serviceClient: () => ({}) }));
-vi.mock('./feedback-detail-data', () => ({ loadFeedbackDetail: loadFeedbackDetailMock }));
+vi.mock('./feedback-detail-data', () => ({
+  loadFeedbackDetail: loadFeedbackDetailMock,
+}));
 vi.mock('./feedback-status-form', () => ({ FeedbackStatusForm: () => null }));
 
 import AdminFeedbackDetailPage from './page';
@@ -619,7 +637,9 @@ describe('AdminFeedbackDetailPage', () => {
       adminNote: null,
       resolvedAt: null,
     });
-    const result = await AdminFeedbackDetailPage({ params: Promise.resolve({ id: 'f1' }) });
+    const result = await AdminFeedbackDetailPage({
+      params: Promise.resolve({ id: 'f1' }),
+    });
     expect(loadFeedbackDetailMock).toHaveBeenCalledWith({}, 'f1');
     expect(result).toBeTruthy();
   });
@@ -669,11 +689,13 @@ git commit -m "feat(web): add admin Feedback detail page (security tests E, F)"
 ### Task 3: Status/note update route handler + real form (security tests G, H)
 
 **Files:**
+
 - Create: `apps/web/app/api/admin/feedback/[id]/route.ts`
 - Create: `apps/web/app/api/admin/feedback/[id]/route.test.ts` (this is where security tests G and H live)
 - Modify: `apps/web/app/admin/feedback/[id]/feedback-status-form.tsx` (replace the Task 2 placeholder with the real form)
 
 **Interfaces:**
+
 - Consumes: `getAdminUser()`, `serviceClient()`.
 - Produces: `PATCH` handler accepting `{ status?: 'new'|'reviewing'|'resolved'|'archived'; adminNote?: string }`, returning `{ ok: true }` on success or an error body with the matching status code.
 
@@ -721,7 +743,10 @@ describe('PATCH /api/admin/feedback/[id]', () => {
   it('H: admin user can modify feedback status and note', async () => {
     getAdminUserMock.mockResolvedValue({ id: 'admin-1', role: 'owner' });
     updateMock.mockClear();
-    const res = await PATCH(req({ status: 'resolved', adminNote: 'Fixed in v2.' }), ctx);
+    const res = await PATCH(
+      req({ status: 'resolved', adminNote: 'Fixed in v2.' }),
+      ctx,
+    );
     expect(res.status).toBe(200);
     expect(updateMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -767,14 +792,16 @@ import { serviceClient } from '@/lib/supabase';
 const VALID_STATUSES = ['new', 'reviewing', 'resolved', 'archived'] as const;
 type Status = (typeof VALID_STATUSES)[number];
 const isValidStatus = (value: unknown): value is Status =>
-  typeof value === 'string' && (VALID_STATUSES as readonly string[]).includes(value);
+  typeof value === 'string' &&
+  (VALID_STATUSES as readonly string[]).includes(value);
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const admin = await getAdminUser();
-  if (!admin) return Response.json({ ok: false, error: 'not-found' }, { status: 404 });
+  if (!admin)
+    return Response.json({ ok: false, error: 'not-found' }, { status: 404 });
 
   let body: unknown;
   try {
@@ -783,13 +810,22 @@ export async function PATCH(
     return Response.json({ ok: false, error: 'invalid-json' }, { status: 400 });
   }
 
-  const { status, adminNote } = (body ?? {}) as { status?: unknown; adminNote?: unknown };
+  const { status, adminNote } = (body ?? {}) as {
+    status?: unknown;
+    adminNote?: unknown;
+  };
 
   if (status !== undefined && !isValidStatus(status)) {
-    return Response.json({ ok: false, error: 'invalid-status' }, { status: 400 });
+    return Response.json(
+      { ok: false, error: 'invalid-status' },
+      { status: 400 },
+    );
   }
   if (adminNote !== undefined && typeof adminNote !== 'string') {
-    return Response.json({ ok: false, error: 'invalid-admin-note' }, { status: 400 });
+    return Response.json(
+      { ok: false, error: 'invalid-admin-note' },
+      { status: 400 },
+    );
   }
 
   const fields: Record<string, unknown> = {};
@@ -803,11 +839,21 @@ export async function PATCH(
   if (adminNote !== undefined) fields.admin_note = adminNote;
 
   const { id } = await params;
-  const { error } = await serviceClient().from('feedback').update(fields).eq('id', id);
+  const { error } = await serviceClient()
+    .from('feedback')
+    .update(fields)
+    .eq('id', id);
 
   if (error) {
-    console.error('[api/admin/feedback] update failed:', error.code, error.message);
-    return Response.json({ ok: false, error: 'storage-failed' }, { status: 500 });
+    console.error(
+      '[api/admin/feedback] update failed:',
+      error.code,
+      error.message,
+    );
+    return Response.json(
+      { ok: false, error: 'storage-failed' },
+      { status: 500 },
+    );
   }
 
   return Response.json({ ok: true }, { status: 200 });

@@ -22,11 +22,13 @@
 ### Task 1: `ProductEvent` type + `recordEvent` on `CloudServiceConfig`
 
 **Files:**
+
 - Modify: `packages/cloud-server/src/service.ts`
 - Modify: `packages/cloud-server/src/index.ts`
 - Test: `packages/cloud-server/src/product-events.test.ts`
 
 **Interfaces:**
+
 - Produces: `export type ProductEvent = { userId: string | null; eventName: string; machineId?: string; success: boolean; errorCode?: string; metadata?: Record<string, unknown> }`, exported from both `service.ts` and the package's `index.ts`. `CloudServiceConfig` gains `recordEvent?: (event: ProductEvent) => Promise<void> | void`.
 
 - [ ] **Step 1: Write the failing test**
@@ -101,13 +103,13 @@ Add one field to the existing `CloudServiceConfig` type (do not remove or reorde
 Add one line inside `createCloudService`'s body (near the other `config.X ?? default` destructuring, e.g. near `const now = ...`):
 
 ```typescript
-  const recordEventSafely = async (event: ProductEvent): Promise<void> => {
-    try {
-      await config.recordEvent?.(event);
-    } catch (err) {
-      console.error('[product-events] recordEvent failed', err);
-    }
-  };
+const recordEventSafely = async (event: ProductEvent): Promise<void> => {
+  try {
+    await config.recordEvent?.(event);
+  } catch (err) {
+    console.error('[product-events] recordEvent failed', err);
+  }
+};
 ```
 
 - [ ] **Step 4: Export `ProductEvent` from the package root**
@@ -147,17 +149,24 @@ git commit -m "feat(cloud-server): add optional recordEvent product-analytics ho
 ### Task 2: Instrument `commitEnvironmentVersion` (push) and `getEnvironment` (pull)
 
 **Files:**
+
 - Modify: `packages/cloud-server/src/service.ts`
 - Test: `packages/cloud-server/src/product-events.test.ts` (extend from Task 1)
 
 **Interfaces:**
+
 - Consumes: `recordEventSafely` (Task 1, defined inside `createCloudService`'s closure — both methods being modified are also defined inside that same closure, so it's already in scope, no import needed).
 
 - [ ] **Step 1: Write the failing tests (append to product-events.test.ts)**
 
 ```typescript
 // Append to packages/cloud-server/src/product-events.test.ts
-import { describe as describe2, expect as expect2, it as it2, vi as vi2 } from 'vitest';
+import {
+  describe as describe2,
+  expect as expect2,
+  it as it2,
+  vi as vi2,
+} from 'vitest';
 
 function makeEnvironmentBundle(name: string) {
   return {
@@ -171,79 +180,107 @@ function makeEnvironmentBundle(name: string) {
 }
 
 describe2('push/pull event recording', () => {
-  it2('records cloud.push.succeeded on a successful commitEnvironmentVersion, and does not affect the response', async () => {
-    const recordEvent = vi2.fn();
-    const service = createCloudService({
-      repository: createInMemoryRepository(),
-      blobStore: createInMemoryBlobStore(),
-      appUrl: 'http://localhost:3000',
-      ticketSecret: 'test-secret',
-      recordEvent,
-    });
-    const user = { userId: 'user-1', tokenId: 'token-1' };
-    const result = await service.commitEnvironmentVersion(user, 'main', {
-      bundle: makeEnvironmentBundle('main'),
-      expectedLatestVersionId: null,
-    });
-    expect(result.createdNew).toBe(true);
-    expect(recordEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-1', eventName: 'cloud.push.succeeded', success: true }),
-    );
-  });
+  it2(
+    'records cloud.push.succeeded on a successful commitEnvironmentVersion, and does not affect the response',
+    async () => {
+      const recordEvent = vi2.fn();
+      const service = createCloudService({
+        repository: createInMemoryRepository(),
+        blobStore: createInMemoryBlobStore(),
+        appUrl: 'http://localhost:3000',
+        ticketSecret: 'test-secret',
+        recordEvent,
+      });
+      const user = { userId: 'user-1', tokenId: 'token-1' };
+      const result = await service.commitEnvironmentVersion(user, 'main', {
+        bundle: makeEnvironmentBundle('main'),
+        expectedLatestVersionId: null,
+      });
+      expect(result.createdNew).toBe(true);
+      expect(recordEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-1',
+          eventName: 'cloud.push.succeeded',
+          success: true,
+        }),
+      );
+    },
+  );
 
-  it2('commitEnvironmentVersion still succeeds even if recordEvent throws', async () => {
-    const recordEvent = vi2.fn().mockRejectedValue(new Error('analytics db down'));
-    const service = createCloudService({
-      repository: createInMemoryRepository(),
-      blobStore: createInMemoryBlobStore(),
-      appUrl: 'http://localhost:3000',
-      ticketSecret: 'test-secret',
-      recordEvent,
-    });
-    const user = { userId: 'user-1', tokenId: 'token-1' };
-    const result = await service.commitEnvironmentVersion(user, 'main', {
-      bundle: makeEnvironmentBundle('main'),
-      expectedLatestVersionId: null,
-    });
-    expect(result.createdNew).toBe(true); // the push itself must not fail
-  });
+  it2(
+    'commitEnvironmentVersion still succeeds even if recordEvent throws',
+    async () => {
+      const recordEvent = vi2
+        .fn()
+        .mockRejectedValue(new Error('analytics db down'));
+      const service = createCloudService({
+        repository: createInMemoryRepository(),
+        blobStore: createInMemoryBlobStore(),
+        appUrl: 'http://localhost:3000',
+        ticketSecret: 'test-secret',
+        recordEvent,
+      });
+      const user = { userId: 'user-1', tokenId: 'token-1' };
+      const result = await service.commitEnvironmentVersion(user, 'main', {
+        bundle: makeEnvironmentBundle('main'),
+        expectedLatestVersionId: null,
+      });
+      expect(result.createdNew).toBe(true); // the push itself must not fail
+    },
+  );
 
-  it2('records cloud.pull.succeeded on a successful getEnvironment', async () => {
-    const recordEvent = vi2.fn();
-    const service = createCloudService({
-      repository: createInMemoryRepository(),
-      blobStore: createInMemoryBlobStore(),
-      appUrl: 'http://localhost:3000',
-      ticketSecret: 'test-secret',
-      recordEvent,
-    });
-    const user = { userId: 'user-1', tokenId: 'token-1' };
-    await service.commitEnvironmentVersion(user, 'main', {
-      bundle: makeEnvironmentBundle('main'),
-      expectedLatestVersionId: null,
-    });
-    recordEvent.mockClear();
-    await service.getEnvironment(user, 'main');
-    expect(recordEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-1', eventName: 'cloud.pull.succeeded', success: true }),
-    );
-  });
+  it2(
+    'records cloud.pull.succeeded on a successful getEnvironment',
+    async () => {
+      const recordEvent = vi2.fn();
+      const service = createCloudService({
+        repository: createInMemoryRepository(),
+        blobStore: createInMemoryBlobStore(),
+        appUrl: 'http://localhost:3000',
+        ticketSecret: 'test-secret',
+        recordEvent,
+      });
+      const user = { userId: 'user-1', tokenId: 'token-1' };
+      await service.commitEnvironmentVersion(user, 'main', {
+        bundle: makeEnvironmentBundle('main'),
+        expectedLatestVersionId: null,
+      });
+      recordEvent.mockClear();
+      await service.getEnvironment(user, 'main');
+      expect(recordEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-1',
+          eventName: 'cloud.pull.succeeded',
+          success: true,
+        }),
+      );
+    },
+  );
 
-  it2('records cloud.pull.failed when getEnvironment throws not-found, and still throws', async () => {
-    const recordEvent = vi2.fn();
-    const service = createCloudService({
-      repository: createInMemoryRepository(),
-      blobStore: createInMemoryBlobStore(),
-      appUrl: 'http://localhost:3000',
-      ticketSecret: 'test-secret',
-      recordEvent,
-    });
-    const user = { userId: 'user-1', tokenId: 'token-1' };
-    await expect(service.getEnvironment(user, 'does-not-exist')).rejects.toThrow();
-    expect(recordEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-1', eventName: 'cloud.pull.failed', success: false }),
-    );
-  });
+  it2(
+    'records cloud.pull.failed when getEnvironment throws not-found, and still throws',
+    async () => {
+      const recordEvent = vi2.fn();
+      const service = createCloudService({
+        repository: createInMemoryRepository(),
+        blobStore: createInMemoryBlobStore(),
+        appUrl: 'http://localhost:3000',
+        ticketSecret: 'test-secret',
+        recordEvent,
+      });
+      const user = { userId: 'user-1', tokenId: 'token-1' };
+      await expect(
+        service.getEnvironment(user, 'does-not-exist'),
+      ).rejects.toThrow();
+      expect(recordEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-1',
+          eventName: 'cloud.pull.failed',
+          success: false,
+        }),
+      );
+    },
+  );
 });
 ```
 
@@ -345,10 +382,12 @@ git commit -m "feat(cloud-server): record push/pull success/failure via recordEv
 ### Task 3: Wire the real Supabase-backed `recordEvent` in `apps/web/lib/cloud-service.ts`
 
 **Files:**
+
 - Modify: `apps/web/lib/cloud-service.ts`
 - Test: `apps/web/lib/cloud-service.test.ts` (create if it doesn't already exist, or extend if it does — check first)
 
 **Interfaces:**
+
 - Consumes: `ProductEvent` (Task 1, exported from `@stack/cloud-server`), `serviceClient()` (`apps/web/lib/supabase.ts`).
 
 - [ ] **Step 1: Read the current file to see exactly how `createCloudService` is called today**
@@ -413,11 +452,13 @@ git commit -m "feat(web): wire the real Supabase-backed recordEvent into the Clo
 ### Task 4: Usage page
 
 **Files:**
+
 - Create: `apps/web/app/admin/usage/usage-data.ts`
 - Create: `apps/web/app/admin/usage/page.tsx`
 - Test: `apps/web/app/admin/usage/usage-data.test.ts`
 
 **Interfaces:**
+
 - Produces: `export type UsageMetrics = { pushesPerDay: { date: string; count: number }[]; pullsPerDay: { date: string; count: number }[]; activeMachines: number; memoryBackupsCount: number; memoryRecoveriesCount: number; publicStakPublications: number }` and `export async function loadUsageMetrics(db: SupabaseClient, range: AdminDateRange): Promise<UsageMetrics>`.
 
 - [ ] **Step 1: Write the failing test**
@@ -428,7 +469,12 @@ import { describe, expect, it } from 'vitest';
 
 import { loadUsageMetrics } from './usage-data';
 
-function fakeDb(responses: Record<string, { data: unknown[]; count?: number; error?: unknown }>) {
+function fakeDb(
+  responses: Record<
+    string,
+    { data: unknown[]; count?: number; error?: unknown }
+  >,
+) {
   return {
     from: (table: string) => {
       const builder: Record<string, unknown> = {};
@@ -449,10 +495,22 @@ describe('loadUsageMetrics', () => {
     const db = fakeDb({
       product_events: {
         data: [
-          { event_name: 'cloud.push.succeeded', created_at: '2026-10-19T10:00:00Z' },
-          { event_name: 'cloud.push.succeeded', created_at: '2026-10-19T11:00:00Z' },
-          { event_name: 'cloud.pull.succeeded', created_at: '2026-10-19T12:00:00Z' },
-          { event_name: 'memory.recovered', created_at: '2026-10-19T13:00:00Z' },
+          {
+            event_name: 'cloud.push.succeeded',
+            created_at: '2026-10-19T10:00:00Z',
+          },
+          {
+            event_name: 'cloud.push.succeeded',
+            created_at: '2026-10-19T11:00:00Z',
+          },
+          {
+            event_name: 'cloud.pull.succeeded',
+            created_at: '2026-10-19T12:00:00Z',
+          },
+          {
+            event_name: 'memory.recovered',
+            created_at: '2026-10-19T13:00:00Z',
+          },
         ],
         error: null,
       },
@@ -522,7 +580,9 @@ export const loadUsageMetrics = async (
   const rows = (events ?? []) as { event_name: string; created_at: string }[];
   const pushRows = rows.filter((r) => r.event_name === 'cloud.push.succeeded');
   const pullRows = rows.filter((r) => r.event_name === 'cloud.pull.succeeded');
-  const memoryRecoveriesCount = rows.filter((r) => r.event_name === 'memory.recovered').length;
+  const memoryRecoveriesCount = rows.filter(
+    (r) => r.event_name === 'memory.recovered',
+  ).length;
 
   const { data: machineRows, error: machineError } = await db
     .from('machines')
@@ -658,20 +718,22 @@ export default async function AdminUsagePage({
 // apps/web/app/admin/usage/page.test.tsx
 import { describe, expect, it, vi } from 'vitest';
 
-const { getAdminUserMock, notFoundMock, loadUsageMetricsMock } = vi.hoisted(() => ({
-  getAdminUserMock: vi.fn(),
-  notFoundMock: vi.fn(() => {
-    throw new Error('NEXT_NOT_FOUND');
+const { getAdminUserMock, notFoundMock, loadUsageMetricsMock } = vi.hoisted(
+  () => ({
+    getAdminUserMock: vi.fn(),
+    notFoundMock: vi.fn(() => {
+      throw new Error('NEXT_NOT_FOUND');
+    }),
+    loadUsageMetricsMock: vi.fn().mockResolvedValue({
+      pushesPerDay: [],
+      pullsPerDay: [],
+      activeMachines: 0,
+      memoryBackupsCount: 0,
+      memoryRecoveriesCount: 0,
+      publicStakPublications: 0,
+    }),
   }),
-  loadUsageMetricsMock: vi.fn().mockResolvedValue({
-    pushesPerDay: [],
-    pullsPerDay: [],
-    activeMachines: 0,
-    memoryBackupsCount: 0,
-    memoryRecoveriesCount: 0,
-    publicStakPublications: 0,
-  }),
-}));
+);
 
 vi.mock('@/lib/admin', () => ({ getAdminUser: getAdminUserMock }));
 vi.mock('next/navigation', () => ({ notFound: notFoundMock }));
@@ -683,9 +745,9 @@ import AdminUsagePage from './page';
 describe('AdminUsagePage', () => {
   it('calls notFound (its own gate) when there is no admin user', async () => {
     getAdminUserMock.mockResolvedValue(null);
-    await expect(AdminUsagePage({ searchParams: Promise.resolve({}) })).rejects.toThrow(
-      'NEXT_NOT_FOUND',
-    );
+    await expect(
+      AdminUsagePage({ searchParams: Promise.resolve({}) }),
+    ).rejects.toThrow('NEXT_NOT_FOUND');
     expect(loadUsageMetricsMock).not.toHaveBeenCalled();
   });
 
@@ -714,11 +776,13 @@ git commit -m "feat(web): add admin Usage page sourced from product_events"
 ### Task 5: Reliability page
 
 **Files:**
+
 - Create: `apps/web/app/admin/reliability/reliability-data.ts`
 - Create: `apps/web/app/admin/reliability/page.tsx`
 - Test: `apps/web/app/admin/reliability/reliability-data.test.ts`
 
 **Interfaces:**
+
 - Produces: `export type ReliabilityMetrics = { pushSuccessRate: number | null; pullSuccessRate: number | null; recentFailures: { operation: string; errorCode: string; count: number; affectedUsers: number; firstSeen: string; lastSeen: string }[] }` and `export async function loadReliabilityMetrics(db: SupabaseClient, range: AdminDateRange): Promise<ReliabilityMetrics>`.
 
 - [ ] **Step 1: Write the failing test**
@@ -729,12 +793,21 @@ import { describe, expect, it } from 'vitest';
 
 import { loadReliabilityMetrics } from './reliability-data';
 
-function fakeDb(rows: { event_name: string; success: boolean; error_code: string | null; user_id: string; created_at: string }[]) {
+function fakeDb(
+  rows: {
+    event_name: string;
+    success: boolean;
+    error_code: string | null;
+    user_id: string;
+    created_at: string;
+  }[],
+) {
   return {
     from: () => ({
       select: () => ({
         gte: () => ({
-          then: (resolve: (v: unknown) => void) => resolve({ data: rows, error: null }),
+          then: (resolve: (v: unknown) => void) =>
+            resolve({ data: rows, error: null }),
         }),
       }),
     }),
@@ -744,10 +817,34 @@ function fakeDb(rows: { event_name: string; success: boolean; error_code: string
 describe('loadReliabilityMetrics', () => {
   it('computes push/pull success rates and groups recent failures', async () => {
     const db = fakeDb([
-      { event_name: 'cloud.push.succeeded', success: true, error_code: null, user_id: 'u1', created_at: '2026-10-19T10:00:00Z' },
-      { event_name: 'cloud.push.failed', success: false, error_code: 'invalid-request', user_id: 'u1', created_at: '2026-10-19T11:00:00Z' },
-      { event_name: 'cloud.push.failed', success: false, error_code: 'invalid-request', user_id: 'u2', created_at: '2026-10-19T12:00:00Z' },
-      { event_name: 'cloud.pull.succeeded', success: true, error_code: null, user_id: 'u1', created_at: '2026-10-19T13:00:00Z' },
+      {
+        event_name: 'cloud.push.succeeded',
+        success: true,
+        error_code: null,
+        user_id: 'u1',
+        created_at: '2026-10-19T10:00:00Z',
+      },
+      {
+        event_name: 'cloud.push.failed',
+        success: false,
+        error_code: 'invalid-request',
+        user_id: 'u1',
+        created_at: '2026-10-19T11:00:00Z',
+      },
+      {
+        event_name: 'cloud.push.failed',
+        success: false,
+        error_code: 'invalid-request',
+        user_id: 'u2',
+        created_at: '2026-10-19T12:00:00Z',
+      },
+      {
+        event_name: 'cloud.pull.succeeded',
+        success: true,
+        error_code: null,
+        user_id: 'u1',
+        created_at: '2026-10-19T13:00:00Z',
+      },
     ]);
 
     const result = await loadReliabilityMetrics(db, 'all');
@@ -810,10 +907,18 @@ type EventRow = {
   created_at: string;
 };
 
-const successRateFor = (rows: EventRow[], succeededName: string, failedName: string): number | null => {
-  const relevant = rows.filter((r) => r.event_name === succeededName || r.event_name === failedName);
+const successRateFor = (
+  rows: EventRow[],
+  succeededName: string,
+  failedName: string,
+): number | null => {
+  const relevant = rows.filter(
+    (r) => r.event_name === succeededName || r.event_name === failedName,
+  );
   if (relevant.length === 0) return null;
-  const succeeded = relevant.filter((r) => r.event_name === succeededName).length;
+  const succeeded = relevant.filter(
+    (r) => r.event_name === succeededName,
+  ).length;
   return succeeded / relevant.length;
 };
 
@@ -841,12 +946,15 @@ export const loadReliabilityMetrics = async (
 
   const recentFailures = [...grouped.entries()]
     .map(([, list]) => {
-      const sorted = [...list].sort((a, b) => a.created_at.localeCompare(b.created_at));
+      const sorted = [...list].sort((a, b) =>
+        a.created_at.localeCompare(b.created_at),
+      );
       return {
         operation: sorted[0]!.event_name,
         errorCode: sorted[0]!.error_code ?? 'unknown',
         count: sorted.length,
-        affectedUsers: new Set(sorted.map((r) => r.user_id).filter(Boolean)).size,
+        affectedUsers: new Set(sorted.map((r) => r.user_id).filter(Boolean))
+          .size,
         firstSeen: sorted[0]!.created_at,
         lastSeen: sorted[sorted.length - 1]!.created_at,
       };
@@ -854,8 +962,16 @@ export const loadReliabilityMetrics = async (
     .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen));
 
   return {
-    pushSuccessRate: successRateFor(rows, 'cloud.push.succeeded', 'cloud.push.failed'),
-    pullSuccessRate: successRateFor(rows, 'cloud.pull.succeeded', 'cloud.pull.failed'),
+    pushSuccessRate: successRateFor(
+      rows,
+      'cloud.push.succeeded',
+      'cloud.push.failed',
+    ),
+    pullSuccessRate: successRateFor(
+      rows,
+      'cloud.pull.succeeded',
+      'cloud.pull.failed',
+    ),
     recentFailures,
   };
 };
@@ -970,31 +1086,34 @@ export default async function AdminReliabilityPage({
 // apps/web/app/admin/reliability/page.test.tsx
 import { describe, expect, it, vi } from 'vitest';
 
-const { getAdminUserMock, notFoundMock, loadReliabilityMetricsMock } = vi.hoisted(() => ({
-  getAdminUserMock: vi.fn(),
-  notFoundMock: vi.fn(() => {
-    throw new Error('NEXT_NOT_FOUND');
-  }),
-  loadReliabilityMetricsMock: vi.fn().mockResolvedValue({
-    pushSuccessRate: null,
-    pullSuccessRate: null,
-    recentFailures: [],
-  }),
-}));
+const { getAdminUserMock, notFoundMock, loadReliabilityMetricsMock } =
+  vi.hoisted(() => ({
+    getAdminUserMock: vi.fn(),
+    notFoundMock: vi.fn(() => {
+      throw new Error('NEXT_NOT_FOUND');
+    }),
+    loadReliabilityMetricsMock: vi.fn().mockResolvedValue({
+      pushSuccessRate: null,
+      pullSuccessRate: null,
+      recentFailures: [],
+    }),
+  }));
 
 vi.mock('@/lib/admin', () => ({ getAdminUser: getAdminUserMock }));
 vi.mock('next/navigation', () => ({ notFound: notFoundMock }));
 vi.mock('@/lib/supabase', () => ({ serviceClient: () => ({}) }));
-vi.mock('./reliability-data', () => ({ loadReliabilityMetrics: loadReliabilityMetricsMock }));
+vi.mock('./reliability-data', () => ({
+  loadReliabilityMetrics: loadReliabilityMetricsMock,
+}));
 
 import AdminReliabilityPage from './page';
 
 describe('AdminReliabilityPage', () => {
   it('calls notFound (its own gate) when there is no admin user', async () => {
     getAdminUserMock.mockResolvedValue(null);
-    await expect(AdminReliabilityPage({ searchParams: Promise.resolve({}) })).rejects.toThrow(
-      'NEXT_NOT_FOUND',
-    );
+    await expect(
+      AdminReliabilityPage({ searchParams: Promise.resolve({}) }),
+    ).rejects.toThrow('NEXT_NOT_FOUND');
     expect(loadReliabilityMetricsMock).not.toHaveBeenCalled();
   });
 

@@ -4,16 +4,19 @@ Permanent reference so these numbers don't drift as the dashboard evolves.
 If a definition changes, update this file in the same commit.
 
 ## Activated user
+
 A user with at least one row in `environment_versions` (i.e. has made a
 successful authenticated Cloud push), ever — not scoped to the selected
 date range. Computed in `apps/web/app/admin/overview-data.ts`.
 
 ## Activation rate
+
 Activated users ÷ total signed-up users, both all-time counts (not
 range-scoped — see "Activated user"). Returns `null`, not `NaN`, when
 there are zero signed-up users.
 
 ## Portable user
+
 A user with active (non-revoked) machines spanning >= 2 distinct
 `machine_id`s. Computed once, shared across Overview/Activation/Usage via
 `apps/web/lib/admin-metrics.ts`'s `loadActiveMachinesByUser`/
@@ -21,6 +24,7 @@ A user with active (non-revoked) machines spanning >= 2 distinct
 same implementation so the figure can't drift between pages.
 
 ## Push / pull success rate
+
 Successful `product_events` of that type ÷ (successful + failed) of that
 type, in the selected date range. Returns `null` when there are zero
 attempts of that type in range. Computed via server-side `head:true`
@@ -48,13 +52,16 @@ failures. Not yet split out — a follow-up candidate, same as the pull
 caveat above.
 
 ## Open feedback
+
 `feedback.status` in `('new', 'reviewing')`.
 
 ## Weekly active user (WAU)
+
 **Not implemented as of Phase 5.** Deferred — see Phase 1 final-review
 carry-over notes; no page currently renders a WAU figure.
 
 ## CLI version breakdown
+
 **Unavailable.** The CLI sends no version header on any Cloud API
 request. Not faked — every page that would show this explicitly renders
 "Unavailable — no CLI version header exists yet" rather than a number.
@@ -63,11 +70,13 @@ request. Not faked — every page that would show this explicitly renders
 a breakdown of what versions real users are actually running.)
 
 ## Memory recoveries
+
 **Not instrumented.** No code path emits a `memory.recovered` event yet.
 Usage's tile renders the literal string "Not instrumented yet" rather than
 a real-looking `0`.
 
 ## Row-cap caveat (applies to several loaders)
+
 Hosted Supabase/PostgREST caps any single response at 1000 rows by
 default, with no server-side override configured in this repo. Every
 loader below fetches row-level data for an aggregation that can't be
@@ -92,12 +101,12 @@ arbitrary, not "the most recent N":
   (`.order()` + `.limit(500)`), but its `environment_versions`/`feedback`
   row fetches (for push/feedback counts) use `.limit(MAX_ROWS * 20)` =
   10,000 with no `.order()` — the comment there describes this as a
-  stopgap cap, but the *real* ceiling is 1000 regardless of what's
+  stopgap cap, but the _real_ ceiling is 1000 regardless of what's
   requested, so counts for very active users can silently undercount.
 - `apps/web/app/admin/usage/usage-data.ts`'s per-day buckets and
   `apps/web/app/admin/reliability/reliability-data.ts`'s failure grouping
   — these at least `.order('created_at', { ascending: false })` with an
-  explicit `.limit(1000)`, so truncation drops the *oldest* rows in range
+  explicit `.limit(1000)`, so truncation drops the _oldest_ rows in range
   rather than an arbitrary set, but still truncates silently.
 - The Feedback list (`feedback-data.ts`) and the above Users list both
   cap at 500 rows client-side in addition to the 1000-row server cap.
@@ -110,6 +119,7 @@ reasoning behind accepting each instance rather than blocking on a
 rewrite.
 
 ## Deferred from v1 (not silently missing — listed here on purpose)
+
 The design spec described a larger surface than v1 ships. These are
 known gaps, not oversights:
 

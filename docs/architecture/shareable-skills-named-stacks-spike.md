@@ -74,7 +74,7 @@ such rather than guessed.
 
 - `packages/cli/src/commands/use.ts:24-25` — `stak use <stack>` is described as "Add a local
   or public (`@owner/name`) Stack to main". This is **not** an environment switch. A "Stack"
-  in the current product is a reusable, named Skill-composition *layer* (a manifest:
+  in the current product is a reusable, named Skill-composition _layer_ (a manifest:
   `packages/spec/src/stack.ts:11-17`, `stackManifestSchema` — `name`, `description`, `extends`,
   `skills[]`) that gets resolved and merged into the single environment (`main`) as an
   `EnvironmentStackLayer` (`packages/spec/src/stack.ts:64-70`, carrying `id`, `stackId`,
@@ -165,9 +165,9 @@ such rather than guessed.
   has no `public`/`owner_handle` columns, no immutability trigger, and is explicitly a
   "latest-only, replaced-on-next-check" cache (file header, lines 4-6), the opposite of the
   immutable-version semantics public sharing requires.
-- **Conclusion:** individual-Skill sharing would reuse the *reference-identity primitives*
-  (`ReferenceRecord`, `inspectPublicSourceRemote`) and the *existing public-Stack publish
-  pipeline* (§2 below), not the P5a review-check table itself.
+- **Conclusion:** individual-Skill sharing would reuse the _reference-identity primitives_
+  (`ReferenceRecord`, `inspectPublicSourceRemote`) and the _existing public-Stack publish
+  pipeline_ (§2 below), not the P5a review-check table itself.
 
 ---
 
@@ -222,7 +222,7 @@ What is genuinely missing (CLI/product surface, not schema):
 **Confidence: medium.** Two distinct things are being asked for under "named Stacks," and
 they have different feasibility:
 
-**(a) A *local, un-published* Stack manifest the user authors and names, used to compose
+**(a) A _local, un-published_ Stack manifest the user authors and names, used to compose
 `main`.** This already fully exists: `stackManifestSchema` (`packages/spec/src/stack.ts:11-17`)
 is a named, described, inheritable (`extends`), Skill-listing manifest; `stak use <stack>`
 already consumes a "local or public (`@owner/name`) Stack" (`use.ts:25`). Nothing new is
@@ -250,11 +250,11 @@ requires real CLI code changes (not a migration)**, because the Cloud schema is 
 name-generic but the CLI's on-disk/initialization layer is not.
 
 Per the candidate model in this task's brief ("NAMED STACK ... NOT machine-installed state"),
-the brief's own definition points at (a), not (b) — a named Stack is explicitly *not*
+the brief's own definition points at (a), not (b) — a named Stack is explicitly _not_
 machine-installed state, it's a composition recipe. Under that reading, **named Stacks (as
 specified by the brief) are feasible today, as `EnvironmentStackLayer`/`stackManifestSchema`
-objects, with no migration** — the open work is a *private, named, listable collection of
-these the user manages outside of `main`'s current layer list* (today, Stack layers only
+objects, with no migration** — the open work is a _private, named, listable collection of
+these the user manages outside of `main`'s current layer list_ (today, Stack layers only
 exist as entries already merged into `main`'s manifest, `environmentManifestSchema.stacks:
 environmentStackLayerSchema[]`, `environment.ts:44`; there's no account-level registry of
 "Stacks I've created but haven't necessarily applied to `main`" — see §6 for the minimal
@@ -312,18 +312,18 @@ person is a genuinely new capability, not a variant of existing public publish (
 
 ## 6. CLI implications
 
-- `stak use <stack>` already describes the right verb for *applying* a (local or public)
+- `stak use <stack>` already describes the right verb for _applying_ a (local or public)
   Stack composition into `main` (`use.ts:24-25`) — this verb would likely stay the same under
   named Stacks, since applying a named Stack into `main` is exactly what it already does when
   given a Stack name.
-- `stak publish <stack>` (`publish.ts:29`) already describes the right verb for *publishing* a
+- `stak publish <stack>` (`publish.ts:29`) already describes the right verb for _publishing_ a
   Stack — this is reusable for publishing a named Stack unchanged, and (per §2) could also be
   the literal mechanism behind "share a Skill" if the product accepts one-item-Stack framing.
-- Missing CLI surface for the brief's four flows (see §7): a verb to *create/name* a Stack
+- Missing CLI surface for the brief's four flows (see §7): a verb to _create/name_ a Stack
   without immediately using/publishing it (today a Stack only exists as a manifest file the
   user hand-authors — there's no `stak stack create <name>` scaffolding command found in
-  `packages/cli/src/commands/*.ts`), a verb to *list* a user's own named Stacks (local or
-  account-side), and a verb to *share with one person* (as opposed to publish-to-everyone).
+  `packages/cli/src/commands/*.ts`), a verb to _list_ a user's own named Stacks (local or
+  account-side), and a verb to _share with one person_ (as opposed to publish-to-everyone).
 - `stak skill` (`skill.ts:133-183`) has no `publish`/`share` subcommand at all today (§1.6,
   §2) — this would be new CLI surface regardless of whether the backend reuses the Stack
   publish pipeline.
@@ -349,13 +349,13 @@ person is a genuinely new capability, not a variant of existing public publish (
 ### Flow B: Edit a named Stack
 
 1. Edit the local manifest file directly — **supported today** (plain file edit); no Stack
-   "version history" exists for a *local, unpublished* Stack today (`ImportedStackVersion`
+   "version history" exists for a _local, unpublished_ Stack today (`ImportedStackVersion`
    versioning, `stack.ts:35-44`, only materializes once a Stack is resolved/imported into an
    environment or published).
 2. Re-apply the edited Stack into `main` — **supported today** via `stak use` again (re-running
    `use` with a changed local manifest re-resolves it; `use.ts`'s `applyUse` path).
 3. See a diff between the Stack's old and new composition before re-applying — **unknown,
-   needs further investigation**: `use.ts`'s dry-run shows the *resolved* result
+   needs further investigation**: `use.ts`'s dry-run shows the _resolved_ result
    (`proposal.resolved`/`proposal.summary`, lines 44-47) but I did not confirm whether this
    is rendered as a diff against the Stack's previously-applied state or only as the absolute
    resulting composition. Worth checking `packages/core/src/stack-composition.ts` directly in
@@ -410,7 +410,7 @@ person is a genuinely new capability, not a variant of existing public publish (
   guarded elsewhere in the system (`CloudProjectRecord`/`cloud_projects` explicitly carries no
   path, per its own migration header, `0005_product_read_models.sql:7-10`) — consistent
   project-wide discipline, not a one-off.
-- **Private-Git-repository behavior.** Only the remote *URL* is published (as part of a
+- **Private-Git-repository behavior.** Only the remote _URL_ is published (as part of a
   `ReferenceRecord`), never repository content beyond what the CLI already read locally to
   compute `expectedContentHash`. A private repository's remote URL itself (e.g. an
   organization/path structure on a private host) is not content-sensitive the way credentials
@@ -431,11 +431,11 @@ person is a genuinely new capability, not a variant of existing public publish (
   tables with different schemas, and the public bundle type cannot represent a snapshot.
 - **Malicious-Skill review surface.** The P5a skill-review-check mechanism
   (`skill_review_checks`, §1.6) exists but is **owner-scoped only** — it tells a user whether
-  *their own* installed Skill drifted from its approved source, it is not a mechanism for
+  _their own_ installed Skill drifted from its approved source, it is not a mechanism for
   reviewing someone else's shared Skill before accepting it. Today, consuming a public Stack
   (`stak use @owner/slug`) resolves and merges its requirements with no distinct "review this
   incoming Skill's diff before trusting it" step found in `use.ts` — the dry-run shows the
-  resolved composition, not a security-review-flavored diff of a *new, unfamiliar* Skill's
+  resolved composition, not a security-review-flavored diff of a _new, unfamiliar_ Skill's
   actual script/instruction content. **Unknown, needs further investigation:** whether
   `packages/core/src/stack-composition.ts`'s resolution surfaces enough for a user to inspect
   an incoming public Skill's real content before it's merged, or whether that inspection only

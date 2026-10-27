@@ -1,22 +1,26 @@
 import { describe, expect, it, vi } from 'vitest';
 
-const { getAdminUserMock, notFoundMock, loadActivationFunnelMock } = vi.hoisted(() => ({
-  getAdminUserMock: vi.fn(),
-  notFoundMock: vi.fn(() => {
-    throw new Error('NEXT_NOT_FOUND');
+const { getAdminUserMock, notFoundMock, loadActivationFunnelMock } = vi.hoisted(
+  () => ({
+    getAdminUserMock: vi.fn(),
+    notFoundMock: vi.fn(() => {
+      throw new Error('NEXT_NOT_FOUND');
+    }),
+    loadActivationFunnelMock: vi.fn().mockResolvedValue({
+      accounts: 10,
+      cliAuthenticated: 5,
+      firstPush: 3,
+      portable: 1,
+    }),
   }),
-  loadActivationFunnelMock: vi.fn().mockResolvedValue({
-    accounts: 10,
-    cliAuthenticated: 5,
-    firstPush: 3,
-    portable: 1,
-  }),
-}));
+);
 
 vi.mock('@/lib/admin', () => ({ getAdminUser: getAdminUserMock }));
 vi.mock('next/navigation', () => ({ notFound: notFoundMock }));
 vi.mock('@/lib/supabase', () => ({ serviceClient: () => ({}) }));
-vi.mock('./activation-data', () => ({ loadActivationFunnel: loadActivationFunnelMock }));
+vi.mock('./activation-data', () => ({
+  loadActivationFunnel: loadActivationFunnelMock,
+}));
 
 import AdminActivationPage from './page';
 

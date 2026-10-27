@@ -24,9 +24,11 @@
 ### Task 1: `admin_users` migration
 
 **Files:**
+
 - Create: `supabase/migrations/0013_admin_users.sql`
 
 **Interfaces:**
+
 - Produces: table `public.admin_users(user_id uuid PK, role text, created_at timestamptz)` — consumed by Task 3's `getAdminUser()`.
 
 - [ ] **Step 1: Write the migration file**
@@ -65,9 +67,11 @@ git commit -m "feat(db): add admin_users table for admin authorization"
 ### Task 2: `cloudEnv`/`serviceClient` — confirm reuse, no changes needed
 
 **Files:**
+
 - None (verification-only task; `apps/web/lib/supabase.ts`'s `serviceClient()` and `apps/web/lib/session.ts`'s `getSessionUser()` are reused as-is).
 
 **Interfaces:**
+
 - Consumes: `serviceClient(): SupabaseClient` from `apps/web/lib/supabase.ts`; `getSessionUser(): Promise<WebUser | null>` from `apps/web/lib/session.ts`.
 
 - [ ] **Step 1: Confirm both exports exist with these exact signatures**
@@ -82,10 +86,12 @@ No commit — this task only confirms the interfaces Task 3 depends on.
 ### Task 3: `getAdminUser()` server helper
 
 **Files:**
+
 - Create: `apps/web/lib/admin.ts`
 - Test: `apps/web/lib/admin.test.ts`
 
 **Interfaces:**
+
 - Consumes: `getSessionUser()` (Task 2), `serviceClient()` (Task 2).
 - Produces: `export type AdminUser = WebUser & { role: 'owner' | 'admin' }` and `export async function getAdminUser(): Promise<AdminUser | null>` — consumed by Task 5 (admin shell), Task 6 (security tests), and every later-phase admin page/route.
 
@@ -132,7 +138,9 @@ describe('getAdminUser', () => {
 
   it('returns the admin user with role when present in admin_users', async () => {
     getSessionUserMock.mockResolvedValue({ id: 'user-1', displayName: 'Ada' });
-    const maybeSingle = vi.fn().mockResolvedValue({ data: { role: 'owner' }, error: null });
+    const maybeSingle = vi
+      .fn()
+      .mockResolvedValue({ data: { role: 'owner' }, error: null });
     const eq = vi.fn().mockReturnValue({ maybeSingle });
     const select = vi.fn().mockReturnValue({ eq });
     fromMock.mockReturnValue({ select });
@@ -197,9 +205,11 @@ git commit -m "feat(web): add getAdminUser server-side admin authorization helpe
 ### Task 4: Admin shell CSS (extend `.stak` theme)
 
 **Files:**
+
 - Create: `apps/web/app/admin/admin.css`
 
 **Interfaces:**
+
 - Produces: CSS classes `.stak-admin`, `.stak-admin-sidebar`, `.stak-admin-nav-link`, `.stak-admin-nav-link.is-active`, `.stak-admin-main` — consumed by Task 5's `AdminSidebar` and all later-phase admin pages.
 
 - [ ] **Step 1: Read the existing theme tokens to reuse verbatim**
@@ -293,12 +303,14 @@ git commit -m "feat(web): add admin dashboard shell CSS extending the .stak them
 ### Task 5: Admin shell layout + sidebar component + gated `/admin` landing page
 
 **Files:**
+
 - Create: `apps/web/app/admin/_components/admin-sidebar.tsx`
 - Create: `apps/web/app/admin/layout.tsx`
 - Create: `apps/web/app/admin/page.tsx`
 - Test: `apps/web/app/admin/_components/admin-sidebar.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `getAdminUser()` (Task 3), `.stak-admin*` classes (Task 4).
 - Produces: `AdminSidebar({ active }: { active: AdminNavKey })` component and `AdminNavKey` type — consumed by every later-phase admin page (`/admin/users`, `/admin/activation`, etc., which each import `AdminSidebar` and pass their own `active` key).
 
@@ -439,9 +451,11 @@ git commit -m "feat(web): add gated admin shell layout, sidebar, and overview pl
 ### Task 6: Security tests A, B, C, D, I
 
 **Files:**
+
 - Test: `apps/web/app/admin/admin-access.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `getAdminUser()` (Task 3), `AdminLayout` (Task 5).
 
 - [ ] **Step 1: Write the failing tests**
@@ -523,14 +537,16 @@ git commit -m "test(web): add admin access-control tests A, B, C and static serv
 ### Task 7: Owner bootstrap procedure (documentation, no production mutation)
 
 **Files:**
+
 - Create: `docs/admin-bootstrap.md`
 
 **Interfaces:**
+
 - None (documentation task).
 
 - [ ] **Step 1: Write the bootstrap doc**
 
-```markdown
+````markdown
 # STAK Admin — Owner Bootstrap
 
 One-time production setup to grant the first `owner` admin account. Do not
@@ -554,17 +570,19 @@ GitHub account to grant.
    insert into public.admin_users (user_id, role)
    values ('<your-uuid-here>', 'owner');
    ```
+````
 
 4. Sign in to the web app with that account and visit `/admin` — it should
    render the Overview placeholder instead of 404.
-```
+
+````
 
 - [ ] **Step 2: Commit**
 
 ```bash
 git add docs/admin-bootstrap.md
 git commit -m "docs: add admin owner bootstrap procedure"
-```
+````
 
 ---
 

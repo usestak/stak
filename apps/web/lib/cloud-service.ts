@@ -1,4 +1,8 @@
-import { createCloudService, type CloudService, type ProductEvent } from '@stack/cloud-server';
+import {
+  createCloudService,
+  type CloudService,
+  type ProductEvent,
+} from '@stack/cloud-server';
 import { after } from 'next/server';
 import { cache } from 'react';
 

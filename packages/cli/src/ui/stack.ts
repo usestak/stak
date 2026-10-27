@@ -21,7 +21,8 @@ export const renderSkillRemove = (proposal: SkillRemoveProposal) =>
 
 export const removedName = (
   proposal: StackRemoveProposal | SkillRemoveProposal,
-): string => (isSkillRemoveProposal(proposal) ? proposal.name : proposal.layer.name);
+): string =>
+  isSkillRemoveProposal(proposal) ? proposal.name : proposal.layer.name;
 
 export const renderRemove = (
   proposal: StackRemoveProposal | SkillRemoveProposal,

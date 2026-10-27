@@ -217,7 +217,9 @@ export const createUserStackService = (ctx: UserStackServiceContext) => {
     // passes through the HTTP `publishPublicStackVersionRequestSchema` body validation that
     // the direct bundle-publish endpoint enforces — so it must reject an empty description
     // itself rather than let an unreadable bundle reach Cloud storage.
-    const description = (descriptionOverride ?? version.bundle.description).trim();
+    const description = (
+      descriptionOverride ?? version.bundle.description
+    ).trim();
     if (description.length === 0)
       return {
         eligible: false,
