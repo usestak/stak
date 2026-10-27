@@ -250,6 +250,32 @@ URL — no token, secret, or Memory is ever included. Makes no network call of
 its own (web sign-in is handled by the browser) and mutates nothing. Pass
 `--print` to print the URL instead of launching a browser.
 
+## CLI updates
+
+### `stak upgrade [--dry-run] [-y|--yes]`
+
+Update the CLI to the newest version on your channel: a prerelease build
+(such as `0.2.0-beta.3`) follows the npm `beta` dist-tag, a release follows
+`latest`. Checks the registry directly, prints the current and latest
+versions, and exits 0 if you are already up to date. Otherwise it detects
+whether the CLI was installed with npm or pnpm, shows the exact command
+(`npm i -g @memstk/cli@<channel>` or `pnpm add -g @memstk/cli@<channel>`;
+npm when it cannot tell), and asks before running it. `--yes` skips the
+prompt; `--dry-run` prints the command and changes nothing. If the install
+fails, the command is printed so you can run it yourself (from an
+administrator or `sudo` shell for a permissions error).
+
+**Update reminder.** At most once every 24 hours, other commands look up the
+newest version on your channel (honouring `npm_config_registry`) and cache
+the answer in `update-check.json` under `STAK_HOME`. When a newer version
+exists, one line is printed to stderr after the command's output, at most
+once a day per version. The lookup never delays a command by more than about
+a second and never changes its output or exit code; any failure is silent
+and backs off for an hour before the next attempt.
+It stays quiet when stderr is not a TTY, when `CI` is set, with `--json`,
+`--version` or `--help`, for `stak upgrade` itself, and when
+`STAK_NO_UPDATE_CHECK=1` or `NO_UPDATE_NOTIFIER` is set.
+
 ## Current V0.1 restrictions
 
 - One persistent Environment: `main` only. `stak switch` is deferred.

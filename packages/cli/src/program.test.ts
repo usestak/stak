@@ -33,6 +33,7 @@ import {
 import type { MemoryPushPreflight } from './commands/push.js';
 import { gatherCheckinInputs, reportCheckin } from './cloud/checkin.js';
 import { isRenderableCliError } from './ui/errors.js';
+import { startUpdateReminder } from './update/check.js';
 import type { PullPlan, PushPlan, TrialStackResolution } from '@stack/core';
 import {
   MemoryLockError,
@@ -4343,5 +4344,132 @@ describe('stak open (P4)', () => {
       reportMachineCheckin,
     });
     expect(reportMachineCheckin).not.toHaveBeenCalled();
+  });
+});
+
+describe('update reminder and `stak upgrade` wiring', () => {
+  const MACHINE = '00000000-0000-4000-8000-0000000000a1';
+  const openDeps = {
+    machineId: async () => MACHINE,
+    openUrl: (machineId: string) => `https://app.stak.test/o?m=${machineId}`,
+    openBrowser: async () => undefined,
+  };
+
+  it('starts the lookup before the action and finishes it after the output and check-in', async () => {
+    const events: string[] = [];
+    const finish = vi.fn(async () => {
+      events.push('reminder');
+    });
+    const cancel = vi.fn();
+    const startUpdateReminder = vi.fn((name: string) => {
+      events.push(`start:${name}`);
+      return { finish, cancel };
+    });
+    const result = await runProgram(['scan'], {
+      startUpdateReminder,
+      scan: async () => {
+        events.push('action');
+        return emptyResult;
+      },
+      reportMachineCheckin: async () => {
+        events.push('checkin');
+      },
+    });
+    expect(result.exit?.exitCode ?? 0).toBe(0);
+    expect(startUpdateReminder).toHaveBeenCalledWith('scan');
+    expect(events).toEqual(['start:scan', 'action', 'checkin', 'reminder']);
+  });
+
+  it('passes the leaf command name for nested subcommands', async () => {
+    const startUpdateReminder = vi.fn(() => ({
+      finish: async () => undefined,
+      cancel: () => undefined,
+    }));
+    await runProgram(['project', 'list', '--json'], {
+      startUpdateReminder,
+      projectList: async () => [],
+    });
+    expect(startUpdateReminder).toHaveBeenCalledWith('list');
+  });
+
+  it('abandons the lookup when the command fails, leaving the error untouched', async () => {
+    const finish = vi.fn(async () => undefined);
+    const cancel = vi.fn();
+    await expect(
+      runProgram(['open'], {
+        ...openDeps,
+        startUpdateReminder: () => ({ finish, cancel }),
+        openBrowser: async () => {
+          throw new Error('no browser');
+        },
+      }),
+    ).rejects.toThrow('no browser');
+    expect(finish).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('never runs for --version or --help (they run no action)', async () => {
+    const startUpdateReminder = vi.fn();
+    await runProgram(['--version'], { startUpdateReminder });
+    await runProgram(['--help'], { startUpdateReminder });
+    await runProgram(['status', '--help'], { startUpdateReminder });
+    expect(startUpdateReminder).not.toHaveBeenCalled();
+  });
+
+  it('a failing registry leaves the command output and exit code unchanged', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'stak-update-wiring-'));
+    try {
+      const errors: string[] = [];
+      const result = await runProgram(['open', '--print'], {
+        ...openDeps,
+        startUpdateReminder: (commandName) =>
+          startUpdateReminder(
+            {
+              currentVersion: '0.2.0-beta.3',
+              cachePath: path.join(home, 'update-check.json'),
+              fetch: async () => {
+                throw new TypeError('fetch failed');
+              },
+              now: () => Date.now(),
+              env: {},
+              isTTY: true,
+              argv: ['node', 'stak', 'open', '--print'],
+              writeErr: (value) => errors.push(value),
+            },
+            { commandName },
+          ),
+      });
+      expect(result.exit?.exitCode ?? 0).toBe(0);
+      expect(result.output).toBe(`https://app.stak.test/o?m=${MACHINE}\n`);
+      expect(errors).toEqual([]);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('registers `stak upgrade` with the shared confirm and output', async () => {
+    const confirm = vi.fn(async () => false);
+    const runInstall = vi.fn(async () => ({ exitCode: 0 }));
+    const result = await runProgram(['upgrade'], {
+      confirm,
+      upgrade: {
+        currentVersion: '0.2.0-beta.3',
+        latestVersion: async () => '0.2.0-beta.4',
+        detectPackageManager: () => 'npm',
+        installCommand: (packageManager, channel) => ({
+          packageManager,
+          command: packageManager,
+          args: ['i', '-g', `@memstk/cli@${channel}`],
+          display: `${packageManager} i -g @memstk/cli@${channel}`,
+        }),
+        runInstall,
+      },
+    });
+    expect(result.exit?.exitCode ?? 0).toBe(0);
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(result.output).toContain('This will run: npm i -g @memstk/cli@beta');
+    expect(runInstall).not.toHaveBeenCalled();
+    const help = await runProgram(['--help']);
+    expect(help.output).toContain('  upgrade');
   });
 });
