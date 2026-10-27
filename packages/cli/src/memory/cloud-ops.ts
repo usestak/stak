@@ -1356,9 +1356,12 @@ export const readMemoryCloudStatus = async (
       localRecoveredGeneration: recorded?.recoveredGeneration ?? null,
       historicalRecovery: false,
     };
-  const profile = await deps.backend.getProfile();
-  const latest = await deps.backend.getLatest();
-  const methods = await deps.backend.listRecoveryMethods();
+  // Three independent reads: fetched in parallel rather than one after another.
+  const [profile, latest, methods] = await Promise.all([
+    deps.backend.getProfile(),
+    deps.backend.getLatest(),
+    deps.backend.listRecoveryMethods(),
+  ]);
   const latestGeneration = profile?.latestGeneration ?? null;
   const provenance = await effectiveRecoveryProvenance(
     deps.backend,

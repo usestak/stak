@@ -437,6 +437,58 @@ describe('memory cloud operations', () => {
     expect(status.latestGeneration).toBe(0);
   });
 
+  it('status issues its three independent Cloud reads concurrently and reports the same result', async () => {
+    const source = await writeStore();
+    const store = new InMemoryRemoteMemoryStore();
+    const backend = inMemoryRemoteMemoryBackend(store, USER);
+    const keys = secureKeys(await temp('stack-ops-keys-'));
+    const deps = {
+      stackHome: source.stackHome,
+      backend,
+      localKeyStore: keys,
+      runLocalBackup: fakeBackup,
+    };
+    await runMemoryCloudBackup(deps);
+    const latest = await backend.getLatest();
+
+    const events: string[] = [];
+    const delayed: typeof backend = Object.create(backend);
+    for (const name of [
+      'getProfile',
+      'getLatest',
+      'listRecoveryMethods',
+    ] as const) {
+      const original = backend[name].bind(backend) as () => Promise<unknown>;
+      (delayed as unknown as Record<string, unknown>)[name] = async () => {
+        events.push(`${name}:start`);
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 5);
+        });
+        events.push(`${name}:end`);
+        return original();
+      };
+    }
+    const status = await readMemoryCloudStatus({ ...deps, backend: delayed });
+    // All three started before any finished.
+    expect(events.slice(0, 3).sort()).toEqual([
+      'getLatest:start',
+      'getProfile:start',
+      'listRecoveryMethods:start',
+    ]);
+    expect(status).toEqual({
+      authenticated: true,
+      privacyMode: 'standard',
+      latestGeneration: 0,
+      lastCloudBackupAt: latest?.createdAt ?? null,
+      recoveryMethodTypes: [],
+      deviceEnrolled: await keys.hasKey(),
+      // The backup above recorded this machine as synced at generation 0.
+      localRecoveredGeneration: 0,
+      historicalRecovery: false,
+    });
+    expect(await readMemoryCloudStatus(deps)).toEqual(status);
+  });
+
   it('protect fails closed and does not finalize Protected when the local key cannot be secured', async () => {
     const source = await writeStore();
     const store = new InMemoryRemoteMemoryStore();

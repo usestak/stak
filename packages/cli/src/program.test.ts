@@ -30,6 +30,7 @@ import {
   isRemoteUseProposal,
   type ProgramDependencies,
 } from './program.js';
+import type { MemoryPushPreflight } from './commands/push.js';
 import { gatherCheckinInputs, reportCheckin } from './cloud/checkin.js';
 import { isRenderableCliError } from './ui/errors.js';
 import type { PullPlan, PushPlan, TrialStackResolution } from '@stack/core';
@@ -2205,6 +2206,225 @@ describe('STAK CLI', () => {
       ).rejects.toThrow('Push did not fully succeed');
       expect(applyMemoryPush).not.toHaveBeenCalled();
       expect(chunks.join('')).toContain('FAILED: changed meanwhile');
+    });
+
+    // Split from #11: Skills and Memory are independent domains with their own Cloud
+    // state, so `stak push` applies them concurrently. The Memory branch keeps the lock
+    // and the re-check inside it; only the outer ordering changed.
+    describe('stak push applies Skills and Memory concurrently', () => {
+      const tick = () =>
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, 5);
+        });
+
+      it('starts both domains before either finishes, Memory still inside the lock with its re-check', async () => {
+        const events: string[] = [];
+        const { calls, withMemoryLock } = recordingLock(events);
+        let preflights = 0;
+        const result = await runProgram(['push', '--yes'], {
+          cloudPreparePush: async () => basePushPlan,
+          cloudApplyPush: async () => {
+            events.push('skills:start');
+            await tick();
+            events.push('skills:end');
+            return appliedPush();
+          },
+          memoryPushPreflight: async () => {
+            events.push(++preflights === 1 ? 'preflight' : 'recheck');
+            return { blocked: false };
+          },
+          applyMemoryPush: async () => {
+            events.push('memory:start');
+            await tick();
+            events.push('memory:end');
+            return { status: 'standard', generation: 3 };
+          },
+          withMemoryLock,
+        });
+        expect(calls).toEqual(['stak push']);
+        const at = (event: string) => events.indexOf(event);
+        // Both started before either finished.
+        expect(at('memory:start')).toBeLessThan(at('skills:end'));
+        expect(at('skills:start')).toBeLessThan(at('memory:end'));
+        // Memory still runs inside the lock, after the authoritative re-check.
+        expect(at('lock:stak push')).toBeLessThan(at('recheck'));
+        expect(at('recheck')).toBeLessThan(at('memory:start'));
+        expect(at('memory:end')).toBeLessThan(at('unlock'));
+        // The early, unlocked preflight ran before anything was applied.
+        expect(at('preflight')).toBeLessThan(at('skills:start'));
+        expect(at('preflight')).toBeLessThan(at('lock:stak push'));
+        expect(result.output).toContain('main updated in the cloud.');
+        expect(result.output).toContain('synced to Cloud (generation 3)');
+        expect(result.output).toContain('Push complete.');
+      });
+
+      it('a busy lock fails Memory while a slower Skills push still completes; both are reported, exit is partial failure', async () => {
+        let skillsFinished = false;
+        const applyMemoryPush = vi.fn(async () => ({
+          status: 'standard' as const,
+          generation: 3,
+        }));
+        const chunks: string[] = [];
+        await expect(
+          runProgram(['push', '--yes'], {
+            cloudPreparePush: async () => basePushPlan,
+            cloudApplyPush: async () => {
+              await tick();
+              skillsFinished = true;
+              return appliedPush();
+            },
+            applyMemoryPush,
+            withMemoryLock: busyLock(),
+            writeOut: (value) => chunks.push(value),
+          }),
+        ).rejects.toMatchObject({
+          code: 'push-partial-failure',
+          message: expect.stringContaining('Push did not fully succeed'),
+        });
+        // The lock rejection never cut the Skills branch short.
+        expect(skillsFinished).toBe(true);
+        expect(applyMemoryPush).not.toHaveBeenCalled();
+        const out = chunks.join('');
+        expect(out).toContain('main updated in the cloud.');
+        expect(out).toContain(`FAILED: ${BUSY}`);
+        expect(out).not.toContain('Push complete.');
+      });
+
+      it('a Skills failure with a slower Memory success reports both, exit is partial failure', async () => {
+        let memoryFinished = false;
+        const chunks: string[] = [];
+        await expect(
+          runProgram(['push', '--yes'], {
+            cloudPreparePush: async () => basePushPlan,
+            cloudApplyPush: async () => {
+              throw new Error('upload failed');
+            },
+            applyMemoryPush: async () => {
+              await tick();
+              memoryFinished = true;
+              return { status: 'standard', generation: 4 };
+            },
+            withMemoryLock: recordingLock([]).withMemoryLock,
+            writeOut: (value) => chunks.push(value),
+          }),
+        ).rejects.toMatchObject({ code: 'push-partial-failure' });
+        expect(memoryFinished).toBe(true);
+        const out = chunks.join('');
+        expect(out).toContain('FAILED: upload failed');
+        expect(out).toContain('synced to Cloud (generation 4)');
+        expect(out).not.toContain('Push complete.');
+      });
+
+      it('Skills-only push (no Memory wiring) is unchanged: no lock, Memory not attempted, nothing-to-push still short-circuits', async () => {
+        const { calls: lockCalls, withMemoryLock: lock } = recordingLock([]);
+        const cloudApplyPush = vi.fn(appliedPush);
+        const result = await runProgram(['push', '--yes'], {
+          cloudPreparePush: async () => basePushPlan,
+          cloudApplyPush,
+          withMemoryLock: lock,
+        });
+        expect(cloudApplyPush).toHaveBeenCalledTimes(1);
+        expect(lockCalls).toEqual([]);
+        expect(result.output).toContain('main updated in the cloud.');
+        expect(result.output).toContain('not attempted.');
+
+        const noopApply = vi.fn(appliedPush);
+        const noop = await runProgram(['push', '--yes'], {
+          cloudPreparePush: async () => ({ ...basePushPlan, noop: true }),
+          cloudApplyPush: noopApply,
+          withMemoryLock: lock,
+        });
+        expect(noopApply).not.toHaveBeenCalled();
+        expect(lockCalls).toEqual([]);
+        expect(noop.output).not.toContain('Pushing main...');
+      });
+
+      it('starts the early Memory preflight while Skills planning is still in flight', async () => {
+        const events: string[] = [];
+        await runProgram(['push', '--yes'], {
+          cloudPreparePush: async () => {
+            events.push('plan:start');
+            await tick();
+            events.push('plan:end');
+            return basePushPlan;
+          },
+          cloudApplyPush: appliedPush,
+          memoryPushPreflight: async () => {
+            events.push('preflight');
+            return { blocked: false };
+          },
+          applyMemoryPush: async () => ({ status: 'standard', generation: 3 }),
+          withMemoryLock: recordingLock([]).withMemoryLock,
+        });
+        expect(events.indexOf('preflight')).toBeLessThan(
+          events.indexOf('plan:end'),
+        );
+      });
+
+      it('a Skills conflict still outranks a blocked or failing early preflight, and nothing is applied', async () => {
+        const preflights: Array<() => Promise<MemoryPushPreflight>> = [
+          async () => ({ blocked: true, reason: 'memory blocked' }),
+          async () => {
+            throw new Error('preflight network down');
+          },
+        ];
+        for (const memoryPushPreflight of preflights) {
+          const cloudApplyPush = vi.fn(appliedPush);
+          const applyMemoryPush = vi.fn(async () => ({
+            status: 'standard' as const,
+            generation: 3,
+          }));
+          await expect(
+            runProgram(['push', '--yes'], {
+              cloudPreparePush: async () => ({
+                ...basePushPlan,
+                conflict: {
+                  kind: 'remote-newer',
+                  message: 'Cloud moved on',
+                  localBaseVersionId: null,
+                  remoteVersionNumber: 3,
+                },
+              }),
+              cloudApplyPush,
+              memoryPushPreflight,
+              applyMemoryPush,
+            }),
+          ).rejects.toThrow('Cloud moved on');
+          expect(cloudApplyPush).not.toHaveBeenCalled();
+          expect(applyMemoryPush).not.toHaveBeenCalled();
+        }
+      });
+
+      it('a blocked early preflight still stops both domains before any change', async () => {
+        const cloudApplyPush = vi.fn(appliedPush);
+        const { calls: lockCalls, withMemoryLock: lock } = recordingLock([]);
+        await expect(
+          runProgram(['push', '--yes'], {
+            cloudPreparePush: async () => basePushPlan,
+            cloudApplyPush,
+            memoryPushPreflight: async () => ({
+              blocked: true,
+              reason: 'no sync history',
+            }),
+            applyMemoryPush: async () => ({
+              status: 'standard',
+              generation: 3,
+            }),
+            withMemoryLock: lock,
+          }),
+        ).rejects.toThrow('no sync history');
+        expect(cloudApplyPush).not.toHaveBeenCalled();
+        expect(lockCalls).toEqual([]);
+      });
+
+      it('push --json --dry-run never runs the Memory preflight', async () => {
+        const memoryPushPreflight = vi.fn(async () => ({ blocked: false }));
+        await runProgram(['push', '--dry-run', '--json'], {
+          cloudPreparePush: async () => basePushPlan,
+          memoryPushPreflight,
+        });
+        expect(memoryPushPreflight).not.toHaveBeenCalled();
+      });
     });
 
     it('stak pull runs all Memory work inside the lock, Skills outside', async () => {

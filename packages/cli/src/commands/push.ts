@@ -78,6 +78,17 @@ export const registerPushCommand = (
         verbose?: boolean;
       }) => {
         const verbose = options.verbose === true;
+        // The early Memory preflight is read-only and independent of the Skills plan, so
+        // its Cloud reads overlap with planning instead of following it. Its outcome is
+        // still acted on only after the Skills conflict check, so error priority is
+        // unchanged (a rejection is held until then, never left unhandled). It is the
+        // unlocked gate for BOTH domains; the authoritative check runs again under the
+        // Memory lock below.
+        const memoryPreflightPromise: Promise<MemoryPushPreflight> =
+          dependencies.memoryPushPreflight && !options.json
+            ? dependencies.memoryPushPreflight()
+            : Promise.resolve({ blocked: false });
+        memoryPreflightPromise.catch(() => undefined);
         const plan = await dependencies.cloudPreparePush();
         if (options.json) {
           if (!options.dryRun)
@@ -92,9 +103,7 @@ export const registerPushCommand = (
           throw plan.conflict.kind === 'remote-newer'
             ? new RemoteEnvironmentConflictError(plan.conflict.message)
             : new LocalEnvironmentConflictError(plan.conflict.message);
-        const memoryPreflight = dependencies.memoryPushPreflight
-          ? await dependencies.memoryPushPreflight()
-          : { blocked: false };
+        const memoryPreflight = await memoryPreflightPromise;
         // Preflight for BOTH domains completes before either is mutated — a predictable
         // Memory conflict stops the Skill push too, even though Skills had none.
         if (memoryPreflight.blocked)
@@ -118,32 +127,34 @@ export const registerPushCommand = (
         }
         dependencies.writeOut('Pushing main...\n\n');
 
-        let skill: PushSkillOutcome;
-        if (plan.noop) skill = { status: 'noop' };
-        else
+        // Skills and Memory are independent domains with their own Cloud state, so they
+        // are applied concurrently. Each branch catches its own failure and resolves to
+        // an outcome, so neither can reject the Promise.all or cut the other short.
+        const applySkills = async (): Promise<PushSkillOutcome> => {
+          if (plan.noop) return { status: 'noop' };
           try {
-            skill = {
+            return {
               status: 'applied',
               result: await dependencies.cloudApplyPush(plan),
             };
           } catch (error) {
-            skill = {
+            return {
               status: 'failed',
               error: error instanceof Error ? error.message : String(error),
             };
           }
+        };
 
-        // The Memory part holds the Memory lock (spec 2026-10-25 §3.2); Skills above run
+        // The Memory part holds the Memory lock (spec 2026-10-25 §3.2); Skills run
         // outside it. The preflight is read again under the lock so the write acts on
         // the state it checked. A busy lock (MemoryLockError) lands in the catch below
         // and reports Memory FAILED with the lock message, like any Memory failure.
-        let memory: PushMemoryOutcome;
-        const applyMemoryPush = dependencies.applyMemoryPush;
-        if (!applyMemoryPush) memory = { status: 'not-attempted' };
-        else
+        const applyMemory = async (): Promise<PushMemoryOutcome> => {
+          const applyMemoryPush = dependencies.applyMemoryPush;
+          if (!applyMemoryPush) return { status: 'not-attempted' };
           try {
             const lock = dependencies.withMemoryLock ?? runDirectly;
-            memory = await lock(
+            return await lock(
               'stak push',
               async (): Promise<PushMemoryOutcome> => {
                 const recheck = dependencies.memoryPushPreflight
@@ -163,11 +174,17 @@ export const registerPushCommand = (
               },
             );
           } catch (error) {
-            memory = {
+            return {
               status: 'failed',
               error: error instanceof Error ? error.message : String(error),
             };
           }
+        };
+
+        const [skill, memory] = await Promise.all([
+          applySkills(),
+          applyMemory(),
+        ]);
 
         dependencies.writeOut(renderCombinedPushResult(skill, memory));
         // A runtime/network failure in either domain after apply began is partial
