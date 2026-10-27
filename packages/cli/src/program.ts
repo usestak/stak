@@ -1,8 +1,10 @@
+import { realpathSync } from 'node:fs';
 import { readdir, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
+import { fileURLToPath } from 'node:url';
 
 import { Command } from 'commander';
 
@@ -107,6 +109,22 @@ import {
   resolveCloudBaseUrl,
 } from './cloud/config.js';
 import { registerOpenCommand } from './commands/open.js';
+import {
+  registerUpgradeCommand,
+  type InstallRunResult,
+  type UpgradeCommandDependencies,
+} from './commands/upgrade.js';
+import {
+  fetchLatestVersion,
+  startUpdateReminder,
+  UPDATE_CHECK_FILE,
+  type UpdateReminderHandle,
+} from './update/check.js';
+import {
+  detectPackageManager,
+  installCommandFor,
+  type InstallCommand,
+} from './update/install.js';
 import { stackCloudRemoteMemoryBackend } from './memory/cloud-backend.js';
 import {
   canonicalMemoryStatus,
@@ -421,6 +439,13 @@ export type ProgramDependencies = {
    * `defaultDependencies`. Connectivity failures are non-fatal; a 401/403 is re-thrown.
    */
   reportMachineCheckin?(commandName: string): Promise<void>;
+  /**
+   * Update reminder: called as a command starts (lookup not awaited); the handle's
+   * `finish()` runs after the command's output. Optional so tests can omit it.
+   */
+  startUpdateReminder?(commandName: string): UpdateReminderHandle;
+  /** `stak upgrade` registry/installer seams. Optional; the real CLI wires them in. */
+  upgrade?: Omit<UpgradeCommandDependencies, 'confirm' | 'writeOut'>;
 };
 
 /**
@@ -691,6 +716,73 @@ export const bootstrapEmptyMainIfSkillFree = async (options: {
  * reused by the check-in if still fresh. It is never read across process invocations.
  */
 let lastGlobalScan: { result: ScanResult } | undefined;
+
+/**
+ * Run a global install for `stak upgrade` with the user's terminal attached. `.cmd` shims on
+ * Windows need a shell. Never rejects: a spawn failure resolves with its error code.
+ */
+const runInstall = async (
+  install: InstallCommand,
+): Promise<InstallRunResult> => {
+  const { spawn } = await import('node:child_process');
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (result: InstallRunResult) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    try {
+      const child = spawn(install.command, install.args, {
+        stdio: 'inherit',
+        shell: process.platform === 'win32',
+      });
+      child.on('error', (error: NodeJS.ErrnoException) =>
+        settle({ exitCode: null, errorCode: error.code ?? 'UNKNOWN' }),
+      );
+      child.on('close', (code) => settle({ exitCode: code }));
+    } catch (error) {
+      settle({
+        exitCode: null,
+        errorCode: (error as NodeJS.ErrnoException).code ?? 'UNKNOWN',
+      });
+    }
+  });
+};
+
+/** The paths that reveal how this CLI was installed (bundle location and the bin shim). */
+const installedPackagePaths = (): string[] => {
+  const paths: string[] = [];
+  for (const candidate of [fileURLToPath(import.meta.url), process.argv[1]]) {
+    if (!candidate) continue;
+    paths.push(candidate);
+    try {
+      paths.push(realpathSync(candidate));
+    } catch {
+      // A missing path just contributes nothing.
+    }
+  }
+  return paths;
+};
+
+const defaultUpgradeDependencies: NonNullable<ProgramDependencies['upgrade']> =
+  {
+    currentVersion: packageMetadata.version,
+    latestVersion: (channel) =>
+      fetchLatestVersion({
+        fetch: (url, init) => fetch(url, init),
+        env: process.env,
+        channel,
+        signal: AbortSignal.timeout(15_000),
+      }),
+    detectPackageManager: () =>
+      detectPackageManager({
+        packagePaths: installedPackagePaths(),
+        env: process.env,
+      }),
+    installCommand: installCommandFor,
+    runInstall,
+  };
 
 const defaultDependencies: ProgramDependencies = {
   scan: async ({ project }) => {
@@ -1363,6 +1455,21 @@ const defaultDependencies: ProgramDependencies = {
     }
   },
   writeOut: (value) => process.stdout.write(value),
+  startUpdateReminder: (commandName) =>
+    startUpdateReminder(
+      {
+        currentVersion: packageMetadata.version,
+        cachePath: path.join(stackHome, UPDATE_CHECK_FILE),
+        fetch: (url, init) => fetch(url, init),
+        now: () => Date.now(),
+        env: process.env,
+        isTTY: process.stderr.isTTY === true,
+        argv: process.argv,
+        writeErr: (value) => process.stderr.write(value),
+      },
+      { commandName },
+    ),
+  upgrade: defaultUpgradeDependencies,
   // Spec 2026-10-25: every Memory-changing command wraps its Memory work in this. The
   // one-line leftover-lock note goes to stderr so it never corrupts `--json` stdout.
   withMemoryLock: (command, fn) =>
@@ -1503,6 +1610,35 @@ export const createProgram = (
     .name('stak')
     .description('The control plane for portable AI agent environments.')
     .version(packageMetadata.version);
+  // Update reminder: the lookup starts with the command (not awaited) and is waited on for
+  // at most ~1 s once the command (and its check-in) is done. Commander runs postAction
+  // hooks in reverse registration order, so registering this one first makes the reminder
+  // print last. It never throws or prints to stdout, so it cannot change a command's output
+  // or exit code. `--version`/`--help` run no action, so they never reach these hooks.
+  let updateReminder: UpdateReminderHandle | undefined;
+  program.hook('preAction', (_thisCommand, actionCommand) => {
+    try {
+      updateReminder = dependencies.startUpdateReminder?.(actionCommand.name());
+    } catch {
+      updateReminder = undefined;
+    }
+  });
+  program.hook('postAction', async () => {
+    const reminder = updateReminder;
+    updateReminder = undefined;
+    await reminder?.finish();
+  });
+  // A failed command skips postAction: abandon its lookup so a slow registry never holds
+  // the process open after the error is printed.
+  const parseAsync = program.parseAsync.bind(program);
+  program.parseAsync = (async (...args: Parameters<Command['parseAsync']>) => {
+    try {
+      return await parseAsync(...args);
+    } finally {
+      updateReminder?.cancel();
+      updateReminder = undefined;
+    }
+  }) as Command['parseAsync'];
   // Phase P1: after a state-changing command succeeds, report this machine's state
   // best-effort (no daemon — only on user-run commands). Skipped for commands whose
   // success does not change machine state; a 401/403 propagates (explicit, not offline).
@@ -1529,5 +1665,10 @@ export const createProgram = (
   registerProjectCommand(program, dependencies);
   registerSkillCommand(program, dependencies);
   registerOpenCommand(program, dependencies);
+  registerUpgradeCommand(program, {
+    ...(dependencies.upgrade ?? defaultUpgradeDependencies),
+    confirm: dependencies.confirm,
+    writeOut: dependencies.writeOut,
+  });
   return program;
 };
