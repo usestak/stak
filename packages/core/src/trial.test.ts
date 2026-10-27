@@ -48,7 +48,7 @@ describe('trial Stack resolution', () => {
     ).toBe(true);
   });
 
-  it('reuses required/optional semantics and rejects internal required conflicts', async () => {
+  it('reuses required/optional semantics and renames internal required conflicts', async () => {
     const root = await temp();
     const bundle = path.join(root, 'conflict');
     await mkdir(bundle, { recursive: true });
@@ -56,9 +56,19 @@ describe('trial Stack resolution', () => {
       path.join(bundle, 'stak.yaml'),
       `schemaVersion: 1\nname: conflict\ndescription: conflict\nextends:\n  - ${JSON.stringify(fixture('base'))}\n  - ${JSON.stringify(fixture('required-conflict'))}\nskills: []\n`,
     );
-    await expect(resolveTrialStack({ input: bundle })).rejects.toMatchObject({
-      code: 'try-resolution-conflict',
-    });
+    // Since 8119b81 a same-name, different-content required Skill no longer blocks
+    // resolution: the newcomer is kept under a name prefixed with its originating Stack.
+    const conflicting = await resolveTrialStack({ input: bundle });
+    expect(conflicting.resolved.environment.conflicts).toEqual([]);
+    expect(
+      conflicting.resolved.environment.renamed.map(({ name, renamedTo }) => ({
+        name,
+        renamedTo,
+      })),
+    ).toEqual([{ name: 'review', renamedTo: 'required-conflict-review' }]);
+    expect(
+      conflicting.resolved.environment.skills.map((skill) => skill.name),
+    ).toEqual(['required-conflict-review', 'review']);
     const optional = await resolveTrialStack({
       input: fixture('optional-conflict'),
     });
