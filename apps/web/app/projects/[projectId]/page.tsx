@@ -9,7 +9,7 @@ import { ShellNotice } from '../../_components/shell-notice';
 import { getCloudService } from '../../../lib/cloud-service';
 import { readActiveMachinePreference } from '../../../lib/machine-preference';
 import { displayNameOf, getSessionUser } from '../../../lib/session';
-import { loadSidebarSummary } from '../../../lib/sidebar-summary';
+import { loadSidebarShell } from '../../../lib/sidebar-shell';
 
 import { loadProjectDetail } from './project-detail-data';
 import { ProjectLifecycleButton } from '../_components/project-lifecycle-button';
@@ -30,6 +30,9 @@ export default async function ProjectDetailPage({
   const { machine: requestedMachine } = await searchParams;
   const machine = requestedMachine ?? (await readActiveMachinePreference());
   const handle = user.githubUsername ?? displayNameOf(user);
+  // Resolves the same viewing machine as the loader; started first so the badge reads
+  // overlap with the page's own instead of following them.
+  const shellPromise = loadSidebarShell(getCloudService(), user, machine);
   const view = await loadProjectDetail(
     getCloudService(),
     user,
@@ -90,12 +93,7 @@ export default async function ProjectDetailPage({
       </ShellNotice>
     );
 
-  const sidebarCounts = await loadSidebarSummary(
-    getCloudService(),
-    user,
-    view.viewing.machineId,
-    view.machines.length,
-  );
+  const { sidebarCounts } = await shellPromise;
 
   return (
     <div className="stak-frame">

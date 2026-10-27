@@ -100,6 +100,14 @@ export const loadProjectsList = async (
   if (!viewingId)
     return { kind: 'choose-machine', machines: options, anyCheckedIn };
 
+  // Badge counts don't depend on this page's own reads — fetch them concurrently.
+  const sidebarPromise = loadSidebarSummary(
+    service,
+    user,
+    viewingId,
+    active.length,
+  );
+
   const viewing = active.find((m) => m.machineId === viewingId)!;
 
   let projects: ProjectSummary[];
@@ -154,7 +162,7 @@ export const loadProjectsList = async (
     // `.projects` is this page's own authoritative count (`rows.length`, the same list
     // rendered below) — every other badge comes from the one shared loader.
     sidebar: {
-      ...(await loadSidebarSummary(service, user, viewingId, active.length)),
+      ...(await sidebarPromise),
       projects: rows.length > 0 ? String(rows.length) : '',
     },
     statusSentence,

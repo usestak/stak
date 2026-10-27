@@ -68,6 +68,10 @@ export const getCloudService = (): CloudService => {
       getOverview: cache(service.getOverview),
       listUserStacks: cache(service.listUserStacks),
       getMachinesReadModel: cache(service.getMachinesReadModel),
+      // Public pages read these in both `generateMetadata` and the page body. Primitive
+      // (owner/slug/handle) arguments, so cache() keys them by value.
+      getPublicStack: cache(service.getPublicStack),
+      getPublicProfile: cache(service.getPublicProfile),
     };
   }
   return cached;
