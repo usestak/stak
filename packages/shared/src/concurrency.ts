@@ -1,7 +1,11 @@
 /**
  * Map `items` through `fn` with at most `limit` calls in flight, preserving input order in
- * the result. Rejects with the first error once in-flight work settles; no new work starts
- * after a failure.
+ * the result.
+ *
+ * On failure: no new work starts, every call already in flight is allowed to settle (so no
+ * rejection is left unobserved and nothing keeps running after this returns), and then the
+ * promise rejects with the FIRST error thrown — first in time, not by item or worker index.
+ * Later errors from calls that were already in flight are dropped.
  */
 export const mapWithConcurrency = async <T, R>(
   items: readonly T[],
@@ -9,28 +13,27 @@ export const mapWithConcurrency = async <T, R>(
   fn: (item: T, index: number) => Promise<R>,
 ): Promise<R[]> => {
   const results = new Array<R>(items.length);
+  if (items.length === 0) return results;
+  const width = Math.min(
+    items.length,
+    Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : items.length,
+  );
   let next = 0;
-  let failed = false;
+  let failure: { error: unknown } | null = null;
   const worker = async (): Promise<void> => {
-    while (!failed && next < items.length) {
+    while (failure === null && next < items.length) {
       const index = next++;
       try {
         results[index] = await fn(items[index] as T, index);
       } catch (error) {
-        failed = true;
-        throw error;
+        failure ??= { error };
+        return;
       }
     }
   };
-  const workers = Array.from(
-    { length: Math.max(1, Math.min(limit, items.length)) },
-    worker,
-  );
-  const settled = await Promise.allSettled(workers);
-  const rejection = settled.find(
-    (outcome): outcome is PromiseRejectedResult =>
-      outcome.status === 'rejected',
-  );
-  if (rejection) throw rejection.reason;
+  // Workers never reject (errors are captured above), so awaiting them all cannot leave
+  // an unhandled rejection behind.
+  await Promise.all(Array.from({ length: width }, worker));
+  if (failure !== null) throw (failure as { error: unknown }).error;
   return results;
 };
