@@ -404,3 +404,139 @@ describe('web-originated single-Skill share after a real stak push', () => {
     ).rejects.toMatchObject({ code: 'public-stack-not-found' });
   });
 });
+
+describe('stak push round trips', () => {
+  /** Counts Cloud API calls by route so tests can assert on round trips, not just results. */
+  const countingClient = (
+    service: ReturnType<typeof makeCloud>['service'],
+    token: string,
+  ) => {
+    const calls: string[] = [];
+    const inner = createInProcessFetch(service);
+    const client = createCloudClient({
+      baseUrl: 'http://localhost:3000',
+      token,
+      fetchImpl: (input, init) => {
+        const route = new URL(input).pathname
+          .replace('/api/v1/', '')
+          .replace(/sha256:[0-9a-f]+|[0-9a-f-]{36}|up\.[^/]+/g, ':id');
+        calls.push(`${init.method} ${route.split('/').slice(0, 2).join('/')}`);
+        return inner(input, init);
+      },
+    });
+    return { client, calls };
+  };
+
+  it('reuses the plan-time upload ticket instead of preparing each snapshot twice', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const { service, client } = makeCloud();
+    const token = await signIn(service, client);
+    const { client: counted, calls } = countingClient(service, token);
+    await seedMainWithLocalAndGitSkills(
+      stackHome,
+      path.join(root, 'src'),
+      'v1',
+    );
+
+    const plan = await preparePush({ stackHome, client: counted });
+    calls.length = 0;
+    const result = await applyPush({ stackHome, plan, client: counted });
+
+    expect(result.uploaded).toBe(2);
+    expect(calls.filter((c) => c === 'POST snapshots/prepare')).toHaveLength(0);
+  });
+
+  it('re-prepares when the plan-time ticket is too old to trust', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const { service, client } = makeCloud();
+    const token = await signIn(service, client);
+    const { client: counted, calls } = countingClient(service, token);
+    await seedMainWithLocalAndGitSkills(
+      stackHome,
+      path.join(root, 'src'),
+      'v1',
+    );
+
+    let now = 1_000_000;
+    const plan = await preparePush({
+      stackHome,
+      client: counted,
+      nowMs: () => now,
+    });
+    now += 6 * 60 * 1000;
+    calls.length = 0;
+    const result = await applyPush({
+      stackHome,
+      plan,
+      client: counted,
+      nowMs: () => now,
+    });
+
+    expect(result.uploaded).toBe(2);
+    expect(calls.filter((c) => c === 'POST snapshots/prepare')).toHaveLength(2);
+  });
+
+  it('only checks content that is new since this Machine last pushed', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const { service, client } = makeCloud();
+    const token = await signIn(service, client);
+    const { client: counted, calls } = countingClient(service, token);
+    const { localHash } = await seedMainWithLocalAndGitSkills(
+      stackHome,
+      path.join(root, 'src'),
+      'v1',
+    );
+    await applyPush({
+      stackHome,
+      plan: await preparePush({ stackHome, client: counted }),
+      client: counted,
+    });
+
+    const newHash = await bumpGitSkillContent(root, stackHome, 'v2');
+    calls.length = 0;
+    const plan = await preparePush({ stackHome, client: counted });
+
+    // The unchanged local Skill was confirmed by the previous push; only the new
+    // content costs a Cloud round trip.
+    expect(calls.filter((c) => c === 'POST snapshots/prepare')).toHaveLength(1);
+    expect(plan.snapshotsToUpload).toEqual([newHash]);
+    expect(plan.snapshotsAlready).toBe(1);
+    expect(plan.snapshotsToUpload).not.toContain(localHash);
+  });
+
+  it('re-checks everything when Cloud moved on since this Machine last synced', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const { service, client } = makeCloud();
+    const token = await signIn(service, client);
+    const { client: counted, calls } = countingClient(service, token);
+    await seedMainWithLocalAndGitSkills(
+      stackHome,
+      path.join(root, 'src'),
+      'v1',
+    );
+    await applyPush({
+      stackHome,
+      plan: await preparePush({ stackHome, client: counted }),
+      client: counted,
+    });
+
+    // A pull (or older CLI) rewrites sync state without confirmed hashes.
+    const syncDir = path.join(stackHome, 'state', 'machines');
+    const [machineId] = await (
+      await import('node:fs/promises')
+    ).readdir(syncDir);
+    const syncFile = path.join(syncDir, machineId as string, 'sync.json');
+    const sync = JSON.parse(await readFile(syncFile, 'utf8'));
+    delete sync.environments.main.confirmedContentHashes;
+    await writeFileFs(syncFile, JSON.stringify(sync));
+
+    await bumpGitSkillContent(root, stackHome, 'v2');
+    calls.length = 0;
+    await preparePush({ stackHome, client: counted });
+    expect(calls.filter((c) => c === 'POST snapshots/prepare')).toHaveLength(2);
+  });
+});
