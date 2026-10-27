@@ -125,10 +125,16 @@ export const preparePush = async (
   const pendingUploads: PendingUpload[] = [];
   let snapshotsAlready = 0;
   if (!conflict && !noop) {
-    // Content this Machine's previous push confirmed is in Cloud needs no re-check
-    // (snapshots are never deleted). Deliberately NOT the remote bundle's own requirement
-    // list: legacy bundles derive it from every Skill, including Git-backed ones older
-    // CLIs never uploaded. Only new content costs a round trip, and those run concurrently.
+    // Content this Machine's previous push confirmed is in Cloud needs no re-check.
+    // This relies on the snapshot-store invariant documented on
+    // `CloudRepository.hasSnapshot` (packages/cloud-server/src/repository.ts): a user's
+    // snapshots are never deleted while any of their Environment versions exist. Cloud
+    // does not re-verify requirements at commit, so the confirmation is trusted only
+    // while Cloud's latest is the exact version this Machine last synced; anything else
+    // (Cloud moved on, main was recreated) re-checks everything.
+    // Deliberately NOT the remote bundle's own requirement list: legacy bundles derive
+    // it from every Skill, including Git-backed ones older CLIs never uploaded. Only
+    // new content costs a round trip, and those run concurrently.
     const known = new Set(
       sync?.lastSyncedVersionId === remote?.latest?.version.versionId
         ? (sync?.confirmedContentHashes ?? [])

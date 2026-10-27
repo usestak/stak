@@ -646,4 +646,42 @@ describe('stak push round trips', () => {
     ).toBeLessThanOrEqual(2);
     expect(calls.some((c) => c.startsWith('POST environments'))).toBe(false);
   });
+
+  it('re-checks everything when Cloud no longer has the version this Machine last synced', async () => {
+    const root = await temp();
+    const stackHome = path.join(root, 'stack');
+    const first = makeCloud();
+    const firstToken = await signIn(first.service, first.client);
+    const { localHash, gitHash } = await seedMainWithLocalAndGitSkills(
+      stackHome,
+      path.join(root, 'src'),
+      'v1',
+    );
+    const firstClient = countingClient(first.service, firstToken).client;
+    await applyPush({
+      stackHome,
+      plan: await preparePush({ stackHome, client: firstClient }),
+      client: firstClient,
+    });
+
+    // Same Machine and sync state (including confirmedContentHashes), but Cloud's main is
+    // gone (e.g. the account was deleted and recreated): lastSyncedVersionId no longer
+    // matches Cloud's latest, so nothing the earlier push confirmed may be skipped.
+    const second = makeCloud();
+    const secondToken = await signIn(second.service, second.client);
+    const { client: counted, calls } = countingClient(
+      second.service,
+      secondToken,
+    );
+    const plan = await preparePush({ stackHome, client: counted });
+
+    expect(plan.conflict).toBeNull();
+    expect(calls.filter((c) => c === 'POST snapshots/prepare')).toHaveLength(2);
+    expect(plan.snapshotsAlready).toBe(0);
+    expect([...plan.snapshotsToUpload].sort()).toEqual(
+      [localHash, gitHash].sort(),
+    );
+    const result = await applyPush({ stackHome, plan, client: counted });
+    expect(result.uploaded).toBe(2);
+  });
 });

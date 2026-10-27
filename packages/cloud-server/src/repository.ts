@@ -244,6 +244,20 @@ export interface CloudRepository {
     input: CommitVersionInput,
   ): Promise<CommitVersionOutcome>;
 
+  /**
+   * INVARIANT — snapshots are append-only. Once `putSnapshot` records a user's content
+   * hash (and `CloudBlobStore.put` holds its bytes), neither is deleted while that user
+   * has any Environment version; today the only deletion is the `auth.users` cascade on
+   * account deletion, which removes the Environments with them.
+   *
+   * `commitEnvironmentVersion` does NOT re-verify that a bundle's
+   * `contentUploadRequirements` exist, and `stak push` skips re-checking content its
+   * previous push confirmed (`EnvironmentSyncState.confirmedContentHashes`, trusted only
+   * while that push's version is still Cloud's latest). Any future snapshot GC, retention
+   * policy or per-snapshot delete MUST therefore either keep every hash referenced by a
+   * stored version, or add an existence check to commit (and make the CLI fall back to a
+   * full re-check on that error) in the same change.
+   */
   hasSnapshot(userId: string, contentHash: string): Promise<boolean>;
   getSnapshot(
     userId: string,
@@ -553,6 +567,7 @@ export interface CloudBlobStore {
   putPending(ticket: string, bytes: Uint8Array): Promise<void>;
   getPending(ticket: string): Promise<Uint8Array | null>;
   deletePending(ticket: string): Promise<void>;
+  /** Snapshot bytes are append-only: see the invariant on `CloudRepository.hasSnapshot`. */
   put(userId: string, contentHash: string, bytes: Uint8Array): Promise<void>;
   get(userId: string, contentHash: string): Promise<Uint8Array | null>;
   has(userId: string, contentHash: string): Promise<boolean>;
