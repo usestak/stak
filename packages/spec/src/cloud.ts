@@ -275,6 +275,11 @@ export const environmentSyncStateSchema = z.object({
   lastSyncedVersionId: z.uuid(),
   lastSyncedDigest: contentHashSchema,
   syncedAt: z.iso.datetime({ offset: true }),
+  /** Content hashes this Machine's last push confirmed are stored in Cloud (uploaded or
+   *  already present). Snapshots are never deleted (see `CloudRepository.hasSnapshot`), so
+   *  the next push skips re-checking them — but only while `lastSyncedVersionId` is still
+   *  Cloud's latest version. Optional: absent (older CLIs, pulls) means re-check all. */
+  confirmedContentHashes: z.array(contentHashSchema).optional(),
 });
 export const machineSyncStateSchema = z.object({
   schemaVersion: z.literal(1),
