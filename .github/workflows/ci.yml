@@ -42,6 +42,14 @@ jobs:
       - name: Test
         # --continue: report every package's failures, not just the first.
         run: pnpm test --continue
+        env:
+          # Windows runners' default TEMP is the 8.3 short path C:\Users\RUNNER~1\...
+          # The Memory tests build Claude-style vendor keys from temp paths and then
+          # reconstruct the directory from real directory names, which never include
+          # the short alias. Use the runner's long-path temp directory instead.
+          # (POSIX tmpdir() reads TMPDIR, so this changes nothing on Linux or macOS.)
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
 
       - name: Build
         run: pnpm build
