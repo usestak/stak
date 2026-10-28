@@ -31,7 +31,7 @@ export const WHY_NOT_GIT_ITEMS: WhyNotGitItem[] = [
     body: "It also has your chat history, temporary files and login details — things you shouldn't upload anywhere. STAK only syncs your memory and Skills, and can encrypt them so only you can read them.",
   },
   {
-    lead: 'One memory for all your agents (coming soon).',
-    body: 'Your Skills already work in Claude Code, Codex and Cursor. Shared project memory is next.',
+    lead: 'One memory for all your agents.',
+    body: 'Your Skills and your project memory now work in Claude Code, Codex and Cursor. Set up an agent with stak run codex or stak run cursor and it starts every session knowing your project — privately, without anything being committed to your repo.',
   },
 ];
