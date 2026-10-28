@@ -5,6 +5,7 @@
 **Goal:** Export each located project's canonical Memory into Codex (`AGENTS.override.md`) and Cursor (`.cursor/rules/stak-memory.mdc`), privately and one-way. Spec: `docs/superpowers/specs/2026-10-28-cross-agent-memory-design.md`.
 
 **Architecture:**
+
 - **@stack/memory** gains a pure renderer and an exporter. The exporter covers file writes, the local Git exclude block, and the machine-local export state.
 - **@memstk/cli** wires the exporter in four places:
   - `stak run` turns it on.
@@ -15,6 +16,7 @@
 **Tech:** TypeScript, vitest, `node:child_process` for the `git` calls (follow the existing Git-remote helpers in `packages/memory` and `packages/scanner`).
 
 ## Global Constraints
+
 - **Spec rules are binding:**
   - §4 order and budgets: Codex 30 KiB for the whole override file, Cursor 24 KiB for the STAK section. Whole documents only.
   - §5 privacy: `git rev-parse --git-path info/exclude`; a managed block starting `# >>> STAK (managed) >>>` and ending `# <<< STAK <<<`; root-anchored paths; never write a tracked file; with no Git available, don't write into Git repos.
@@ -44,6 +46,7 @@
 ### Task 1: Renderer and exporter in @stack/memory
 
 **Files:**
+
 - Create: `packages/memory/src/agent-export/render.ts` (+ test)
 - Create: `packages/memory/src/agent-export/exporter.ts` (+ test)
 - Create: `packages/memory/src/agent-export/git-exclude.ts` (+ test)
@@ -51,6 +54,7 @@
 - Modify: `packages/core/src/state.ts` (add `memory/agent-exports` to `STATE_EXCLUDE_PATHS`)
 
 **Produces:**
+
 - `renderAgentMemory(input: { agent: 'codex' | 'cursor'; documents: Array<{ path: string; text: string }>; teamAgentsMd?: string }): { content: string; omitted: string[]; status: 'ok' | 'team-agents-md-too-large' }`
   - Pure; this is where the order and the budget are applied.
   - `documents` holds only the present `notes/**` and `instructions/private.md` documents. The caller filters out `agents/**`.
@@ -67,6 +71,7 @@
   - Stored in `memory/agent-exports/settings.json`.
 
 **Steps (TDD):**
+
 - [ ] Renderer tests:
   - order;
   - managed line;
@@ -95,6 +100,7 @@
 ### Task 2: CLI wiring
 
 **Files:**
+
 - Modify: `packages/cli/src/memory/canonical-ops.ts`
   - Add `exportAgentMemory(stackHome, discovery, { agents? })`. It locates targets via the same `locateMaterializeTargets` and returns per-agent notes.
   - Call it at the end of the locked span of add / pull / push / backup / final resolve / materialize / recover. That is NOT the check-in.
@@ -110,6 +116,7 @@
 - Modify: `docs/memory.md`, `docs/commands.md`, and the web CLI reference data (`apps/web/app/docs/cli/cli-reference.data.ts`) for the new subcommands.
 
 **Steps (TDD):** CLI tests with the existing harness and temp projects:
+
 - [ ] `stak run codex` enables the agent and writes the file; `--no-memory` doesn't.
 - [ ] `add .` refreshes the export; `pull` writes Cursor and Codex files for a located project; disabled agents are untouched.
 - [ ] Status lines.
@@ -118,6 +125,7 @@
 - [ ] Implement, run all checks (cli + memory + web docs test), then commit.
 
 ### Task 3: End-to-end check and docs polish
+
 - [ ] Add an end-to-end test using the real functions:
   - two machines;
   - A has Claude notes, then `add .` and `push`;

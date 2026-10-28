@@ -17,7 +17,7 @@
  * The exporter never takes the Memory lock: callers run it inside their own
  * locked span. `exportProjectMemory` never throws — every problem is a result.
  */
-import { lstat, readFile, realpath, rm, stat } from 'node:fs/promises';
+import { lstat, readdir, readFile, realpath, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { assertPathWithin, PathFenceError } from '@stack/shared';
@@ -223,23 +223,61 @@ const withRecord = (
   return { ...state, projects };
 };
 
-const sameRetired = (
-  a: RetiredAgentExportRecord,
-  b: RetiredAgentExportRecord,
-): boolean =>
-  a.projectId === b.projectId && a.agent === b.agent && a.path === b.path;
-
 const comparableFile = (file: string): string => {
   const resolved = path.resolve(file);
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 };
 
-/** Remove the exclude lines of `exclude` that no record in `state` (current or
- * retired) still uses. Call AFTER the state no longer holds the released
- * record, so a line shared with another worktree's record survives. */
+/** Record paths are compared like this everywhere, so `C:\` vs `c:\` on
+ * Windows is never mistaken for a moved project. */
+const samePath = (a: string, b: string): boolean =>
+  comparableFile(a) === comparableFile(b);
+
+const sameRetired = (
+  a: RetiredAgentExportRecord,
+  b: RetiredAgentExportRecord,
+): boolean =>
+  a.projectId === b.projectId &&
+  a.agent === b.agent &&
+  samePath(a.path, b.path);
+
+const TEMP_SIBLING =
+  /^\.(.+)\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/i;
+
+/** Delete STAK's own leftover temp siblings of `target` (`.<name>.<uuid>.tmp`,
+ * left by a crash mid-write). Returns false when one could not be removed. */
+const removeTempSiblings = async (target: string): Promise<boolean> => {
+  const name = path.basename(target);
+  let entries: string[];
+  try {
+    entries = await readdir(path.dirname(target));
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT';
+  }
+  let clean = true;
+  for (const entry of entries) {
+    if (TEMP_SIBLING.exec(entry)?.[1] !== name) continue;
+    const sibling = path.join(path.dirname(target), entry);
+    try {
+      if ((await lstat(sibling)).isFile()) await rm(sibling, { force: true });
+      else clean = false;
+    } catch {
+      clean = false;
+    }
+  }
+  return clean;
+};
+
+/** Remove the exclude lines of `exclude` that no record in `state` (current,
+ * retired or private-file) still uses. Call AFTER the state no longer holds
+ * the released record, so a line shared with another worktree's record
+ * survives. `target` is the file the lines were for: before its temp-pattern
+ * line goes, STAK's crashed temp siblings are deleted (if one can't be, the
+ * line stays, so it can never be committed). */
 const releaseExclude = async (
   state: AgentExportState,
   exclude: AgentExportRecord['exclude'],
+  target?: string,
 ): Promise<void> => {
   if (!exclude) return;
   const file = comparableFile(exclude.file);
@@ -257,7 +295,11 @@ const releaseExclude = async (
         : [],
     ),
   );
-  const unused = exclude.entries.filter((entry) => !stillUsed.has(entry));
+  let unused = exclude.entries.filter((entry) => !stillUsed.has(entry));
+  if (unused.some((entry) => entry.endsWith('.*.tmp'))) {
+    const clean = target !== undefined && (await removeTempSiblings(target));
+    if (!clean) unused = unused.filter((entry) => !entry.endsWith('.*.tmp'));
+  }
   if (unused.length > 0) await removeGitExcludeEntries(exclude.file, unused);
 };
 
@@ -266,7 +308,7 @@ const dropRecord = async (
   stackHome: string,
   projectId: string,
   agent: AgentExportId,
-  extraRelease?: AgentExportRecord['exclude'],
+  extra?: { exclude: AgentExportRecord['exclude']; target: string },
 ): Promise<void> => {
   const before = (await readExportState(stackHome)).projects[projectId]?.[
     agent
@@ -274,8 +316,8 @@ const dropRecord = async (
   const next = await mutateState(stackHome, (state) =>
     withRecord(state, projectId, agent, undefined),
   );
-  await releaseExclude(next, before?.exclude);
-  await releaseExclude(next, extraRelease);
+  await releaseExclude(next, before?.exclude, before?.path);
+  if (extra) await releaseExclude(next, extra.exclude, extra.target);
 };
 
 export const readExportSettings = async (
@@ -347,21 +389,25 @@ const assertTargetSafe = async (
   await assertPathWithin({ ownedRoot: projectDir, proposedPath: target });
 };
 
-/** Whether `dir` or any ancestor has a `.git` entry (file or folder). */
-const hasGitAncestor = async (dir: string): Promise<boolean> => {
+/** The nearest folder at or above `dir` with a `.git` entry (file or folder). */
+const gitAncestorOf = async (dir: string): Promise<string | undefined> => {
   let current = dir;
   for (;;) {
     try {
       await lstat(path.join(current, '.git'));
-      return true;
+      return current;
     } catch {
       // keep walking up
     }
     const parent = path.dirname(current);
-    if (parent === current) return false;
+    if (parent === current) return undefined;
     current = parent;
   }
 };
+
+/** Whether `dir` or any ancestor has a `.git` entry (file or folder). */
+const hasGitAncestor = async (dir: string): Promise<boolean> =>
+  (await gitAncestorOf(dir)) !== undefined;
 
 const readTeamAgentsMd = async (
   projectDir: string,
@@ -406,9 +452,10 @@ const retireIfMoved = async (
   const isHere = (record: RetiredAgentExportRecord) =>
     record.projectId === projectId &&
     record.agent === agent &&
-    record.path === target;
+    samePath(record.path, target);
   const returning = (state.retired ?? []).find(isHere);
-  if (stored?.path === target || (!stored && !returning)) return;
+  if ((stored && samePath(stored.path, target)) || (!stored && !returning))
+    return;
   await mutateState(stackHome, (current) => {
     const retired = [
       ...(current.retired ?? []).filter((record) => !isHere(record)),
@@ -461,7 +508,7 @@ const sweepRetired = async (
           (other) => !sameRetired(other, record),
         ),
       }));
-      await releaseExclude(next, record.exclude);
+      await releaseExclude(next, record.exclude, record.path);
     } catch {
       kept += 1; // unreadable or unsafe: keep it recorded, and so excluded
     }
@@ -686,7 +733,7 @@ const exportOnce = async (
       // unchanged. A hand-edited one (reached only on reset) stays recorded.
       if (!handEdited) {
         if (ownUnchanged) await rm(target, { force: true });
-        await dropRecord(stackHome, projectId, agent, exclude);
+        await dropRecord(stackHome, projectId, agent, { exclude, target });
       }
       return result(
         'skipped-not-ignorable',
@@ -717,7 +764,7 @@ const exportOnce = async (
     );
     // Lines of a previous exclude location that nothing uses any more.
     if (record?.exclude && !sameExclude(record.exclude, exclude))
-      await releaseExclude(next, record.exclude);
+      await releaseExclude(next, record.exclude, record.path);
   }
 
   return result(
@@ -809,7 +856,7 @@ export const exportStatus = async (
   if (existing.kind === 'none') return 'missing';
   const state = await readExportState(options.stackHome);
   const stored = state.projects[options.projectId]?.[options.agent];
-  if (existing.kind === 'other' || !stored || stored.path !== target)
+  if (existing.kind === 'other' || !stored || !samePath(stored.path, target))
     return 'user-file';
   if (hashBytes(existing.bytes) !== stored.sha256) return 'hand-edited';
   const team =
@@ -857,9 +904,6 @@ export type PrivateFileGuardOptions = {
   now?: () => Date;
 };
 
-const samePath = (a: string, b: string): boolean =>
-  comparableFile(a) === comparableFile(b);
-
 /**
  * Call right BEFORE materialize writes a private file into a project folder,
  * inside the caller's Memory lock. Applies the agent files' privacy rules to
@@ -881,13 +925,15 @@ export const guardPrivateProjectFile = async (
   try {
     const location = await locateGitRepository(git, projectDir);
     if (location.kind !== 'repo') {
-      if (!(await hasGitAncestor(projectDir)))
-        return { write: true, status: 'plain' };
+      const repo = await gitAncestorOf(projectDir);
+      if (repo === undefined) return { write: true, status: 'plain' };
       return {
         write: false,
         status: 'skipped-no-git',
         message: notWritten(
-          "Git isn't available, so STAK can't keep your private instructions out of this repository.",
+          location.kind === 'no-git'
+            ? "Git isn't installed or can't be started, so STAK can't keep your private instructions out of this repository."
+            : `Git refused to read this repository (for example its safe.directory ownership check), so STAK can't keep your private instructions out of it. If you trust it, run \`git config --global --add safe.directory ${repo}\`.`,
         ),
       };
     }
@@ -927,12 +973,16 @@ export const guardPrivateProjectFile = async (
     if (!ignorable) {
       // A "!" rule wins over the exclude: release what this call added (a line
       // another record relies on stays), and don't write.
-      await releaseExclude(state, {
-        file,
-        entries: needed.filter(
-          (entry) => !(prior?.exclude.entries ?? []).includes(entry),
-        ),
-      });
+      await releaseExclude(
+        state,
+        {
+          file,
+          entries: needed.filter(
+            (entry) => !(prior?.exclude.entries ?? []).includes(entry),
+          ),
+        },
+        target,
+      );
       return {
         write: false,
         status: 'skipped-not-ignorable',
@@ -961,6 +1011,14 @@ export const guardPrivateProjectFile = async (
     }));
     return { write: true, status: 'excluded' };
   } catch (error) {
+    if (error instanceof AgentExportStateError)
+      return {
+        write: false,
+        status: 'failed',
+        message: notWritten(
+          `STAK's record of the files it keeps out of Git (${agentExportPaths(stackHome).state}) is unreadable. Move it aside (e.g. state.json.bak), then run \`stak pull\` (or \`stak memory materialize\`).`,
+        ),
+      };
     return {
       write: false,
       status: 'failed',
@@ -992,5 +1050,5 @@ export const releasePrivateProjectFile = async (options: {
       (r) => !samePath(r.path, target),
     ),
   }));
-  await releaseExclude(next, record.exclude);
+  await releaseExclude(next, record.exclude, record.path);
 };

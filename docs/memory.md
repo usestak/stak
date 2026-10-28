@@ -187,8 +187,11 @@ keeps it out of Git the same way as the Codex and Cursor files: unless the
 repository already ignores it, STAK first adds `/CLAUDE.local.md` to the local
 `.git/info/exclude` (in its marked block) and checks that Git now ignores it. A
 `CLAUDE.local.md` that is tracked by Git is yours to commit, and is written as
-before. If a `.gitignore` rule re-includes it (a `!` line), or Git can't answer,
-STAK doesn't write it and says so; it tries again on the next sync. When STAK
+before. If a `.gitignore` rule re-includes it (a `!` line), Git isn't usable
+(not installed, or it refuses the repository, for example because of its
+`safe.directory` ownership check: the note gives the `git config` command), or
+Git reports an error, STAK doesn't write it and says so; it tries again on the
+next sync. When STAK
 deletes the file, it removes the exclude line too (unless another worktree's copy
 still needs it).
 
@@ -277,10 +280,12 @@ don't flow back.
   nothing). `stak memory agents enable <codex|cursor>` does the same without
   launching.
 - **Fresh:** after `stak add .`, `stak pull`, `stak push`, `stak memory backup`,
-  the final `stak memory resolve`, `stak memory materialize` and `stak memory
-recover`, STAK rewrites the files for every project it finds on this machine
-  and every agent that is on. This happens inside the same Memory lock as the
-  command. Codex's file is also rebuilt when your team's `AGENTS.md` changes.
+  the final `stak memory resolve`, `stak memory materialize` and
+  `stak memory recover`, STAK rewrites the files for every project it finds on
+  this machine and every agent that is on. This happens inside the same Memory
+  lock as the command. When your team's `AGENTS.md` changes, Codex's file is
+  rebuilt at the next of these refreshes; run `stak run codex` (or
+  `stak memory agents enable codex`) to refresh it now.
 - **Status:** `stak status` and `stak memory status` show one line per agent that
   is on: up to date, or how many projects are out of date, skipped, hand-edited,
   not ignorable or over budget. `stak memory agents` lists both agents, on or off,
@@ -307,11 +312,21 @@ folder (for example two checkouts of one repository), it skips it with a note
 until you choose one with `stak project map <project> <dir>`.
 
 Exporting never fails the command that triggered it: problems are printed as
-notes. If STAK's record of the files it wrote becomes unreadable, the note says to
-move `$STAK_HOME/memory/agent-exports/state.json` aside (for example, rename it to
-`state.json.bak`), run `stak memory agents reset <agent>`, and then check
-`git status` in your projects. That record is machine-local and is never
-backed up or pushed.
+notes. STAK's record of the files it keeps out of Git is
+`$STAK_HOME/memory/agent-exports/state.json`. It is machine-local and never
+backed up or pushed. If it becomes unreadable, STAK writes no agent file and no
+`CLAUDE.local.md` into a Git repository until it is fixed, and the note names the
+file. To recover:
+
+- **Everyone:** move the file aside (for example, rename it to
+  `state.json.bak`), then run `stak pull` (or `stak memory materialize`) so
+  `CLAUDE.local.md` is written again, kept out of Git.
+- **If you share Memory with Codex or Cursor:** also run
+  `stak memory agents reset <agent>` for each agent that is on. Old STAK agent
+  files that differ from a fresh one now read as "not written by STAK" and are
+  left alone: delete those `AGENTS.override.md` / `.cursor/rules/stak-memory.mdc`
+  files by hand and run the reset again. Then check `git status` in your
+  projects.
 
 ### `stak memory backup`
 

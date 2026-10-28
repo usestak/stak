@@ -137,9 +137,11 @@ command that prints Memory content.
 Rebuild agent Memory files from STAK Memory, for every project on this machine
 or just one. Never overwrites a file you edited and haven't added yet. Projects
 not found on this machine are reported as not available and nothing is written
-for them. Only `claude` is supported. In a Git repository, `CLAUDE.local.md`
-is kept out of Git with the local `.git/info/exclude` before it is written; one
-a `.gitignore` rule re-includes is not written, with a note.
+for them. Only `claude` is supported. In a Git repository, STAK adds
+`CLAUDE.local.md` to the local `.git/info/exclude` before writing it (unless the
+repository already ignores or tracks it). It is not written, with a note, when a
+`.gitignore` rule re-includes it, when Git is not installed or refuses the
+repository (for example `safe.directory`), or when Git reports an error.
 
 ### `stak memory agents [--json]`
 

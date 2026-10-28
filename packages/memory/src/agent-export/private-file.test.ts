@@ -13,12 +13,14 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  agentExportPaths,
   guardPrivateProjectFile,
   readExportState,
   releasePrivateProjectFile,
 } from './exporter.js';
 import {
   defaultGitRunner,
+  GitUnavailableError,
   STAK_EXCLUDE_BEGIN,
   type GitRunner,
 } from './git-exclude.js';
@@ -82,6 +84,48 @@ const guard = (stackHome: string, projectDir: string, git?: GitRunner) =>
     relativePath: 'CLAUDE.local.md',
     ...(git ? { git } : {}),
   });
+
+describe('guardPrivateProjectFile: a repository Git refuses vs. no usable Git', () => {
+  /** A folder with a `.git` entry, so it is a repository whatever Git says. */
+  const repoFolder = async () => {
+    const dir = await temp();
+    await mkdir(path.join(dir, '.git'));
+    return dir;
+  };
+
+  it('Git refuses the repository (safe.directory): not written, with the safe.directory hint', async () => {
+    const home = await temp();
+    const dir = await repoFolder();
+    const refusing: GitRunner = {
+      run: async () => ({
+        exitCode: 128,
+        stdout: '',
+        stderr: `fatal: detected dubious ownership in repository at '${dir}'`,
+      }),
+    };
+    const result = await guard(home, dir, refusing);
+    expect(result).toEqual({
+      write: false,
+      status: 'skipped-no-git',
+      message: `CLAUDE.local.md was not written: Git refused to read this repository (for example its safe.directory ownership check), so STAK can't keep your private instructions out of it. If you trust it, run \`git config --global --add safe.directory ${dir}\`.`,
+    });
+  });
+
+  it('Git is not installed: not written, and says so', async () => {
+    const home = await temp();
+    const dir = await repoFolder();
+    const missing: GitRunner = {
+      run: () => Promise.reject(new GitUnavailableError()),
+    };
+    const result = await guard(home, dir, missing);
+    expect(result).toEqual({
+      write: false,
+      status: 'skipped-no-git',
+      message:
+        "CLAUDE.local.md was not written: Git isn't installed or can't be started, so STAK can't keep your private instructions out of this repository.",
+    });
+  });
+});
 
 describe.skipIf(!hasGit)('guardPrivateProjectFile (CLAUDE.local.md)', () => {
   it('not ignored: adds the root-anchored file and temp lines, Git then ignores it, and the record is kept', async () => {
@@ -177,6 +221,21 @@ describe.skipIf(!hasGit)('guardPrivateProjectFile (CLAUDE.local.md)', () => {
       expect(result.message).toMatch(
         /^CLAUDE\.local\.md was not written: .*STAK can't confirm it would stay out of Git\.$/,
       );
+  });
+
+  it('a corrupt state.json: not written, and the note names the file and the recovery', async () => {
+    const home = await temp();
+    const repo = await initRepo();
+    const statePath = agentExportPaths(home).state;
+    await mkdir(path.dirname(statePath), { recursive: true });
+    await writeFile(statePath, '{ broken');
+    const result = await guard(home, repo);
+    expect(result).toEqual({
+      write: false,
+      status: 'failed',
+      message: `CLAUDE.local.md was not written: STAK's record of the files it keeps out of Git (${statePath}) is unreadable. Move it aside (e.g. state.json.bak), then run \`stak pull\` (or \`stak memory materialize\`).`,
+    });
+    expect(await excludeText(repo)).not.toContain('CLAUDE.local.md');
   });
 
   it('not a Git repository: written as before, nothing recorded', async () => {

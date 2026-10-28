@@ -40,13 +40,33 @@ export class GitExcludeError extends Error {
   }
 }
 
+/** Variables that point Git at a different repository, index or working
+ * tree than the folder STAK names with `-C` (for example when STAK runs inside
+ * a Git hook). They are removed for every STAK Git call. */
+export const GIT_LOCATION_ENV_VARS = [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_INDEX_FILE',
+  'GIT_COMMON_DIR',
+  'GIT_PREFIX',
+] as const;
+
+/** `env` without `GIT_LOCATION_ENV_VARS` (matched case-insensitively, as
+ * Windows environment names are). */
+export const gitChildEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  const drop = new Set<string>(GIT_LOCATION_ENV_VARS);
+  return Object.fromEntries(
+    Object.entries(env).filter(([name]) => !drop.has(name.toUpperCase())),
+  );
+};
+
 export const defaultGitRunner: GitRunner = {
   run: (cwd, args) =>
     new Promise((resolve, reject) => {
       execFile(
         'git',
         ['-C', cwd, ...args],
-        { encoding: 'utf8', windowsHide: true },
+        { encoding: 'utf8', windowsHide: true, env: gitChildEnv(process.env) },
         (error, stdout, stderr) => {
           const out = String(stdout);
           const err = String(stderr);
