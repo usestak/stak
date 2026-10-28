@@ -2,6 +2,7 @@ import type { Command } from 'commander';
 
 import type { EnvironmentStatus, ScanResult } from '@stack/spec';
 
+import type { AgentMemoryStatusReport } from '../memory/agent-export-ops.js';
 import type { MemoryWorkingTreeStatus } from '../memory/working-tree-status.js';
 import {
   renderStatus,
@@ -28,6 +29,9 @@ export type StatusCommandDependencies = {
   /** Whether Memory has ever reached Cloud at all — deliberately not an "up to date"
    * claim (see `MemoryCloudDisplayState`). MUST never throw. */
   checkMemoryCloud?(): Promise<MemoryCloudDisplayState>;
+  /** Spec 2026-10-28 §7: Codex/Cursor Memory file status, one line per
+   * enabled agent. Read-only; a failure just omits the lines. */
+  agentMemoryStatus?(): Promise<AgentMemoryStatusReport>;
   writeOut(value: string): void;
 };
 
@@ -61,6 +65,9 @@ export const registerStatusCommand = (
             .checkMemoryCloud()
             .catch(() => ({ status: 'not-checked' }) as const)
         : undefined;
+      const agentMemory = dependencies.agentMemoryStatus
+        ? await dependencies.agentMemoryStatus().catch(() => undefined)
+        : undefined;
       if (options.json) {
         dependencies.writeOut(
           `${JSON.stringify(
@@ -69,6 +76,7 @@ export const registerStatusCommand = (
               ...(cloud ? { cloud } : {}),
               ...(memory ? { memory } : {}),
               ...(memoryCloud ? { memoryCloud } : {}),
+              ...(agentMemory ? { agentMemory } : {}),
             },
             null,
             2,
@@ -87,6 +95,7 @@ export const registerStatusCommand = (
           ...(cloud ? { cloud } : {}),
           ...(memory ? { memory } : {}),
           ...(memoryCloud ? { memoryCloud } : {}),
+          ...(agentMemory ? { agentMemory } : {}),
         }),
       );
     });

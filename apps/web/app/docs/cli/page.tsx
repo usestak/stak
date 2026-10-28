@@ -139,19 +139,22 @@ const COMMAND_DETAILS: Record<string, CommandDetail> = {
     notes: ['Skills still required by other layers are preserved.'],
   },
   run: {
-    usage: 'stak run <codex|cursor|claude> [--dry-run] [--json] [--yes]',
+    usage:
+      'stak run <codex|cursor|claude> [--dry-run] [--json] [--yes] [--no-memory]',
     purpose:
       "Reconcile `main` into an agent's Skill directory, then launch that agent's CLI with the Skills projected.",
     options: [
       '--dry-run — reconcile and preview without launching',
       '--json — add structured output',
       '--yes — skip the confirmation prompt (non-interactive use)',
+      "--no-memory — don't share project Memory with Codex or Cursor",
     ],
     examples: ['stak run claude', 'stak run codex --dry-run'],
     notes: [
       'Verifies the agent is installed first; protects unmanaged content; removes only healthy STAK-owned bindings.',
       '`stak run codex` launches the Codex CLI (`codex` on your PATH), not the ChatGPT desktop app.',
       'The launcher is shim-safe: on Windows an npm `.cmd`/`.bat` shim is executed without a shell and with argument-array semantics preserved.',
+      '`stak run codex` and `stak run cursor` also turn on project Memory sharing for that agent and write its files before launching (see `stak memory agents`). `--dry-run` writes nothing.',
     ],
   },
   try: {
@@ -210,10 +213,15 @@ const COMMAND_DETAILS: Record<string, CommandDetail> = {
   },
   memory: {
     usage:
-      'stak memory scan [--json] [--verbose] | stak memory backup [--json] | stak memory status [--json] [--verbose] | stak memory recover [--backup <n>] [--passkey] [--recovery-file <path>] [--json] | stak memory restore [--dry-run] [--json] [--verbose] | stak memory protect [--passkey] [--recovery-file <path>] [--json] | stak memory history [--json]',
+      'stak memory scan [--json] [--verbose] | stak memory backup [--json] | stak memory status [--json] [--verbose] | stak memory recover [--backup <n>] [--passkey] [--recovery-file <path>] [--json] | stak memory restore [--dry-run] [--json] [--verbose] | stak memory protect [--passkey] [--recovery-file <path>] [--json] | stak memory history [--json] | stak memory agents [--json] | stak memory agents enable|disable|reset <codex|cursor>',
     purpose:
       'Private, local, durable agent context — separate from shareable Skills and never publishable.',
-    examples: ['stak memory scan', 'stak memory backup', 'stak memory status'],
+    examples: [
+      'stak memory scan',
+      'stak memory backup',
+      'stak memory status',
+      'stak memory agents enable cursor',
+    ],
     notes: [
       '`scan` is read-only discovery of portable Claude memory on this machine; changes nothing.',
       '`backup` copies allowlisted memory into STAK’s private store (read-only capture; native Claude files are never modified) and, when signed in, also uploads it to STAK Cloud. Commits the manifest last.',
@@ -222,7 +230,9 @@ const COMMAND_DETAILS: Record<string, CommandDetail> = {
       '`restore` writes private memory into native agent Memory files. Local only — never talks to Cloud. Only writes absent targets; a differing existing target is reported as a conflict and left untouched (never merged).',
       '`protect` enables client-side encrypted (Protected) Cloud backup, optionally with a passkey or recovery file.',
       '`history` shows your Memory backup history (newest first).',
-      'Memory is currently scoped to Claude Code; Codex and Cursor memory support is planned.',
+      "`agents` shares project Memory (notes and private instructions) with Codex (`AGENTS.override.md`) and Cursor (`.cursor/rules/stak-memory.mdc`): one-way, and kept out of Git with the repository's local exclude list. `enable` turns an agent on and writes its files, `disable` removes the files STAK wrote (a hand-edited one is kept, still excluded from Git), `reset` rewrites hand-edited STAK files, and no argument lists each agent and its status. The files are refreshed after `stak add .`, `stak pull`, `stak push`, `stak memory backup`, the final `stak memory resolve`, `stak memory materialize`, `stak memory recover`, `stak run codex|cursor` and `stak memory agents enable|reset`.",
+      "When STAK writes Claude's private `CLAUDE.local.md` into a Git repository, it keeps it out of Git the same way: it is added to the local exclude list first (unless the repository already ignores or tracks it), and it is not written, with a note, if a `.gitignore` rule re-includes it or Git is not usable.",
+      'Memory is captured from Claude Code; Codex and Cursor receive it through `stak memory agents`.',
     ],
   },
   push: {

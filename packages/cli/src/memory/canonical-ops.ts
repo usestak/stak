@@ -45,6 +45,8 @@ import {
   writeLocalRegistry,
   writeMemoryObject,
   writePendingMerge,
+  guardPrivateProjectFile,
+  releasePrivateProjectFile,
   projectIdentityKey,
   canonicalDigest,
   documentOf,
@@ -219,6 +221,32 @@ const findCandidateDir = (
   return undefined;
 };
 
+/** Platform-normalized key for comparing two folder paths. */
+const dirKeyOf = (dir: string, platform: NodeJS.Platform): string => {
+  const resolved = path.resolve(dir);
+  return platform === 'win32' ? resolved.toLowerCase() : resolved;
+};
+
+/** Every distinct candidate folder whose encoded vendor key matches one of
+ * `vendorKeys` (`findCandidateDir` returns only the first). More than one means
+ * the same project is checked out in several folders (for example worktrees). */
+const findCandidateDirs = (
+  vendorKeys: Set<string>,
+  candidates: ClaudeProjectInput[],
+  platform: NodeJS.Platform,
+): string[] => {
+  const targets = new Set(
+    [...vendorKeys].map((key) => normalizeVendorKey(key, platform)),
+  );
+  const dirs = new Map<string, string>();
+  for (const candidate of candidates) {
+    const dir = path.resolve(candidate.dir);
+    if (targets.has(normalizeVendorKey(encodeClaudeProjectKey(dir), platform)))
+      dirs.set(dirKeyOf(dir, platform), dir);
+  }
+  return [...dirs.values()];
+};
+
 /** Gated on `isDirectory` being present (the existing opt-in-to-reconstruction
  * contract) even though `reconstructProjectDir`'s own walk reads the REAL
  * filesystem via its own `listDirs` default — `isDirectory` here only ends up
@@ -262,10 +290,17 @@ const resolveProjectDir = async (
     isDirectory?: (candidate: string) => Promise<boolean>;
     platform: NodeJS.Platform;
   },
-): Promise<{ dir: string; gitRemote?: string } | undefined> => {
+): Promise<
+  | {
+      dir: string;
+      gitRemote?: string;
+      via: 'binding' | 'candidate' | 'reconstructed';
+    }
+  | undefined
+> => {
   if (knownProjectId) {
     const binding = bindingFor(registry, knownProjectId);
-    if (binding) return { dir: binding.dir };
+    if (binding) return { dir: binding.dir, via: 'binding' };
   }
   const candidate = findCandidateDir(
     group.vendorKeys,
@@ -276,13 +311,14 @@ const resolveProjectDir = async (
     return {
       dir: path.resolve(candidate.dir),
       ...(candidate.gitRemote ? { gitRemote: candidate.gitRemote } : {}),
+      via: 'candidate',
     };
   const reconstructed = await findReconstructedDir(
     group.vendorKeys,
     options.isDirectory,
     options.platform,
   );
-  if (reconstructed) return { dir: reconstructed };
+  if (reconstructed) return { dir: reconstructed, via: 'reconstructed' };
   return undefined;
 };
 
@@ -472,6 +508,11 @@ type EnumerationResult = {
    * group's binding fallback resolved that `canonical-identity.ts`'s own resolver —
    * deliberately unmodified — has no equivalent rule for). */
   groupProjectIds: Map<string, string>;
+  /** Projects (not bound with `stak project map`) found in more than one
+   * folder this run — for example two worktrees of one repository. `resolved`
+   * still holds the first one (materialize is unchanged); the agent exporter
+   * skips these instead, so one project never gets two agent files. */
+  multiLocated: Map<string, string[]>;
 };
 
 /**
@@ -524,6 +565,8 @@ const enumerateSyncableProjects = async (
   let conflictedCount = 0;
   let untrackedFolderCount = 0;
   let mintedAny = false;
+  const boundIds = new Set<string>();
+  const locatedDirs = new Map<string, Map<string, string>>();
 
   for (const group of groups) {
     const known = resolveKnownProjectId(group, registry, candidates, platform);
@@ -571,6 +614,17 @@ const enumerateSyncableProjects = async (
     }
 
     groupProjectIds.set(group.identityKey, projectId);
+    // Every folder this project was found in this run (a binding is the user's
+    // own answer, so it is never ambiguous).
+    if (location.via === 'binding') boundIds.add(projectId);
+    else {
+      const dirs = locatedDirs.get(projectId) ?? new Map<string, string>();
+      for (const dir of location.via === 'candidate'
+        ? findCandidateDirs(group.vendorKeys, candidates, platform)
+        : [location.dir])
+        dirs.set(dirKeyOf(dir, platform), dir);
+      locatedDirs.set(projectId, dirs);
+    }
     if (seen.has(projectId)) continue; // dedup: first-resolved group for this Project ID wins
     seen.add(projectId);
     resolved.push({
@@ -582,6 +636,10 @@ const enumerateSyncableProjects = async (
 
   if (mode === 'stage' && mintedAny)
     await writeLocalRegistry(stackHome, registry);
+  const multiLocated = new Map<string, string[]>();
+  for (const [projectId, dirs] of locatedDirs)
+    if (!boundIds.has(projectId) && dirs.size > 1)
+      multiLocated.set(projectId, [...dirs.values()]);
   return {
     resolved,
     registry,
@@ -590,6 +648,7 @@ const enumerateSyncableProjects = async (
     unlocatableProjects,
     untrackedFolderCount,
     groupProjectIds,
+    multiLocated,
   };
 };
 
@@ -969,7 +1028,7 @@ export type CanonicalPullOutcome = {
  * skipped entirely for writes, counted in `unavailable` for the caller to report.
  * Never mints, never guesses — only an exact binding or git-identity match counts.
  */
-const locateMaterializeTargets = async (
+export const locateMaterializeTargets = async (
   stackHome: string,
   options: CanonicalDiscoveryOptions,
 ): Promise<{
@@ -980,14 +1039,19 @@ const locateMaterializeTargets = async (
    * locate) — this machine's own local registry never learned this claim.
    * Keyed by projectId, value is the exact portable record to import. */
   locatedViaRemoteClaim: Map<string, PortableProjectRecord>;
+  /** Projects found in more than one folder (never a bound one): `targets`
+   * holds the first, as before; the agent exporter skips these. */
+  ambiguous: Map<string, string[]>;
 }> => {
+  const platform = options.platform ?? process.platform;
   const registry = await readLocalRegistry(stackHome);
   const main = await readCanonicalMain(stackHome);
-  const { resolved } = await enumerateSyncableProjects(
+  const { resolved, multiLocated } = await enumerateSyncableProjects(
     stackHome,
     options,
     'status',
   );
+  const ambiguous = new Map(multiLocated);
   const targets = new Map<string, string>(
     resolved.map((r) => [r.projectId, r.dir]),
   );
@@ -1016,6 +1080,9 @@ const locateMaterializeTargets = async (
     if (!gitClaim) continue; // no binding, no git claim (local or remote) to match a candidate against
     const claimCanonical = gitClaim.canonical.toLowerCase();
     const viaSnapshotOnly = !localClaim;
+    // The first match is the target (unchanged); every match is collected so a
+    // repository checked out in two folders is reported as ambiguous.
+    const matched = new Map<string, string>();
     for (const candidate of options.projects ?? []) {
       // Task 13 fix round 3 (Minor): a snapshot-only claim never takes a
       // directory that is already the write target of a DIFFERENT project —
@@ -1037,18 +1104,23 @@ const locateMaterializeTargets = async (
           : undefined);
       const identity = canonicalGitIdentity(remote);
       if (identity && identity.canonical.toLowerCase() === claimCanonical) {
-        targets.set(project.projectId, path.resolve(candidate.dir));
-        if (!localClaim && remoteRecord)
-          locatedViaRemoteClaim.set(project.projectId, remoteRecord);
-        break;
+        const dir = path.resolve(candidate.dir);
+        if (matched.size === 0) {
+          targets.set(project.projectId, dir);
+          if (!localClaim && remoteRecord)
+            locatedViaRemoteClaim.set(project.projectId, remoteRecord);
+        }
+        matched.set(dirKeyOf(dir, platform), dir);
       }
     }
+    if (matched.size > 1)
+      ambiguous.set(project.projectId, [...matched.values()]);
   }
 
   const unavailable = main.projects
     .filter((p) => !targets.has(p.projectId))
     .map((p) => p.projectId);
-  return { targets, unavailable, locatedViaRemoteClaim };
+  return { targets, unavailable, locatedViaRemoteClaim, ambiguous };
 };
 
 export type MaterializeOutcome = {
@@ -1108,6 +1180,26 @@ const nativeHashAt = async (
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
   }
+};
+
+/** Canonical documents materialize writes INSIDE the project folder that must
+ * stay private (never committed): today Claude's `CLAUDE.local.md`
+ * (`instructions/private.md`). Returns its POSIX path relative to `dir`, or
+ * undefined for any other document. */
+const PRIVATE_PROJECT_DOCUMENTS = new Set(['instructions/private.md']);
+const privateProjectFileOf = (
+  projectId: string,
+  dir: string,
+  canonicalPath: string,
+  claudeHome: string | undefined,
+): string | undefined => {
+  if (!PRIVATE_PROJECT_DOCUMENTS.has(canonicalPath)) return undefined;
+  const target = claudeNativeTargetOf(
+    { projectId, dir },
+    canonicalPath,
+    claudeHome,
+  );
+  return path.relative(dir, target).split(path.sep).join('/');
 };
 
 export const materializeCanonicalProjects = async (
@@ -1220,6 +1312,33 @@ export const materializeCanonicalProjects = async (
             });
             continue;
           }
+          // Spec 2026-10-28 §5, applied to Claude's private file: a
+          // `CLAUDE.local.md` written into a Git repository must stay out of
+          // Git, exactly like the Codex/Cursor files. Write time only: the
+          // sync decision above is unchanged. Refused (a "!" rule, no usable
+          // Git, an error): not written, so its projection is not advanced
+          // either, and it is reported as a note.
+          const privateFile = privateProjectFileOf(
+            projectId,
+            dir,
+            action.path,
+            options.claudeHome,
+          );
+          if (privateFile !== undefined) {
+            const guard = await guardPrivateProjectFile({
+              stackHome,
+              projectDir: dir,
+              relativePath: privateFile,
+            });
+            if (!guard.write) {
+              conflicts.push({
+                projectId,
+                path: '',
+                reason: `${nameHintFor(registry, projectId) ?? shortProjectId(projectId)}: ${guard.message}`,
+              });
+              continue;
+            }
+          }
         }
         actions.push(action);
       }
@@ -1229,6 +1348,23 @@ export const materializeCanonicalProjects = async (
         actions,
         options.claudeHome,
       );
+      // A private file STAK deleted no longer needs its exclude lines (kept
+      // while another worktree's copy still uses them). Best effort: a line
+      // left behind only keeps a file out of Git.
+      for (const deletedPath of applied.deleted) {
+        const privateFile = privateProjectFileOf(
+          projectId,
+          dir,
+          deletedPath,
+          options.claudeHome,
+        );
+        if (privateFile !== undefined)
+          await releasePrivateProjectFile({
+            stackHome,
+            projectDir: dir,
+            relativePath: privateFile,
+          }).catch(() => undefined);
+      }
       written += applied.written.length;
       deleted += applied.deleted.length;
       materialized += 1;

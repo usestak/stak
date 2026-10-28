@@ -11,6 +11,13 @@ import type {
   ResolvedLocalEnvironment,
 } from '@stack/spec';
 
+import {
+  isAgentExportId,
+  safelyExportAgentMemory,
+  type AgentExportId,
+  type AgentExportReport,
+} from '../memory/agent-export-ops.js';
+import { renderAgentExportNotes } from '../ui/agent-memory.js';
 import { agentLabel, block, skills } from '../ui/format.js';
 import {
   bindingCountLines,
@@ -48,9 +55,24 @@ export type RunCommandDependencies = {
     environment: ResolvedLocalEnvironment,
   ): Promise<BindingVerification>;
   launchAgent?(agent: AgentId): Promise<LaunchResult>;
+  /** Spec 2026-10-28 §7: `stak run codex|cursor` turns on project Memory
+   * sharing for that agent and writes its files right away. Optional. */
+  enableAgentMemory?(agent: AgentExportId): Promise<AgentExportReport>;
+  /** Runs `fn` holding the Memory lock (spec 2026-10-25). `stak run` takes it
+   * around the Memory export only, with a short wait (`timeoutMs`). Optional;
+   * when absent, `fn` runs directly. */
+  withMemoryLock?<T>(
+    command: string,
+    fn: () => Promise<T>,
+    options?: { timeoutMs?: number },
+  ): Promise<T>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
+
+/** How long `stak run` waits for a busy Memory lock before launching without
+ * the export (the same short wait as the post-command check-in). */
+export const RUN_MEMORY_LOCK_TIMEOUT_MS = 2_000;
 
 const mutationStates = new Set([
   'add',
@@ -70,6 +92,7 @@ export const registerRunCommand = (
     .option('--json', 'emit structured JSON for dry-run')
     .option('--yes', 'approve safe changes non-interactively')
     .option('--verbose', 'show detailed binding internals')
+    .option('--no-memory', "don't share project Memory with Codex or Cursor")
     .action(
       async (
         agent: string,
@@ -78,6 +101,7 @@ export const registerRunCommand = (
           json?: boolean;
           yes?: boolean;
           verbose?: boolean;
+          memory?: boolean;
         },
       ) => {
         if (!['codex', 'cursor', 'claude'].includes(agent))
@@ -162,6 +186,27 @@ export const registerRunCommand = (
           dependencies.writeOut(
             `${agentName} is already set up with ${skills(summary.total)}.\n\n`,
           );
+        // Spec 2026-10-28 §7: share project Memory with Codex/Cursor (Claude
+        // already reads it). The Memory lock is held around the export only;
+        // a busy lock or any export problem is a note, never a failure (§8).
+        const enableAgentMemory = dependencies.enableAgentMemory;
+        if (
+          options.memory !== false &&
+          isAgentExportId(agentId) &&
+          enableAgentMemory
+        ) {
+          const report = await safelyExportAgentMemory(() =>
+            dependencies.withMemoryLock
+              ? dependencies.withMemoryLock(
+                  'stak run',
+                  () => enableAgentMemory.call(dependencies, agentId),
+                  { timeoutMs: RUN_MEMORY_LOCK_TIMEOUT_MS },
+                )
+              : enableAgentMemory.call(dependencies, agentId),
+          );
+          const notes = renderAgentExportNotes(report, 'enable');
+          if (notes) dependencies.writeOut(notes);
+        }
         dependencies.writeOut(`Launching ${agentName}...\n`);
         if (dependencies.launchAgent) await dependencies.launchAgent(agentId);
         else await dependencies.launchCodex();

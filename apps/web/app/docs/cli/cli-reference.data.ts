@@ -10,6 +10,10 @@ export type CliCommandGroup =
 export interface CliCommandMeta {
   name: string;
   group: CliCommandGroup;
+  /** Documented nested subcommands (e.g. `memory agents`). cli-reference.test.ts
+   * fails if one is not registered in that command's packages/cli/src/commands
+   * file. */
+  subcommands?: string[];
 }
 
 // Mirrors the `register*Command(program, dependencies)` calls in
@@ -32,7 +36,24 @@ export const CLI_REFERENCE_COMMANDS: CliCommandMeta[] = [
   { name: 'try', group: 'STAKs' },
   { name: 'skill', group: 'STAKs' },
   { name: 'project', group: 'Projects' },
-  { name: 'memory', group: 'Memory' },
+  {
+    name: 'memory',
+    group: 'Memory',
+    subcommands: [
+      'scan',
+      'backup',
+      'status',
+      'recover',
+      'restore',
+      'protect',
+      'history',
+      'resolve',
+      'diff',
+      'materialize',
+      'agents',
+      'unlock',
+    ],
+  },
   { name: 'push', group: 'Cloud & Publishing' },
   { name: 'pull', group: 'Cloud & Publishing' },
   { name: 'publish', group: 'Cloud & Publishing' },

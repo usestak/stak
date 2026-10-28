@@ -51,7 +51,11 @@ export type StagedMemorySummary = {
 
 export const renderSkillAdd = (
   proposal: SkillAddProposal,
-  options: { memory?: StagedMemorySummary } = {},
+  options: {
+    memory?: StagedMemorySummary;
+    /** Spec 2026-10-28: notes from refreshing the Codex/Cursor Memory files. */
+    agentNotes?: string[];
+  } = {},
 ): string => {
   if (
     proposal.targets.length === 0 &&
@@ -110,6 +114,7 @@ export const renderSkillAdd = (
       lines.push(
         `  Memory: ${options.memory.untrackedFolders} Claude memory folder(s) have no project folder on this machine and aren't tracked`,
       );
+    for (const note of options.agentNotes ?? []) lines.push(`  ${note}`);
   }
   if (proposal.targets.length > 0 || options.memory)
     lines.push('', 'Run `stak push` to sync main to STAK Cloud.');

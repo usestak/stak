@@ -212,6 +212,18 @@ import { registerScanCommand } from './commands/scan.js';
 import { registerStatusCommand } from './commands/status.js';
 import { registerRunCommand } from './commands/run.js';
 import {
+  agentMemoryStatus,
+  disableAgentMemory,
+  enableAgentMemory,
+  exportAgentMemory,
+  resetAgentMemory,
+  type AgentDisableReport,
+  type AgentExportId,
+  type AgentExportReport,
+  type AgentMemoryStatusReport,
+  type AgentResetReport,
+} from './memory/agent-export-ops.js';
+import {
   registerUseCommand,
   type UseBootstrapPreview,
 } from './commands/use.js';
@@ -408,6 +420,14 @@ export type ProgramDependencies = {
     MemoryCommandDependencies['memoryMaterialize']
   >;
   unlockMemory?: NonNullable<MemoryCommandDependencies['unlockMemory']>;
+  /** Spec 2026-10-28: cross-agent Project Memory (Codex, Cursor). Each runs
+   * inside its caller's Memory lock and never throws. */
+  exportAgentMemory?(): Promise<AgentExportReport>;
+  enableAgentMemory?(agent: AgentExportId): Promise<AgentExportReport>;
+  disableAgentMemory?(agent: AgentExportId): Promise<AgentDisableReport>;
+  resetAgentMemory?(agent: AgentExportId): Promise<AgentResetReport>;
+  /** Read-only; never takes the lock. */
+  agentMemoryStatus?(): Promise<AgentMemoryStatusReport>;
   projectList(): Promise<ProjectListRow[]>;
   projectMap(options: {
     project: string;
@@ -431,8 +451,13 @@ export type ProgramDependencies = {
   /**
    * Runs `fn` while holding the cross-process Memory lock (spec 2026-10-25).
    * Optional so existing tests keep working; when absent, `fn` runs directly.
+   * `timeoutMs` shortens the wait for a busy lock (default 10 s).
    */
-  withMemoryLock?<T>(command: string, fn: () => Promise<T>): Promise<T>;
+  withMemoryLock?<T>(
+    command: string,
+    fn: () => Promise<T>,
+    options?: { timeoutMs?: number },
+  ): Promise<T>;
   /**
    * Phase P1: best-effort machine check-in after a state-changing command succeeds.
    * Optional so the test harness can omit it; the real CLI wires it in
@@ -1472,13 +1497,28 @@ const defaultDependencies: ProgramDependencies = {
   upgrade: defaultUpgradeDependencies,
   // Spec 2026-10-25: every Memory-changing command wraps its Memory work in this. The
   // one-line leftover-lock note goes to stderr so it never corrupts `--json` stdout.
-  withMemoryLock: (command, fn) =>
+  withMemoryLock: (command, fn, options) =>
     withMemoryLock(stackHome, command, fn, {
+      ...(options?.timeoutMs !== undefined
+        ? { timeoutMs: options.timeoutMs }
+        : {}),
       onLeftoverCleared: (holder) =>
         process.stderr.write(`${leftoverClearedMessage(holder)}\n`),
     }),
   // `stak memory unlock` — deliberately NOT wrapped in withMemoryLock.
   unlockMemory: (options) => unlockMemory(stackHome, options),
+  // Spec 2026-10-28: cross-agent Project Memory. Every caller already holds the
+  // Memory lock (the commands take it); none of these takes it, and the
+  // post-command check-in never calls them.
+  exportAgentMemory: async () =>
+    exportAgentMemory(stackHome, await memoryDiscoveryOptions()),
+  enableAgentMemory: async (agent) =>
+    enableAgentMemory(stackHome, await memoryDiscoveryOptions(), agent),
+  disableAgentMemory: (agent) => disableAgentMemory(stackHome, agent),
+  resetAgentMemory: async (agent) =>
+    resetAgentMemory(stackHome, await memoryDiscoveryOptions(), agent),
+  agentMemoryStatus: async () =>
+    agentMemoryStatus(stackHome, await memoryDiscoveryOptions()),
   reportMachineCheckin: async (commandName) => {
     // Best-effort check-in; signed out → nothing to report. Connectivity failures are
     // swallowed by reportCheckin; a 401/403 propagates so a revoked machine is explicit.

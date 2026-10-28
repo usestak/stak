@@ -71,6 +71,7 @@ export const STATE_EXCLUDE_PATHS: readonly string[] = [
   path.join('memory', 'projections'), // machine-local native/canonical sync state (directory)
   path.join('memory', '.memory.lock'), // machine-local Memory lock
   path.join('memory', '.memory.lock.clearing'), // machine-local Memory lock guard
+  path.join('memory', 'agent-exports'), // machine-local Codex/Cursor export state and settings (directory)
 ];
 
 /**

@@ -3,7 +3,12 @@ import type { Command } from 'commander';
 import type { SkillAddProposal } from '@stack/core';
 import type { ScanResult } from '@stack/spec';
 
+import {
+  safelyExportAgentMemory,
+  type AgentExportReport,
+} from '../memory/agent-export-ops.js';
 import { renderSkillAdd, type StagedMemorySummary } from '../ui/add.js';
+import { agentExportNotes } from '../ui/agent-memory.js';
 
 export type AddCommandDependencies = {
   scan(options: { project: boolean }): Promise<ScanResult>;
@@ -23,6 +28,9 @@ export type AddCommandDependencies = {
    * Optional so existing tests keep working; when absent, `fn` runs directly.
    */
   withMemoryLock?<T>(command: string, fn: () => Promise<T>): Promise<T>;
+  /** Spec 2026-10-28 §7: refresh every enabled agent's Memory file. Called at
+   * the end of `stak add .`'s locked span. Optional; never fails the command. */
+  exportAgentMemory?(): Promise<AgentExportReport>;
   writeOut(value: string): void;
 };
 
@@ -53,7 +61,13 @@ export const registerAddCommand = (
         const memory = stageMemory
           ? await stageMemory.call(dependencies)
           : undefined;
-        return { proposal, memory };
+        // Spec 2026-10-28 §7: refresh the agent files inside the same lock.
+        const agentMemory = stageMemory
+          ? await safelyExportAgentMemory(
+              dependencies.exportAgentMemory?.bind(dependencies),
+            )
+          : undefined;
+        return { proposal, memory, agentMemory };
       };
       // `stak add .` holds the Memory lock across its whole staging (spec 2026-10-25
       // §3.2/§3.3): a busy lock stops it before anything changes, Skills included, so a
@@ -61,9 +75,12 @@ export const registerAddCommand = (
       const lock = stageMemory
         ? (dependencies.withMemoryLock ?? runDirectly)
         : runDirectly;
-      const { proposal, memory } = await lock('stak add', stage);
+      const { proposal, memory, agentMemory } = await lock('stak add', stage);
       dependencies.writeOut(
-        renderSkillAdd(proposal, { ...(memory ? { memory } : {}) }),
+        renderSkillAdd(proposal, {
+          ...(memory ? { memory } : {}),
+          agentNotes: agentExportNotes(agentMemory),
+        }),
       );
     });
 };

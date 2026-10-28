@@ -40,6 +40,8 @@ export type MemoryStatusDisplay = MemoryWorkingTreeStatus & {
   upgradePending?: boolean;
 };
 
+import type { AgentMemoryStatusReport } from '../memory/agent-export-ops.js';
+import { agentMemoryStatusLines } from './agent-memory.js';
 import {
   agentLabel,
   block,
@@ -359,6 +361,7 @@ export const renderStatus = (
     cloud?: CloudSyncDisplayState;
     memory?: MemoryStatusDisplay;
     memoryCloud?: MemoryCloudDisplayState;
+    agentMemory?: AgentMemoryStatusReport;
   } = {},
 ): string => {
   if (options.verbose) return renderStatusVerbose(status);
@@ -408,6 +411,7 @@ export const renderStatus = (
       `${status.invalidSkills.length} invalid discovered Skill${status.invalidSkills.length === 1 ? '' : 's'} (not addable; run \`stak scan --verbose\` for details)`,
     );
   lines.push(...renderMemorySection(options.memory));
+  lines.push(...agentMemoryStatusLines(options.agentMemory));
   lines.push(...renderCloudSection(options.cloud, options.memoryCloud));
   if (options.agents && options.agents.length > 0) {
     lines.push('');

@@ -36,11 +36,23 @@ import { isRenderableCliError } from './ui/errors.js';
 import { startUpdateReminder } from './update/check.js';
 import type { PullPlan, PushPlan, TrialStackResolution } from '@stack/core';
 import {
+  agentExportPaths,
+  encodeClaudeProjectKey,
   MemoryLockError,
+  readLocalRegistry,
+  resolveOrMintProject,
+  setBinding,
   unlockMemory,
   withMemoryLock,
+  writeExportSettings,
+  writeLocalRegistry,
   type DiscoveredMemoryItem,
 } from '@stack/memory';
+import {
+  enableAgentMemory as realEnableAgentMemory,
+  exportAgentMemory as realExportAgentMemory,
+} from './memory/agent-export-ops.js';
+import { stageCanonicalMemory } from './memory/canonical-ops.js';
 import {
   mkdir,
   mkdtemp,
@@ -2883,6 +2895,646 @@ describe('STAK CLI', () => {
       } finally {
         await rm(home, { recursive: true, force: true });
       }
+    });
+
+    // Spec 2026-10-28 §7–§8: the Codex/Cursor Memory files are refreshed at the
+    // END of a Memory command's locked span; an export problem is a note, never
+    // a failure; the post-command check-in never exports.
+    describe('agent Memory export (spec 2026-10-28)', () => {
+      const exported = (agent: 'codex' | 'cursor' = 'codex', written = 1) => ({
+        agents: [{ agent, written, unchanged: 0, skipped: [], overBudget: [] }],
+        problems: [],
+      });
+      const exportSpy = (events: string[]) =>
+        vi.fn(async () => {
+          events.push('export');
+          return exported();
+        });
+      const mark =
+        <T>(events: string[], value: T, name = 'work') =>
+        async () => {
+          events.push(name);
+          return value;
+        };
+
+      it('stak add . refreshes the agent files inside its lock, after staging, and prints a note', async () => {
+        const events: string[] = [];
+        const { withMemoryLock } = recordingLock(events);
+        const exportAgentMemory = exportSpy(events);
+        const { output } = await runProgram(['add', '.'], {
+          prepareAdd: async () => addProposal,
+          stageMemory: mark(events, { files: 1, projects: 0 }, 'stage'),
+          exportAgentMemory,
+          withMemoryLock,
+        });
+        expect(events).toEqual(['lock:stak add', 'stage', 'export', 'unlock']);
+        expect(output).toContain('  Codex: memory updated for 1 project.');
+
+        exportAgentMemory.mockClear();
+        await runProgram(['add', 'some-skill'], {
+          prepareAdd: async () => addProposal,
+          exportAgentMemory,
+          withMemoryLock,
+        });
+        expect(exportAgentMemory).not.toHaveBeenCalled();
+      });
+
+      it('the post-command check-in never exports: one export, inside the lock, before the check-in', async () => {
+        const events: string[] = [];
+        const { withMemoryLock } = recordingLock(events);
+        const exportAgentMemory = exportSpy(events);
+        // `stak memory backup` is a check-in command.
+        await runProgram(['memory', 'backup'], {
+          memoryBackupPreview: async () => ({
+            ...backupPreview(),
+            supersession: {
+              localRecoveredGeneration: null,
+              cloudLatestGeneration: null,
+              parentGeneration: null,
+              nextGeneration: null,
+              supersedes: false,
+            },
+          }),
+          memoryCloudBackup: mark(
+            events,
+            {
+              local: {
+                provider: 'claude' as const,
+                files: 0,
+                projects: 0,
+                createdAt: '2026-10-28T00:00:00.000Z',
+              },
+              cloud: { status: 'skipped' as const },
+            },
+            'backup',
+          ),
+          exportAgentMemory,
+          withMemoryLock,
+          reportMachineCheckin: async (command) => {
+            events.push(`checkin:${command}`);
+          },
+        });
+        expect(exportAgentMemory).toHaveBeenCalledTimes(1);
+        expect(events).toEqual([
+          'lock:stak memory backup',
+          'backup',
+          'export',
+          'unlock',
+          'checkin:backup',
+        ]);
+      });
+
+      it('stak push exports inside the lock, after the Memory push', async () => {
+        const events: string[] = [];
+        const { withMemoryLock } = recordingLock(events);
+        const { output } = await runProgram(['push', '--yes'], {
+          cloudPreparePush: async () => ({ ...basePushPlan, noop: true }),
+          applyMemoryPush: mark(
+            events,
+            { status: 'standard' as const, generation: 3 },
+            'memory',
+          ),
+          exportAgentMemory: exportSpy(events),
+          withMemoryLock,
+        });
+        expect(events).toEqual([
+          'lock:stak push',
+          'memory',
+          'export',
+          'unlock',
+        ]);
+        expect(output).toContain('Codex: memory updated for 1 project.');
+      });
+
+      it('stak pull exports inside the lock, after the canonical pull (Skills changes or not)', async () => {
+        const events: string[] = [];
+        const { withMemoryLock } = recordingLock(events);
+        await runProgram(['pull', '--yes'], {
+          cloudPreparePull: async () => basePullPlan,
+          cloudApplyPull: restoredPull,
+          memoryPullPreflight: async () => ({ eligible: false }),
+          applyCanonicalPull: mark(
+            events,
+            { status: 'up-to-date' } as never,
+            'canonical',
+          ),
+          exportAgentMemory: exportSpy(events),
+          withMemoryLock,
+        });
+        expect(events).toEqual([
+          'lock:stak pull',
+          'canonical',
+          'export',
+          'unlock',
+        ]);
+
+        events.length = 0;
+        const { output } = await runProgram(['pull'], {
+          cloudPreparePull: async () => ({
+            ...basePullPlan,
+            mode: 'noop' as const,
+          }),
+          memoryPullPreflight: async () => ({ eligible: false }),
+          applyCanonicalPull: mark(
+            events,
+            { status: 'up-to-date' } as never,
+            'canonical',
+          ),
+          exportAgentMemory: exportSpy(events),
+          withMemoryLock,
+        });
+        expect(events).toEqual([
+          'lock:stak pull',
+          'canonical',
+          'export',
+          'unlock',
+        ]);
+        expect(output).toContain('Codex: memory updated for 1 project.');
+      });
+
+      it.each([
+        ['memory backup', ['memory', 'backup'], 'stak memory backup'],
+        ['memory recover', ['memory', 'recover'], 'stak memory recover'],
+        [
+          'memory resolve (final)',
+          [
+            'memory',
+            'resolve',
+            'prj_abc',
+            'notes/MEMORY.md',
+            '--keep',
+            'local',
+          ],
+          'stak memory resolve',
+        ],
+        [
+          'memory materialize',
+          ['memory', 'materialize'],
+          'stak memory materialize',
+        ],
+      ])(
+        '%s exports at the end of its locked span',
+        async (_label, argv, command) => {
+          const events: string[] = [];
+          const { withMemoryLock } = recordingLock(events);
+          const { output } = await runProgram(argv, {
+            memoryBackupPreview: async () => ({
+              ...backupPreview(),
+              supersession: {
+                localRecoveredGeneration: null,
+                cloudLatestGeneration: null,
+                parentGeneration: null,
+                nextGeneration: null,
+                supersedes: false,
+              },
+            }),
+            memoryCloudBackup: mark(events, {
+              local: {
+                provider: 'claude' as const,
+                files: 0,
+                projects: 0,
+                createdAt: '2026-10-28T00:00:00.000Z',
+              },
+              cloud: { status: 'skipped' as const },
+            }),
+            memoryCloudRecover: mark(events, {
+              status: 'recovered' as const,
+              privacyMode: 'standard' as const,
+              objects: 1,
+              files: 1,
+              legacyFiles: 1,
+              projectFiles: 0,
+              generation: 2,
+            }),
+            memoryResolveConflict: mark(events, resolved),
+            memoryMaterialize: mark(events, materialized),
+            exportAgentMemory: exportSpy(events),
+            withMemoryLock,
+          });
+          expect(events.filter((e) => e !== 'preview')).toEqual([
+            `lock:${command}`,
+            'work',
+            'export',
+            'unlock',
+          ]);
+          expect(output).toContain('Codex: memory updated for 1 project.');
+        },
+      );
+
+      it('memory backup --json and memory recover --json add an agentMemory field', async () => {
+        const { output } = await runProgram(['memory', 'recover', '--json'], {
+          memoryCloudRecover: async () => ({
+            status: 'recovered' as const,
+            privacyMode: 'standard' as const,
+            objects: 1,
+            files: 1,
+            legacyFiles: 1,
+            projectFiles: 0,
+            generation: 2,
+          }),
+          exportAgentMemory: async () => exported(),
+        });
+        const parsed = JSON.parse(output) as Record<string, unknown>;
+        expect(parsed).toMatchObject({
+          status: 'recovered',
+          backup: 2,
+          agentMemory: exported(),
+        });
+      });
+
+      it('a resolve that leaves conflicts does not export', async () => {
+        const exportAgentMemory = vi.fn(async () => exported());
+        await runProgram(
+          [
+            'memory',
+            'resolve',
+            'prj_abc',
+            'notes/MEMORY.md',
+            '--keep',
+            'local',
+          ],
+          {
+            memoryResolveConflict: async () => ({ ...resolved, remaining: 1 }),
+            exportAgentMemory,
+          },
+        );
+        expect(exportAgentMemory).not.toHaveBeenCalled();
+      });
+
+      it('an export that throws, or reports a corrupt state file, is a note: the exit code is unchanged', async () => {
+        const thrown = await runProgram(['memory', 'materialize'], {
+          memoryMaterialize: async () => materialized,
+          exportAgentMemory: async () => {
+            throw new Error('disk on fire');
+          },
+        });
+        expect(thrown.exit).toBeUndefined();
+        expect(thrown.output).toContain(
+          'Agent memory sharing skipped: disk on fire',
+        );
+
+        // The real exporter, with a corrupt state file in a temp STAK home.
+        const home = await mkdtemp(path.join(os.tmpdir(), 'stak-xagent-'));
+        try {
+          await writeExportSettings(home, { enabled: { codex: true } });
+          const statePath = agentExportPaths(home).state;
+          await writeFile(statePath, '{ broken', 'utf8');
+          const corrupt = await runProgram(['add', '.'], {
+            prepareAdd: async () => addProposal,
+            stageMemory: async () => ({ files: 0, projects: 0 }),
+            exportAgentMemory: () =>
+              realExportAgentMemory(home, {
+                claudeHome: path.join(home, 'claude'),
+              }),
+          });
+          expect(corrupt.exit).toBeUndefined();
+          expect(corrupt.output).toContain(
+            `Move ${statePath} aside (for example, rename it to state.json.bak), then run \`stak memory agents reset codex\` and check \`git status\` in your projects.`,
+          );
+        } finally {
+          await rm(home, { recursive: true, force: true });
+        }
+      });
+
+      describe('stak run', () => {
+        it('stak run codex turns sharing on and writes AGENTS.override.md inside the lock, before launching', async () => {
+          const home = await mkdtemp(path.join(os.tmpdir(), 'stak-xagent-'));
+          try {
+            const claudeHome = path.join(home, 'claude');
+            const project = path.join(home, 'proj');
+            await mkdir(project, { recursive: true });
+            let registry = await readLocalRegistry(home);
+            const minted = resolveOrMintProject(registry, {
+              kind: 'local',
+              vendorKey: 'v-proj',
+            });
+            registry = setBinding(minted.registry, {
+              projectId: minted.projectId,
+              dir: project,
+              boundAt: '2026-10-28T00:00:00.000Z',
+              provenance: 'user-map',
+            });
+            await writeLocalRegistry(home, registry);
+            const notes = path.join(
+              claudeHome,
+              'projects',
+              encodeClaudeProjectKey(path.resolve(project)),
+              'memory',
+            );
+            await mkdir(notes, { recursive: true });
+            await writeFile(path.join(notes, 'MEMORY.md'), 'run note', 'utf8');
+            await stageCanonicalMemory(home, { claudeHome });
+
+            const events: string[] = [];
+            const { calls, withMemoryLock } = recordingLock(events);
+            const { output, exit } = await runProgram(['run', 'codex'], {
+              enableAgentMemory: async (agent) => {
+                events.push(`enable:${agent}`);
+                return realEnableAgentMemory(home, { claudeHome }, agent);
+              },
+              launchCodex: async () => {
+                events.push('launch');
+                return launchResult;
+              },
+              withMemoryLock,
+            });
+            expect(exit).toBeUndefined();
+            expect(calls).toEqual(['stak run']);
+            expect(events).toEqual([
+              'lock:stak run',
+              'enable:codex',
+              'unlock',
+              'launch',
+            ]);
+            expect(
+              await readFile(path.join(project, 'AGENTS.override.md'), 'utf8'),
+            ).toContain('run note');
+            expect(output).toContain('Codex: memory shared with 1 project.');
+            expect(output.indexOf('memory shared')).toBeLessThan(
+              output.indexOf('Launching Codex'),
+            );
+          } finally {
+            await rm(home, { recursive: true, force: true });
+          }
+        });
+
+        it('--no-memory and --dry-run write nothing; stak run claude has nothing to export', async () => {
+          const enableAgentMemory = vi.fn(async () => exported());
+          const { calls, withMemoryLock } = recordingLock([]);
+          await runProgram(['run', 'codex', '--no-memory'], {
+            enableAgentMemory,
+            withMemoryLock,
+          });
+          await runProgram(['run', 'cursor', '--dry-run'], {
+            enableAgentMemory,
+            withMemoryLock,
+          });
+          await runProgram(['run', 'claude'], {
+            enableAgentMemory,
+            withMemoryLock,
+          });
+          expect(enableAgentMemory).not.toHaveBeenCalled();
+          expect(calls).toEqual([]);
+
+          await runProgram(['run', 'cursor'], {
+            enableAgentMemory,
+            withMemoryLock,
+          });
+          expect(enableAgentMemory).toHaveBeenCalledWith('cursor');
+          expect(calls).toEqual(['stak run']);
+        });
+
+        it('stak run waits only 2 s for a busy Memory lock, then shows the note and launches', async () => {
+          const seen: Array<{ timeoutMs?: number } | undefined> = [];
+          await runProgram(['run', 'codex'], {
+            enableAgentMemory: async () => exported(),
+            withMemoryLock: async <T>(
+              _command: string,
+              fn: () => Promise<T>,
+              options?: { timeoutMs?: number },
+            ) => {
+              seen.push(options);
+              return fn();
+            },
+          });
+          expect(seen).toEqual([{ timeoutMs: 2_000 }]);
+
+          // A real lock held by another live process: the run gives up after
+          // its short wait (not the default 10 s) and still launches.
+          const home = await mkdtemp(path.join(os.tmpdir(), 'stak-run-lock-'));
+          try {
+            await mkdir(path.join(home, 'memory'), { recursive: true });
+            await writeFile(
+              path.join(home, 'memory', '.memory.lock'),
+              JSON.stringify({
+                lockId: 'planted-lock',
+                pid: process.pid,
+                hostname: os.hostname(),
+                startedAt: new Date().toISOString(),
+                command: 'stak pull',
+              }),
+            );
+            const enableAgentMemory = vi.fn(async () => exported());
+            const launchCodex = vi.fn(async () => launchResult);
+            const started = Date.now();
+            const { output, exit } = await runProgram(['run', 'codex'], {
+              enableAgentMemory,
+              launchCodex,
+              withMemoryLock: <T>(
+                command: string,
+                fn: () => Promise<T>,
+                options?: { timeoutMs?: number },
+              ) =>
+                withMemoryLock(home, command, fn, {
+                  ...(options?.timeoutMs !== undefined
+                    ? { timeoutMs: options.timeoutMs }
+                    : {}),
+                  pollMs: 50,
+                  installSignalHandlers: false,
+                  isProcessAlive: () => true,
+                }),
+            });
+            const elapsed = Date.now() - started;
+            expect(exit).toBeUndefined();
+            expect(elapsed).toBeGreaterThanOrEqual(1_900);
+            expect(elapsed).toBeLessThan(6_000);
+            expect(enableAgentMemory).not.toHaveBeenCalled();
+            expect(launchCodex).toHaveBeenCalledTimes(1);
+            expect(output).toMatch(
+              /Agent memory sharing skipped: Another STAK command \(`stak pull`, started \d+s ago\) is changing Memory\. Try again when it finishes\./,
+            );
+          } finally {
+            await rm(home, { recursive: true, force: true });
+          }
+        }, 15_000);
+
+        it('a busy lock or a failed export is a note: the agent still launches', async () => {
+          const launchCodex = vi.fn(async () => launchResult);
+          const { output, exit } = await runProgram(['run', 'codex'], {
+            enableAgentMemory: async () => exported(),
+            withMemoryLock: busyLock(),
+            launchCodex,
+          });
+          expect(exit).toBeUndefined();
+          expect(launchCodex).toHaveBeenCalledTimes(1);
+          expect(output).toContain(`Agent memory sharing skipped: ${BUSY}`);
+        });
+      });
+
+      describe('stak memory agents', () => {
+        const statusReport = {
+          agents: [
+            {
+              agent: 'codex' as const,
+              enabled: true,
+              projects: 2,
+              upToDate: 1,
+              outOfDate: 0,
+              handEdited: 1,
+              notIgnorable: 0,
+              skipped: 0,
+              unchecked: 0,
+              overBudget: 0,
+              details: [
+                {
+                  projectId: 'prj_abc',
+                  name: 'demo',
+                  state: 'hand-edited' as const,
+                  message:
+                    'AGENTS.override.md was edited by hand. Move the edit into your memory, or run `stak memory agents reset codex`',
+                },
+              ],
+            },
+            {
+              agent: 'cursor' as const,
+              enabled: false,
+              projects: 0,
+              upToDate: 0,
+              outOfDate: 0,
+              handEdited: 0,
+              notIgnorable: 0,
+              skipped: 0,
+              unchecked: 0,
+              overBudget: 0,
+              details: [],
+            },
+          ],
+          problems: [],
+        };
+
+        it('lists each agent on/off with its status, without the lock', async () => {
+          const events: string[] = [];
+          const { calls, withMemoryLock } = recordingLock(events);
+          const { output } = await runProgram(['memory', 'agents'], {
+            agentMemoryStatus: async () => statusReport,
+            withMemoryLock,
+          });
+          expect(calls).toEqual([]);
+          expect(output).toBe(
+            'Codex    on    1 hand-edited of 2 projects\n' +
+              '  demo: AGENTS.override.md was edited by hand. Move the edit into your memory, or run `stak memory agents reset codex`\n' +
+              'Cursor   off\n',
+          );
+          const json = await runProgram(['memory', 'agents', '--json'], {
+            agentMemoryStatus: async () => statusReport,
+          });
+          expect(JSON.parse(json.output)).toEqual(statusReport);
+        });
+
+        it('enable, disable and reset each run inside the lock', async () => {
+          const events: string[] = [];
+          const { calls, withMemoryLock } = recordingLock(events);
+          const enable = await runProgram(
+            ['memory', 'agents', 'enable', 'cursor'],
+            {
+              enableAgentMemory: async (agent) => {
+                events.push(`enable:${agent}`);
+                return exported('cursor', 2);
+              },
+              withMemoryLock,
+            },
+          );
+          expect(enable.output).toBe(
+            'Cursor: memory shared with 2 projects.\n',
+          );
+          const disable = await runProgram(
+            ['memory', 'agents', 'disable', 'codex'],
+            {
+              disableAgentMemory: async (agent) => {
+                events.push(`disable:${agent}`);
+                return {
+                  agent,
+                  removed: 1,
+                  kept: [{ projectId: 'prj_abc', name: 'demo' }],
+                  failed: [],
+                  problems: [],
+                };
+              },
+              withMemoryLock,
+            },
+          );
+          expect(disable.output).toBe(
+            'Codex: memory sharing is off. Removed AGENTS.override.md from 1 project.\n' +
+              "Codex: kept AGENTS.override.md in demo (or its old folder) because it was edited by hand. It is still excluded from Git, so it can't be committed by accident. Delete it when you no longer need it.\n",
+          );
+          const reset = await runProgram(
+            ['memory', 'agents', 'reset', 'codex'],
+            {
+              resetAgentMemory: async (agent) => {
+                events.push(`reset:${agent}`);
+                return { enabled: true, ...exported('codex', 1) };
+              },
+              withMemoryLock,
+            },
+          );
+          expect(reset.output).toBe(
+            'Codex: rewrote AGENTS.override.md in 1 project.\n',
+          );
+          expect(calls).toEqual([
+            'stak memory agents enable',
+            'stak memory agents disable',
+            'stak memory agents reset',
+          ]);
+          expect(events).toEqual([
+            'lock:stak memory agents enable',
+            'enable:cursor',
+            'unlock',
+            'lock:stak memory agents disable',
+            'disable:codex',
+            'unlock',
+            'lock:stak memory agents reset',
+            'reset:codex',
+            'unlock',
+          ]);
+        });
+
+        it('an unknown agent is refused; a throwing dependency is a note with exit 0', async () => {
+          await expect(
+            runProgram(['memory', 'agents', 'enable', 'claude'], {
+              enableAgentMemory: async () => exported(),
+            }),
+          ).rejects.toThrow('Unknown agent "claude". Choose codex or cursor.');
+          const { exit, output } = await runProgram(
+            ['memory', 'agents', 'disable', 'codex'],
+            {
+              disableAgentMemory: async () => {
+                throw new Error('boom');
+              },
+            },
+          );
+          expect(exit).toBeUndefined();
+          expect(output).toContain('Agent memory cleanup stopped: boom');
+        });
+
+        it('stak status and stak memory status show one line per enabled agent; --json adds agentMemory', async () => {
+          const status = await runProgram(['status'], {
+            agentMemoryStatus: async () => statusReport,
+          });
+          expect(status.output).toContain(
+            '\nAgent memory\n  Codex    1 hand-edited of 2 projects\n  Details: `stak memory agents`\n',
+          );
+          expect(status.output).not.toContain('Cursor   ');
+          const statusJson = await runProgram(['status', '--json'], {
+            agentMemoryStatus: async () => statusReport,
+          });
+          expect(JSON.parse(statusJson.output).agentMemory).toEqual(
+            statusReport,
+          );
+
+          const memoryStatus = await runProgram(['memory', 'status'], {
+            agentMemoryStatus: async () => statusReport,
+          });
+          expect(memoryStatus.output).toContain(
+            '\nAgent memory\n  Codex    1 hand-edited of 2 projects\n',
+          );
+          const memoryJson = await runProgram(['memory', 'status', '--json'], {
+            agentMemoryStatus: async () => statusReport,
+          });
+          expect(JSON.parse(memoryJson.output).agentMemory).toEqual(
+            statusReport,
+          );
+        });
+      });
     });
   });
 
