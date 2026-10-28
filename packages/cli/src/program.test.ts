@@ -2987,14 +2987,17 @@ describe('STAK CLI', () => {
         await mkdir(path.join(home, 'memory'), { recursive: true });
         await writeFile(
           path.join(home, 'memory', '.memory.lock'),
-          JSON.stringify({ ...holder(5), hostname: os.hostname() }),
+          // Minutes, not seconds: the age is rendered when the command runs, so a
+          // seconds-old lock reads "6s ago" whenever the run takes over a second
+          // (it does under full-suite load).
+          JSON.stringify({ ...holder(5 * 60), hostname: os.hostname() }),
         );
         const { output } = await runProgram(['memory', 'unlock'], {
           unlockMemory: (options) =>
             unlockMemory(home, { ...options, isProcessAlive: () => false }),
         });
         expect(output).toBe(
-          'Removed the Memory lock held by `stak pull` (process 1234, started 5s ago, no longer running).\n',
+          'Removed the Memory lock held by `stak pull` (process 1234, started 5m ago, no longer running).\n',
         );
         expect(await readdir(path.join(home, 'memory'))).toEqual([]);
       } finally {
