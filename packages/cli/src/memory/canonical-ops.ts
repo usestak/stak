@@ -45,6 +45,8 @@ import {
   writeLocalRegistry,
   writeMemoryObject,
   writePendingMerge,
+  guardPrivateProjectFile,
+  releasePrivateProjectFile,
   projectIdentityKey,
   canonicalDigest,
   documentOf,
@@ -1180,6 +1182,26 @@ const nativeHashAt = async (
   }
 };
 
+/** Canonical documents materialize writes INSIDE the project folder that must
+ * stay private (never committed): today Claude's `CLAUDE.local.md`
+ * (`instructions/private.md`). Returns its POSIX path relative to `dir`, or
+ * undefined for any other document. */
+const PRIVATE_PROJECT_DOCUMENTS = new Set(['instructions/private.md']);
+const privateProjectFileOf = (
+  projectId: string,
+  dir: string,
+  canonicalPath: string,
+  claudeHome: string | undefined,
+): string | undefined => {
+  if (!PRIVATE_PROJECT_DOCUMENTS.has(canonicalPath)) return undefined;
+  const target = claudeNativeTargetOf(
+    { projectId, dir },
+    canonicalPath,
+    claudeHome,
+  );
+  return path.relative(dir, target).split(path.sep).join('/');
+};
+
 export const materializeCanonicalProjects = async (
   stackHome: string,
   options: CanonicalDiscoveryOptions = {},
@@ -1290,6 +1312,33 @@ export const materializeCanonicalProjects = async (
             });
             continue;
           }
+          // Spec 2026-10-28 §5, applied to Claude's private file: a
+          // `CLAUDE.local.md` written into a Git repository must stay out of
+          // Git, exactly like the Codex/Cursor files. Write time only: the
+          // sync decision above is unchanged. Refused (a "!" rule, no usable
+          // Git, an error): not written, so its projection is not advanced
+          // either, and it is reported as a note.
+          const privateFile = privateProjectFileOf(
+            projectId,
+            dir,
+            action.path,
+            options.claudeHome,
+          );
+          if (privateFile !== undefined) {
+            const guard = await guardPrivateProjectFile({
+              stackHome,
+              projectDir: dir,
+              relativePath: privateFile,
+            });
+            if (!guard.write) {
+              conflicts.push({
+                projectId,
+                path: '',
+                reason: `${nameHintFor(registry, projectId) ?? shortProjectId(projectId)}: ${guard.message}`,
+              });
+              continue;
+            }
+          }
         }
         actions.push(action);
       }
@@ -1299,6 +1348,23 @@ export const materializeCanonicalProjects = async (
         actions,
         options.claudeHome,
       );
+      // A private file STAK deleted no longer needs its exclude lines (kept
+      // while another worktree's copy still uses them). Best effort: a line
+      // left behind only keeps a file out of Git.
+      for (const deletedPath of applied.deleted) {
+        const privateFile = privateProjectFileOf(
+          projectId,
+          dir,
+          deletedPath,
+          options.claudeHome,
+        );
+        if (privateFile !== undefined)
+          await releasePrivateProjectFile({
+            stackHome,
+            projectDir: dir,
+            relativePath: privateFile,
+          }).catch(() => undefined);
+      }
       written += applied.written.length;
       deleted += applied.deleted.length;
       materialized += 1;

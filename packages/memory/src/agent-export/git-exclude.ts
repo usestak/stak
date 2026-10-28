@@ -186,6 +186,15 @@ const rewrite = async (
   });
 };
 
+/** The entries inside STAK's block of `excludePath` (empty when the file or
+ * the block is absent). Throws `GitExcludeError('malformed-block')`. */
+export const readGitExcludeEntries = async (
+  excludePath: string,
+): Promise<string[]> => {
+  const parsed = parseBlock(await readTextOrEmpty(excludePath));
+  return parsed.begin === -1 ? [] : entriesOf(parsed);
+};
+
 export const addGitExcludeEntries = (
   excludePath: string,
   entries: readonly string[],

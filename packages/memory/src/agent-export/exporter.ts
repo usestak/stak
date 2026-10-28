@@ -33,6 +33,7 @@ import {
   isIgnoredByGit,
   isTrackedByGit,
   locateGitRepository,
+  readGitExcludeEntries,
   removeGitExcludeEntries,
   type GitRunner,
 } from './git-exclude.js';
@@ -116,6 +117,17 @@ const retiredRecordSchema = exportRecordSchema.extend({
 });
 export type RetiredAgentExportRecord = z.infer<typeof retiredRecordSchema>;
 
+const privateFileRecordSchema = z.object({
+  /** Absolute path of the private file. */
+  path: z.string().min(1),
+  exclude: z.object({
+    file: z.string().min(1),
+    entries: z.array(z.string().min(1)).min(1),
+  }),
+  updatedAt: z.iso.datetime({ offset: true }),
+});
+export type PrivateFileRecord = z.infer<typeof privateFileRecordSchema>;
+
 const exportStateSchema = z.object({
   schemaVersion: z.literal(1),
   projects: z.record(
@@ -128,6 +140,10 @@ const exportStateSchema = z.object({
   /** Files STAK wrote at a project's previous location that could not be
    * deleted yet (hand-edited). Kept so their exclude lines stay in place. */
   retired: z.array(retiredRecordSchema).optional(),
+  /** Private agent files materialize writes into a project folder (Claude's
+   * `CLAUDE.local.md`) that STAK keeps out of Git: the exclude lines each one
+   * relies on, so they are released only when no record uses them. */
+  privateFiles: z.array(privateFileRecordSchema).optional(),
 });
 export type AgentExportState = z.infer<typeof exportStateSchema>;
 
@@ -227,11 +243,12 @@ const releaseExclude = async (
 ): Promise<void> => {
   if (!exclude) return;
   const file = comparableFile(exclude.file);
-  const records: AgentExportRecord[] = [
+  const records: Array<Pick<AgentExportRecord, 'exclude'>> = [
     ...Object.values(state.projects).flatMap((project) =>
       AGENT_EXPORT_IDS.flatMap((id) => (project[id] ? [project[id]] : [])),
     ),
     ...(state.retired ?? []),
+    ...(state.privateFiles ?? []),
   ];
   const stillUsed = new Set(
     records.flatMap((record) =>
@@ -520,8 +537,28 @@ const resolvePrivacy = async (
       status: 'skipped-tracked',
       message: `${relative} is tracked by Git; STAK will not write a file that could be committed.`,
     };
+  return {
+    kind: 'exclude',
+    file: location.excludePath,
+    entries: await anchoredExcludeEntries(
+      location.toplevel,
+      projectDir,
+      relative,
+    ),
+  };
+};
+
+/** The root-anchored exclude lines for `relative` (POSIX, inside
+ * `projectDir`): the file itself and the temp sibling `atomicWriteFile`
+ * writes first (`.<name>.<uuid>.tmp`). Paths are taken from the worktree
+ * root, with realpath on both sides. */
+const anchoredExcludeEntries = async (
+  toplevel: string,
+  projectDir: string,
+  relative: string,
+): Promise<string[]> => {
   const fromRoot = path.relative(
-    await realpath(location.toplevel),
+    await realpath(toplevel),
     await realpath(projectDir),
   );
   if (fromRoot.startsWith('..') || path.isAbsolute(fromRoot))
@@ -532,15 +569,10 @@ const resolvePrivacy = async (
   ];
   const name = segments.pop() ?? relative;
   const folder = segments.map((segment) => `${segment}/`).join('');
-  return {
-    kind: 'exclude',
-    file: location.excludePath,
-    entries: [
-      excludeEntryFor(`${folder}${name}`),
-      // The temp sibling `atomicWriteFile` writes first (`.<name>.<uuid>.tmp`).
-      `${excludeEntryFor(`${folder}.${name}`)}.*.tmp`,
-    ],
-  };
+  return [
+    excludeEntryFor(`${folder}${name}`),
+    `${excludeEntryFor(`${folder}.${name}`)}.*.tmp`,
+  ];
 };
 
 const sameExclude = (
@@ -797,4 +829,168 @@ export const exportStatus = async (
       return 'stale';
   }
   return 'up-to-date';
+};
+
+// ---------------------------------------------------------------------------
+// Private agent files written by materialize (Claude's CLAUDE.local.md)
+
+export type PrivateFileGuardResult =
+  | {
+      /** Write it. `excluded`: STAK's exclude lines keep it out of Git;
+       * `ignored`: the repository already ignores it; `tracked`: the user
+       * commits it on purpose; `plain`: not a Git repository. */
+      write: true;
+      status: 'excluded' | 'ignored' | 'tracked' | 'plain';
+    }
+  | {
+      write: false;
+      status: 'skipped-not-ignorable' | 'skipped-no-git' | 'failed';
+      message: string;
+    };
+
+export type PrivateFileGuardOptions = {
+  stackHome: string;
+  projectDir: string;
+  /** POSIX path inside `projectDir`, for example `CLAUDE.local.md`. */
+  relativePath: string;
+  git?: GitRunner;
+  now?: () => Date;
+};
+
+const samePath = (a: string, b: string): boolean =>
+  comparableFile(a) === comparableFile(b);
+
+/**
+ * Call right BEFORE materialize writes a private file into a project folder,
+ * inside the caller's Memory lock. Applies the agent files' privacy rules to
+ * it: in a Git repository a file that is not tracked and not already ignored
+ * gets STAK's root-anchored exclude lines (the file and its temp sibling), and
+ * Git must then confirm it is ignored. Fails closed: a `.gitignore` negation,
+ * an unusable Git or any error means "don't write". A tracked file is the
+ * user's to commit and is written as before. Never throws.
+ */
+export const guardPrivateProjectFile = async (
+  options: PrivateFileGuardOptions,
+): Promise<PrivateFileGuardResult> => {
+  const { stackHome, relativePath } = options;
+  const git = options.git ?? defaultGitRunner;
+  const projectDir = path.resolve(options.projectDir);
+  const target = path.join(projectDir, ...relativePath.split('/'));
+  const notWritten = (reason: string) =>
+    `${relativePath} was not written: ${reason}`;
+  try {
+    const location = await locateGitRepository(git, projectDir);
+    if (location.kind !== 'repo') {
+      if (!(await hasGitAncestor(projectDir)))
+        return { write: true, status: 'plain' };
+      return {
+        write: false,
+        status: 'skipped-no-git',
+        message: notWritten(
+          "Git isn't available, so STAK can't keep your private instructions out of this repository.",
+        ),
+      };
+    }
+    if (await isTrackedByGit(git, projectDir, relativePath))
+      return { write: true, status: 'tracked' };
+
+    const entries = await anchoredExcludeEntries(
+      location.toplevel,
+      projectDir,
+      relativePath,
+    );
+    const probes = [
+      relativePath,
+      toPosix(path.relative(projectDir, atomicTempPath(target))),
+    ];
+    const ignored: boolean[] = [];
+    for (const probe of probes)
+      ignored.push(await isIgnoredByGit(git, projectDir, probe));
+    // A line already in STAK's block (another worktree's copy shares this
+    // exclude file) is relied on too, so it is recorded here as well and is
+    // never released while this copy still needs it.
+    const inBlock = new Set(await readGitExcludeEntries(location.excludePath));
+    const needed = entries.filter(
+      (entry, index) => !ignored[index] || inBlock.has(entry),
+    );
+    if (needed.length === 0) return { write: true, status: 'ignored' };
+
+    const state = await readExportState(stackHome);
+    const prior = (state.privateFiles ?? []).find((record) =>
+      samePath(record.path, target),
+    );
+    await addGitExcludeEntries(location.excludePath, needed);
+    const file = await realpath(location.excludePath);
+    let ignorable = true;
+    for (const probe of probes)
+      if (!(await isIgnoredByGit(git, projectDir, probe))) ignorable = false;
+    if (!ignorable) {
+      // A "!" rule wins over the exclude: release what this call added (a line
+      // another record relies on stays), and don't write.
+      await releaseExclude(state, {
+        file,
+        entries: needed.filter(
+          (entry) => !(prior?.exclude.entries ?? []).includes(entry),
+        ),
+      });
+      return {
+        write: false,
+        status: 'skipped-not-ignorable',
+        message: notWritten(
+          `this repository's .gitignore re-includes it (a "!" rule), so STAK can't keep your private instructions out of Git.`,
+        ),
+      };
+    }
+    await mutateState(stackHome, (current) => ({
+      ...current,
+      privateFiles: [
+        ...(current.privateFiles ?? []).filter(
+          (record) => !samePath(record.path, target),
+        ),
+        {
+          path: target,
+          exclude: {
+            file,
+            entries: [
+              ...new Set([...(prior?.exclude.entries ?? []), ...needed]),
+            ],
+          },
+          updatedAt: (options.now?.() ?? new Date()).toISOString(),
+        },
+      ],
+    }));
+    return { write: true, status: 'excluded' };
+  } catch (error) {
+    return {
+      write: false,
+      status: 'failed',
+      message: notWritten(
+        `${messageOf(error)} STAK can't confirm it would stay out of Git.`,
+      ),
+    };
+  }
+};
+
+/** Call after materialize deleted a private file: drop its record and release
+ * the exclude lines no other record uses. A no-op when there is no record. */
+export const releasePrivateProjectFile = async (options: {
+  stackHome: string;
+  projectDir: string;
+  relativePath: string;
+}): Promise<void> => {
+  const target = path.join(
+    path.resolve(options.projectDir),
+    ...options.relativePath.split('/'),
+  );
+  const record = (
+    (await readExportState(options.stackHome)).privateFiles ?? []
+  ).find((r) => samePath(r.path, target));
+  if (!record) return;
+  const next = await mutateState(options.stackHome, (state) => ({
+    ...state,
+    privateFiles: (state.privateFiles ?? []).filter(
+      (r) => !samePath(r.path, target),
+    ),
+  }));
+  await releaseExclude(next, record.exclude);
 };

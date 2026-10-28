@@ -182,6 +182,16 @@ overwrites an agent file that hasn't changed since the last sync, so an edit you
 haven't added is never silently replaced. A missing Memory folder is treated as
 "never written here", not as "deleted everything".
 
+`CLAUDE.local.md` is private, so when STAK writes it into a Git repository it
+keeps it out of Git the same way as the Codex and Cursor files: unless the
+repository already ignores it, STAK first adds `/CLAUDE.local.md` to the local
+`.git/info/exclude` (in its marked block) and checks that Git now ignores it. A
+`CLAUDE.local.md` that is tracked by Git is yours to commit, and is written as
+before. If a `.gitignore` rule re-includes it (a `!` line), or Git can't answer,
+STAK doesn't write it and says so; it tries again on the next sync. When STAK
+deletes the file, it removes the exclude line too (unless another worktree's copy
+still needs it).
+
 `stak pull` always syncs Project Memory, with no extra prompt, even when no
 Skills changed. It merges rather than overwrites, so your unpushed Memory
 changes are kept and real conflicts stop safely.

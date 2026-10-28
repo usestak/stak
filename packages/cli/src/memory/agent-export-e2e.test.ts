@@ -198,8 +198,6 @@ describe.skipIf(!hasGit)(
         new InMemoryRemoteMemoryStore(),
         'xagent-e2e',
       );
-      // Claude keeps CLAUDE.local.md out of the repository itself.
-      const ignored = { '.gitignore': 'CLAUDE.local.md\n' };
 
       // Machine A: Claude notes plus private instructions, `add .`, `push`.
       const a = machine(
@@ -207,7 +205,8 @@ describe.skipIf(!hasGit)(
         path.join(root, 'machine-a', 'xagent-e2e'),
         backend,
       );
-      await checkout(a.dir, ignored);
+      // No .gitignore anywhere: STAK itself must keep CLAUDE.local.md private.
+      await checkout(a.dir, { 'README.md': 'demo\n' });
       await writeClaudeNote(
         a,
         'MEMORY.md',
@@ -230,7 +229,7 @@ describe.skipIf(!hasGit)(
         backend,
       );
       const teamAgentsMd = '# Team rules\n\nRun the tests before pushing.\n';
-      await checkout(b.dir, { ...ignored, 'AGENTS.md': teamAgentsMd });
+      await checkout(b.dir, { 'AGENTS.md': teamAgentsMd });
       for (const agent of ['codex', 'cursor'] as const)
         await locked(b, 'stak memory agents enable', () =>
           enableAgentMemory(b.home, b.discovery(), agent),
@@ -278,6 +277,11 @@ describe.skipIf(!hasGit)(
         ]),
       );
 
+      // Pull also wrote Claude's own private file into the checkout.
+      expect(await readFile(path.join(b.dir, 'CLAUDE.local.md'), 'utf8')).toBe(
+        'Answer tersely.\n',
+      );
+
       // Private: listed in the local exclude block, invisible to Git.
       const excludeFile = path.join(b.dir, '.git', 'info', 'exclude');
       const exclude = await readFile(excludeFile, 'utf8');
@@ -288,6 +292,7 @@ describe.skipIf(!hasGit)(
       for (const entry of positions(exclude, [
         '/AGENTS.override.md',
         '/.cursor/rules/stak-memory.mdc',
+        '/CLAUDE.local.md',
       ])) {
         expect(entry).toBeGreaterThan(begin ?? -1);
         expect(entry).toBeLessThan(end ?? -1);
@@ -324,6 +329,7 @@ describe.skipIf(!hasGit)(
       const after = await readFile(excludeFile, 'utf8');
       expect(after).not.toContain('stak-memory.mdc');
       expect(after).toContain('/AGENTS.override.md');
+      expect(after).toContain('/CLAUDE.local.md');
       expect(await exists(codexFile)).toBe(true);
       expect(git(b.dir, 'status', '--porcelain', '-uall')).toBe('');
 
