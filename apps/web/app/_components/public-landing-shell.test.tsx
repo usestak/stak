@@ -267,7 +267,7 @@ test('Why not just use Git? section renders the heading and all 4 item leads', (
     screen.getByText('That folder holds much more than memory.'),
   ).toBeInTheDocument();
   expect(
-    screen.getByText('One memory for all your agents (coming soon).'),
+    screen.getByText('One memory for all your agents.'),
   ).toBeInTheDocument();
 });
 
