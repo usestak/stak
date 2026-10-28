@@ -12,7 +12,7 @@ describe('beta constants', () => {
   });
 
   it('pins the surfaced version string', () => {
-    expect(PUBLIC_BETA_VERSION).toBe('v0.2.0-beta.3');
+    expect(PUBLIC_BETA_VERSION).toBe('v0.2.0-beta.4');
   });
 
   it('pins the label used across the nav pill and /beta page', () => {

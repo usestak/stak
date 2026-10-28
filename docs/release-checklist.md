@@ -78,6 +78,27 @@ Run from a clean checkout, after the web deploy above is confirmed live.
 - [ ] `npm dist-tag ls @memstk/cli` → confirm `beta` points at `0.2.0-beta.3`
       and `latest` is still `0.1.2`
 
+### Publishing `@memstk/cli@0.2.0-beta.4` to the `beta` dist-tag
+
+No server migration is needed for beta.4: #19, #20, #21, and #23 (the PRs
+this release is built from) added no new files under `supabase/migrations/`
+— the newest migration is still `0018_memory_replica_of.sql`, applied for
+beta.3. There is no deploy-order constraint to observe before publishing
+this one.
+
+Run from a clean checkout. `latest` must stay on `0.1.2` — do not let this
+move it.
+
+- [ ] `pnpm install --frozen-lockfile`
+- [ ] `pnpm build` (from the repo root, or `pnpm --filter @memstk/cli build`)
+- [ ] `cd packages/cli`
+- [ ] `node dist/bin.js --version` → confirm it prints `0.2.0-beta.4`
+- [ ] `npm publish --tag beta` (never plain `npm publish` — that would move
+      `latest`; `publishConfig.access` is already `public` in
+      `packages/cli/package.json`)
+- [ ] `npm dist-tag ls @memstk/cli` → confirm `beta` points at `0.2.0-beta.4`
+      and `latest` is still `0.1.2`
+
 - [ ] **Production web deployment** of `apps/web` with production env vars.
 - [ ] Set server secrets (`SUPABASE_SERVICE_ROLE_KEY`, `STAK_TICKET_SECRET`) in the
       hosting environment — see [env-vars.md](env-vars.md).

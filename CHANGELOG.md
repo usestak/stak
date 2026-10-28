@@ -3,6 +3,29 @@
 All notable changes to STAK are documented here. This project adheres to
 semantic versioning.
 
+## 0.2.0-beta.4 — 2026-10-28
+
+- **Shared memory across agents (#23):** `stak run codex` / `stak run cursor`
+  (or `stak memory agents enable`) shares your project Memory with Codex (a
+  private `AGENTS.override.md` that includes your team's `AGENTS.md`) and
+  Cursor (`.cursor/rules/stak-memory.mdc`). The files stay out of Git via the
+  repo's local ignore list, and are refreshed automatically after
+  `stak add .`, `pull`, `push` and the other Memory commands.
+  `stak memory agents` lists, enables, disables and resets this per agent.
+  `stak status` shows a line per agent. Your own `AGENTS.md`, your Cursor
+  rules and anything you edited by hand are never touched. Sharing is
+  one-way for now: edits made in Codex or Cursor don't flow back.
+- **Privacy fix (#23):** when STAK restores your `CLAUDE.local.md` into a
+  project on another machine, it now keeps it out of Git as well.
+- **#21:** after `stak pull` on a new machine, Skills show as "not installed
+  here yet — run `stak run <agent>`" instead of "missing", and status no
+  longer suggests `stak remove`.
+- **#20:** the hint after `stak memory recover` is accurate (`stak pull` for
+  project Memory). A hanging npm registry no longer slows every command.
+  `recover --passkey` prints the project-merge line.
+- **#19:** a Windows fix, so Skills containing symlinks restore correctly on
+  Windows. CI is now green on Windows, Linux and macOS.
+
 ## 0.2.0-beta.3 — 2026-10-27
 
 - **STAK-native Project Memory.** Project Memory is now stored by STAK
