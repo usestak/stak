@@ -80,6 +80,8 @@ export type MemoryCommandDependencies = {
         status: 'recovered';
         objects: number;
         files: number;
+        legacyFiles: number;
+        projectFiles: number;
         generation: number;
       }
   >;
@@ -522,6 +524,8 @@ export const registerMemoryCommand = (
                       status: result.status,
                       objects: result.objects,
                       files: result.files,
+                      legacyFiles: result.legacyFiles,
+                      projectFiles: result.projectFiles,
                       backup: result.generation,
                     }
                   : result,
@@ -550,6 +554,8 @@ export const registerMemoryCommand = (
                 privacyMode: 'protected',
                 objects: result.objects,
                 files: result.files,
+                legacyFiles: result.legacyFiles,
+                projectFiles: result.projectFiles,
                 generation: result.generation,
               }),
             );
@@ -570,6 +576,8 @@ export const registerMemoryCommand = (
                     privacyMode: outcome.privacyMode,
                     objects: outcome.objects,
                     files: outcome.files,
+                    legacyFiles: outcome.legacyFiles,
+                    projectFiles: outcome.projectFiles,
                     backup: outcome.generation,
                   }
                 : outcome,

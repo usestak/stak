@@ -130,6 +130,8 @@ describe('renderCombinedPullResult', () => {
         privacyMode: 'standard',
         objects: 10,
         files: 14,
+        legacyFiles: 14,
+        projectFiles: 0,
         generation: 3,
       },
     };

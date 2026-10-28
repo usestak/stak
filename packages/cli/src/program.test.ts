@@ -1745,6 +1745,8 @@ describe('STAK CLI', () => {
       privacyMode: 'standard' as const,
       objects: 5,
       files: 7,
+      legacyFiles: 7,
+      projectFiles: 0,
       generation: 2,
     }));
     const chunks: string[] = [];
@@ -1903,6 +1905,8 @@ describe('STAK CLI', () => {
       privacyMode: 'standard' as const,
       objects: 1,
       files: 1,
+      legacyFiles: 1,
+      projectFiles: 0,
       generation: 0,
     }));
     const applyCanonicalPull = vi.fn(async () => ({
@@ -2474,6 +2478,8 @@ describe('STAK CLI', () => {
             privacyMode: 'standard',
             objects: 1,
             files: 1,
+            legacyFiles: 1,
+            projectFiles: 0,
             generation: 1,
           };
         },
@@ -3530,6 +3536,8 @@ describe('STAK CLI', () => {
           privacyMode: 'protected',
           objects: 27,
           files: 29,
+          legacyFiles: 29,
+          projectFiles: 0,
           generation: 3,
         }),
       },
@@ -3552,6 +3560,8 @@ describe('STAK CLI', () => {
           privacyMode: 'protected',
           objects: 27,
           files: 29,
+          legacyFiles: 29,
+          projectFiles: 0,
           generation: 3,
         }),
       },
@@ -3568,6 +3578,8 @@ describe('STAK CLI', () => {
         privacyMode: 'standard',
         objects: 27, // fewer unique content blobs than logical files (dedup)
         files: 29,
+        legacyFiles: 29,
+        projectFiles: 0,
         generation: 3,
       }),
     });
@@ -3870,6 +3882,8 @@ describe('STAK CLI', () => {
           privacyMode: 'protected',
           objects: 27,
           files: 29,
+          legacyFiles: 29,
+          projectFiles: 0,
           generation: 3,
         };
       },
@@ -3888,6 +3902,8 @@ describe('STAK CLI', () => {
           privacyMode: 'protected',
           objects: 27,
           files: 29,
+          legacyFiles: 29,
+          projectFiles: 0,
           generation: 3,
         };
       },
