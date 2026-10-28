@@ -267,6 +267,19 @@ const COMMAND_DETAILS: Record<string, CommandDetail> = {
     ],
     examples: ['stak publish ./my-stak --slug my-stak', 'stak publish main'],
   },
+  upgrade: {
+    usage: 'stak upgrade [--dry-run] [-y|--yes]',
+    purpose:
+      'Update the STAK CLI to the newest version on your channel (`beta` for a prerelease build, `latest` for a release).',
+    options: [
+      '--dry-run — print the install command without running it',
+      '-y, --yes — install without asking for confirmation',
+    ],
+    examples: ['stak upgrade', 'stak upgrade --dry-run'],
+    notes: [
+      'Detects whether the CLI was installed with npm or pnpm and shows the exact command before running it. If the install fails, the command is printed so you can run it yourself.',
+    ],
+  },
 };
 
 const GROUP_ORDER: CliCommandGroup[] = [
@@ -276,6 +289,7 @@ const GROUP_ORDER: CliCommandGroup[] = [
   'Projects',
   'Memory',
   'Cloud & Publishing',
+  'Maintenance',
 ];
 
 const commandsByGroup = (group: CliCommandGroup) =>

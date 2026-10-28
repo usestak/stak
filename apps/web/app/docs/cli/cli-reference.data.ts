@@ -4,7 +4,8 @@ export type CliCommandGroup =
   | 'STAKs'
   | 'Projects'
   | 'Memory'
-  | 'Cloud & Publishing';
+  | 'Cloud & Publishing'
+  | 'Maintenance';
 
 export interface CliCommandMeta {
   name: string;
@@ -35,4 +36,5 @@ export const CLI_REFERENCE_COMMANDS: CliCommandMeta[] = [
   { name: 'push', group: 'Cloud & Publishing' },
   { name: 'pull', group: 'Cloud & Publishing' },
   { name: 'publish', group: 'Cloud & Publishing' },
+  { name: 'upgrade', group: 'Maintenance' },
 ];
