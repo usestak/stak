@@ -104,7 +104,7 @@ export type WriteResult = { written: string[]; deleted: string[] };
  * A segment that does not exist yet (nothing created there so far) is not a
  * symlink and is safe to pass through.
  */
-const assertRootHasNoSymlinkSegments = async (
+export const assertRootHasNoSymlinkSegments = async (
   anchor: string,
   root: string,
 ): Promise<void> => {

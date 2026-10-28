@@ -23,3 +23,6 @@ export * from './canonical/convert-v1.js';
 export * from './canonical/project-sync.js';
 export * from './canonical/claude-project-adapter.js';
 export * from './memory-lock.js';
+export * from './agent-export/render.js';
+export * from './agent-export/git-exclude.js';
+export * from './agent-export/exporter.js';
