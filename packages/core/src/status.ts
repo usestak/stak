@@ -1,7 +1,13 @@
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { environmentDiffSchema, environmentStatusSchema } from '@stack/spec';
+import {
+  bindingRegistrySchema,
+  environmentDiffSchema,
+  environmentStatusSchema,
+} from '@stack/spec';
 import type {
+  BindingRecord,
   BaselineLocation,
   DiscoveredSkill,
   EnvironmentDiff,
@@ -107,6 +113,31 @@ const comparePlacement = (
   return result;
 };
 
+/**
+ * This machine's agent binding records (what `stak run <agent>` installed here). Read-only and
+ * best-effort: a missing or unreadable registry is treated as "no bindings", which can only
+ * make status say "not installed here" rather than "missing" — never the reverse, so it can
+ * never steer the user towards `stak remove`.
+ */
+const readMachineBindings = async (
+  stackHome: string,
+  machineId: string,
+): Promise<BindingRecord[]> => {
+  try {
+    const registry = bindingRegistrySchema.parse(
+      JSON.parse(
+        await readFile(
+          path.join(stackHome, 'state', 'machines', machineId, 'bindings.json'),
+          'utf8',
+        ),
+      ),
+    );
+    return registry.machineId === machineId ? registry.bindings : [];
+  } catch {
+    return [];
+  }
+};
+
 export const statusMainEnvironment = async (
   options: ObserveMainEnvironmentOptions,
 ): Promise<EnvironmentStatus> => {
@@ -137,6 +168,9 @@ export const statusMainEnvironment = async (
   const skills: SkillStatus[] = [];
   const placementDrift: PlacementDrift[] = [];
   const verify = options.store?.verifyStoredSkill ?? verifyStoredSkill;
+  const bindings = (
+    await readMachineBindings(options.stackHome, saved.machine.machineId)
+  ).filter((record) => record.environment === saved.manifest.name);
 
   for (const [entryId, locked] of Object.entries(saved.lock.skills)) {
     const entry = { id: entryId, name: locked.name };
@@ -157,13 +191,26 @@ export const statusMainEnvironment = async (
         uncertaintyRoots.map((root) => [pathKey(root.path), root]),
       ).values(),
     ];
+    // Was this exact Skill ever placed on THIS machine? Either it was captured from here
+    // (`init`/`add` record its placements in the machine baseline) or `stak run <agent>`
+    // bound this content here. `stak pull` deliberately starts with empty placements and no
+    // bindings, so a freshly pulled Skill is "not installed here yet", not "missing".
+    const placedOnThisMachine =
+      baseline.locations.length > 0 ||
+      bindings.some(
+        (record) =>
+          record.environmentEntryId === entry.id &&
+          record.contentHash === locked.contentHash,
+      );
     const stateName: SkillStatus['state'] = exact
       ? 'satisfied'
       : modified
         ? 'modified'
         : uniqueUncertainty.length > 0
           ? 'uncertain'
-          : 'missing';
+          : placedOnThisMachine
+            ? 'missing'
+            : 'not-installed';
     if (stateName === 'modified' && modified)
       assignedModifiedHashes.add(modified.contentHash);
     const currentLocations = exact
@@ -275,6 +322,7 @@ export const statusMainEnvironment = async (
       satisfied: count('satisfied'),
       modified: count('modified'),
       missing: count('missing'),
+      notInstalled: count('not-installed'),
       uncertain: count('uncertain'),
       untracked: untracked.length,
       placementAdded: placementDrift.filter((item) => item.kind === 'added')

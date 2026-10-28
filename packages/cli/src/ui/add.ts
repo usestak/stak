@@ -18,6 +18,8 @@ const issueLine = (issue: SkillAddIssue): string => {
       return `${issue.name}: already matches what's in main. Nothing to add.`;
     case 'missing':
       return `${issue.name}: tracked in main but missing on disk, or could not be verified. Run \`stak remove ${issue.name}\` if removal is intentional.`;
+    case 'not-installed':
+      return `${issue.name}: already in main, just not installed on this machine yet. Nothing to add. Run \`stak run <agent>\` (e.g. \`stak run codex\`) to set it up.`;
   }
 };
 

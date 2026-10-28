@@ -12,6 +12,7 @@ const baseSummary: EnvironmentStatus['summary'] = {
   satisfied: 0,
   modified: 0,
   missing: 0,
+  notInstalled: 0,
   uncertain: 0,
   untracked: 0,
   placementAdded: 0,
@@ -307,6 +308,55 @@ describe('renderStatus (default, non-verbose)', () => {
     expect(output).toContain('! impeccable');
     expect(output).toMatch(/tracked in main, missing on disk/);
     expect(output).toContain('stak remove');
+  });
+
+  it('reports Skills not installed on this machine as a count with `stak run`, never as missing', () => {
+    const status = baseStatus({
+      desiredCount: 2,
+      skills: [
+        skillStatus({
+          entryId: 'skill_a',
+          name: 'alpha',
+          state: 'not-installed',
+        }),
+        skillStatus({
+          entryId: 'skill_b',
+          name: 'beta',
+          state: 'not-installed',
+        }),
+      ],
+      summary: { ...baseSummary, notInstalled: 2 },
+    });
+    const output = renderStatus(status);
+    expect(output).toContain('Nothing to add. 2 skills tracked.');
+    expect(output).toContain(
+      '2 skills in main not installed here yet. Run `stak run <agent>` (e.g. `stak run codex`) to set them up.',
+    );
+    expect(output).not.toContain('alpha');
+    expect(output).not.toContain('missing on disk');
+    expect(output).not.toContain('stak remove');
+  });
+
+  it('keeps the remove hint for genuinely missing Skills alongside not-installed ones', () => {
+    const status = baseStatus({
+      desiredCount: 2,
+      skills: [
+        skillStatus({ entryId: 'skill_a', name: 'alpha', state: 'missing' }),
+        skillStatus({
+          entryId: 'skill_b',
+          name: 'beta',
+          state: 'not-installed',
+        }),
+      ],
+      summary: { ...baseSummary, missing: 1, notInstalled: 1 },
+    });
+    const output = renderStatus(status);
+    expect(output).toContain('! alpha  (tracked in main, missing on disk)');
+    expect(output).not.toContain('! beta');
+    expect(output).toContain('stak remove <skill>');
+    expect(output).toContain(
+      '1 skill in main not installed here yet. Run `stak run <agent>` (e.g. `stak run codex`) to set it up.',
+    );
   });
 
   it('never claims a clean tree when untracked Skills are present', () => {

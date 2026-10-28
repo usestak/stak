@@ -90,7 +90,19 @@ export const machineEnvironmentBaselineSchema = z.object({
 export const skillStatusSchema = z.object({
   entryId: entryIdSchema,
   name: z.string(),
-  state: z.enum(['satisfied', 'modified', 'missing', 'uncertain']),
+  /**
+   * `not-installed`: tracked in `main` (and preserved in the local Store) but never placed
+   * on THIS machine — no baseline placement and no agent binding for this content. The
+   * normal state right after `stak pull` on a new machine, until `stak run <agent>`.
+   * Distinct from `missing`, which means the Skill WAS on this machine and is now gone.
+   */
+  state: z.enum([
+    'satisfied',
+    'modified',
+    'missing',
+    'not-installed',
+    'uncertain',
+  ]),
   desiredHash: contentHashSchema,
   currentHash: contentHashSchema.optional(),
   desiredSource: skillSourceSchema.optional(),
@@ -132,6 +144,7 @@ export const environmentStatusSummarySchema = z.object({
   satisfied: z.number().int().nonnegative(),
   modified: z.number().int().nonnegative(),
   missing: z.number().int().nonnegative(),
+  notInstalled: z.number().int().nonnegative(),
   uncertain: z.number().int().nonnegative(),
   untracked: z.number().int().nonnegative(),
   placementAdded: z.number().int().nonnegative(),
