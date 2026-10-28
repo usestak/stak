@@ -8,6 +8,8 @@ import type {
 } from '@stack/memory';
 import { formatLockAge, toManifestItem } from '@stack/memory';
 
+import type { ProjectFoldNote } from '../memory/project-fold.js';
+
 import { StackCompositionError } from '@stack/core';
 
 import type {
@@ -80,7 +82,11 @@ export type MemoryCommandDependencies = {
         status: 'recovered';
         objects: number;
         files: number;
+        legacyFiles: number;
+        projectFiles: number;
         generation: number;
+        /** Spec §4.2.1: former Project IDs folded after the recover. */
+        folded?: ProjectFoldNote[];
       }
   >;
   memoryCloudStatus(): Promise<MemoryCloudStatus>;
@@ -522,6 +528,8 @@ export const registerMemoryCommand = (
                       status: result.status,
                       objects: result.objects,
                       files: result.files,
+                      legacyFiles: result.legacyFiles,
+                      projectFiles: result.projectFiles,
                       backup: result.generation,
                     }
                   : result,
@@ -550,7 +558,10 @@ export const registerMemoryCommand = (
                 privacyMode: 'protected',
                 objects: result.objects,
                 files: result.files,
+                legacyFiles: result.legacyFiles,
+                projectFiles: result.projectFiles,
                 generation: result.generation,
+                ...(result.folded ? { folded: result.folded } : {}),
               }),
             );
             return;
@@ -570,6 +581,8 @@ export const registerMemoryCommand = (
                     privacyMode: outcome.privacyMode,
                     objects: outcome.objects,
                     files: outcome.files,
+                    legacyFiles: outcome.legacyFiles,
+                    projectFiles: outcome.projectFiles,
                     backup: outcome.generation,
                   }
                 : outcome,

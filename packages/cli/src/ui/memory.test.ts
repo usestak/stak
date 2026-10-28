@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import type { ProjectIdentity, RestorePlan } from '@stack/memory';
 
-import { renderMemoryRestore } from './memory.js';
+import type { CloudRecoverOutcome } from '../memory/cloud-ops.js';
+import { renderMemoryRecover, renderMemoryRestore } from './memory.js';
 
 const gitId = (repo: string): ProjectIdentity => ({
   kind: 'git',
@@ -106,5 +107,51 @@ describe('renderMemoryRestore', () => {
       'restorable  claude/auto-memory/github.com/example/atlas/f0.md',
     );
     expect(output).toContain('project-not-found  claude/auto-memory/');
+  });
+});
+
+describe('renderMemoryRecover', () => {
+  const recovered = (
+    legacyFiles: number,
+    projectFiles: number,
+  ): CloudRecoverOutcome => ({
+    status: 'recovered',
+    privacyMode: 'standard',
+    objects: legacyFiles + projectFiles,
+    files: legacyFiles + projectFiles,
+    legacyFiles,
+    projectFiles,
+    generation: 3,
+  });
+
+  it('points only at `stak pull` / `stak memory materialize` when only Project Memory was recovered', () => {
+    const output = renderMemoryRecover(recovered(0, 2));
+    expect(output).toContain('Memory recovered from backup #3.');
+    expect(output).toContain(
+      'Run `stak pull` to write it into your projects (or `stak memory materialize`).',
+    );
+    expect(output).not.toContain('stak memory restore');
+  });
+
+  it('points only at `stak memory restore` when only legacy/global Memory was recovered', () => {
+    const output = renderMemoryRecover(recovered(2, 0));
+    expect(output).toContain('Run `stak memory restore`.');
+    expect(output).not.toContain('stak pull');
+    expect(output).not.toContain('stak memory materialize');
+  });
+
+  it('mentions both when both legacy/global and Project Memory were recovered', () => {
+    const output = renderMemoryRecover(recovered(1, 1));
+    expect(output).toContain(
+      'Run `stak pull` to write it into your projects (or `stak memory materialize`).',
+    );
+    expect(output).toContain('Run `stak memory restore`.');
+  });
+
+  it('mentions neither when nothing was recovered to write out', () => {
+    const output = renderMemoryRecover(recovered(0, 0));
+    expect(output).not.toContain('stak pull');
+    expect(output).not.toContain('stak memory materialize');
+    expect(output).not.toContain('stak memory restore');
   });
 });

@@ -402,7 +402,9 @@ public):
   with backup number, date, privacy mode, and size.
 - `stak memory recover [--backup <n>] [--recovery-file <path>]` — rebuild the
   private Memory **store** from Cloud on a new machine. It never writes native agent
-  files — run `stak memory restore` afterward for that.
+  files itself: Project Memory lands in them on the next `stak pull` (or
+  `stak memory materialize`), and legacy/global Memory needs
+  `stak memory restore` afterward.
 - `stak memory status` — shows local and Cloud state (privacy mode, recovery
   methods, whether this device is enrolled, and whether local Memory came from an
   earlier backup than the Cloud latest).
@@ -420,7 +422,9 @@ when the latest backup contains unwanted state but an earlier backup is known-go
 
 - Historical recovery changes only your **local** private Memory store. It does
   **not** change the latest Cloud backup, retire newer backups, or upload anything.
-  You still run `stak memory restore` to apply it to native agent Memory.
+  You still need to apply it to native agent Memory: `stak pull` (or
+  `stak memory materialize`) for Project Memory, `stak memory restore` for
+  legacy/global Memory.
 - After recovering a previous backup, `stak memory status` shows the relationship
   (e.g. "Local source Backup #3 / Cloud latest Backup #4") instead of "up to date".
 - If you then `stak push`, STAK publishes the rollback as a **new** backup (see

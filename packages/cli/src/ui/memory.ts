@@ -172,6 +172,19 @@ export const renderMemoryRecover = (outcome: CloudRecoverOutcome): string => {
       'Recover with a passkey in your browser, or use a recovery file:',
       '  stak memory recover --recovery-file <path>',
     ]);
+  // Project Memory (canonical documents) is written into agent files by the next
+  // `stak pull`, or by `stak memory materialize` — never by `stak memory restore`.
+  // Legacy/global v1 items are the only thing `stak memory restore` still writes
+  // (global, e.g. `~/.claude/CLAUDE.md`-type Memory). Only mention each hint when
+  // that kind of item was actually recovered.
+  const hasProjectFiles = outcome.projectFiles > 0;
+  const hasLegacyFiles = outcome.legacyFiles > 0;
+  const hints: string[] = [];
+  if (hasProjectFiles)
+    hints.push(
+      'Run `stak pull` to write it into your projects (or `stak memory materialize`).',
+    );
+  if (hasLegacyFiles) hints.push('Run `stak memory restore`.');
   return block([
     `Memory recovered from backup #${outcome.generation}.`,
     '',
@@ -179,8 +192,7 @@ export const renderMemoryRecover = (outcome: CloudRecoverOutcome): string => {
     `Privacy: ${outcome.privacyMode === 'protected' ? 'Protected' : 'Standard'}`,
     // Spec §4.2.1 (review fix M3): a project merged by the recover, once.
     ...projectFoldNotes(outcome.folded).map((note) => `${note}.`),
-    '',
-    'Run `stak memory restore`.',
+    ...(hints.length > 0 ? ['', ...hints] : []),
   ]);
 };
 
