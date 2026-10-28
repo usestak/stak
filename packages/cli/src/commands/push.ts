@@ -19,6 +19,11 @@ import {
   type PushMemoryOutcome,
   type PushSkillOutcome,
 } from '../ui/cloud.js';
+import {
+  safelyExportAgentMemory,
+  type AgentExportReport,
+} from '../memory/agent-export-ops.js';
+import { renderAgentExportNotes } from '../ui/agent-memory.js';
 
 /** `note`: a one-line notice printed when the push proceeds (spec §8.5: a
  * rollback published by an ordinary push is announced, never silent). */
@@ -48,6 +53,9 @@ export type PushCommandDependencies = {
    * Optional so existing tests keep working; when absent, `fn` runs directly.
    */
   withMemoryLock?<T>(command: string, fn: () => Promise<T>): Promise<T>;
+  /** Spec 2026-10-28 §7: refresh every enabled agent's Memory file, at the end
+   * of the push's locked Memory span. Optional; never fails the command. */
+  exportAgentMemory?(): Promise<AgentExportReport>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -149,6 +157,7 @@ export const registerPushCommand = (
         // outside it. The preflight is read again under the lock so the write acts on
         // the state it checked. A busy lock (MemoryLockError) lands in the catch below
         // and reports Memory FAILED with the lock message, like any Memory failure.
+        let agentMemory: AgentExportReport | undefined;
         const applyMemory = async (): Promise<PushMemoryOutcome> => {
           const applyMemoryPush = dependencies.applyMemoryPush;
           if (!applyMemoryPush) return { status: 'not-attempted' };
@@ -167,10 +176,12 @@ export const registerPushCommand = (
                       recheck.reason ??
                       'Memory has a predictable conflict with STAK Cloud. Resolve it before pushing.',
                   };
-                return {
-                  status: 'applied',
-                  outcome: await applyMemoryPush.call(dependencies),
-                };
+                const outcome = await applyMemoryPush.call(dependencies);
+                // Still inside the lock: Memory is written and materialized.
+                agentMemory = await safelyExportAgentMemory(
+                  dependencies.exportAgentMemory?.bind(dependencies),
+                );
+                return { status: 'applied', outcome };
               },
             );
           } catch (error) {
@@ -187,6 +198,8 @@ export const registerPushCommand = (
         ]);
 
         dependencies.writeOut(renderCombinedPushResult(skill, memory));
+        const agentNotes = renderAgentExportNotes(agentMemory);
+        if (agentNotes) dependencies.writeOut(agentNotes);
         // A runtime/network failure in either domain after apply began is partial
         // success, not total failure — report it clearly above, then fail the command.
         // Never claim "Cloud is up to date" in this path (renderCombinedPushResult

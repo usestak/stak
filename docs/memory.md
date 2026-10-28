@@ -41,7 +41,8 @@ Claude is the only Memory provider in V0. Codex and Cursor are not faked: Codex
 has no native auto-memory directory, and Cursor account User Rules already sync
 through Cursor while local `~/.cursor/rules` are a separate instruction surface —
 adapters for them may register later and report `unsupported` until a stable
-contract exists.
+contract exists. STAK can still write your project Memory into Codex and Cursor
+(one-way): see [Sharing Memory with Codex and Cursor](#sharing-memory-with-codex-and-cursor).
 
 ## What STAK Memory V0 does NOT preserve
 
@@ -154,7 +155,8 @@ and is purely organizational:
 _Not yet available:_ deleting a project's memory (hard delete), an optional in-repo
 project marker, and repository-transfer reconciliation are designed in the
 architecture docs but not implemented in this release. Also not yet available:
-Cursor and Codex Memory adapters, a User (global) Memory scope, and rename
+Cursor and Codex Memory adapters that read their memory back into STAK (sharing
+from STAK to them is available), a User (global) Memory scope, and rename
 detection (a renamed Memory file counts as one deletion plus one new file).
 
 ## Canonical Project Memory
@@ -241,6 +243,64 @@ they need to be redone. Old decisions are never replayed blindly.
 project known only from another machine shows as **not available on this
 machine** until the next `stak pull` finds it, or until you map it with
 `stak project map`.
+
+### Sharing Memory with Codex and Cursor
+
+STAK can write each project's Memory into Codex and Cursor too, so all three
+agents start a session knowing the same things. It is one-way (STAK → agent)
+and private to you.
+
+| Agent  | File STAK writes, inside the project folder                                 |
+| ------ | --------------------------------------------------------------------------- |
+| Codex  | `AGENTS.override.md`: your team's `AGENTS.md`, then the STAK Memory section |
+| Cursor | `.cursor/rules/stak-memory.mdc` (always applied)                            |
+
+The Memory section holds the project's private instructions
+(`instructions/private.md`) and its notes (`notes/…`), never another agent's
+`agents/…` documents. If it doesn't fit (Codex: 30 KiB for the whole file,
+Cursor: 24 KiB), whole notes are left out from the end and the file says which.
+Edit your Memory in Claude or with `stak memory`, not in these files: edits there
+don't flow back.
+
+- **On:** `stak run codex` / `stak run cursor` turns sharing on for that agent and
+  writes its files before launching (`--no-memory` skips this, `--dry-run` writes
+  nothing). `stak memory agents enable <codex|cursor>` does the same without
+  launching.
+- **Fresh:** after `stak add .`, `stak pull`, `stak push`, `stak memory backup`,
+  the final `stak memory resolve`, `stak memory materialize` and `stak memory
+recover`, STAK rewrites the files for every project it finds on this machine
+  and every agent that is on. This happens inside the same Memory lock as the
+  command. Codex's file is also rebuilt when your team's `AGENTS.md` changes.
+- **Status:** `stak status` and `stak memory status` show one line per agent that
+  is on: up to date, or how many projects are out of date, skipped, hand-edited,
+  not ignorable or over budget. `stak memory agents` lists both agents, on or off,
+  with what to do for each project that needs it.
+- **Off:** `stak memory agents disable <agent>` turns sharing off and deletes the
+  files STAK wrote, if you haven't changed them. A hand-edited file is kept
+  (including one left in a project's old folder) and stays excluded from Git, so it
+  can't be committed by accident. Delete it yourself when you're done.
+- **Reset:** a file you edited by hand is never overwritten.
+  `stak memory agents reset <agent>` rewrites STAK's own files for that agent,
+  hand edits included. It never touches a file STAK didn't write.
+
+**Privacy.** In a Git repository, STAK adds each file it writes to the repository's
+local-only exclude list (`.git/info/exclude`, in a marked STAK block) before
+writing it, so it never shows in `git status` and can't be committed. A project
+is skipped, with a note, when the file is already tracked by Git, when a
+`.gitignore` rule re-includes it (a `!` line), when Git isn't available, or when
+a file of that name exists that STAK didn't write. A project that isn't a Git
+repository gets the file without an exclude.
+
+**One folder per project.** A project is written to the same folder
+`stak memory materialize` uses. If STAK finds the same project in more than one
+folder (for example two checkouts of one repository), it skips it with a note
+until you choose one with `stak project map <project> <dir>`.
+
+Exporting never fails the command that triggered it: problems are printed as
+notes. If STAK's record of the files it wrote becomes unreadable, the note says to
+delete `$STAK_HOME/memory/agent-exports/state.json` and run
+`stak memory agents reset <agent>`. That record is machine-local and is never
+backed up or pushed.
 
 ### `stak memory backup`
 

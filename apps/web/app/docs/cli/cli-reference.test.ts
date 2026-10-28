@@ -45,4 +45,28 @@ describe('CLI reference matches registered commands', () => {
       expect(registered).toContain(c.name);
     }
   });
+
+  it('documents only subcommands that are actually registered', () => {
+    for (const c of CLI_REFERENCE_COMMANDS) {
+      if (!c.subcommands) continue;
+      const source = readFileSync(
+        path.join(
+          here,
+          `../../../../../packages/cli/src/commands/${c.name}.ts`,
+        ),
+        'utf8',
+      );
+      for (const sub of c.subcommands)
+        expect(
+          source.includes(`.command('${sub}'`) ||
+            source.includes(`.command('${sub} `),
+        ).toBe(true);
+    }
+  });
+
+  it('documents `memory agents` (cross-agent Project Memory)', () => {
+    expect(
+      CLI_REFERENCE_COMMANDS.find((c) => c.name === 'memory')?.subcommands,
+    ).toContain('agents');
+  });
 });

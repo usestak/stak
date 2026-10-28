@@ -25,7 +25,10 @@ by `init`/`add`, or installed by `stak run`) and is now gone; `stak remove` drop
 it from `main` if that was deliberate. _Not installed_ means the Skill is in
 `main` but was never set up on this machine, which is normal right after
 `stak pull` or `stak use`; run `stak run <agent>` to install it. Not
-installed Skills are never staged or pushed as removals.
+installed Skills are never staged or pushed as removals. When project Memory
+sharing is on for Codex or Cursor, `status` adds one line per agent (up to date,
+or how many projects are out of date, skipped, hand-edited, not ignorable or over
+budget); `--json` adds an `agentMemory` field.
 
 ### `stak use <stak> [--dry-run] [--json] [--yes]`
 
@@ -39,7 +42,7 @@ locally so subsequent `status`/`diff`/`remove` work offline.
 Remove a STAK layer from `main`. Skills still required by other layers are
 preserved.
 
-### `stak run <codex|cursor|claude> [--dry-run] [--json] [--yes]`
+### `stak run <codex|cursor|claude> [--dry-run] [--json] [--yes] [--no-memory]`
 
 Reconcile `main` into an agent's Skill directory, then launch that agent's CLI
 with the Skills projected. Verifies the agent is installed first; protects
@@ -49,6 +52,10 @@ The launcher is shim-safe: on Windows an npm `.cmd`/`.bat` shim is executed
 without a shell and with argument-array semantics preserved (see
 [security](./security.md#windows-npm-shims)). `--dry-run` reconciles and previews
 without launching; add `--json` for structured output.
+`stak run codex` and `stak run cursor` also turn on project Memory sharing for
+that agent and write its files before launching (see `stak memory agents`);
+`--no-memory` skips this and `--dry-run` writes nothing. Sharing problems are
+printed as notes and never stop the launch.
 
 ### `stak try <stak> -- codex|claude|cursor [--dry-run] [--json]`
 
@@ -80,7 +87,8 @@ to try again.
 
 ### `stak memory status [--json] [--verbose]`
 
-Show the last memory backup.
+Show the last memory backup, plus one line per agent with Memory sharing on
+(`--json` adds an `agentMemory` field).
 
 ### `stak memory recover [--backup <n>] [--passkey] [--recovery-file <path>] [--json]`
 
@@ -131,6 +139,29 @@ or just one. Never overwrites a file you edited and haven't added yet. Projects
 not found on this machine are reported as not available and nothing is written
 for them. Only `claude` is supported.
 
+### `stak memory agents [--json]`
+
+Share project Memory (notes and private instructions) with Codex and Cursor,
+one-way and private. With no subcommand, lists each agent (on or off), a short
+status, and what to do for each project that needs it. Codex gets
+`AGENTS.override.md` (your team's `AGENTS.md` plus the STAK Memory section),
+Cursor gets `.cursor/rules/stak-memory.mdc`. In a Git repository both are added
+to the local `.git/info/exclude` first, so they are never committed. Once an
+agent is on, its files are refreshed after `stak add .`, `pull`, `push`,
+`memory backup`, the final `memory resolve`, `memory materialize` and
+`memory recover`. Sharing problems are printed as notes and never fail a
+command. See [memory](./memory.md#sharing-memory-with-codex-and-cursor).
+
+- `stak memory agents enable <codex|cursor>` — turn sharing on and write the
+  files now (`stak run codex|cursor` does this too).
+- `stak memory agents disable <codex|cursor>` — turn sharing off and delete the
+  files STAK wrote, if unchanged. A hand-edited file is kept and stays excluded
+  from Git.
+- `stak memory agents reset <codex|cursor>` — rewrite STAK's files for that
+  agent, including ones edited by hand. Never touches a file STAK didn't write.
+
+`enable`, `disable` and `reset` hold the Memory lock; the list never does.
+
 ### `stak memory unlock [--force]`
 
 Remove a leftover Memory lock left behind by a crashed STAK command. Shows which
@@ -140,8 +171,8 @@ a warning: doing this while a real STAK command is running can lose its Memory
 changes. Says so, and succeeds, when no lock is held. Leftover locks normally
 clear themselves; this is the manual fallback.
 
-Memory is currently scoped to Claude Code; Codex and Cursor memory support is
-planned.
+Memory is captured from Claude Code; Codex and Cursor receive project Memory
+through `stak memory agents`.
 
 ## Project
 

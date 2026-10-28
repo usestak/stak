@@ -20,6 +20,11 @@ import {
   type PullMemoryOutcome,
   type PullSkillOutcome,
 } from '../ui/cloud.js';
+import {
+  safelyExportAgentMemory,
+  type AgentExportReport,
+} from '../memory/agent-export-ops.js';
+import { renderAgentExportNotes } from '../ui/agent-memory.js';
 
 export type MemoryPullPreflight = { eligible: boolean; reason?: string };
 
@@ -49,6 +54,9 @@ export type PullCommandDependencies = {
    * Optional so existing tests keep working; when absent, `fn` runs directly.
    */
   withMemoryLock?<T>(command: string, fn: () => Promise<T>): Promise<T>;
+  /** Spec 2026-10-28 §7: refresh every enabled agent's Memory file, at the end
+   * of the pull's locked Memory span. Optional; never fails the command. */
+  exportAgentMemory?(): Promise<AgentExportReport>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -118,6 +126,7 @@ export const registerPullCommand = (
             status: 'not-attempted',
           };
           let lockError: string | undefined;
+          let agentMemory: AgentExportReport | undefined;
           try {
             canonicalMemory = await (
               dependencies.withMemoryLock ?? runDirectly
@@ -126,17 +135,23 @@ export const registerPullCommand = (
               // not run the canonical pull's migration (Task 13 Important-8).
               if ((await readMemoryPreflight()).eligible)
                 return { status: 'not-attempted' };
+              let result: PullCanonicalOutcome;
               try {
-                return {
+                result = {
                   status: 'applied',
                   outcome: await applyCanonicalPull.call(dependencies),
                 };
               } catch (error) {
-                return {
+                result = {
                   status: 'failed',
                   error: error instanceof Error ? error.message : String(error),
                 };
               }
+              // Still inside the lock, after Memory was merged and materialized.
+              agentMemory = await safelyExportAgentMemory(
+                dependencies.exportAgentMemory?.bind(dependencies),
+              );
+              return result;
             });
           } catch (error) {
             if (!(error instanceof MemoryLockError)) throw error;
@@ -152,6 +167,8 @@ export const registerPullCommand = (
               ? renderPullPlan(plan, { verbose })
               : rendered,
           );
+          const agentNotes = renderAgentExportNotes(agentMemory);
+          if (agentNotes) dependencies.writeOut(agentNotes);
           if (lockError)
             throw new StackCompositionError(
               'pull-partial-failure',
@@ -241,11 +258,20 @@ export const registerPullCommand = (
                 error: error instanceof Error ? error.message : String(error),
               };
             }
+          // Spec 2026-10-28 §7: refresh the agent files last, inside the lock.
+          if (
+            memory.status === 'applied' ||
+            canonicalMemory.status !== 'not-attempted'
+          )
+            agentMemory = await safelyExportAgentMemory(
+              dependencies.exportAgentMemory?.bind(dependencies),
+            );
           return { memory, canonicalMemory };
         };
 
         let memory: PullMemoryOutcome = { status: 'not-attempted' };
         let canonicalMemory: PullCanonicalOutcome = { status: 'not-attempted' };
+        let agentMemory: AgentExportReport | undefined;
         const hasMemoryWork =
           dependencies.memoryPullPreflight !== undefined ||
           dependencies.applyMemoryPull !== undefined ||
@@ -265,6 +291,8 @@ export const registerPullCommand = (
         dependencies.writeOut(
           renderCombinedPullResult(skill, memory, canonicalMemory),
         );
+        const agentNotes = renderAgentExportNotes(agentMemory);
+        if (agentNotes) dependencies.writeOut(agentNotes);
         if (pullFailed(skill, memory))
           throw new StackCompositionError(
             'pull-partial-failure',

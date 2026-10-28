@@ -21,6 +21,23 @@ import type {
   ResolveConflictOutcome,
 } from '../memory/canonical-ops.js';
 import { canonicalExtraNotes, projectFoldNotes } from '../ui/cloud.js';
+import {
+  AGENT_EXPORT_IDS,
+  isAgentExportId,
+  safelyExportAgentMemory,
+  type AgentDisableReport,
+  type AgentExportId,
+  type AgentExportReport,
+  type AgentMemoryStatusReport,
+  type AgentResetReport,
+} from '../memory/agent-export-ops.js';
+import {
+  agentMemoryStatusLines,
+  renderAgentDisable,
+  renderAgentExportNotes,
+  renderAgentMemoryList,
+  renderAgentReset,
+} from '../ui/agent-memory.js';
 import type {
   CloudRecoverOutcome,
   MemoryBackupOutcome,
@@ -112,6 +129,15 @@ export type MemoryCommandDependencies = {
   withMemoryLock?<T>(command: string, fn: () => Promise<T>): Promise<T>;
   /** `stak memory unlock` (spec 2026-10-25 §3.6). Never takes the lock itself. */
   unlockMemory?(options: { force: boolean }): Promise<UnlockResult>;
+  /** Spec 2026-10-28 §7: refresh every enabled agent's Memory file. Called at
+   * the end of a Memory command's locked span; never fails the command. */
+  exportAgentMemory?(): Promise<AgentExportReport>;
+  /** `stak memory agents enable|disable|reset <agent>` (run inside the lock). */
+  enableAgentMemory?(agent: AgentExportId): Promise<AgentExportReport>;
+  disableAgentMemory?(agent: AgentExportId): Promise<AgentDisableReport>;
+  resetAgentMemory?(agent: AgentExportId): Promise<AgentResetReport>;
+  /** Read-only: each agent's on/off state and file status. */
+  agentMemoryStatus?(): Promise<AgentMemoryStatusReport>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
@@ -215,6 +241,24 @@ export const registerMemoryCommand = (
     dependencies.withMemoryLock
       ? dependencies.withMemoryLock(command, fn)
       : fn();
+  // Spec 2026-10-28 §7: the agent files are refreshed at the END of a Memory
+  // command's locked span (call this inside `locked`). Never throws.
+  const exportAgents = () =>
+    safelyExportAgentMemory(dependencies.exportAgentMemory?.bind(dependencies));
+  const writeNotes = (report: AgentExportReport | undefined) => {
+    const notes = renderAgentExportNotes(report);
+    if (notes) dependencies.writeOut(notes);
+  };
+  const agentStatus = async (): Promise<
+    AgentMemoryStatusReport | undefined
+  > => {
+    if (!dependencies.agentMemoryStatus) return undefined;
+    try {
+      return await dependencies.agentMemoryStatus();
+    } catch {
+      return undefined;
+    }
+  };
 
   memory
     .command('scan')
@@ -348,11 +392,16 @@ export const registerMemoryCommand = (
         if (!options.json)
           dependencies.writeOut('Backing up Claude memory...\n\n');
         const outcome = await dependencies.memoryCloudBackup();
+        const agentMemory = await exportAgents();
         if (options.json) {
-          emitJson(dependencies, outcome);
+          emitJson(dependencies, {
+            ...outcome,
+            ...(agentMemory ? { agentMemory } : {}),
+          });
           return;
         }
         dependencies.writeOut(renderMemoryCloudBackup(outcome));
+        writeNotes(agentMemory);
       });
     });
 
@@ -520,6 +569,8 @@ export const registerMemoryCommand = (
             const result = await dependencies.memoryRecoverPasskey({
               ...(generation !== undefined ? { generation } : {}),
             });
+            const agentMemory =
+              result.status === 'recovered' ? await exportAgents() : undefined;
             if (options.json) {
               emitJson(
                 dependencies,
@@ -531,6 +582,7 @@ export const registerMemoryCommand = (
                       legacyFiles: result.legacyFiles,
                       projectFiles: result.projectFiles,
                       backup: result.generation,
+                      ...(agentMemory ? { agentMemory } : {}),
                     }
                   : result,
               );
@@ -564,6 +616,7 @@ export const registerMemoryCommand = (
                 ...(result.folded ? { folded: result.folded } : {}),
               }),
             );
+            writeNotes(agentMemory);
             return;
           }
           const outcome = await dependencies.memoryCloudRecover({
@@ -572,6 +625,8 @@ export const registerMemoryCommand = (
               ? { recoveryFile: options.recoveryFile }
               : {}),
           });
+          const agentMemory =
+            outcome.status === 'recovered' ? await exportAgents() : undefined;
           if (options.json) {
             emitJson(
               dependencies,
@@ -584,6 +639,7 @@ export const registerMemoryCommand = (
                     legacyFiles: outcome.legacyFiles,
                     projectFiles: outcome.projectFiles,
                     backup: outcome.generation,
+                    ...(agentMemory ? { agentMemory } : {}),
                   }
                 : outcome,
             );
@@ -594,6 +650,7 @@ export const registerMemoryCommand = (
             return;
           }
           dependencies.writeOut(renderMemoryRecover(outcome));
+          writeNotes(agentMemory);
         });
       },
     );
@@ -604,9 +661,10 @@ export const registerMemoryCommand = (
     .option('--json', 'emit structured JSON only')
     .option('--verbose', 'show detail')
     .action(async (options: Flags) => {
-      const [local, cloud] = await Promise.all([
+      const [local, cloud, agents] = await Promise.all([
         dependencies.memoryStatus(),
         dependencies.memoryCloudStatus(),
+        agentStatus(),
       ]);
       if (options.json) {
         // Public CLI JSON uses backup terminology only; internal generation-named
@@ -623,10 +681,15 @@ export const registerMemoryCommand = (
             localRecoveredBackup: cloud.localRecoveredGeneration,
             cloudLatestBackup: cloud.latestGeneration,
           },
+          ...(agents ? { agentMemory: agents } : {}),
         });
         return;
       }
-      dependencies.writeOut(renderMemoryCloudStatus(local, cloud));
+      const agentLines = agentMemoryStatusLines(agents);
+      dependencies.writeOut(
+        renderMemoryCloudStatus(local, cloud) +
+          (agentLines.length > 0 ? `${agentLines.join('\n')}\n` : ''),
+      );
     });
 
   // Task 14 — spec §8.3: diff (opt-in, the only command that shows content),
@@ -680,10 +743,24 @@ export const registerMemoryCommand = (
             'Choose a side: --keep local, --keep cloud, or --keep both.',
           );
         const resolveConflict = required(dependencies.memoryResolveConflict);
-        const outcome = await locked('stak memory resolve', () =>
-          resolveConflict({ project, path: docPath, keep }),
+        const { outcome, agentMemory } = await locked(
+          'stak memory resolve',
+          async () => {
+            const resolved = await resolveConflict({
+              project,
+              path: docPath,
+              keep,
+            });
+            // Only the final resolve changes Memory (and materializes it).
+            return {
+              outcome: resolved,
+              agentMemory:
+                resolved.remaining === 0 ? await exportAgents() : undefined,
+            };
+          },
         );
         dependencies.writeOut(renderResolveOutcome(outcome));
+        writeNotes(agentMemory);
       },
     );
 
@@ -700,10 +777,112 @@ export const registerMemoryCommand = (
           `Unsupported agent "${options.agent}". Only claude is supported in this version.`,
         );
       const materialize = required(dependencies.memoryMaterialize);
-      const outcome = await locked('stak memory materialize', () =>
-        materialize(project !== undefined ? { project } : {}),
+      const { outcome, agentMemory } = await locked(
+        'stak memory materialize',
+        async () => {
+          const materialized = await materialize(
+            project !== undefined ? { project } : {},
+          );
+          return { outcome: materialized, agentMemory: await exportAgents() };
+        },
       );
       dependencies.writeOut(renderMaterializeOutcome(outcome));
+      writeNotes(agentMemory);
+    });
+
+  // Spec 2026-10-28 §7: share project Memory with Codex and Cursor.
+  const agentOf = (value: string): AgentExportId => {
+    if (!isAgentExportId(value))
+      throw new StackCompositionError(
+        'memory-agents-unknown-agent',
+        `Unknown agent "${value}". Choose ${AGENT_EXPORT_IDS.join(' or ')}.`,
+      );
+    return value;
+  };
+  const agents = memory
+    .command('agents')
+    .description(
+      'Share project Memory with Codex and Cursor (list, enable, disable, reset)',
+    )
+    .option('--json', 'emit structured JSON only')
+    .action(async (options: Flags) => {
+      const report = await required(dependencies.agentMemoryStatus)();
+      if (options.json) {
+        emitJson(dependencies, report);
+        return;
+      }
+      dependencies.writeOut(renderAgentMemoryList(report));
+    });
+  agents
+    .command('enable <agent>')
+    .description('Share project Memory with an agent and write its files now')
+    .action(async (value: string) => {
+      const agent = agentOf(value);
+      const enable = required(dependencies.enableAgentMemory);
+      const report = await locked('stak memory agents enable', () =>
+        safelyExportAgentMemory(() => enable(agent)),
+      );
+      dependencies.writeOut(renderAgentExportNotes(report, 'enable'));
+    });
+  agents
+    .command('disable <agent>')
+    .description(
+      "Stop sharing project Memory with an agent and remove STAK's files",
+    )
+    .action(async (value: string) => {
+      const agent = agentOf(value);
+      const disable = required(dependencies.disableAgentMemory);
+      const report = await locked(
+        'stak memory agents disable',
+        async (): Promise<AgentDisableReport> => {
+          try {
+            return await disable(agent);
+          } catch (error) {
+            return {
+              agent,
+              removed: 0,
+              kept: [],
+              failed: [],
+              problems: [
+                {
+                  code: 'failed',
+                  message: `Agent memory cleanup stopped: ${error instanceof Error ? error.message : String(error)}`,
+                },
+              ],
+            };
+          }
+        },
+      );
+      dependencies.writeOut(renderAgentDisable(report));
+    });
+  agents
+    .command('reset <agent>')
+    .description(
+      "Rewrite an agent's STAK Memory files, including hand-edited ones",
+    )
+    .action(async (value: string) => {
+      const agent = agentOf(value);
+      const reset = required(dependencies.resetAgentMemory);
+      const report = await locked(
+        'stak memory agents reset',
+        async (): Promise<AgentResetReport> => {
+          try {
+            return await reset(agent);
+          } catch (error) {
+            return {
+              enabled: true,
+              agents: [],
+              problems: [
+                {
+                  code: 'failed',
+                  message: `Agent memory reset stopped: ${error instanceof Error ? error.message : String(error)}`,
+                },
+              ],
+            };
+          }
+        },
+      );
+      dependencies.writeOut(renderAgentReset(agent, report));
     });
 
   memory
