@@ -385,6 +385,58 @@ describe.skipIf(!hasGit)('privacy in a real Git repository', () => {
     expect(status(oldRepo)).toBe('');
   });
 
+  it('restores the retired record when the project moves back', async () => {
+    const stackHome = await temp();
+    const dirA = await initRepo();
+    const dirB = await temp();
+    const base = { stackHome, projectId: PROJECT, agent: 'codex' } as const;
+    const first = await exportProjectMemory({
+      ...base,
+      projectDir: dirA,
+      documents: docs,
+    });
+    expect(first.status).toBe('written');
+    await writeFile(first.path, 'hand edit in A\n');
+    expect(
+      (
+        await exportProjectMemory({
+          ...base,
+          projectDir: dirB,
+          documents: docs,
+        })
+      ).status,
+    ).toBe('written');
+
+    const back = await exportProjectMemory({
+      ...base,
+      projectDir: dirA,
+      documents: docs,
+    });
+    expect(back.status).toBe('skipped-hand-edited');
+    expect(await readFile(first.path, 'utf8')).toBe('hand edit in A\n');
+    expect(await exportStatus({ ...base, projectDir: dirA })).toBe(
+      'hand-edited',
+    );
+    const state = await readExportState(stackHome);
+    expect(state.projects[PROJECT]?.codex?.path).toBe(first.path);
+    expect(state.retired ?? []).toEqual([]); // B's unchanged file was swept
+    expect(await listFiles(dirB)).toEqual([]);
+    expect(status(dirA)).toBe('');
+
+    const reset = await exportProjectMemory({
+      ...base,
+      projectDir: dirA,
+      documents: docs,
+      overwriteHandEdits: true,
+    });
+    expect(reset.status).toBe('written');
+    expect(await readFile(first.path, 'utf8')).toContain(MANAGED_LINE);
+    expect(await exportStatus({ ...base, projectDir: dirA })).toBe(
+      'up-to-date',
+    );
+    expect(status(dirA)).toBe('');
+  });
+
   it('works inside a submodule', async () => {
     const stackHome = await temp();
     const inner = await initRepo();

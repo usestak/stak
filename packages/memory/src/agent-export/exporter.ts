@@ -386,11 +386,26 @@ const retireIfMoved = async (
 ): Promise<void> => {
   const state = await readExportState(stackHome);
   const stored = state.projects[projectId]?.[agent];
-  if (!stored || stored.path === target) return;
-  await mutateState(stackHome, (current) => ({
-    ...withRecord(current, projectId, agent, undefined),
-    retired: [...(current.retired ?? []), { ...stored, projectId, agent }],
-  }));
+  const isHere = (record: RetiredAgentExportRecord) =>
+    record.projectId === projectId &&
+    record.agent === agent &&
+    record.path === target;
+  const returning = (state.retired ?? []).find(isHere);
+  if (stored?.path === target || (!stored && !returning)) return;
+  await mutateState(stackHome, (current) => {
+    const retired = [
+      ...(current.retired ?? []).filter((record) => !isHere(record)),
+      ...(stored ? [{ ...stored, projectId, agent }] : []),
+    ];
+    // Moving back to a folder STAK wrote before: its retired record becomes
+    // current again, so a hand edit there reads as hand-edited (and `reset`
+    // works) instead of as the user's own file.
+    // (Parsing with the record schema strips `projectId` and `agent`.)
+    const restored = returning
+      ? exportRecordSchema.parse(returning)
+      : undefined;
+    return { ...withRecord(current, projectId, agent, restored), retired };
+  });
 };
 
 /** Delete retired files for (project, agent) that are unchanged or already
