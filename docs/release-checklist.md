@@ -63,6 +63,35 @@ is automatically verified from what requires an owner decision.
          no sticky v1-after-v2 gate and no guarded retire, so old CLIs could
          overwrite upgraded accounts and protect runs unguarded.
 
+### How to publish a beta (from `0.2.0-beta.5` on)
+
+GitHub Actions publishes the CLI now, not a laptop. The workflow is
+`.github/workflows/release-cli.yml` ("Release CLI (beta)"). It uses npm
+trusted publishing, so there is no npm token, `npm login` or browser 2FA.
+
+One-time setup (done once, by an npm owner of `@memstk/cli`):
+
+- [ ] On npmjs.com → `@memstk/cli` → **Settings** → **Trusted Publisher** →
+      **GitHub Actions**. Organization or user `usestak`, repository `stak`,
+      workflow filename `release-cli.yml`, environment name `npm`.
+- [ ] Optional: GitHub → `usestak/stak` → **Settings** → **Environments** →
+      `npm` → add yourself as a required reviewer, for an approval click
+      before each publish.
+
+Each release:
+
+1. [ ] Merge the version-bump PR (`packages/cli/package.json` version,
+       `CHANGELOG.md`, `PUBLIC_BETA_VERSION` in `apps/web/lib/beta.ts`).
+2. [ ] If it adds migrations, apply them to production first, then
+       `notify pgrst, 'reload schema'`, then let the web deploy finish.
+3. [ ] GitHub → **Actions** → **Release CLI (beta)** → **Run workflow** on
+       `main`. It refuses non-beta versions, versions already on npm, and runs
+       from anywhere but `main`. It builds, typechecks and tests the CLI,
+       installs the packed package, then publishes with `--tag beta` and
+       pushes the Git tag `v<version>`.
+4. [ ] A few minutes later, `npm view @memstk/cli dist-tags` → `beta` is the
+       new version and `latest` is still `0.1.2`.
+
 ### Publishing `@memstk/cli@0.2.0-beta.3` to the `beta` dist-tag
 
 Run from a clean checkout, after the web deploy above is confirmed live.

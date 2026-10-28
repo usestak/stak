@@ -1,0 +1,126 @@
+name: Release CLI (beta)
+
+# Publishes @memstk/cli to npm under the `beta` dist-tag. It never moves `latest`.
+#
+# Run it by hand: Actions → "Release CLI (beta)" → Run workflow (on main).
+# It publishes whatever version packages/cli/package.json holds on main, so merge the
+# version-bump PR first. Checklist: docs/release-checklist.md.
+#
+# Authentication is npm trusted publishing (OIDC): no npm token is stored anywhere.
+# npm only accepts this workflow file, from usestak/stak, in the `npm` environment.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-cli
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish @memstk/cli to beta
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Add required reviewers to this environment in the repo settings for a second
+    # approval click before anything is published.
+    environment: npm
+    permissions:
+      contents: write # push the v<version> Git tag
+      id-token: write # npm trusted publishing
+    steps:
+      - name: Only from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Run this workflow from main (it was started on ${GITHUB_REF})."
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      # Node 24 ships npm 11, which trusted publishing needs (11.5.1 or newer).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Check the version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./packages/cli/package.json').version")"
+          echo "Version on main: $version"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]; then
+            echo "::error::$version is not a beta version (expected X.Y.Z-beta.N). Stable releases are not published by this workflow."
+            exit 1
+          fi
+          if npm view "@memstk/cli@$version" version >/dev/null 2>&1; then
+            echo "::error::@memstk/cli@$version is already on npm. Merge a version bump first."
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
+            echo "::error::Git tag v$version already exists."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - run: pnpm install --frozen-lockfile
+
+      # The CLI and every package it bundles. The web app is not part of the CLI.
+      - run: pnpm turbo run build --filter=@memstk/cli...
+
+      - name: Typecheck and test the CLI
+        run: |
+          pnpm --filter @memstk/cli exec tsc --noEmit -p .
+          pnpm --filter @memstk/cli test
+
+      - name: Check the built CLI reports the right version
+        shell: bash
+        run: |
+          set -euo pipefail
+          built="$(node packages/cli/dist/bin.js --version)"
+          if [[ "$built" != "${{ steps.version.outputs.version }}" ]]; then
+            echo "::error::Built CLI says $built, expected ${{ steps.version.outputs.version }}."
+            exit 1
+          fi
+
+      - name: Check the packed CLI installs and runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          tgz="$(cd packages/cli && npm pack --pack-destination "$RUNNER_TEMP" | tail -1)"
+          mkdir -p "$RUNNER_TEMP/rc" && cd "$RUNNER_TEMP/rc"
+          echo '{"name":"rc","private":true}' > package.json
+          npm install "$RUNNER_TEMP/$tgz" --no-save
+          ./node_modules/.bin/stak --version
+
+      - name: Publish to npm (beta)
+        working-directory: packages/cli
+        run: npm publish --tag beta
+
+      - name: Tag the release in Git
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v${{ steps.version.outputs.version }}"
+          git tag "$tag"
+          git push origin "$tag"
+
+      - name: Summary
+        shell: bash
+        run: |
+          {
+            echo "## Published @memstk/cli@${{ steps.version.outputs.version }} to \`beta\`"
+            echo
+            echo "npm can take a few minutes to show it. Check with:"
+            echo
+            echo '```'
+            echo 'npm view @memstk/cli dist-tags'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
