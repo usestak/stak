@@ -270,8 +270,9 @@ newest version on your channel (honouring `npm_config_registry`) and cache
 the answer in `update-check.json` under `STAK_HOME`. When a newer version
 exists, one line is printed to stderr after the command's output, at most
 once a day per version. The lookup never delays a command by more than about
-a second and never changes its output or exit code; any failure is silent
-and backs off for an hour before the next attempt.
+a second and never changes its output or exit code; any failure — including
+a registry that never answers — is silent and backs off for an hour before
+the next attempt.
 It stays quiet when stderr is not a TTY, when `CI` is set, with `--json`,
 `--version` or `--help`, for `stak upgrade` itself, and when
 `STAK_NO_UPDATE_CHECK=1` or `NO_UPDATE_NOTIFIER` is set.

@@ -335,7 +335,7 @@ describe('update reminder — when it prints', () => {
       expect(fetch).not.toHaveBeenCalled();
     });
 
-  it('does not delay a finished command beyond the ~1 s cap when the registry is slow', async () => {
+  it('does not delay a finished command beyond the ~1 s cap when the registry is slow, and still backs off', async () => {
     let aborted = false;
     const slow = vi.fn<FetchLike>(
       (_url, init) =>
@@ -365,6 +365,71 @@ describe('update reminder — when it prints', () => {
     expect(elapsed).toBeLessThan(1_500);
     expect(errors).toEqual([]);
     expect(aborted).toBe(true);
+    // The command's own ~1 s wait is over, but the background lookup is still settling
+    // (aborting the fetch, then writing the backoff) — give it a moment to land.
+    await vi.waitFor(async () => {
+      expect(await readUpdateCache(cachePath)).toMatchObject({
+        channel: 'beta',
+        failedAt: T0,
+      });
+    });
+  });
+
+  it('a hanging registry (past the hard ceiling) backs off for 1 h, so the next command makes no network call', async () => {
+    const hanging: FetchLike = (_url, init) =>
+      new Promise((_resolve, reject) => {
+        if (init.signal.aborted) {
+          reject(new Error('aborted'));
+          return;
+        }
+        init.signal.addEventListener('abort', () =>
+          reject(new Error('aborted')),
+        );
+      });
+    const hang = vi.fn(hanging);
+    const { errors } = await run({
+      fetch: hang,
+      fetchTimeoutMs: 20,
+      waitCapMs: 1_000,
+    });
+    expect(errors).toEqual([]);
+    expect(await readUpdateCache(cachePath)).toEqual({
+      channel: 'beta',
+      failedAt: T0,
+    });
+
+    // Within the hour: no network call at all, so no ~1 s wait per command.
+    const during = registry({ beta: '0.2.0-beta.4' });
+    expect(
+      (await run({ fetch: during, now: () => T0 + 30 * 60 * 1000 })).errors,
+    ).toEqual([]);
+    expect(during).not.toHaveBeenCalled();
+  });
+
+  it('cancel() (a failed command) does not record a registry failure', async () => {
+    const hanging: FetchLike = (_url, init) =>
+      new Promise((_resolve, reject) => {
+        if (init.signal.aborted) {
+          reject(new Error('aborted'));
+          return;
+        }
+        init.signal.addEventListener('abort', () =>
+          reject(new Error('aborted')),
+        );
+      });
+    const hang = vi.fn(hanging);
+    const { dependencies, errors } = setup({
+      fetch: hang,
+      waitCapMs: 50,
+      fetchTimeoutMs: 50,
+    });
+    const handle = startUpdateReminder(dependencies, { commandName: 'status' });
+    handle.cancel();
+    await handle.finish();
+    expect(errors).toEqual([]);
+    // Give the aborted lookup's background promise a moment to settle, then confirm
+    // no backoff was recorded for a cancellation that isn't a registry failure.
+    await new Promise((resolve) => setTimeout(resolve, 150));
     expect(await readUpdateCache(cachePath)).toBeUndefined();
   });
 
