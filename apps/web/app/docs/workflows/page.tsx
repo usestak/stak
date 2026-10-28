@@ -153,6 +153,13 @@ export default function DocsWorkflowsPage() {
       <pre>
         <code>{`stak login\nstak pull\nstak status`}</code>
       </pre>
+      <p>
+        Pull does not touch your agents, so <code>stak status</code> lists the
+        pulled Skills as not installed here yet. Set them up in an agent:
+      </p>
+      <pre>
+        <code>{`stak run codex`}</code>
+      </pre>
       <p>If you use Claude Code, materialize recovered Memory into it:</p>
       <pre>
         <code>{`stak project\nstak memory restore --dry-run\nstak memory restore`}</code>

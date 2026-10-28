@@ -259,6 +259,14 @@ export const renderInitResult = (
 // status
 // ---------------------------------------------------------------------------
 
+/**
+ * Skills that are in `main` but were never installed on this machine — the normal state
+ * right after `stak pull` on a new machine. Not a change to add and NOT a deletion, so
+ * this line must never suggest `stak remove`; `stak run <agent>` sets them up.
+ */
+const notInstalledLine = (count: number): string =>
+  `${skills(count)} in main not installed here yet. Run \`stak run <agent>\` (e.g. \`stak run codex\`) to set ${count === 1 ? 'it' : 'them'} up.`;
+
 const skillLines = (title: string, marker: string, list: SkillStatus[]) => {
   const matching = list.filter((skill) => skill.state === title.toLowerCase());
   return matching.length === 0
@@ -278,6 +286,7 @@ const renderStatusVerbose = (status: EnvironmentStatus): string => {
     `Satisfied      ${summary.satisfied}`,
     `Modified       ${summary.modified}`,
     `Missing        ${summary.missing}`,
+    `Not installed  ${summary.notInstalled}`,
     `Uncertain      ${summary.uncertain}`,
     `Untracked      ${summary.untracked}`,
     '',
@@ -316,6 +325,17 @@ const renderStatusVerbose = (status: EnvironmentStatus): string => {
     ...skillLines('Missing', '-', status.skills),
     ...skillLines('Uncertain', '?', status.skills),
   );
+  const notInstalled = status.skills.filter(
+    (skill) => skill.state === 'not-installed',
+  );
+  if (notInstalled.length > 0)
+    lines.push(
+      '',
+      'Not installed here',
+      ...notInstalled.map((skill) => `  ${skill.name}`),
+      '',
+      notInstalledLine(notInstalled.length),
+    );
   if (status.untracked.length > 0)
     lines.push(
       '',
@@ -348,6 +368,9 @@ export const renderStatus = (
   const modified = named('modified');
   const missing = named('missing');
   const uncertain = named('uncertain');
+  // Tracked in main but never installed here: not a change to add, not a deletion.
+  const notInstalled = named('not-installed');
+  const tracked = summary.satisfied + notInstalled.length;
   const hasChanges =
     summary.untracked > 0 ||
     modified.length > 0 ||
@@ -356,7 +379,7 @@ export const renderStatus = (
 
   const lines: Array<string | false> = [`STAK: ${status.environment}`, ''];
   if (!hasChanges) {
-    lines.push(`Nothing to add. ${skills(summary.satisfied)} tracked.`);
+    lines.push(`Nothing to add. ${skills(tracked)} tracked.`);
   } else {
     lines.push('Changes not added', '', 'Skills');
     for (const skill of modified) lines.push(`  ~ ${skill.name}`);
@@ -367,7 +390,7 @@ export const renderStatus = (
     for (const skill of status.untracked) lines.push(`  + ${skill.name}`);
     lines.push(
       '',
-      `${summary.satisfied} tracked`,
+      `${tracked} tracked`,
       summary.untracked > 0 && `${summary.untracked} untracked`,
     );
     if (missing.length > 0)
@@ -377,6 +400,8 @@ export const renderStatus = (
       );
     lines.push('', 'Run `stak add <skill>` or `stak add .` to stage changes.');
   }
+  if (notInstalled.length > 0)
+    lines.push('', notInstalledLine(notInstalled.length));
   if (status.invalidSkills.length > 0)
     lines.push(
       '',
@@ -510,9 +535,14 @@ export const renderDiff = (
   const untracked = diff.untracked
     .map((item) => item.name)
     .sort((a, b) => a.localeCompare(b));
+  const notInstalled = diff.entries.filter(
+    (entry) => entry.state === 'not-installed',
+  ).length;
+  const notInstalledNote =
+    notInstalled > 0 ? ['', notInstalledLine(notInstalled)] : [];
   const total =
     missing.length + modified.length + uncertain.length + untracked.length;
-  if (total === 0) return block(['No changes.']);
+  if (total === 0) return block(['No changes.', ...notInstalledNote]);
   const group = (title: string, names: string[]) =>
     names.length > 0 ? ['', title, ...names.map((name) => `  ${name}`)] : [];
   return block([
@@ -521,5 +551,6 @@ export const renderDiff = (
     ...group('Missing', missing),
     ...group('Modified', modified),
     ...group('Uncertain', uncertain),
+    ...notInstalledNote,
   ]);
 };

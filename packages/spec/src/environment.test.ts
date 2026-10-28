@@ -100,6 +100,7 @@ describe('Phase 2 contracts', () => {
         satisfied: 0,
         modified: 0,
         missing: 0,
+        notInstalled: 0,
         uncertain: 0,
         untracked: 0,
         placementAdded: 0,

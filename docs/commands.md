@@ -19,8 +19,13 @@ Capture the current global Skills as the desired Environment `main`.
 
 ### `stak status [--json]` / `stak diff [--json]`
 
-Compare this machine to `main`: satisfied, modified, missing, uncertain,
-untracked, drift.
+Compare this machine to `main`: satisfied, modified, missing, not installed,
+uncertain, untracked, drift. _Missing_ means a Skill was on this machine (captured
+by `init`/`add`, or installed by `stak run`) and is now gone; `stak remove` drops
+it from `main` if that was deliberate. _Not installed_ means the Skill is in
+`main` but was never set up on this machine, which is normal right after
+`stak pull` or `stak use`; run `stak run <agent>` to install it. Not
+installed Skills are never staged or pushed as removals.
 
 ### `stak use <stak> [--dry-run] [--json] [--yes]`
 
@@ -235,7 +240,9 @@ no-op when unchanged. Does not change agent bindings.
 ### `stak pull [--dry-run] [--json] [--yes]`
 
 Reconstruct `main` on this machine (reference reacquisition + private snapshot
-download, all verified, then an atomic commit). Does not change agent bindings.
+download, all verified, then an atomic commit). Does not change agent bindings:
+the pulled Skills show as _not installed here yet_ in `stak status` until
+`stak run <agent>` installs them.
 
 ### `stak publish <stak> [--slug <slug>] [--dry-run] [--json] [--yes]`
 

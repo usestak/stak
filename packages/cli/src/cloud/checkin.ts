@@ -132,12 +132,12 @@ export const gatherCheckinInputs = async (
  * display name — so machine-installed state joins to the desired Skill record in P2/P3 and
  * two skills that share a display name but have distinct ids cannot collapse. The installed
  * version is the content ACTUALLY on this machine: `desiredHash` when satisfied (current ==
- * desired), `currentHash` when modified. A skill that is missing/uncertain is not installed
+ * desired), `currentHash` when modified. A skill that is missing/not-installed/uncertain is not installed
  * and is omitted.
  */
 export type SkillStatusLike = {
   entryId: string;
-  state: 'satisfied' | 'modified' | 'missing' | 'uncertain';
+  state: 'satisfied' | 'modified' | 'missing' | 'not-installed' | 'uncertain';
   desiredHash: string;
   currentHash?: string | undefined;
 };
