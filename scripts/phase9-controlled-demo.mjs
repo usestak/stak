@@ -2,10 +2,11 @@
 //
 // Fenced under a Phase 6.1 owned temporary root. A publisher creates a clean
 // Git-reference-backed local Stack, publishes it to an in-process Stack Cloud,
-// and a separate consumer Machine tries and uses @user-a/frontend. Reference
-// reacquisition uses an injected Git executor (the published remote is a
-// portable https URL that is intentionally unreachable offline). It never
-// writes to the real user HOME.
+// and a separate consumer Machine tries and uses @user-a/frontend. Publishing
+// requires the owner's pushed snapshot, so the consumer reacquires the exact
+// Skill from the published public snapshot; an injected Git executor stands in
+// for the published remote (a portable https URL that is intentionally
+// unreachable offline). It never writes to the real user HOME.
 
 import { execFileSync } from 'node:child_process';
 import { access, stat } from 'node:fs/promises';
@@ -36,7 +37,11 @@ import {
   createOwnedTestRoot,
   hashSkillDirectory,
 } from '../packages/shared/dist/index.js';
-import { verifyStoredSkill } from '../packages/store/dist/index.js';
+import {
+  ingestSkill,
+  packStoreObject,
+  verifyStoredSkill,
+} from '../packages/store/dist/index.js';
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -63,9 +68,10 @@ console.log(`Owned temporary root: ${owned.rootPath}`);
 
 try {
   const repository = createInMemoryRepository();
+  const blobStore = createInMemoryBlobStore();
   const service = createCloudService({
     repository,
-    blobStore: createInMemoryBlobStore(),
+    blobStore,
     appUrl: 'http://localhost:3000',
     ticketSecret: 'phase9-demo-secret',
   });
@@ -90,7 +96,7 @@ try {
   // --- Publisher: a clean Git-reference-backed local Stack -----------------
   const authoring = path.join(owned.rootPath, 'authoring');
   await owned.writeText(
-    path.join(authoring, 'stack.yaml'),
+    path.join(authoring, 'stak.yaml'),
     'schemaVersion: 1\nname: frontend\ndescription: Frontend Stack\nskills:\n  - path: skills/design\n    requirement: required\n',
   );
   await owned.writeText(
@@ -109,6 +115,23 @@ try {
   const contentHash = (
     await hashSkillDirectory(path.join(authoring, SKILL_PATH))
   ).hash;
+
+  // Publishing requires the owner to have already pushed this exact content to
+  // Cloud (Hybrid Public Skill Portability). Stand in for that `stak push`: pack
+  // the Skill into the same transport archive a push uploads and seed it into
+  // the owner's Cloud blob store (the upload-ticket round-trip is not what this
+  // demo exercises).
+  const uploadStackHome = path.join(owned.rootPath, 'publisher-upload');
+  await ingestSkill({
+    stackHome: uploadStackHome,
+    sourcePath: path.join(authoring, SKILL_PATH),
+    expectedContentHash: contentHash,
+  });
+  const { bytes: uploaded } = await packStoreObject({
+    stackHome: uploadStackHome,
+    contentHash,
+  });
+  await blobStore.put(USER_A, contentHash, uploaded);
 
   const publisherStackHome = path.join(owned.rootPath, 'publisher-stack');
   const tokenA = await mintToken(USER_A, 'alice');
@@ -232,6 +255,7 @@ try {
     stackHome: consumerStackHome,
     trial,
     gitExecutor: fakeGit,
+    client: anon,
   });
   assert(
     (await verifyStoredSkill({ stackHome: consumerStackHome, contentHash }))
@@ -262,7 +286,7 @@ try {
     stackHome: consumerStackHome,
     source,
   });
-  await applyRemoteStackUse(proposal, { gitExecutor: fakeGit });
+  await applyRemoteStackUse(proposal, { gitExecutor: fakeGit, client: anon });
   const state = await loadMainEnvironment({ stackHome: consumerStackHome });
   assert(
     state.manifest.stacks[0]?.source?.kind === 'public',
@@ -300,7 +324,7 @@ try {
   assert(bBlocked, "User B cannot download the publisher's private snapshot.");
 
   console.log(
-    'PASS: published a reference-only public Stack; anonymous read + profile ' +
+    'PASS: published a Git-backed public Stack with its portable snapshot; anonymous read + profile ' +
       'listing work; a consumer tried and used @alice/frontend with exact ' +
       'reacquisition; the imported layer works offline; and public access never ' +
       'exposed the publisher private Environment or snapshots.',

@@ -171,7 +171,7 @@ try {
   // Build a git-reference authoring Stack 'frontend' (design).
   const authoring = path.join(owned.rootPath, 'authoring');
   await owned.writeText(
-    path.join(authoring, 'stack.yaml'),
+    path.join(authoring, 'stak.yaml'),
     'schemaVersion: 1\nname: frontend\ndescription: Frontend\nskills:\n  - path: skills/design\n    requirement: required\n',
   );
   await owned.writeText(
@@ -306,7 +306,7 @@ try {
   });
   await applyRemoteStackUse(
     await prepareRemoteStackUse({ stackHome: stackC, source }),
-    { gitExecutor: fakeGit },
+    { gitExecutor: fakeGit, client: anon },
   );
   await runAgent(CursorAdapter, stackC, homeC);
   await access(path.join(homeC, '.agents', 'skills', 'design'));
