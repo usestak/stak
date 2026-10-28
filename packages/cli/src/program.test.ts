@@ -126,6 +126,7 @@ const emptyStatus: EnvironmentStatus = {
     satisfied: 0,
     modified: 0,
     missing: 0,
+    notInstalled: 0,
     uncertain: 0,
     untracked: 0,
     placementAdded: 0,
@@ -1745,6 +1746,8 @@ describe('STAK CLI', () => {
       privacyMode: 'standard' as const,
       objects: 5,
       files: 7,
+      legacyFiles: 7,
+      projectFiles: 0,
       generation: 2,
     }));
     const chunks: string[] = [];
@@ -1903,6 +1906,8 @@ describe('STAK CLI', () => {
       privacyMode: 'standard' as const,
       objects: 1,
       files: 1,
+      legacyFiles: 1,
+      projectFiles: 0,
       generation: 0,
     }));
     const applyCanonicalPull = vi.fn(async () => ({
@@ -2474,6 +2479,8 @@ describe('STAK CLI', () => {
             privacyMode: 'standard',
             objects: 1,
             files: 1,
+            legacyFiles: 1,
+            projectFiles: 0,
             generation: 1,
           };
         },
@@ -3533,6 +3540,8 @@ describe('STAK CLI', () => {
           privacyMode: 'protected',
           objects: 27,
           files: 29,
+          legacyFiles: 29,
+          projectFiles: 0,
           generation: 3,
         }),
       },
@@ -3555,6 +3564,8 @@ describe('STAK CLI', () => {
           privacyMode: 'protected',
           objects: 27,
           files: 29,
+          legacyFiles: 29,
+          projectFiles: 0,
           generation: 3,
         }),
       },
@@ -3571,6 +3582,8 @@ describe('STAK CLI', () => {
         privacyMode: 'standard',
         objects: 27, // fewer unique content blobs than logical files (dedup)
         files: 29,
+        legacyFiles: 29,
+        projectFiles: 0,
         generation: 3,
       }),
     });
@@ -3873,6 +3886,8 @@ describe('STAK CLI', () => {
           privacyMode: 'protected',
           objects: 27,
           files: 29,
+          legacyFiles: 29,
+          projectFiles: 0,
           generation: 3,
         };
       },
@@ -3891,11 +3906,36 @@ describe('STAK CLI', () => {
           privacyMode: 'protected',
           objects: 27,
           files: 29,
+          legacyFiles: 29,
+          projectFiles: 0,
           generation: 3,
         };
       },
     });
     expect(requested).toBe(3);
+  });
+
+  it('recover --passkey prints the folded-project merge line, like the non-passkey recover path (spec §4.2.1)', async () => {
+    const result = await runProgram(['memory', 'recover', '--passkey'], {
+      memoryRecoverPasskey: async () => ({
+        status: 'recovered',
+        objects: 27,
+        files: 29,
+        legacyFiles: 29,
+        projectFiles: 0,
+        generation: 3,
+        folded: [
+          {
+            fromProjectId: 'prj_abcdefghijklmnop',
+            toProjectId: 'prj_qrstuvwxyzabcdef',
+            keptBoth: 0,
+          },
+        ],
+      }),
+    });
+    expect(result.output).toContain(
+      `Merged project ${'prj_abcdefghijklmnop'.slice(0, 10)}… into ${'prj_qrstuvwxyzabcdef'.slice(0, 10)}… (same repository).`,
+    );
   });
 
   it('recover fails clearly when --backup and --generation disagree', async () => {

@@ -997,6 +997,14 @@ export type CloudRecoverOutcome =
        * never evidence of loss by itself).
        */
       files: number;
+      /**
+       * Of `files`, how many are legacy/global v1 Memory items — still needing
+       * `stak memory restore` to land in native agent files — vs. Project Memory
+       * documents already written out by the next `stak pull` or
+       * `stak memory materialize`. See `renderMemoryRecover`.
+       */
+      legacyFiles: number;
+      projectFiles: number;
       generation: number;
       /** Spec §4.2.1: former Project IDs folded after the recover. */
       folded?: ProjectFoldNote[];
@@ -1006,23 +1014,25 @@ export type CloudRecoverOutcome =
   | { status: 'no-backup' };
 
 /**
- * The restored store's logical file count: the v1 manifest's own items PLUS
- * every `present` canonical document (Task 13 fix — once a store migrates,
- * project-scope files move OUT of the v1 manifest into canonical Memory
- * (`migrate.ts`'s `slimToGlobal`); counting only `manifest.items.length` after a
- * migrated recovery would silently undercount, reporting 0 recovered files for
- * an account whose Memory is entirely project-scope). Never thrown — `0` for an
+ * The restored store's logical files, split by what still needs to be written out:
+ * the v1 manifest's own items (legacy/global Memory — `stak memory restore` writes
+ * these into native agent files) and every `present` canonical document
+ * (Project Memory — written by `stak pull` or `stak memory materialize`, once a
+ * store migrates project-scope files move OUT of the v1 manifest into canonical
+ * Memory via `migrate.ts`'s `slimToGlobal`). Never thrown — `0` for an
  * unreadable/absent manifest.
  */
-const recoveredFileCount = async (stackHome: string): Promise<number> => {
+const recoveredFileBreakdown = async (
+  stackHome: string,
+): Promise<{ legacyFiles: number; projectFiles: number }> => {
   const manifest = await readMemoryManifest(stackHome);
   const main = await readCanonicalMain(stackHome);
-  const canonicalCount = main.projects.reduce(
+  const projectFiles = main.projects.reduce(
     (n, project) =>
       n + project.documents.filter((doc) => doc.state === 'present').length,
     0,
   );
-  return (manifest?.items.length ?? 0) + canonicalCount;
+  return { legacyFiles: manifest?.items.length ?? 0, projectFiles };
 };
 
 /**
@@ -1144,12 +1154,15 @@ export const runMemoryCloudRecover = async (
       ...(await restoredManifestFingerprint(deps.stackHome)),
     });
     await seedRecoveredProjectNames(deps);
+    const standardBreakdown = await recoveredFileBreakdown(deps.stackHome);
     return {
       status: 'recovered',
       ...(recoverFold.notes.length > 0 ? { folded: recoverFold.notes } : {}),
       privacyMode: 'standard',
       objects: result.objects,
-      files: await recoveredFileCount(deps.stackHome),
+      files: standardBreakdown.legacyFiles + standardBreakdown.projectFiles,
+      legacyFiles: standardBreakdown.legacyFiles,
+      projectFiles: standardBreakdown.projectFiles,
       generation: result.generation,
     };
   }
@@ -1188,12 +1201,15 @@ export const runMemoryCloudRecover = async (
     ...(await restoredManifestFingerprint(deps.stackHome)),
   });
   await seedRecoveredProjectNames(deps);
+  const protectedBreakdown = await recoveredFileBreakdown(deps.stackHome);
   return {
     status: 'recovered',
     ...(recoverFold.notes.length > 0 ? { folded: recoverFold.notes } : {}),
     privacyMode: 'protected',
     objects: result.objects,
-    files: await recoveredFileCount(deps.stackHome),
+    files: protectedBreakdown.legacyFiles + protectedBreakdown.projectFiles,
+    legacyFiles: protectedBreakdown.legacyFiles,
+    projectFiles: protectedBreakdown.projectFiles,
     generation: result.generation,
   };
 };
@@ -1675,7 +1691,14 @@ export type PasskeyRecoverResult =
   | { status: 'not-authenticated' }
   | { status: 'no-backup' }
   | { status: 'passkey-failed'; reason: PasskeyFailureReason }
-  | { status: 'recovered'; objects: number; files: number; generation: number };
+  | {
+      status: 'recovered';
+      objects: number;
+      files: number;
+      legacyFiles: number;
+      projectFiles: number;
+      generation: number;
+    };
 
 /**
  * Recover Protected Memory via a passkey: create a one-time recovery session, open
@@ -1767,11 +1790,14 @@ export const runPasskeyRecover = async (
     ...(await restoredManifestFingerprint(deps.stackHome)),
   });
   await seedRecoveredProjectNames(deps);
+  const passkeyBreakdown = await recoveredFileBreakdown(deps.stackHome);
   return {
     status: 'recovered',
     ...(recoverFold.notes.length > 0 ? { folded: recoverFold.notes } : {}),
     objects: result.objects,
-    files: await recoveredFileCount(deps.stackHome),
+    files: passkeyBreakdown.legacyFiles + passkeyBreakdown.projectFiles,
+    legacyFiles: passkeyBreakdown.legacyFiles,
+    projectFiles: passkeyBreakdown.projectFiles,
     generation: result.generation,
   };
 };

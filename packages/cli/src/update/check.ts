@@ -215,10 +215,15 @@ export const startUpdateReminder = (
   const current = dependencies.currentVersion;
   const channel = channelFor(current);
   const controller = new AbortController();
-  const ceiling = setTimeout(
-    () => controller.abort(),
-    dependencies.fetchTimeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS,
-  );
+  // Distinguishes *why* the lookup was aborted: a timeout (the hard ceiling below, or
+  // the wait cap in `finish()`) means the registry never answered, which backs off like
+  // any other failure (see the catch block). A `cancel()` (the command itself failed)
+  // is not a registry failure and must not set the backoff.
+  let abortedBy: 'timeout' | 'cancel' | undefined;
+  const ceiling = setTimeout(() => {
+    abortedBy ??= 'timeout';
+    controller.abort();
+  }, dependencies.fetchTimeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS);
   ceiling.unref?.();
 
   const lookup: Promise<UpdateCheckCache | undefined> = (async () => {
@@ -245,9 +250,11 @@ export const startUpdateReminder = (
         signal: controller.signal,
       });
     } catch (error) {
-      // Our own abort (the wait cap, the hard ceiling, or a failed command) is not a
-      // registry failure: just try again next time.
-      if (!controller.signal.aborted)
+      // A genuine failure (network error, HTTP error, bad dist-tag) or a timeout (the
+      // wait cap or the hard ceiling — the registry just never answered) both back off
+      // for an hour, so a hanging registry doesn't cost every command its own wait.
+      // A `cancel()` (the command itself failed) is not a registry failure.
+      if (!controller.signal.aborted || abortedBy === 'timeout')
         await writeUpdateCache(dependencies.cachePath, {
           ...(cached ?? { channel }),
           failedAt: now,
@@ -274,6 +281,7 @@ export const startUpdateReminder = (
   let done = false;
   const cancel = (): void => {
     done = true;
+    abortedBy ??= 'cancel';
     clearTimeout(ceiling);
     controller.abort();
   };
@@ -297,7 +305,11 @@ export const startUpdateReminder = (
         ]);
         clearTimeout(timer);
         if (result === timedOut) {
-          // Give up silently; the next command tries again.
+          // Give up on this command's output, but the registry just hasn't answered —
+          // record it as a failure (below) so the next command backs off for an hour
+          // instead of paying this same wait again. `??=` so a `cancel()` reason (set
+          // if the command failed in the meantime) is never overwritten.
+          abortedBy ??= 'timeout';
           controller.abort();
           return;
         }

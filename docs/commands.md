@@ -19,8 +19,13 @@ Capture the current global Skills as the desired Environment `main`.
 
 ### `stak status [--json]` / `stak diff [--json]`
 
-Compare this machine to `main`: satisfied, modified, missing, uncertain,
-untracked, drift.
+Compare this machine to `main`: satisfied, modified, missing, not installed,
+uncertain, untracked, drift. _Missing_ means a Skill was on this machine (captured
+by `init`/`add`, or installed by `stak run`) and is now gone; `stak remove` drops
+it from `main` if that was deliberate. _Not installed_ means the Skill is in
+`main` but was never set up on this machine, which is normal right after
+`stak pull` or `stak use`; run `stak run <agent>` to install it. Not
+installed Skills are never staged or pushed as removals.
 
 ### `stak use <stak> [--dry-run] [--json] [--yes]`
 
@@ -235,7 +240,9 @@ no-op when unchanged. Does not change agent bindings.
 ### `stak pull [--dry-run] [--json] [--yes]`
 
 Reconstruct `main` on this machine (reference reacquisition + private snapshot
-download, all verified, then an atomic commit). Does not change agent bindings.
+download, all verified, then an atomic commit). Does not change agent bindings:
+the pulled Skills show as _not installed here yet_ in `stak status` until
+`stak run <agent>` installs them.
 
 ### `stak publish <stak> [--slug <slug>] [--dry-run] [--json] [--yes]`
 
@@ -270,8 +277,9 @@ newest version on your channel (honouring `npm_config_registry`) and cache
 the answer in `update-check.json` under `STAK_HOME`. When a newer version
 exists, one line is printed to stderr after the command's output, at most
 once a day per version. The lookup never delays a command by more than about
-a second and never changes its output or exit code; any failure is silent
-and backs off for an hour before the next attempt.
+a second and never changes its output or exit code; any failure — including
+a registry that never answers — is silent and backs off for an hour before
+the next attempt.
 It stays quiet when stderr is not a TTY, when `CI` is set, with `--json`,
 `--version` or `--help`, for `stak upgrade` itself, and when
 `STAK_NO_UPDATE_CHECK=1` or `NO_UPDATE_NOTIFIER` is set.

@@ -38,7 +38,9 @@ export type SkillAddIssue =
   | { status: 'invalid'; selector: string }
   | { status: 'stack-origin'; selector: string; name: string }
   | { status: 'already-satisfied'; selector: string; name: string }
-  | { status: 'missing'; selector: string; name: string };
+  | { status: 'missing'; selector: string; name: string }
+  /** Tracked in main but never installed on this machine (e.g. right after `stak pull`). */
+  | { status: 'not-installed'; selector: string; name: string };
 
 export type PrepareSkillAddOptions = {
   stackHome: string;
@@ -173,6 +175,8 @@ const resolveSelector = (
     const skillStatus = status.skills.find((item) => item.entryId === entryId);
     if (!skillStatus || skillStatus.state === 'satisfied')
       return { status: 'already-satisfied', selector, name: selector };
+    if (skillStatus.state === 'not-installed')
+      return { status: 'not-installed', selector, name: selector };
     if (skillStatus.state !== 'modified' || !skillStatus.currentHash)
       return { status: 'missing', selector, name: selector };
     const isDirectOnly =
