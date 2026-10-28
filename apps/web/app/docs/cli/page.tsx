@@ -72,7 +72,8 @@ const COMMAND_DETAILS: Record<string, CommandDetail> = {
     ],
     examples: ['stak status', 'stak status --json'],
     notes: [
-      'Reports satisfied, modified, missing, uncertain, untracked, and drift states.',
+      'Reports satisfied, modified, missing, not installed, uncertain, untracked, and drift states.',
+      'Missing: the Skill was on this machine and is gone (`stak remove` drops it from `main` if deliberate). Not installed: in `main` but never set up here, normal right after `stak pull`; run `stak run <agent>`.',
     ],
   },
   add: {
@@ -91,7 +92,7 @@ const COMMAND_DETAILS: Record<string, CommandDetail> = {
     options: ['--json — print exactly one JSON document to stdout'],
     examples: ['stak diff', 'stak diff --json'],
     notes: [
-      'Reports satisfied, modified, missing, uncertain, untracked, and drift states.',
+      'Reports satisfied, modified, missing, not installed, uncertain, untracked, and drift states.',
     ],
   },
   scan: {
