@@ -13,13 +13,16 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  addGitExcludeEntries,
   addGitExcludeEntry,
   defaultGitRunner,
   excludeEntryFor,
   GitExcludeError,
   GitUnavailableError,
+  isIgnoredByGit,
   isTrackedByGit,
   locateGitRepository,
+  removeGitExcludeEntries,
   removeGitExcludeEntry,
   resolveGitExcludePath,
   STAK_EXCLUDE_BEGIN,
@@ -220,5 +223,51 @@ describe.skipIf(!hasGit)('with a real Git repository', () => {
     expect(
       await isTrackedByGit(defaultGitRunner, repo, 'AGENTS.override.md'),
     ).toBe(false);
+  });
+
+  it('reports whether a path is ignored', async () => {
+    const repo = await initRepo();
+    const exclude = await resolveGitExcludePath(defaultGitRunner, repo);
+    await addGitExcludeEntry(exclude, '/AGENTS.override.md');
+    expect(
+      await isIgnoredByGit(defaultGitRunner, repo, 'AGENTS.override.md'),
+    ).toBe(true);
+    expect(await isIgnoredByGit(defaultGitRunner, repo, 'other.md')).toBe(
+      false,
+    );
+  });
+});
+
+describe('fail-closed Git answers', () => {
+  const answering = (exitCode: number): GitRunner => ({
+    run: () => Promise.resolve({ exitCode, stdout: '', stderr: '' }),
+  });
+
+  it('isTrackedByGit: 0 tracked, 1 untracked, anything else throws', async () => {
+    const dir = await temp();
+    expect(await isTrackedByGit(answering(0), dir, 'a')).toBe(true);
+    expect(await isTrackedByGit(answering(1), dir, 'a')).toBe(false);
+    await expect(isTrackedByGit(answering(128), dir, 'a')).rejects.toThrow(
+      GitExcludeError,
+    );
+  });
+
+  it('isIgnoredByGit: 0 ignored, 1 not ignored, anything else throws', async () => {
+    const dir = await temp();
+    expect(await isIgnoredByGit(answering(0), dir, 'a')).toBe(true);
+    expect(await isIgnoredByGit(answering(1), dir, 'a')).toBe(false);
+    await expect(isIgnoredByGit(answering(128), dir, 'a')).rejects.toThrow(
+      GitExcludeError,
+    );
+  });
+
+  it('adds and removes several entries in one rewrite', async () => {
+    const file = path.join(await temp(), 'info', 'exclude');
+    await addGitExcludeEntries(file, ['/b', '/a']);
+    expect(await readFile(file, 'utf8')).toBe(
+      `${STAK_EXCLUDE_BEGIN}\n/a\n/b\n${STAK_EXCLUDE_END}\n`,
+    );
+    await removeGitExcludeEntries(file, ['/a', '/b']);
+    expect(await readFile(file, 'utf8')).toBe('');
   });
 });

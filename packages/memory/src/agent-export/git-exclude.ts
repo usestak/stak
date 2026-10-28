@@ -186,17 +186,31 @@ const rewrite = async (
   });
 };
 
+export const addGitExcludeEntries = (
+  excludePath: string,
+  entries: readonly string[],
+): Promise<void> =>
+  rewrite(excludePath, (text) =>
+    entries.reduce((next, entry) => withExcludeEntry(next, entry), text),
+  );
+
+export const removeGitExcludeEntries = (
+  excludePath: string,
+  entries: readonly string[],
+): Promise<void> =>
+  rewrite(excludePath, (text) =>
+    entries.reduce((next, entry) => withoutExcludeEntry(next, entry), text),
+  );
+
 export const addGitExcludeEntry = (
   excludePath: string,
   entry: string,
-): Promise<void> =>
-  rewrite(excludePath, (text) => withExcludeEntry(text, entry));
+): Promise<void> => addGitExcludeEntries(excludePath, [entry]);
 
 export const removeGitExcludeEntry = (
   excludePath: string,
   entry: string,
-): Promise<void> =>
-  rewrite(excludePath, (text) => withoutExcludeEntry(text, entry));
+): Promise<void> => removeGitExcludeEntries(excludePath, [entry]);
 
 /** `git rev-parse --git-path info/exclude`, resolved against `dir` (Git prints
  * a path relative to `-C <dir>` for a plain repo, an absolute one for a
@@ -248,17 +262,47 @@ export const locateGitRepository = async (
   };
 };
 
+/** A yes/no Git query: exit 0 is yes, exit 1 is no, anything else is an error
+ * (fail closed — never read an error as the answer that allows a write). */
+const yesNo = async (
+  git: GitRunner,
+  dir: string,
+  args: readonly string[],
+  what: string,
+): Promise<boolean> => {
+  const result = await git.run(dir, args);
+  if (result.exitCode === 0) return true;
+  if (result.exitCode === 1) return false;
+  throw new GitExcludeError(
+    'git-failed',
+    `Git could not check whether ${what} (exit ${result.exitCode}).`,
+  );
+};
+
 /** Whether Git tracks `relativePath` (relative to `dir`). */
-export const isTrackedByGit = async (
+export const isTrackedByGit = (
   git: GitRunner,
   dir: string,
   relativePath: string,
-): Promise<boolean> => {
-  const result = await git.run(dir, [
-    'ls-files',
-    '--error-unmatch',
-    '--',
-    relativePath,
-  ]);
-  return result.exitCode === 0;
-};
+): Promise<boolean> =>
+  yesNo(
+    git,
+    dir,
+    ['ls-files', '--error-unmatch', '--', relativePath],
+    `${relativePath} is tracked`,
+  );
+
+/** Whether Git's ignore rules (any `.gitignore`, `info/exclude`, the global
+ * excludes file) ignore `relativePath` (relative to `dir`), regardless of the
+ * index. */
+export const isIgnoredByGit = (
+  git: GitRunner,
+  dir: string,
+  relativePath: string,
+): Promise<boolean> =>
+  yesNo(
+    git,
+    dir,
+    ['check-ignore', '-q', '--no-index', '--', relativePath],
+    `${relativePath} is ignored`,
+  );

@@ -6,6 +6,14 @@
  * and records what it wrote in machine-local state so it only ever updates or
  * deletes its own, unchanged files.
  *
+ * Privacy invariants (a STAK file must never become committable):
+ *  - the exclude lines (the file and its atomic-write temp sibling) are added,
+ *    and Git is asked to confirm they hold, BEFORE the file is written;
+ *  - an exclude line is removed only when no record (current or retired) in
+ *    the state still uses it — worktrees of one repo share one exclude file;
+ *  - a file left behind by a moved project stays recorded ("retired"), and so
+ *    stays excluded, until it is deleted (by STAK if unchanged, or the user).
+ *
  * The exporter never takes the Memory lock: callers run it inside their own
  * locked span. `exportProjectMemory` never throws — every problem is a result.
  */
@@ -16,15 +24,16 @@ import { assertPathWithin, PathFenceError } from '@stack/shared';
 import { z } from 'zod';
 
 import { assertRootHasNoSymlinkSegments } from '../canonical/claude-project-adapter.js';
-import { atomicWriteFile } from '../remote/secure-file.js';
+import { atomicTempPath, atomicWriteFile } from '../remote/secure-file.js';
 import { hashBytes, memoryStorePaths } from '../store.js';
 import {
-  addGitExcludeEntry,
+  addGitExcludeEntries,
   defaultGitRunner,
   excludeEntryFor,
+  isIgnoredByGit,
   isTrackedByGit,
   locateGitRepository,
-  removeGitExcludeEntry,
+  removeGitExcludeEntries,
   type GitRunner,
 } from './git-exclude.js';
 import {
@@ -40,16 +49,19 @@ export const AGENT_EXPORT_RELATIVE_PATHS: Record<AgentExportId, string> = {
   cursor: '.cursor/rules/stak-memory.mdc',
 };
 
-const AGENT_FILE_LABELS: Record<AgentExportId, string> = {
-  codex: 'AGENTS.override.md',
-  cursor: '.cursor/rules/stak-memory.mdc',
-};
-
 export const agentExportTargetOf = (
   projectDir: string,
   agent: AgentExportId,
 ): string =>
   path.join(projectDir, ...AGENT_EXPORT_RELATIVE_PATHS[agent].split('/'));
+
+/** The project folder a recorded target belongs to (the inverse of
+ * `agentExportTargetOf`). */
+const projectDirOfTarget = (target: string, agent: AgentExportId): string =>
+  path.resolve(
+    target,
+    ...AGENT_EXPORT_RELATIVE_PATHS[agent].split('/').map(() => '..'),
+  );
 
 /** Machine-local; listed in `STATE_EXCLUDE_PATHS` so it never enters a bundle. */
 export const agentExportPaths = (stackHome: string) => {
@@ -75,24 +87,34 @@ export class AgentExportStateError extends Error {
 // ---------------------------------------------------------------------------
 // State and settings
 
+const sha256Schema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
+
 const exportRecordSchema = z.object({
   /** Absolute path of the file STAK wrote. */
   path: z.string().min(1),
   /** `sha256:<hex>` of the exact bytes STAK last wrote. */
-  sha256: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  sha256: sha256Schema,
   /** Codex: hash of the team `AGENTS.md` bytes it was built from (null when
    * there was none). Always null for Cursor. */
-  agentsMdHash: z
-    .string()
-    .regex(/^sha256:[a-f0-9]{64}$/)
-    .nullable(),
-  /** The exclude line STAK added, so it can be removed without asking Git. */
+  agentsMdHash: sha256Schema.nullable(),
+  /** The exclude lines STAK relies on for this file (the file itself and its
+   * temp sibling), so they can be released without asking Git. `file` is the
+   * real path of the exclude file. */
   exclude: z
-    .object({ file: z.string().min(1), entry: z.string().min(1) })
+    .object({
+      file: z.string().min(1),
+      entries: z.array(z.string().min(1)).min(1),
+    })
     .optional(),
   updatedAt: z.iso.datetime({ offset: true }),
 });
 export type AgentExportRecord = z.infer<typeof exportRecordSchema>;
+
+const retiredRecordSchema = exportRecordSchema.extend({
+  projectId: z.string().min(1),
+  agent: z.enum(AGENT_EXPORT_IDS),
+});
+export type RetiredAgentExportRecord = z.infer<typeof retiredRecordSchema>;
 
 const exportStateSchema = z.object({
   schemaVersion: z.literal(1),
@@ -103,6 +125,9 @@ const exportStateSchema = z.object({
       cursor: exportRecordSchema.optional(),
     }),
   ),
+  /** Files STAK wrote at a project's previous location that could not be
+   * deleted yet (hand-edited). Kept so their exclude lines stay in place. */
+  retired: z.array(retiredRecordSchema).optional(),
 });
 export type AgentExportState = z.infer<typeof exportStateSchema>;
 
@@ -150,19 +175,24 @@ export const readExportState = async (
   }
 };
 
-const writeExportState = (
+/** Read, change and write the state; returns what was written. */
+const mutateState = async (
   stackHome: string,
-  state: AgentExportState,
-): Promise<void> =>
-  writeJson(agentExportPaths(stackHome).state, exportStateSchema.parse(state));
+  change: (state: AgentExportState) => AgentExportState,
+): Promise<AgentExportState> => {
+  const next = exportStateSchema.parse(
+    change(await readExportState(stackHome)),
+  );
+  await writeJson(agentExportPaths(stackHome).state, next);
+  return next;
+};
 
-const updateRecord = async (
-  stackHome: string,
+const withRecord = (
+  state: AgentExportState,
   projectId: string,
   agent: AgentExportId,
   record: AgentExportRecord | undefined,
-): Promise<void> => {
-  const state = await readExportState(stackHome);
+): AgentExportState => {
   const previous = state.projects[projectId] ?? {};
   const project = Object.fromEntries(
     AGENT_EXPORT_IDS.flatMap((id) => {
@@ -174,7 +204,61 @@ const updateRecord = async (
     Object.entries(state.projects).filter(([id]) => id !== projectId),
   );
   if (Object.keys(project).length > 0) projects[projectId] = project;
-  await writeExportState(stackHome, { schemaVersion: 1, projects });
+  return { ...state, projects };
+};
+
+const sameRetired = (
+  a: RetiredAgentExportRecord,
+  b: RetiredAgentExportRecord,
+): boolean =>
+  a.projectId === b.projectId && a.agent === b.agent && a.path === b.path;
+
+const comparableFile = (file: string): string => {
+  const resolved = path.resolve(file);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+};
+
+/** Remove the exclude lines of `exclude` that no record in `state` (current or
+ * retired) still uses. Call AFTER the state no longer holds the released
+ * record, so a line shared with another worktree's record survives. */
+const releaseExclude = async (
+  state: AgentExportState,
+  exclude: AgentExportRecord['exclude'],
+): Promise<void> => {
+  if (!exclude) return;
+  const file = comparableFile(exclude.file);
+  const records: AgentExportRecord[] = [
+    ...Object.values(state.projects).flatMap((project) =>
+      AGENT_EXPORT_IDS.flatMap((id) => (project[id] ? [project[id]] : [])),
+    ),
+    ...(state.retired ?? []),
+  ];
+  const stillUsed = new Set(
+    records.flatMap((record) =>
+      record.exclude && comparableFile(record.exclude.file) === file
+        ? record.exclude.entries
+        : [],
+    ),
+  );
+  const unused = exclude.entries.filter((entry) => !stillUsed.has(entry));
+  if (unused.length > 0) await removeGitExcludeEntries(exclude.file, unused);
+};
+
+/** Drop the current record for (project, agent), then release its lines. */
+const dropRecord = async (
+  stackHome: string,
+  projectId: string,
+  agent: AgentExportId,
+  extraRelease?: AgentExportRecord['exclude'],
+): Promise<void> => {
+  const before = (await readExportState(stackHome)).projects[projectId]?.[
+    agent
+  ];
+  const next = await mutateState(stackHome, (state) =>
+    withRecord(state, projectId, agent, undefined),
+  );
+  await releaseExclude(next, before?.exclude);
+  await releaseExclude(next, extraRelease);
 };
 
 export const readExportSettings = async (
@@ -286,6 +370,73 @@ const messageOf = (error: unknown): string =>
       ? error.message
       : String(error);
 
+const toPosix = (relative: string): string =>
+  relative.split(path.sep).join('/');
+
+// ---------------------------------------------------------------------------
+// Moved projects
+
+/** A recorded file at a location other than `target` belongs to the project's
+ * previous folder: move its record to `retired`. */
+const retireIfMoved = async (
+  stackHome: string,
+  projectId: string,
+  agent: AgentExportId,
+  target: string,
+): Promise<void> => {
+  const state = await readExportState(stackHome);
+  const stored = state.projects[projectId]?.[agent];
+  if (!stored || stored.path === target) return;
+  await mutateState(stackHome, (current) => ({
+    ...withRecord(current, projectId, agent, undefined),
+    retired: [...(current.retired ?? []), { ...stored, projectId, agent }],
+  }));
+};
+
+/** Delete retired files for (project, agent) that are unchanged or already
+ * gone, and release their exclude lines. Hand-edited ones stay recorded (and
+ * excluded). Returns how many are still kept. */
+const sweepRetired = async (
+  stackHome: string,
+  projectId: string,
+  agent: AgentExportId,
+): Promise<number> => {
+  const candidates = ((await readExportState(stackHome)).retired ?? []).filter(
+    (record) => record.projectId === projectId && record.agent === agent,
+  );
+  let kept = 0;
+  for (const record of candidates) {
+    try {
+      const existing = await readExisting(record.path);
+      if (existing.kind === 'other') {
+        kept += 1;
+        continue;
+      }
+      if (existing.kind === 'file') {
+        if (hashBytes(existing.bytes) !== record.sha256) {
+          kept += 1;
+          continue;
+        }
+        await assertTargetSafe(
+          projectDirOfTarget(record.path, agent),
+          record.path,
+        );
+        await rm(record.path, { force: true });
+      }
+      const next = await mutateState(stackHome, (state) => ({
+        ...state,
+        retired: (state.retired ?? []).filter(
+          (other) => !sameRetired(other, record),
+        ),
+      }));
+      await releaseExclude(next, record.exclude);
+    } catch {
+      kept += 1; // unreadable or unsafe: keep it recorded, and so excluded
+    }
+  }
+  return kept;
+};
+
 // ---------------------------------------------------------------------------
 // Export
 
@@ -295,6 +446,7 @@ export type ExportStatusCode =
   | 'skipped-user-file'
   | 'skipped-hand-edited'
   | 'skipped-tracked'
+  | 'skipped-not-ignorable'
   | 'skipped-no-git'
   | 'skipped-team-too-large'
   | 'failed';
@@ -322,7 +474,7 @@ export type ExportProjectMemoryOptions = {
 
 type Privacy =
   | { kind: 'plain' }
-  | { kind: 'exclude'; file: string; entry: string }
+  | { kind: 'exclude'; file: string; entries: string[] }
   | {
       kind: 'skip';
       status: 'skipped-no-git' | 'skipped-tracked';
@@ -351,7 +503,7 @@ const resolvePrivacy = async (
     return {
       kind: 'skip',
       status: 'skipped-tracked',
-      message: `${AGENT_FILE_LABELS[agent]} is tracked by Git; STAK will not write a file that could be committed.`,
+      message: `${relative} is tracked by Git; STAK will not write a file that could be committed.`,
     };
   const fromRoot = path.relative(
     await realpath(location.toplevel),
@@ -361,19 +513,26 @@ const resolvePrivacy = async (
     throw new Error('The project folder is outside its Git working tree.');
   const segments = [
     ...fromRoot.split(path.sep).filter((segment) => segment.length > 0),
-    relative,
+    ...relative.split('/'),
   ];
+  const name = segments.pop() ?? relative;
+  const folder = segments.map((segment) => `${segment}/`).join('');
   return {
     kind: 'exclude',
     file: location.excludePath,
-    entry: excludeEntryFor(segments.join('/')),
+    entries: [
+      excludeEntryFor(`${folder}${name}`),
+      // The temp sibling `atomicWriteFile` writes first (`.<name>.<uuid>.tmp`).
+      `${excludeEntryFor(`${folder}.${name}`)}.*.tmp`,
+    ],
   };
 };
 
 const sameExclude = (
   a: AgentExportRecord['exclude'],
   b: AgentExportRecord['exclude'],
-): boolean => a?.file === b?.file && a?.entry === b?.entry;
+): boolean =>
+  a?.file === b?.file && a?.entries.join('\n') === b?.entries.join('\n');
 
 const exportOnce = async (
   options: ExportProjectMemoryOptions,
@@ -382,7 +541,7 @@ const exportOnce = async (
 ): Promise<ExportResult> => {
   const { stackHome, projectId, agent } = options;
   const git = options.git ?? defaultGitRunner;
-  const label = AGENT_FILE_LABELS[agent];
+  const label = AGENT_EXPORT_RELATIVE_PATHS[agent];
   const result = (
     status: ExportStatusCode,
     message?: string,
@@ -402,28 +561,17 @@ const exportOnce = async (
   }
   await assertTargetSafe(projectDir, target);
 
-  const state = await readExportState(stackHome);
-  const stored = state.projects[projectId]?.[agent];
-  const record = stored?.path === target ? stored : undefined;
-  const existing = await readExisting(target);
+  await retireIfMoved(stackHome, projectId, agent, target);
+  await sweepRetired(stackHome, projectId, agent);
 
-  if (existing.kind === 'other' || (existing.kind === 'file' && !record))
+  const state = await readExportState(stackHome);
+  const record = state.projects[projectId]?.[agent];
+  const existing = await readExisting(target);
+  if (existing.kind === 'other')
     return result(
       'skipped-user-file',
       `${label} already exists and was not written by STAK; leaving it alone.`,
     );
-  const handEdited =
-    existing.kind === 'file' &&
-    record !== undefined &&
-    hashBytes(existing.bytes) !== record.sha256;
-  if (handEdited && !options.overwriteHandEdits)
-    return result(
-      'skipped-hand-edited',
-      `${label} was edited by hand. Move the edit into your real memory, or reset the file with \`stak memory agents reset ${agent}\`.`,
-    );
-
-  const privacy = await resolvePrivacy(git, projectDir, agent);
-  if (privacy.kind === 'skip') return result(privacy.status, privacy.message);
 
   const team =
     agent === 'codex' ? await readTeamAgentsMd(projectDir) : undefined;
@@ -432,14 +580,40 @@ const exportOnce = async (
     documents: options.documents,
     ...(team ? { teamAgentsMd: team.text } : {}),
   });
-  if (rendered.status === 'team-agents-md-too-large') {
+  const bytes =
+    rendered.status === 'ok' ? Buffer.from(rendered.content, 'utf8') : null;
+  const sha256 = bytes ? hashBytes(bytes) : null;
+  const existingSha =
+    existing.kind === 'file' ? hashBytes(existing.bytes) : null;
+
+  // A file with no record is the user's — unless it is byte-for-byte what STAK
+  // would write now (a crash between writing it and recording it): adopt it.
+  if (existingSha !== null && !record && existingSha !== sha256)
+    return result(
+      'skipped-user-file',
+      `${label} already exists and was not written by STAK; leaving it alone.`,
+    );
+  const handEdited =
+    existingSha !== null &&
+    record !== undefined &&
+    existingSha !== record.sha256;
+  if (handEdited && !options.overwriteHandEdits)
+    return result(
+      'skipped-hand-edited',
+      `${label} was edited by hand. Move the edit into your real memory, or reset the file with \`stak memory agents reset ${agent}\`.`,
+    );
+  // STAK's own file, unchanged since it wrote it (or identical to a fresh one).
+  const ownUnchanged = existingSha !== null && !handEdited;
+
+  const privacy = await resolvePrivacy(git, projectDir, agent);
+  if (privacy.kind === 'skip') return result(privacy.status, privacy.message);
+
+  if (!bytes || !sha256) {
     // An old override would now hide the team's new AGENTS.md from Codex, so
     // withdraw STAK's own (unchanged) file.
-    if (existing.kind === 'file' && record && !handEdited) {
+    if (ownUnchanged && record) {
       await rm(target, { force: true });
-      if (record.exclude)
-        await removeGitExcludeEntry(record.exclude.file, record.exclude.entry);
-      await updateRecord(stackHome, projectId, agent, undefined);
+      await dropRecord(stackHome, projectId, agent);
     }
     return result(
       'skipped-team-too-large',
@@ -447,20 +621,34 @@ const exportOnce = async (
     );
   }
 
-  const bytes = Buffer.from(rendered.content, 'utf8');
-  const sha256 = hashBytes(bytes);
-  const exclude =
-    privacy.kind === 'exclude'
-      ? { file: privacy.file, entry: privacy.entry }
-      : undefined;
+  let exclude: AgentExportRecord['exclude'];
+  if (privacy.kind === 'exclude') {
+    // Hide the file (and its temp sibling) from Git before either exists, and
+    // confirm with Git that nothing (a `.gitignore` negation) re-includes them.
+    await addGitExcludeEntries(privacy.file, privacy.entries);
+    exclude = { file: await realpath(privacy.file), entries: privacy.entries };
+    const probes = [
+      label,
+      toPosix(path.relative(projectDir, atomicTempPath(target))),
+    ];
+    let ignorable = true;
+    for (const probe of probes)
+      if (!(await isIgnoredByGit(git, projectDir, probe))) ignorable = false;
+    if (!ignorable) {
+      // A STAK file there would be committable: withdraw it if it is ours and
+      // unchanged. A hand-edited one (reached only on reset) stays recorded.
+      if (!handEdited) {
+        if (ownUnchanged) await rm(target, { force: true });
+        await dropRecord(stackHome, projectId, agent, exclude);
+      }
+      return result(
+        'skipped-not-ignorable',
+        `This repository's .gitignore re-includes ${label} (a "!" rule), so STAK cannot keep it out of Git and did not write it.`,
+      );
+    }
+  }
 
-  // Hide the file from Git before it exists.
-  if (exclude) await addGitExcludeEntry(exclude.file, exclude.entry);
-  if (record?.exclude && !sameExclude(record.exclude, exclude))
-    await removeGitExcludeEntry(record.exclude.file, record.exclude.entry);
-
-  const unchanged =
-    existing.kind === 'file' && hashBytes(existing.bytes) === sha256;
+  const unchanged = existingSha === sha256;
   if (!unchanged) await atomicWriteFile(target, bytes);
 
   const agentsMdHash = team?.hash ?? null;
@@ -470,14 +658,20 @@ const exportOnce = async (
     record.sha256 === sha256 &&
     record.agentsMdHash === agentsMdHash &&
     sameExclude(record.exclude, exclude);
-  if (!recordIsCurrent)
-    await updateRecord(stackHome, projectId, agent, {
-      path: target,
-      sha256,
-      agentsMdHash,
-      ...(exclude ? { exclude } : {}),
-      updatedAt: (options.now?.() ?? new Date()).toISOString(),
-    });
+  if (!recordIsCurrent) {
+    const next = await mutateState(stackHome, (current) =>
+      withRecord(current, projectId, agent, {
+        path: target,
+        sha256,
+        agentsMdHash,
+        ...(exclude ? { exclude } : {}),
+        updatedAt: (options.now?.() ?? new Date()).toISOString(),
+      }),
+    );
+    // Lines of a previous exclude location that nothing uses any more.
+    if (record?.exclude && !sameExclude(record.exclude, exclude))
+      await releaseExclude(next, record.exclude);
+  }
 
   return result(
     unchanged ? 'unchanged' : 'written',
@@ -512,16 +706,23 @@ export type RemoveProjectExportOptions = {
 };
 
 /** Delete STAK's file for one project and agent, only if unchanged since STAK
- * wrote it, and drop its exclude line (and the block once empty). A hand-edited
- * file keeps its exclude line and record, so it stays private and reported. */
+ * wrote it, and release its exclude lines (the block goes once empty). Files
+ * left at a previous project folder are cleaned the same way. A hand-edited
+ * file keeps its record and exclude lines, so it stays private and reported. */
 export const removeProjectExport = async (
   options: RemoveProjectExportOptions,
 ): Promise<{ status: 'removed' | 'kept-hand-edited' | 'none' }> => {
+  const { stackHome, projectId, agent } = options;
   const projectDir = path.resolve(options.projectDir);
-  const target = agentExportTargetOf(projectDir, options.agent);
-  const state = await readExportState(options.stackHome);
-  const record = state.projects[options.projectId]?.[options.agent];
-  if (!record || record.path !== target) return { status: 'none' };
+  const target = agentExportTargetOf(projectDir, agent);
+  await retireIfMoved(stackHome, projectId, agent, target);
+  const keptRetired = await sweepRetired(stackHome, projectId, agent);
+  const fallback = keptRetired > 0 ? 'kept-hand-edited' : 'none';
+
+  const record = (await readExportState(stackHome)).projects[projectId]?.[
+    agent
+  ];
+  if (!record) return { status: fallback };
 
   const existing = await readExisting(target);
   if (
@@ -533,15 +734,15 @@ export const removeProjectExport = async (
     await assertTargetSafe(projectDir, target);
     await rm(target, { force: true });
   }
-  if (record.exclude)
-    await removeGitExcludeEntry(record.exclude.file, record.exclude.entry);
-  await updateRecord(
-    options.stackHome,
-    options.projectId,
-    options.agent,
-    undefined,
-  );
-  return { status: existing.kind === 'file' ? 'removed' : 'none' };
+  await dropRecord(stackHome, projectId, agent);
+  return {
+    status:
+      keptRetired > 0
+        ? 'kept-hand-edited'
+        : existing.kind === 'file'
+          ? 'removed'
+          : 'none',
+  };
 };
 
 export type ExportStatusOptions = RemoveProjectExportOptions & {

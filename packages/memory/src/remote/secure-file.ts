@@ -103,6 +103,17 @@ export const verifyOwnerOnly = async (options: {
 };
 
 /**
+ * The temp sibling `atomicWriteFile` writes before renaming over `target`:
+ * `.<basename>.<uuid>.tmp` in the same folder. Callers that must keep that
+ * temp file out of Git (cross-agent Memory export) rely on this exact shape.
+ */
+export const atomicTempPath = (target: string): string =>
+  path.join(
+    path.dirname(target),
+    `.${path.basename(target)}.${randomUUID()}.tmp`,
+  );
+
+/**
  * Write bytes atomically with restrictive permissions: a temp sibling is written
  * (mode 0o600) then renamed over the target, so readers never see a partial file
  * and the file never exists world-readable. Cleans up the temp file on failure.
@@ -113,10 +124,7 @@ export const atomicWriteFile = async (
   options: { mode?: number } = {},
 ): Promise<void> => {
   await secureMkdir(path.dirname(target));
-  const temporary = path.join(
-    path.dirname(target),
-    `.${path.basename(target)}.${randomUUID()}.tmp`,
-  );
+  const temporary = atomicTempPath(target);
   try {
     await writeFile(temporary, bytes, { mode: options.mode ?? 0o600 });
     await rename(temporary, target);

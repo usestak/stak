@@ -14,6 +14,7 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { atomicTempPath } from '../remote/secure-file.js';
 import { hashBytes } from '../store.js';
 import {
   agentExportPaths,
@@ -514,8 +515,17 @@ describe.skipIf(!hasGit)('exportProjectMemory in a real Git repository', () => {
       'utf8',
     );
     expect(exclude).toContain(
-      `${STAK_EXCLUDE_BEGIN}\n/.cursor/rules/stak-memory.mdc\n/AGENTS.override.md\n# <<< STAK <<<\n`,
+      `${STAK_EXCLUDE_BEGIN}\n/.AGENTS.override.md.*.tmp\n/.cursor/rules/.stak-memory.mdc.*.tmp\n/.cursor/rules/stak-memory.mdc\n/AGENTS.override.md\n# <<< STAK <<<\n`,
     );
+    // The atomic-write temp files are hidden too (fix I3).
+    for (const agent of ['codex', 'cursor'] as const) {
+      const tempFile = atomicTempPath(agentExportTargetOf(repo, agent));
+      await writeFile(tempFile, 'partial');
+      expect(git(repo, 'status', '--porcelain', '--untracked-files=all')).toBe(
+        '',
+      );
+      await rm(tempFile);
+    }
     expect(exclude.split(STAK_EXCLUDE_BEGIN).length).toBe(2);
 
     const again = await exportProjectMemory({
