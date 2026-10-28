@@ -129,7 +129,7 @@ export const agentExportProblemOf = (
     return error.code === 'state-corrupt'
       ? {
           code: 'state-corrupt',
-          message: `Agent memory sharing skipped: STAK's record of the agent files it wrote is unreadable. Delete ${paths.state}, then run \`stak memory agents reset ${commandAgent(agents)}\`.`,
+          message: `Agent memory sharing skipped: STAK's record of the agent files it wrote is unreadable. Move ${paths.state} aside (for example, rename it to state.json.bak), then run \`stak memory agents reset ${commandAgent(agents)}\` and check \`git status\` in your projects.`,
         }
       : {
           code: 'settings-corrupt',
@@ -526,7 +526,13 @@ export const disableAgentMemory = async (
 // Status (read-only)
 
 export type AgentProjectState =
-  'up-to-date' | 'out-of-date' | 'hand-edited' | 'not-ignorable' | 'skipped';
+  | 'up-to-date'
+  | 'out-of-date'
+  | 'hand-edited'
+  | 'not-ignorable'
+  | 'skipped'
+  /** Git (or the file system) couldn't answer: never reported as fine. */
+  | 'unchecked';
 
 export type AgentMemoryAgentStatus = {
   agent: AgentExportId;
@@ -538,6 +544,7 @@ export type AgentMemoryAgentStatus = {
   handEdited: number;
   notIgnorable: number;
   skipped: number;
+  unchecked: number;
   overBudget: number;
   /** Every project that is not plainly up to date, with what to do. */
   details: Array<{
@@ -566,6 +573,7 @@ const emptyAgentStatus = (
   handEdited: 0,
   notIgnorable: 0,
   skipped: 0,
+  unchecked: 0,
   overBudget: 0,
   details: [],
 });
@@ -600,10 +608,54 @@ const reIncludedByGit = async (
     '--',
     relative,
   ]);
-  if (result.exitCode !== 0 && result.exitCode !== 1) return false;
+  // Fail closed: a Git error is "couldn't check", never "fine".
+  if (result.exitCode !== 0 && result.exitCode !== 1)
+    throw new Error(
+      `Git couldn't check whether ${relative} is ignored (exit ${result.exitCode}).`,
+    );
   const line = result.stdout.split('\n').find((l) => l.includes('\t')) ?? '';
   const pattern = /^.*?:\d+:(.*)\t/.exec(line)?.[1] ?? '';
   return pattern.startsWith('!');
+};
+
+/** Whether a `.gitignore` "!" rule re-includes the agent file or its temp
+ * sibling, so Git could commit it. Throws when Git can't answer. */
+const reIncludedFile = async (
+  git: GitRunner,
+  dir: string,
+  agent: AgentExportId,
+): Promise<boolean> => {
+  const relative = AGENT_EXPORT_RELATIVE_PATHS[agent];
+  const name = path.posix.basename(relative);
+  const tempProbe = path.posix.join(
+    path.posix.dirname(relative),
+    `.${name}.probe.tmp`,
+  );
+  return (
+    (await reIncludedByGit(git, dir, relative)) ||
+    (await reIncludedByGit(git, dir, tempProbe))
+  );
+};
+
+/** For a file STAK already wrote: does it still sit in a repository whose
+ * ignore rules keep it out of Git? Read-only. */
+const existingFileNotIgnorable = async (
+  git: GitRunner,
+  dir: string,
+  agent: AgentExportId,
+): Promise<string | undefined> => {
+  const relative = AGENT_EXPORT_RELATIVE_PATHS[agent];
+  const location = await locateGitRepository(git, dir);
+  if (location.kind !== 'repo') {
+    if (await hasGitAncestor(dir))
+      throw new Error(
+        `Git isn't available, so STAK can't check that ${relative} is kept out of the repository.`,
+      );
+    return undefined;
+  }
+  return (await reIncludedFile(git, dir, agent))
+    ? `.gitignore re-includes ${relative}, so Git could commit it. Remove the "!" rule, or run \`stak memory agents disable ${agent}\``
+    : undefined;
 };
 
 const readTeamAgentsMd = async (dir: string): Promise<string | undefined> => {
@@ -641,15 +693,7 @@ const classifyMissing = async (
   }
   if (await isTrackedByGit(git, dir, relative))
     return { state: 'skipped', message: `${relative} is tracked by Git` };
-  const name = path.posix.basename(relative);
-  const tempProbe = path.posix.join(
-    path.posix.dirname(relative),
-    `.${name}.probe.tmp`,
-  );
-  if (
-    (await reIncludedByGit(git, dir, relative)) ||
-    (await reIncludedByGit(git, dir, tempProbe))
-  )
+  if (await reIncludedFile(git, dir, agent))
     return {
       state: 'not-ignorable',
       message: `.gitignore re-includes ${relative}, so STAK won't write it`,
@@ -710,6 +754,7 @@ export const agentMemoryStatus = async (
           if (state === 'hand-edited') status.handEdited += 1;
           if (state === 'not-ignorable') status.notIgnorable += 1;
           if (state === 'skipped') status.skipped += 1;
+          if (state === 'unchecked') status.unchecked += 1;
           if (state !== 'up-to-date')
             status.details.push({
               projectId: target.projectId,
@@ -744,7 +789,16 @@ export const agentMemoryStatus = async (
             documents,
           });
           const relative = AGENT_EXPORT_RELATIVE_PATHS[agent];
-          if (fresh === 'up-to-date') add('up-to-date');
+          // A STAK file that exists: a "!" rule added after it was written
+          // makes it committable, whatever else is true of it.
+          const notIgnorable =
+            fresh === 'up-to-date' ||
+            fresh === 'stale' ||
+            fresh === 'hand-edited'
+              ? await existingFileNotIgnorable(git, target.dir, agent)
+              : undefined;
+          if (notIgnorable !== undefined) add('not-ignorable', notIgnorable);
+          else if (fresh === 'up-to-date') add('up-to-date');
           else if (fresh === 'stale')
             add('out-of-date', `${relative} is out of date`);
           else if (fresh === 'hand-edited')
@@ -783,7 +837,7 @@ export const agentMemoryStatus = async (
         } catch (error) {
           if (error instanceof AgentExportStateError) throw error;
           add(
-            'skipped',
+            'unchecked',
             `couldn't check: ${error instanceof Error ? error.message : String(error)}`,
           );
         }

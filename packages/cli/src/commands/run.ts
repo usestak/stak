@@ -59,11 +59,20 @@ export type RunCommandDependencies = {
    * sharing for that agent and writes its files right away. Optional. */
   enableAgentMemory?(agent: AgentExportId): Promise<AgentExportReport>;
   /** Runs `fn` holding the Memory lock (spec 2026-10-25). `stak run` takes it
-   * around the Memory export only. Optional; when absent, `fn` runs directly. */
-  withMemoryLock?<T>(command: string, fn: () => Promise<T>): Promise<T>;
+   * around the Memory export only, with a short wait (`timeoutMs`). Optional;
+   * when absent, `fn` runs directly. */
+  withMemoryLock?<T>(
+    command: string,
+    fn: () => Promise<T>,
+    options?: { timeoutMs?: number },
+  ): Promise<T>;
   confirm(message: string): Promise<boolean>;
   writeOut(value: string): void;
 };
+
+/** How long `stak run` waits for a busy Memory lock before launching without
+ * the export (the same short wait as the post-command check-in). */
+export const RUN_MEMORY_LOCK_TIMEOUT_MS = 2_000;
 
 const mutationStates = new Set([
   'add',
@@ -188,8 +197,10 @@ export const registerRunCommand = (
         ) {
           const report = await safelyExportAgentMemory(() =>
             dependencies.withMemoryLock
-              ? dependencies.withMemoryLock('stak run', () =>
-                  enableAgentMemory.call(dependencies, agentId),
+              ? dependencies.withMemoryLock(
+                  'stak run',
+                  () => enableAgentMemory.call(dependencies, agentId),
+                  { timeoutMs: RUN_MEMORY_LOCK_TIMEOUT_MS },
                 )
               : enableAgentMemory.call(dependencies, agentId),
           );

@@ -298,8 +298,9 @@ until you choose one with `stak project map <project> <dir>`.
 
 Exporting never fails the command that triggered it: problems are printed as
 notes. If STAK's record of the files it wrote becomes unreadable, the note says to
-delete `$STAK_HOME/memory/agent-exports/state.json` and run
-`stak memory agents reset <agent>`. That record is machine-local and is never
+move `$STAK_HOME/memory/agent-exports/state.json` aside (for example, rename it to
+`state.json.bak`), run `stak memory agents reset <agent>`, and then check
+`git status` in your projects. That record is machine-local and is never
 backed up or pushed.
 
 ### `stak memory backup`

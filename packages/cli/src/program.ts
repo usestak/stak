@@ -451,8 +451,13 @@ export type ProgramDependencies = {
   /**
    * Runs `fn` while holding the cross-process Memory lock (spec 2026-10-25).
    * Optional so existing tests keep working; when absent, `fn` runs directly.
+   * `timeoutMs` shortens the wait for a busy lock (default 10 s).
    */
-  withMemoryLock?<T>(command: string, fn: () => Promise<T>): Promise<T>;
+  withMemoryLock?<T>(
+    command: string,
+    fn: () => Promise<T>,
+    options?: { timeoutMs?: number },
+  ): Promise<T>;
   /**
    * Phase P1: best-effort machine check-in after a state-changing command succeeds.
    * Optional so the test harness can omit it; the real CLI wires it in
@@ -1492,8 +1497,11 @@ const defaultDependencies: ProgramDependencies = {
   upgrade: defaultUpgradeDependencies,
   // Spec 2026-10-25: every Memory-changing command wraps its Memory work in this. The
   // one-line leftover-lock note goes to stderr so it never corrupts `--json` stdout.
-  withMemoryLock: (command, fn) =>
+  withMemoryLock: (command, fn, options) =>
     withMemoryLock(stackHome, command, fn, {
+      ...(options?.timeoutMs !== undefined
+        ? { timeoutMs: options.timeoutMs }
+        : {}),
       onLeftoverCleared: (holder) =>
         process.stderr.write(`${leftoverClearedMessage(holder)}\n`),
     }),

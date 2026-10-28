@@ -20,6 +20,8 @@ import {
   hashBytes,
   writeCanonicalMain,
   writeMemoryObject,
+  defaultGitRunner,
+  type GitRunner,
   encodeClaudeProjectKey,
   fileLocalMemoryKeyStore,
   inMemoryRemoteMemoryBackend,
@@ -341,8 +343,12 @@ describe('disable / reset', () => {
 
     const refresh = await exportAgentMemory(stackHome, discovery());
     expect(refresh.agents[0]?.skipped[0]?.status).toBe('skipped-hand-edited');
-    expect(renderAgentExportNotes(refresh)).toContain(
-      'stak memory agents reset codex',
+    // A refresh after add/pull/push stays quiet about it…
+    expect(renderAgentExportNotes(refresh)).toBe('');
+    // …but enable (and `stak run`) says how to fix it.
+    const again = await enableAgentMemory(stackHome, discovery(), 'codex');
+    expect(renderAgentExportNotes(again, 'enable')).toContain(
+      '; not overwritten. Move the edit into your memory, or run `stak memory agents reset codex`.',
     );
     expect(await readFile(codexFile(projectDir), 'utf8')).toBe('hand edit\n');
 
@@ -372,7 +378,7 @@ describe('a corrupt state file never throws (spec §8)', () => {
     expect(exported.problems).toEqual([
       {
         code: 'state-corrupt',
-        message: `Agent memory sharing skipped: STAK's record of the agent files it wrote is unreadable. Delete ${statePath}, then run \`stak memory agents reset codex\`.`,
+        message: `Agent memory sharing skipped: STAK's record of the agent files it wrote is unreadable. Move ${statePath} aside (for example, rename it to state.json.bak), then run \`stak memory agents reset codex\` and check \`git status\` in your projects.`,
       },
     ]);
     const status = await agentMemoryStatus(stackHome, discovery());
@@ -440,6 +446,48 @@ describe.skipIf(!hasGit)('in a real Git repository', () => {
     expect(status.agents[1]).toMatchObject({ notIgnorable: 1, projects: 1 });
     expect(agentMemoryStatusLines(status)[2]).toBe(
       '  Cursor   1 not ignorable of 1 project',
+    );
+  });
+
+  it('a "!" rule added after STAK wrote its file shows as not ignorable right away', async () => {
+    initRepo(projectDir);
+    await stagedProject();
+    await enableAgentMemory(stackHome, discovery(), 'cursor');
+    let status = await agentMemoryStatus(stackHome, discovery());
+    expect(status.agents[1]).toMatchObject({ upToDate: 1, notIgnorable: 0 });
+
+    await writeFile(
+      path.join(projectDir, '.gitignore'),
+      '!.cursor/rules/stak-memory.mdc\n',
+      'utf8',
+    );
+    status = await agentMemoryStatus(stackHome, discovery());
+    expect(status.agents[1]).toMatchObject({ upToDate: 0, notIgnorable: 1 });
+    expect(status.agents[1]?.details[0]?.message).toContain(
+      'so Git could commit it',
+    );
+    expect(agentMemoryStatusLines(status)[2]).toBe(
+      '  Cursor   1 not ignorable of 1 project',
+    );
+  });
+
+  it('a Git error in the status check shows as "couldn\'t check", never as fine', async () => {
+    initRepo(projectDir);
+    await stagedProject();
+    await enableAgentMemory(stackHome, discovery(), 'codex');
+    const failingCheckIgnore: GitRunner = {
+      run: async (cwd, args) =>
+        args[0] === 'check-ignore'
+          ? { exitCode: 128, stdout: '', stderr: 'fatal: broken' }
+          : defaultGitRunner.run(cwd, args),
+    };
+    const status = await agentMemoryStatus(stackHome, discovery(), {
+      git: failingCheckIgnore,
+    });
+    expect(status.agents[0]).toMatchObject({ upToDate: 0, unchecked: 1 });
+    expect(status.agents[0]?.details[0]?.message).toMatch(/^couldn't check: /);
+    expect(agentMemoryStatusLines(status)[2]).toBe(
+      "  Codex    1 couldn't be checked of 1 project",
     );
   });
 

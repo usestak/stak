@@ -28,6 +28,10 @@ const names = (items: ReadonlyArray<{ name: string }>): string =>
 const skipNotes = (
   agent: AgentExportId,
   skipped: AgentExportProjectNote[],
+  /** The hand-edit note is for the commands where it matters (`memory
+   * agents enable|reset`, `stak run`); a refresh after add/pull/push stays
+   * quiet about it (status still shows it). */
+  showHandEdited: boolean,
 ): string[] => {
   const label = agentLabel(agent);
   const file = AGENT_EXPORT_RELATIVE_PATHS[agent];
@@ -44,7 +48,7 @@ const skipNotes = (
           `${label}: ${plural(items.length, 'project')} skipped — ${reason} (${names(items)}).`,
         ];
   };
-  const handEdited = of('skipped-hand-edited');
+  const handEdited = showHandEdited ? of('skipped-hand-edited') : [];
   return [
     ...grouped(
       'skipped-not-ignorable',
@@ -103,7 +107,7 @@ const agentNotes = (
     lines.push(
       `${label}: memory updated for ${plural(report.written, 'project')}.`,
     );
-  lines.push(...skipNotes(report.agent, report.skipped));
+  lines.push(...skipNotes(report.agent, report.skipped, mode !== 'refresh'));
   const omitted = report.overBudget.reduce(
     (sum, p) => sum + p.omitted.length,
     0,
@@ -180,6 +184,7 @@ const statusSummary = (status: AgentMemoryAgentStatus): string => {
     status.handEdited > 0 && `${status.handEdited} hand-edited`,
     status.notIgnorable > 0 && `${status.notIgnorable} not ignorable`,
     status.overBudget > 0 && `${status.overBudget} over budget`,
+    status.unchecked > 0 && `${status.unchecked} couldn't be checked`,
   ].filter((part): part is string => typeof part === 'string');
   if (status.projects === 0) return 'on, no projects with Memory yet';
   if (parts.length === 0)

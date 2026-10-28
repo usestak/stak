@@ -3189,7 +3189,7 @@ describe('STAK CLI', () => {
           });
           expect(corrupt.exit).toBeUndefined();
           expect(corrupt.output).toContain(
-            `Delete ${statePath}, then run \`stak memory agents reset codex\`.`,
+            `Move ${statePath} aside (for example, rename it to state.json.bak), then run \`stak memory agents reset codex\` and check \`git status\` in your projects.`,
           );
         } finally {
           await rm(home, { recursive: true, force: true });
@@ -3284,6 +3284,70 @@ describe('STAK CLI', () => {
           expect(calls).toEqual(['stak run']);
         });
 
+        it('stak run waits only 2 s for a busy Memory lock, then shows the note and launches', async () => {
+          const seen: Array<{ timeoutMs?: number } | undefined> = [];
+          await runProgram(['run', 'codex'], {
+            enableAgentMemory: async () => exported(),
+            withMemoryLock: async <T>(
+              _command: string,
+              fn: () => Promise<T>,
+              options?: { timeoutMs?: number },
+            ) => {
+              seen.push(options);
+              return fn();
+            },
+          });
+          expect(seen).toEqual([{ timeoutMs: 2_000 }]);
+
+          // A real lock held by another live process: the run gives up after
+          // its short wait (not the default 10 s) and still launches.
+          const home = await mkdtemp(path.join(os.tmpdir(), 'stak-run-lock-'));
+          try {
+            await mkdir(path.join(home, 'memory'), { recursive: true });
+            await writeFile(
+              path.join(home, 'memory', '.memory.lock'),
+              JSON.stringify({
+                lockId: 'planted-lock',
+                pid: process.pid,
+                hostname: os.hostname(),
+                startedAt: new Date().toISOString(),
+                command: 'stak pull',
+              }),
+            );
+            const enableAgentMemory = vi.fn(async () => exported());
+            const launchCodex = vi.fn(async () => launchResult);
+            const started = Date.now();
+            const { output, exit } = await runProgram(['run', 'codex'], {
+              enableAgentMemory,
+              launchCodex,
+              withMemoryLock: <T>(
+                command: string,
+                fn: () => Promise<T>,
+                options?: { timeoutMs?: number },
+              ) =>
+                withMemoryLock(home, command, fn, {
+                  ...(options?.timeoutMs !== undefined
+                    ? { timeoutMs: options.timeoutMs }
+                    : {}),
+                  pollMs: 50,
+                  installSignalHandlers: false,
+                  isProcessAlive: () => true,
+                }),
+            });
+            const elapsed = Date.now() - started;
+            expect(exit).toBeUndefined();
+            expect(elapsed).toBeGreaterThanOrEqual(1_900);
+            expect(elapsed).toBeLessThan(6_000);
+            expect(enableAgentMemory).not.toHaveBeenCalled();
+            expect(launchCodex).toHaveBeenCalledTimes(1);
+            expect(output).toMatch(
+              /Agent memory sharing skipped: Another STAK command \(`stak pull`, started \d+s ago\) is changing Memory\. Try again when it finishes\./,
+            );
+          } finally {
+            await rm(home, { recursive: true, force: true });
+          }
+        }, 15_000);
+
         it('a busy lock or a failed export is a note: the agent still launches', async () => {
           const launchCodex = vi.fn(async () => launchResult);
           const { output, exit } = await runProgram(['run', 'codex'], {
@@ -3309,6 +3373,7 @@ describe('STAK CLI', () => {
               handEdited: 1,
               notIgnorable: 0,
               skipped: 0,
+              unchecked: 0,
               overBudget: 0,
               details: [
                 {
@@ -3329,6 +3394,7 @@ describe('STAK CLI', () => {
               handEdited: 0,
               notIgnorable: 0,
               skipped: 0,
+              unchecked: 0,
               overBudget: 0,
               details: [],
             },
