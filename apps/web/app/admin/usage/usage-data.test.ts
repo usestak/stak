@@ -2,7 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { loadUsageMetrics } from './usage-data';
 
-function fakeDb(responses: Record<string, { data?: unknown[]; count?: number; error?: unknown }>) {
+function fakeDb(
+  responses: Record<
+    string,
+    { data?: unknown[]; count?: number; error?: unknown }
+  >,
+) {
   const selectSpies: Record<string, ReturnType<typeof vi.fn>> = {};
   return {
     from: (table: string) => {
@@ -29,11 +34,27 @@ describe('loadUsageMetrics', () => {
     const db = fakeDb({
       product_events: {
         data: [
-          { event_name: 'cloud.push.succeeded', created_at: '2026-10-19T10:00:00Z', metadata: null },
-          { event_name: 'cloud.push.succeeded', created_at: '2026-10-19T11:00:00Z', metadata: null },
-          { event_name: 'cloud.pull.succeeded', created_at: '2026-10-19T12:00:00Z', metadata: null },
+          {
+            event_name: 'cloud.push.succeeded',
+            created_at: '2026-10-19T10:00:00Z',
+            metadata: null,
+          },
+          {
+            event_name: 'cloud.push.succeeded',
+            created_at: '2026-10-19T11:00:00Z',
+            metadata: null,
+          },
+          {
+            event_name: 'cloud.pull.succeeded',
+            created_at: '2026-10-19T12:00:00Z',
+            metadata: null,
+          },
           // A replayed push must not be double-counted as a new push.
-          { event_name: 'cloud.push.succeeded', created_at: '2026-10-19T14:00:00Z', metadata: { replayed: true } },
+          {
+            event_name: 'cloud.push.succeeded',
+            created_at: '2026-10-19T14:00:00Z',
+            metadata: { replayed: true },
+          },
         ],
         error: null,
       },
@@ -67,8 +88,18 @@ describe('loadUsageMetrics', () => {
 
     await loadUsageMetrics(db, 'all');
 
-    const spies = (db as unknown as { __selectSpies: Record<string, ReturnType<typeof vi.fn>> }).__selectSpies;
-    expect(spies.memory_backups).toHaveBeenCalledWith('backup_id', { count: 'exact', head: true });
-    expect(spies.public_stack_versions).toHaveBeenCalledWith('version_id', { count: 'exact', head: true });
+    const spies = (
+      db as unknown as {
+        __selectSpies: Record<string, ReturnType<typeof vi.fn>>;
+      }
+    ).__selectSpies;
+    expect(spies.memory_backups).toHaveBeenCalledWith('backup_id', {
+      count: 'exact',
+      head: true,
+    });
+    expect(spies.public_stack_versions).toHaveBeenCalledWith('version_id', {
+      count: 'exact',
+      head: true,
+    });
   });
 });

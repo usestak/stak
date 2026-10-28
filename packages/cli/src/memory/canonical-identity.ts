@@ -156,7 +156,8 @@ export const reconcileNativeWithStagedMemory = (
     const claimed = group.find(
       (entry) =>
         entry.project &&
-        resolveProjectForIdentity(registry, entry.project).status === 'resolved',
+        resolveProjectForIdentity(registry, entry.project).status ===
+          'resolved',
     );
     items.push(claimed ?? sourceCopy);
   }

@@ -2,9 +2,17 @@ import { describe, expect, it } from 'vitest';
 
 import { loadReliabilityMetrics } from './reliability-data';
 
-type FailureRow = { event_name: string; error_code: string | null; user_id: string; created_at: string };
+type FailureRow = {
+  event_name: string;
+  error_code: string | null;
+  user_id: string;
+  created_at: string;
+};
 
-function fakeDb(config: { counts: Record<string, number>; failureRows: FailureRow[] }) {
+function fakeDb(config: {
+  counts: Record<string, number>;
+  failureRows: FailureRow[];
+}) {
   return {
     from: () => {
       const state: { eventName?: string; isFailureQuery?: boolean } = {};
@@ -22,7 +30,10 @@ function fakeDb(config: { counts: Record<string, number>; failureRows: FailureRo
         if (state.isFailureQuery) {
           resolve({ data: config.failureRows, error: null });
         } else {
-          resolve({ count: config.counts[state.eventName ?? ''] ?? 0, error: null });
+          resolve({
+            count: config.counts[state.eventName ?? ''] ?? 0,
+            error: null,
+          });
         }
       };
       return builder;
@@ -40,8 +51,18 @@ describe('loadReliabilityMetrics', () => {
         'cloud.pull.failed': 0,
       },
       failureRows: [
-        { event_name: 'cloud.push.failed', error_code: 'invalid-request', user_id: 'u1', created_at: '2026-10-19T11:00:00Z' },
-        { event_name: 'cloud.push.failed', error_code: 'invalid-request', user_id: 'u2', created_at: '2026-10-19T12:00:00Z' },
+        {
+          event_name: 'cloud.push.failed',
+          error_code: 'invalid-request',
+          user_id: 'u1',
+          created_at: '2026-10-19T11:00:00Z',
+        },
+        {
+          event_name: 'cloud.push.failed',
+          error_code: 'invalid-request',
+          user_id: 'u2',
+          created_at: '2026-10-19T12:00:00Z',
+        },
       ],
     });
 

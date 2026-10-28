@@ -4,7 +4,8 @@ import { serviceClient } from '@/lib/supabase';
 const VALID_STATUSES = ['new', 'reviewing', 'resolved', 'archived'] as const;
 type Status = (typeof VALID_STATUSES)[number];
 const isValidStatus = (value: unknown): value is Status =>
-  typeof value === 'string' && (VALID_STATUSES as readonly string[]).includes(value);
+  typeof value === 'string' &&
+  (VALID_STATUSES as readonly string[]).includes(value);
 
 // Matches the free-text cap already used elsewhere on this table
 // (feedback.goal, migration 0012) -- admin_note has no DB-level check,
@@ -16,7 +17,8 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const admin = await getAdminUser();
-  if (!admin) return Response.json({ ok: false, error: 'not-found' }, { status: 404 });
+  if (!admin)
+    return Response.json({ ok: false, error: 'not-found' }, { status: 404 });
 
   let body: unknown;
   try {
@@ -25,17 +27,29 @@ export async function PATCH(
     return Response.json({ ok: false, error: 'invalid-json' }, { status: 400 });
   }
 
-  const { status, adminNote } = (body ?? {}) as { status?: unknown; adminNote?: unknown };
+  const { status, adminNote } = (body ?? {}) as {
+    status?: unknown;
+    adminNote?: unknown;
+  };
 
   if (status !== undefined && !isValidStatus(status)) {
-    return Response.json({ ok: false, error: 'invalid-status' }, { status: 400 });
+    return Response.json(
+      { ok: false, error: 'invalid-status' },
+      { status: 400 },
+    );
   }
   if (adminNote !== undefined) {
     if (typeof adminNote !== 'string') {
-      return Response.json({ ok: false, error: 'invalid-admin-note' }, { status: 400 });
+      return Response.json(
+        { ok: false, error: 'invalid-admin-note' },
+        { status: 400 },
+      );
     }
     if (adminNote.length > MAX_ADMIN_NOTE_LENGTH) {
-      return Response.json({ ok: false, error: 'admin-note-too-long' }, { status: 400 });
+      return Response.json(
+        { ok: false, error: 'admin-note-too-long' },
+        { status: 400 },
+      );
     }
   }
 
@@ -72,8 +86,15 @@ export async function PATCH(
       .select('id');
 
     if (error) {
-      console.error('[api/admin/feedback] update failed:', error.code, error.message);
-      return Response.json({ ok: false, error: 'storage-failed' }, { status: 500 });
+      console.error(
+        '[api/admin/feedback] update failed:',
+        error.code,
+        error.message,
+      );
+      return Response.json(
+        { ok: false, error: 'storage-failed' },
+        { status: 500 },
+      );
     }
     if (!data || data.length === 0) {
       return Response.json({ ok: false, error: 'not-found' }, { status: 404 });
@@ -82,7 +103,10 @@ export async function PATCH(
     // Covers serviceClient()'s own throw (e.g. a missing/misconfigured
     // Supabase env var), same distinction the public feedback route makes.
     console.error('[api/admin/feedback] service client/config error:', err);
-    return Response.json({ ok: false, error: 'storage-failed' }, { status: 500 });
+    return Response.json(
+      { ok: false, error: 'storage-failed' },
+      { status: 500 },
+    );
   }
 
   return Response.json({ ok: true }, { status: 200 });

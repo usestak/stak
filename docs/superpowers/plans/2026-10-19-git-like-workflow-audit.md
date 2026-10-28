@@ -17,7 +17,7 @@ The target mental model is **already substantially implemented** in the domain l
 4. A **status/diff Cloud-state column**: cheap metadata call already exists (`sync-metadata.ts` + `client.getEnvironment`) — just needs surfacing in `status` output.
 5. **CLI-level config model** for machine-only vs portable settings: this is a genuine gap (no such schema exists anywhere) but the brief's portable-config scope is small, so it's low-risk to add.
 
-**This can plausibly ship as a beta soon**, but not "tomorrow" in the literal sense of the prompt — Phase 1 (status/add) is low-risk and mostly rendering + one new function; Phases 2–3 (push/pull orchestration incl. Memory/Project) are moderate risk because they touch the already-working, safety-critical conflict logic and must not regress it. Recommend: Phase 1 shippable in ~1 day, Phases 2–4 need a few days of careful integration + test updates, given how much *existing* conflict-safety behavior must be preserved byte-for-byte.
+**This can plausibly ship as a beta soon**, but not "tomorrow" in the literal sense of the prompt — Phase 1 (status/add) is low-risk and mostly rendering + one new function; Phases 2–3 (push/pull orchestration incl. Memory/Project) are moderate risk because they touch the already-working, safety-critical conflict logic and must not regress it. Recommend: Phase 1 shippable in ~1 day, Phases 2–4 need a few days of careful integration + test updates, given how much _existing_ conflict-safety behavior must be preserved byte-for-byte.
 
 ---
 
@@ -47,11 +47,11 @@ supabase/migrations/     environments, environment_versions, snapshots (main syn
 
 **Three distinct Cloud concepts exist today, with separate tables and client classes — this distinction must be preserved and made explicit in the new design:**
 
-| Concept | Tables | Client | Used by |
-|---|---|---|---|
-| Per-account "main" sync | `environments`, `environment_versions`, `snapshots` | `CloudClient` | `stak push`/`stak pull` |
-| Named/saved Stacks | `user_stacks`, `user_stack_versions` | `UserStackClient` | `stak use <name>` (private saved composition) |
-| Public sharing | `public_stacks`, `public_stack_versions`, `public_handles` | `PublicStackClient` | `stak use @owner/stak`, `stak try @owner/stak` |
+| Concept                 | Tables                                                     | Client              | Used by                                        |
+| ----------------------- | ---------------------------------------------------------- | ------------------- | ---------------------------------------------- |
+| Per-account "main" sync | `environments`, `environment_versions`, `snapshots`        | `CloudClient`       | `stak push`/`stak pull`                        |
+| Named/saved Stacks      | `user_stacks`, `user_stack_versions`                       | `UserStackClient`   | `stak use <name>` (private saved composition)  |
+| Public sharing          | `public_stacks`, `public_stack_versions`, `public_handles` | `PublicStackClient` | `stak use @owner/stak`, `stak try @owner/stak` |
 
 `stak push`/`stak pull` operate **only** on the first. `stak use`/`stak try` operate on the second/third and never touch the first directly (per audit: `use` only mutates local `main`; it never auto-pushes).
 
@@ -63,7 +63,7 @@ supabase/migrations/     environments, environment_versions, snapshots (main syn
 
 - **`environments/main/environment.yaml`** — `EnvironmentManifest` (zod: `packages/spec/src/environment.ts:40`): `{ schemaVersion, name, skills: ManifestSkillEntry[], stacks: StackReference[], overrides: Record<string, unknown> }`. This is the **desired/intentional composition** — the Git-like "index"/working-tree-of-intent.
 - **`environments/main/stack.lock.json`** — `EnvironmentLock`: resolved per-entry `{ contentHash, preferredSource, restoration, origins }` keyed by entryId. This is the **resolved, content-addressed pin** — closest Git analogue: a committed tree object.
-- **`state/machines/<machineId>/environments/main.json`** — `MachineEnvironmentBaseline`: last-observed on-disk locations per entry. This is machine-scoped, **not portable** — it's "where did we last see this on *this* disk," analogous to a local working-tree cache, never shipped to Cloud.
+- **`state/machines/<machineId>/environments/main.json`** — `MachineEnvironmentBaseline`: last-observed on-disk locations per entry. This is machine-scoped, **not portable** — it's "where did we last see this on _this_ disk," analogous to a local working-tree cache, never shipped to Cloud.
 
 This is **already exactly the "intentional local STAK" layer** the brief wants. No new concept is needed for Skills; `main` is not conflated with "whatever the scanner currently finds" — it's a separately persisted, deliberately-mutated file.
 
@@ -86,32 +86,32 @@ This is **already exactly the "intentional local STAK" layer** the brief wants. 
 
 ### A. MACHINE (what physically exists right now, recomputed every run)
 
-| Category | Representation today | Notes |
-|---|---|---|
-| Skills | `ScanResult` from `scanSkills` (packages/scanner) — ephemeral, not persisted except the machine baseline cache | Already the right shape; ID = `contentHash` |
-| Memory | `DiscoveredMemoryItem[]` from native scan (packages/memory) | Ephemeral scan, same pattern as Skills |
-| Projects | Local directory + git-remote/other claim, resolved via `resolveProjectForIdentity` | Directories aren't "discovered" in bulk today in the same sense as Skills — verify this is sufficient for `status`'s "3 projects discovered" example (see §13 gap) |
-| Config | No distinct machine-local config schema exists today | Genuine gap — see §6 |
-| Machine-only state | `machine.json` (machineId, platform, arch), `MachineEnvironmentBaseline` (last-observed locations), `local-recovery-state.ts` (which Memory generation local state came from) | Already correctly excluded from anything portable |
+| Category           | Representation today                                                                                                                                                          | Notes                                                                                                                                                              |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Skills             | `ScanResult` from `scanSkills` (packages/scanner) — ephemeral, not persisted except the machine baseline cache                                                                | Already the right shape; ID = `contentHash`                                                                                                                        |
+| Memory             | `DiscoveredMemoryItem[]` from native scan (packages/memory)                                                                                                                   | Ephemeral scan, same pattern as Skills                                                                                                                             |
+| Projects           | Local directory + git-remote/other claim, resolved via `resolveProjectForIdentity`                                                                                            | Directories aren't "discovered" in bulk today in the same sense as Skills — verify this is sufficient for `status`'s "3 projects discovered" example (see §13 gap) |
+| Config             | No distinct machine-local config schema exists today                                                                                                                          | Genuine gap — see §6                                                                                                                                               |
+| Machine-only state | `machine.json` (machineId, platform, arch), `MachineEnvironmentBaseline` (last-observed locations), `local-recovery-state.ts` (which Memory generation local state came from) | Already correctly excluded from anything portable                                                                                                                  |
 
 ### B. MAIN (deliberately chosen, persisted locally, not yet necessarily synced)
 
-| Category | Representation today | Gap for MVP |
-|---|---|---|
-| Skills | `environment.yaml` + `stack.lock.json` | None — reuse as-is |
-| Memory | `memory/manifests/current.json` local manifest (content-addressed, written by `runMemoryBackup`) | None — this **is** already a MAIN-equivalent for Memory, confirmed by the Memory fork |
-| Projects | `LocalRegistry` → `PortableProjectRecord[]` (projectId, claims, lifecycle) — already distinct from `MachineBinding` (local-only path binding) | None — the portable/local split already exists; `toPortableSnapshot()` already strips bindings |
-| Config | Doesn't exist | Need to define: which CLI-level settings are "desired STAK composition / portable settings" vs "agent install paths / absolute paths" (see §6) |
-| Machine-only state | N/A by definition | N/A |
+| Category           | Representation today                                                                                                                          | Gap for MVP                                                                                                                                    |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Skills             | `environment.yaml` + `stack.lock.json`                                                                                                        | None — reuse as-is                                                                                                                             |
+| Memory             | `memory/manifests/current.json` local manifest (content-addressed, written by `runMemoryBackup`)                                              | None — this **is** already a MAIN-equivalent for Memory, confirmed by the Memory fork                                                          |
+| Projects           | `LocalRegistry` → `PortableProjectRecord[]` (projectId, claims, lifecycle) — already distinct from `MachineBinding` (local-only path binding) | None — the portable/local split already exists; `toPortableSnapshot()` already strips bindings                                                 |
+| Config             | Doesn't exist                                                                                                                                 | Need to define: which CLI-level settings are "desired STAK composition / portable settings" vs "agent install paths / absolute paths" (see §6) |
+| Machine-only state | N/A by definition                                                                                                                             | N/A                                                                                                                                            |
 
 ### C. CLOUD (last intentionally synced version)
 
-| Category | Representation today | Notes |
-|---|---|---|
-| Skills | `environments` / `environment_versions` / `snapshots` tables, synced via `CloudClient.commitEnvironmentVersion` | Already immutable-version-chain, already digest-compared for conflict detection |
-| Memory | `memory_backups` / generation chain (server-side backend, not read in this audit) | Already a monotonic, immutable generation chain with optimistic concurrency |
-| Projects | `cloud_projects` table | Portable project records already live here (per Project-identity fork + prior memory on the display-name backfill fix) |
-| Config | N/A yet | To be added only for the portable subset identified in §6 |
+| Category | Representation today                                                                                            | Notes                                                                                                                  |
+| -------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Skills   | `environments` / `environment_versions` / `snapshots` tables, synced via `CloudClient.commitEnvironmentVersion` | Already immutable-version-chain, already digest-compared for conflict detection                                        |
+| Memory   | `memory_backups` / generation chain (server-side backend, not read in this audit)                               | Already a monotonic, immutable generation chain with optimistic concurrency                                            |
+| Projects | `cloud_projects` table                                                                                          | Portable project records already live here (per Project-identity fork + prior memory on the display-name backfill fix) |
+| Config   | N/A yet                                                                                                         | To be added only for the portable subset identified in §6                                                              |
 
 **Key architectural decision already made for you by the existing code and worth locking explicitly: Skills/Memory/Projects each have their own MACHINE/MAIN/CLOUD triad with slightly different mechanics (file-based lock for Skills, content-addressed manifest for Memory, ID-registry for Projects) — the new `status`/`add`/`push`/`pull` commands should be a thin orchestration layer over three domain-specific triads, not a single unified staging engine.** Attempting to unify them into one generic staging abstraction would be new architecture the brief explicitly says to avoid ("Do not assume file-level staging is required").
 
@@ -125,22 +125,22 @@ No distinct STAK-level config schema distinguishing portable vs machine-local se
 
 ## 7. Command Semantics Table
 
-| Command | Reads Machine? | Reads Main? | Reads Cloud? | Changes Machine? | Changes Main? | Changes Cloud? | Status today |
-|---|---|---|---|---|---|---|---|
-| `status` | Yes (scan) | Yes | Yes (cheap metadata) | No | No | No | Core ready; renderer needs untracked + Cloud-state surfaced |
-| `diff` | Yes (scan) | Yes | Optional | No | No | No | Same gap as status |
-| `scan` | Yes (scan) | No | No | No | No | No | Unchanged — remains diagnostic-only |
-| `add <skill>` | Yes (via status's untracked) | Yes | No | No | Yes | No | **Does not exist — must build** |
-| `add .` | Yes | Yes | No | No | Yes | No | **Does not exist — must build**, generalized from `add <skill>` |
-| `init` | Yes | No (creates) | No | No | Creates | No | Unchanged — bulk bootstrap only, keep as escape hatch |
-| `use <source>` | No | Yes | Yes (fetches Stack/public source) | No | Yes | No | Already correct — confirmed "added to main," no auto-push |
-| `remove` | No | Yes | No | No | Yes | No | Already correct |
-| `push` | No (reads main, not raw machine) | Yes | Yes (conflict check) | No | No | Yes (creates version) | Already auto-commits; extend to include Memory/Project |
-| `pull` | No | Yes (conflict check) | Yes | No | Yes (restores) | No | Already conflict-safe; extend to orchestrate Memory/Project + become "new machine" path |
-| `try <source> -- <agent>` | No | No | Yes (fetches source) | Temp only | No | No | Unchanged |
-| `run <agent>` | No | Yes (projects main) | No | Yes (writes agent skill dir — projection, not "change") | No | No | Unchanged |
-| `memory backup` | Yes | N/A (becomes the Memory main write) | No | No | Yes (writes local manifest) | Yes (creates generation) | Already behaves like Memory-scoped push |
-| `memory recover` | No | No | Yes | No | Yes (restores local manifest) | No | Already behaves like Memory-scoped pull |
+| Command                   | Reads Machine?                   | Reads Main?                         | Reads Cloud?                      | Changes Machine?                                        | Changes Main?                 | Changes Cloud?           | Status today                                                                            |
+| ------------------------- | -------------------------------- | ----------------------------------- | --------------------------------- | ------------------------------------------------------- | ----------------------------- | ------------------------ | --------------------------------------------------------------------------------------- |
+| `status`                  | Yes (scan)                       | Yes                                 | Yes (cheap metadata)              | No                                                      | No                            | No                       | Core ready; renderer needs untracked + Cloud-state surfaced                             |
+| `diff`                    | Yes (scan)                       | Yes                                 | Optional                          | No                                                      | No                            | No                       | Same gap as status                                                                      |
+| `scan`                    | Yes (scan)                       | No                                  | No                                | No                                                      | No                            | No                       | Unchanged — remains diagnostic-only                                                     |
+| `add <skill>`             | Yes (via status's untracked)     | Yes                                 | No                                | No                                                      | Yes                           | No                       | **Does not exist — must build**                                                         |
+| `add .`                   | Yes                              | Yes                                 | No                                | No                                                      | Yes                           | No                       | **Does not exist — must build**, generalized from `add <skill>`                         |
+| `init`                    | Yes                              | No (creates)                        | No                                | No                                                      | Creates                       | No                       | Unchanged — bulk bootstrap only, keep as escape hatch                                   |
+| `use <source>`            | No                               | Yes                                 | Yes (fetches Stack/public source) | No                                                      | Yes                           | No                       | Already correct — confirmed "added to main," no auto-push                               |
+| `remove`                  | No                               | Yes                                 | No                                | No                                                      | Yes                           | No                       | Already correct                                                                         |
+| `push`                    | No (reads main, not raw machine) | Yes                                 | Yes (conflict check)              | No                                                      | No                            | Yes (creates version)    | Already auto-commits; extend to include Memory/Project                                  |
+| `pull`                    | No                               | Yes (conflict check)                | Yes                               | No                                                      | Yes (restores)                | No                       | Already conflict-safe; extend to orchestrate Memory/Project + become "new machine" path |
+| `try <source> -- <agent>` | No                               | No                                  | Yes (fetches source)              | Temp only                                               | No                            | No                       | Unchanged                                                                               |
+| `run <agent>`             | No                               | Yes (projects main)                 | No                                | Yes (writes agent skill dir — projection, not "change") | No                            | No                       | Unchanged                                                                               |
+| `memory backup`           | Yes                              | N/A (becomes the Memory main write) | No                                | No                                                      | Yes (writes local manifest)   | Yes (creates generation) | Already behaves like Memory-scoped push                                                 |
+| `memory recover`          | No                               | No                                  | Yes                               | No                                                      | Yes (restores local manifest) | No                       | Already behaves like Memory-scoped pull                                                 |
 
 ---
 
@@ -155,6 +155,7 @@ addSkillToMain(stackHome, { entryId | discoveredSkill }, opts?) -> AddResult
 ```
 
 Resolution steps:
+
 1. Locate the target among `status`'s already-computed `untracked` (preferred — avoids re-scanning) or accept a name/path directly and resolve against a fresh scan if not found (collision-safe: error if the name matches more than one untracked hash — this mirrors the resolver's existing name-collision detection in `resolver.ts`).
 2. Reuse `ingestSkill`/content-store identity check — if content already exists in the store (same hash, different location), **dedupe automatically** (this is exactly what the store already guarantees via `verifyStoredSkill`).
 3. Push a new `ManifestSkillEntry` into `environment.yaml` (direct skills, not a Stack layer), recompute `stack.lock.json` via the existing resolver.
@@ -171,7 +172,7 @@ Resolution steps:
 - Memory: no staging needed — `stak add .` is a no-op for Memory (native scan is already "everything eligible," confirmed by the Memory fork; finer-grained selection would be new architecture the brief explicitly says to avoid).
 - Projects: similarly treat "all locally-bound, not-yet-portable-registered projects" as auto-included — the registry/binding split already makes this safe (binding data never leaves the machine regardless).
 
-So concretely, `stak add .`'s only *new* logic is "loop untracked skills through add"; Memory/Project don't need an add step at all for MVP because they have no staging concept to begin with — they become fully "added" at `push` time directly from machine state (see §10).
+So concretely, `stak add .`'s only _new_ logic is "loop untracked skills through add"; Memory/Project don't need an add step at all for MVP because they have no staging concept to begin with — they become fully "added" at `push` time directly from machine state (see §10).
 
 ---
 
@@ -429,12 +430,14 @@ Projects: nothing to add (always included).
 ## 19. Test Plan
 
 **Keep passing unchanged (regression gate):**
+
 - All existing `packages/cli/src/memory/*.test.ts` listed in §13.
 - Existing `cloud-push`/`cloud-pull` conflict-kind tests (`unsynced-remote`, `remote-newer`, `unsynced-local`, `local-changes`).
 - Existing resolver conflict tests using `fixtures/staks/required-conflict`, `optional-conflict`, `extends-cycle`.
 - Existing scanner tests using `fixtures/skills/*` (invalid-frontmatter, missing-description, missing-name, duplicate-copy, same-name-different-content, nested-skill, with-assets, with-script).
 
 **New tests needed:**
+
 - `status`/`diff` default-renderer output includes `untracked`/`invalidSkills`/`placementDrift` sections (regression test pinning the exact "32 vs 31" scenario from the brief).
 - `addSkillToMain` unit tests: single add, `add .` bulk add, dedupe-by-hash, name-collision-with-different-hash (reuses resolver conflict fixtures), add of an invalid skill (should be rejected, mirroring `init`'s existing validity gate).
 - `push`/`pull` orchestration tests: push triggers both Skill-push and Memory-backup; pull on a fresh machine triggers Skill-pull (`create` mode) + Memory-recover + confirms Project reconciliation ran.
@@ -445,9 +448,11 @@ Projects: nothing to add (always included).
 ## 20. Phased Implementation Plan
 
 ### Phase 1 — Status/Add (Skills only)
+
 **Goal:** `status`/`diff` surface untracked/modified/missing by default; `stak add <skill>` and `stak add .` exist.
 
 Files:
+
 - `packages/cli/src/ui/environment.ts` — extend `renderStatus`/`renderDiff` default paths to include `untracked`, `invalidSkills`, `placementDrift` sections (already computed, just not rendered).
 - `packages/core/src/initialize.ts` — extract the per-skill ingest step out of `initializeMainEnvironment`'s loop into a standalone `ingestAndRegisterSkill(entry)`-shaped helper, reused by both `init` and the new add path.
 - New: `packages/core/src/add.ts` (or similar) — `addSkillToMain(stackHome, target, opts)` and `addAllToMain(stackHome, opts)`, built on the extracted helper + resolver's existing conflict logic.
@@ -462,9 +467,11 @@ Tests: as in §19, status/diff rendering + `add` core tests.
 Compatibility risk: **low** — purely additive command + rendering fix; main risk is any test or doc that currently asserts the old (incomplete) status/diff output text.
 
 ### Phase 2 — Push/Pull Orchestration + Cloud Sync State in Status
+
 **Goal:** `status` shows Cloud ahead/behind; `push`/`pull` remain Skills-only in this phase but get their conflict-safety output unified with the new status renderer language.
 
 Files:
+
 - `packages/core/src/status.ts` — add a cheap Cloud-state lookup (reuse `sync-metadata.ts` + `client.getEnvironment`) into `EnvironmentStatus`, no bundle download.
 - `packages/cli/src/ui/environment.ts` — render the new Cloud-state field ("up to date" / "N ahead" / "N behind" / "conflict").
 - `packages/cli/src/commands/push.ts` / `pull.ts` — no logic changes, just confirm output copy matches the new status vocabulary.
@@ -478,9 +485,11 @@ Tests: status output includes Cloud state; offline fallback test.
 Compatibility risk: **low-medium** — new network call path in status needs careful error handling so `status` never fails outright when Cloud is unreachable (must degrade, not throw).
 
 ### Phase 3 — Memory/Project Integration into Push/Pull
+
 **Goal:** `stak push`/`stak pull` orchestrate Memory backup/recover (which already carries Project portables) alongside Skills.
 
 Files:
+
 - `packages/cli/src/commands/push.ts` — after Skill push succeeds, invoke the existing `MemoryCloudDeps` backup path from `packages/cli/src/memory/cloud-ops.ts`.
 - `packages/cli/src/commands/pull.ts` — after Skill pull succeeds (or on fresh-machine `create` mode), invoke the existing `cloudRecover` path via `cloud-ops.ts`.
 - `packages/core/src/status.ts` (or a new combined-status module) — add "Memory: N files discovered/changed" line, reusing Memory's own discovery/diff primitives (don't reimplement).
@@ -494,9 +503,11 @@ Tests: orchestration tests from §19; explicit partial-failure test (Skill push 
 Compatibility risk: **medium** — this is the highest-value but highest-attention-needed phase, since it changes the observable behavior of `push`/`pull` (more side effects per invocation) even though no individual safety mechanism is altered.
 
 ### Phase 4 — CLI UX / Help / Docs / Tests
+
 **Goal:** finalize copy, `--help` text, README/docs updated to the new mental model; full regression pass.
 
 Files:
+
 - `packages/cli/src/program.ts` — command descriptions/help text.
 - Root `README.md` / `docs/` — update onboarding examples to match §16.
 - Full test suite run across all packages.
@@ -534,7 +545,7 @@ Overall: **Medium** project, **not** a rewrite — because audit confirms the ha
 
 ## 23. Recommendation on Beta Timing
 
-**Not literally tomorrow**, but close: Phase 1 alone (status/diff rendering fix + `add`) is genuinely small and could ship within a day once scoped, and it alone fixes the headline "32 vs 31" bug and delivers `stak add`. Phases 2–3 (Cloud-state in status, push/pull orchestration) are the real work and deserve a few focused days given how much *already-correct* conflict-safety behavior must be preserved exactly. Recommend shipping **Phase 1 as a fast-follow patch release first** (low risk, high perceived-value fix), then Phases 2–3 as the actual "new workflow" beta.
+**Not literally tomorrow**, but close: Phase 1 alone (status/diff rendering fix + `add`) is genuinely small and could ship within a day once scoped, and it alone fixes the headline "32 vs 31" bug and delivers `stak add`. Phases 2–3 (Cloud-state in status, push/pull orchestration) are the real work and deserve a few focused days given how much _already-correct_ conflict-safety behavior must be preserved exactly. Recommend shipping **Phase 1 as a fast-follow patch release first** (low risk, high perceived-value fix), then Phases 2–3 as the actual "new workflow" beta.
 
 ---
 
@@ -544,4 +555,4 @@ Overall: **Medium** project, **not** a rewrite — because audit confirms the ha
 2. **Confirm whether `status`'s existing `--verbose`/JSON output (if any) is considered a public/stable API** — affects how carefully Phase 1's renderer change must preserve old shapes.
 3. **Decide exact Memory/Project line format in `status`** (the brief's examples show "14 files discovered" / "3 projects discovered" pre-first-push, vs "N files changed since last backup" post-first-push) — confirm whether Memory needs its own lightweight diff-against-last-backup count for status, or whether "always show current discovery count" is acceptable for MVP (cheaper, per audit's "no staging needed" conclusion).
 4. **Decide config-model scope for MVP** (§6) — confirmed no existing schema; is it fully deferred, or does the beta need even a minimal portable/machine-local distinction surfaced in `status`?
-5. **Confirm whether `stak add <skill>`'s collision behavior should ever be allowed to *replace* an existing main entry** (e.g., re-adding a skill whose content changed in place) vs. requiring `remove` + `add` as two explicit steps — the brief's `modified` status category suggests "re-add to accept the on-disk version" might be a natural `add <skill>` behavior worth confirming explicitly.
+5. **Confirm whether `stak add <skill>`'s collision behavior should ever be allowed to _replace_ an existing main entry** (e.g., re-adding a skill whose content changed in place) vs. requiring `remove` + `add` as two explicit steps — the brief's `modified` status category suggests "re-add to accept the on-disk version" might be a natural `add <skill>` behavior worth confirming explicitly.

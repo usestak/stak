@@ -40,7 +40,11 @@ const bucketByDay = (
     .sort((a, b) => a.date.localeCompare(b.date));
 };
 
-type EventRow = { event_name: string; created_at: string; metadata: { replayed?: boolean } | null };
+type EventRow = {
+  event_name: string;
+  created_at: string;
+  metadata: { replayed?: boolean } | null;
+};
 
 export const loadUsageMetrics = async (
   db: SupabaseClient,

@@ -38,8 +38,7 @@ GitHub account to grant.
    ```
 
 4. Sign in to the web app with that account and visit `/admin` — it should
-   render the real Overview page (metrics, date-range pills) instead of
-   404.
+   render the real Overview page (metrics, date-range pills) instead of 404.
 
 See `docs/admin-metric-definitions.md` for what each number on the
 dashboard actually means, including which metrics are intentionally

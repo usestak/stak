@@ -28,5 +28,6 @@ export const loadActiveMachinesByUser = async (
 };
 
 /** A portable user has active (non-revoked) machines in >=2 distinct machine_ids. */
-export const countPortableUsers = (machinesByUser: Map<string, Set<string>>): number =>
-  [...machinesByUser.values()].filter((s) => s.size >= 2).length;
+export const countPortableUsers = (
+  machinesByUser: Map<string, Set<string>>,
+): number => [...machinesByUser.values()].filter((s) => s.size >= 2).length;

@@ -1,17 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
 
-const { getAdminUserMock, notFoundMock, loadFeedbackDetailMock } = vi.hoisted(() => ({
-  getAdminUserMock: vi.fn(),
-  notFoundMock: vi.fn(() => {
-    throw new Error('NEXT_NOT_FOUND');
+const { getAdminUserMock, notFoundMock, loadFeedbackDetailMock } = vi.hoisted(
+  () => ({
+    getAdminUserMock: vi.fn(),
+    notFoundMock: vi.fn(() => {
+      throw new Error('NEXT_NOT_FOUND');
+    }),
+    loadFeedbackDetailMock: vi.fn(),
   }),
-  loadFeedbackDetailMock: vi.fn(),
-}));
+);
 
 vi.mock('@/lib/admin', () => ({ getAdminUser: getAdminUserMock }));
 vi.mock('next/navigation', () => ({ notFound: notFoundMock }));
 vi.mock('@/lib/supabase', () => ({ serviceClient: () => ({}) }));
-vi.mock('./feedback-detail-data', () => ({ loadFeedbackDetail: loadFeedbackDetailMock }));
+vi.mock('./feedback-detail-data', () => ({
+  loadFeedbackDetail: loadFeedbackDetailMock,
+}));
 vi.mock('./feedback-status-form', () => ({ FeedbackStatusForm: () => null }));
 
 import AdminFeedbackDetailPage from './page';
@@ -41,7 +45,9 @@ describe('AdminFeedbackDetailPage', () => {
       adminNote: null,
       resolvedAt: null,
     });
-    const result = await AdminFeedbackDetailPage({ params: Promise.resolve({ id: 'f1' }) });
+    const result = await AdminFeedbackDetailPage({
+      params: Promise.resolve({ id: 'f1' }),
+    });
     expect(loadFeedbackDetailMock).toHaveBeenCalledWith({}, 'f1');
     expect(result).toBeTruthy();
   });

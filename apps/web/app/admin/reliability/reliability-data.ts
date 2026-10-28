@@ -58,12 +58,13 @@ export const loadReliabilityMetrics = async (
 ): Promise<ReliabilityMetrics> => {
   const since = rangeStart(range) ?? new Date(0);
 
-  const [pushSucceeded, pushFailed, pullSucceeded, pullFailed] = await Promise.all([
-    countFor(db, 'cloud.push.succeeded', since),
-    countFor(db, 'cloud.push.failed', since),
-    countFor(db, 'cloud.pull.succeeded', since),
-    countFor(db, 'cloud.pull.failed', since),
-  ]);
+  const [pushSucceeded, pushFailed, pullSucceeded, pullFailed] =
+    await Promise.all([
+      countFor(db, 'cloud.push.succeeded', since),
+      countFor(db, 'cloud.push.failed', since),
+      countFor(db, 'cloud.pull.succeeded', since),
+      countFor(db, 'cloud.pull.failed', since),
+    ]);
 
   // Explicitly `success = false` at the database level (not a JS `!r.success`
   // check) -- the column allows null, and a future event written with
@@ -88,12 +89,15 @@ export const loadReliabilityMetrics = async (
 
   const recentFailures = [...grouped.entries()]
     .map(([, list]) => {
-      const sorted = [...list].sort((a, b) => a.created_at.localeCompare(b.created_at));
+      const sorted = [...list].sort((a, b) =>
+        a.created_at.localeCompare(b.created_at),
+      );
       return {
         operation: sorted[0]!.event_name,
         errorCode: sorted[0]!.error_code ?? 'unknown',
         count: sorted.length,
-        affectedUsers: new Set(sorted.map((r) => r.user_id).filter(Boolean)).size,
+        affectedUsers: new Set(sorted.map((r) => r.user_id).filter(Boolean))
+          .size,
         firstSeen: sorted[0]!.created_at,
         lastSeen: sorted[sorted.length - 1]!.created_at,
       };

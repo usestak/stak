@@ -62,7 +62,9 @@ describe('CliApprovalCard', () => {
   });
 
   test('omits the Label row entirely when the session has no label — never a blank row', () => {
-    render(<CliApprovalCard heading="Approve this machine?" code="KQTR-4821" />);
+    render(
+      <CliApprovalCard heading="Approve this machine?" code="KQTR-4821" />,
+    );
     expect(screen.queryByText('Label')).toBe(null);
     expect(screen.getByText('KQTR-4821')).toBeInTheDocument();
   });

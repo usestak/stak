@@ -140,7 +140,7 @@ try {
 
   const stackDir = path.join(owned.rootPath, 'a-frontend');
   await owned.writeText(
-    path.join(stackDir, 'stack.yaml'),
+    path.join(stackDir, 'stak.yaml'),
     'schemaVersion: 1\nname: frontend\ndescription: frontend stack\nskills:\n  - path: skills/design\n    requirement: required\n',
   );
   await owned.writeText(

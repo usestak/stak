@@ -565,7 +565,11 @@ export const createCloudService = (config: CloudServiceConfig) => {
             eventName: 'cloud.pull.succeeded',
             success: true,
           });
-          return { environmentId: environment.environmentId, name, latest: null };
+          return {
+            environmentId: environment.environmentId,
+            name,
+            latest: null,
+          };
         }
         const version = await config.repository.getEnvironmentVersion(
           environment.latestVersionId,

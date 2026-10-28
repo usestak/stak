@@ -44,7 +44,11 @@ export function FeedbackStatusForm({
         router.refresh(); // the server-rendered Status/admin_note above this form is otherwise stale
       } else {
         const payload = await res.json().catch(() => null);
-        setError(typeof payload?.error === 'string' ? payload.error : `Save failed (${res.status}).`);
+        setError(
+          typeof payload?.error === 'string'
+            ? payload.error
+            : `Save failed (${res.status}).`,
+        );
       }
     } catch {
       setError('Save failed — check your connection and try again.');

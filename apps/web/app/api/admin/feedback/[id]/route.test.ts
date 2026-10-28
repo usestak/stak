@@ -46,7 +46,10 @@ describe('PATCH /api/admin/feedback/[id]', () => {
   it('H: admin user can modify feedback status and note', async () => {
     getAdminUserMock.mockResolvedValue({ id: 'admin-1', role: 'owner' });
     updateMock.mockClear();
-    const res = await PATCH(req({ status: 'resolved', adminNote: 'Fixed in v2.' }), ctx);
+    const res = await PATCH(
+      req({ status: 'resolved', adminNote: 'Fixed in v2.' }),
+      ctx,
+    );
     expect(res.status).toBe(200);
     expect(updateMock).toHaveBeenCalledWith(
       expect.objectContaining({

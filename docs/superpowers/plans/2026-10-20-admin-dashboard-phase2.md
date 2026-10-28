@@ -22,9 +22,11 @@
 ### Task 1: Performance indexes migration
 
 **Files:**
+
 - Create: `supabase/migrations/0016_admin_indexes.sql`
 
 **Interfaces:**
+
 - None (schema-only; consumed implicitly by every later task's queries).
 
 - [ ] **Step 1: Write the migration**
@@ -59,10 +61,12 @@ git commit -m "feat(db): add indexes supporting admin dashboard date-range queri
 ### Task 2: Date-range helper
 
 **Files:**
+
 - Create: `apps/web/lib/admin-date-range.ts`
 - Test: `apps/web/lib/admin-date-range.test.ts`
 
 **Interfaces:**
+
 - Produces: `export type AdminDateRange = '24h' | '7d' | '30d' | 'all'` and `export function rangeStart(range: AdminDateRange): Date | null` (returns `null` for `'all'`, meaning "no lower bound") — consumed by every later task's `-data.ts` loader.
 
 - [ ] **Step 1: Write the failing test**
@@ -144,10 +148,12 @@ git commit -m "feat(web): add admin date-range helper"
 ### Task 3: Overview metrics loader
 
 **Files:**
+
 - Create: `apps/web/app/admin/overview-data.ts`
 - Test: `apps/web/app/admin/overview-data.test.ts`
 
 **Interfaces:**
+
 - Consumes: `rangeStart(range)` (Task 2); a Supabase `SupabaseClient` passed in by the caller (the page, Task 4), not constructed internally — this keeps the loader unit-testable with a fake client.
 - Produces: `export type OverviewMetrics = { totalUsers: number; newUsers: number; activatedUsers: number; activationRate: number | null; portableUsers: number; newFeedback: number; openFeedback: number; pushPullSuccessRate: 'unavailable' }` and `export async function loadOverviewMetrics(db: SupabaseClient, range: AdminDateRange): Promise<OverviewMetrics>` — consumed by Task 4's `/admin` page.
 
@@ -181,7 +187,11 @@ describe('loadOverviewMetrics', () => {
   it('computes totals, activation rate, and portable users from existing tables', async () => {
     const db = fakeDb({
       profiles: { count: 10, data: [], error: null },
-      environment_versions: { count: 4, data: [{ user_id: 'u1' }, { user_id: 'u2' }], error: null },
+      environment_versions: {
+        count: 4,
+        data: [{ user_id: 'u1' }, { user_id: 'u2' }],
+        error: null,
+      },
       machines: {
         count: 0,
         data: [
@@ -252,26 +262,41 @@ export const loadOverviewMetrics = async (
 ): Promise<OverviewMetrics> => {
   const since = rangeStart(range);
 
-  const totalUsersQuery = db.from('profiles').select('user_id', { count: 'exact', head: true });
+  const totalUsersQuery = db
+    .from('profiles')
+    .select('user_id', { count: 'exact', head: true });
   const { count: totalUsers } = await totalUsersQuery;
 
-  let newUsersQuery = db.from('profiles').select('user_id', { count: 'exact', head: true });
-  if (since) newUsersQuery = newUsersQuery.gte('created_at', since.toISOString());
+  let newUsersQuery = db
+    .from('profiles')
+    .select('user_id', { count: 'exact', head: true });
+  if (since)
+    newUsersQuery = newUsersQuery.gte('created_at', since.toISOString());
   const { count: newUsers } = await newUsersQuery;
 
   let pushesQuery = db.from('environment_versions').select('user_id');
   if (since) pushesQuery = pushesQuery.gte('created_at', since.toISOString());
   const { data: pushRows } = await pushesQuery;
-  const activatedUserIds = new Set((pushRows ?? []).map((r: { user_id: string }) => r.user_id));
+  const activatedUserIds = new Set(
+    (pushRows ?? []).map((r: { user_id: string }) => r.user_id),
+  );
 
-  const { data: machineRows } = await db.from('machines').select('user_id, machine_id').is('revoked_at', null);
+  const { data: machineRows } = await db
+    .from('machines')
+    .select('user_id, machine_id')
+    .is('revoked_at', null);
   const machinesByUser = new Map<string, Set<string>>();
-  for (const row of (machineRows ?? []) as { user_id: string; machine_id: string }[]) {
+  for (const row of (machineRows ?? []) as {
+    user_id: string;
+    machine_id: string;
+  }[]) {
     const set = machinesByUser.get(row.user_id) ?? new Set<string>();
     set.add(row.machine_id);
     machinesByUser.set(row.user_id, set);
   }
-  const portableUsers = [...machinesByUser.values()].filter((s) => s.size >= 2).length;
+  const portableUsers = [...machinesByUser.values()].filter(
+    (s) => s.size >= 2,
+  ).length;
 
   const { count: newFeedback } = await db
     .from('feedback')
@@ -298,7 +323,7 @@ export const loadOverviewMetrics = async (
 };
 ```
 
-Note: the test's `fakeDb` stub returns the table's canned `{ count, data, error }` response regardless of which chained filter methods were called — this is intentional for a unit test of the *shape* of the computation (not a Supabase query-builder integration test). Each query ignores the live `count`/`data` split inconsistency between `head: true` queries (which return `count`) and `.select()` queries (which return `data`) only because the fake returns both fields on every table; the real Supabase client returns exactly the field appropriate to the query shape used.
+Note: the test's `fakeDb` stub returns the table's canned `{ count, data, error }` response regardless of which chained filter methods were called — this is intentional for a unit test of the _shape_ of the computation (not a Supabase query-builder integration test). Each query ignores the live `count`/`data` split inconsistency between `head: true` queries (which return `count`) and `.select()` queries (which return `data`) only because the fake returns both fields on every table; the real Supabase client returns exactly the field appropriate to the query shape used.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -317,10 +342,12 @@ git commit -m "feat(web): add admin overview metrics loader"
 ### Task 4: Real `/admin` Overview page (replaces Phase 1 placeholder)
 
 **Files:**
+
 - Modify: `apps/web/app/admin/page.tsx`
 - Test: `apps/web/app/admin/page.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `getAdminUser()` (Phase 1, `apps/web/lib/admin.ts`), `serviceClient()` (`apps/web/lib/supabase.ts`), `loadOverviewMetrics(db, range)` (Task 3), `AdminDateRange` (Task 2), `AdminSidebar` (Phase 1).
 
 - [ ] **Step 1: Write the failing test**
@@ -349,22 +376,26 @@ const loadOverviewMetricsMock = vi.fn().mockResolvedValue({
   openFeedback: 2,
   pushPullSuccessRate: 'unavailable',
 });
-vi.mock('./overview-data', () => ({ loadOverviewMetrics: loadOverviewMetricsMock }));
+vi.mock('./overview-data', () => ({
+  loadOverviewMetrics: loadOverviewMetricsMock,
+}));
 
 import AdminOverviewPage from './page';
 
 describe('AdminOverviewPage', () => {
   it('calls notFound (its own gate, independent of the layout) when there is no admin user', async () => {
     getAdminUserMock.mockResolvedValue(null);
-    await expect(AdminOverviewPage({ searchParams: Promise.resolve({}) })).rejects.toThrow(
-      'NEXT_NOT_FOUND',
-    );
+    await expect(
+      AdminOverviewPage({ searchParams: Promise.resolve({}) }),
+    ).rejects.toThrow('NEXT_NOT_FOUND');
     expect(loadOverviewMetricsMock).not.toHaveBeenCalled();
   });
 
   it('renders metrics for an admin user, defaulting to the "30d" range', async () => {
     getAdminUserMock.mockResolvedValue({ id: 'admin-1', role: 'owner' });
-    const result = await AdminOverviewPage({ searchParams: Promise.resolve({}) });
+    const result = await AdminOverviewPage({
+      searchParams: Promise.resolve({}),
+    });
     expect(loadOverviewMetricsMock).toHaveBeenCalledWith({}, '30d');
     expect(JSON.stringify(result)).toContain('10'); // totalUsers rendered somewhere
   });
@@ -517,11 +548,13 @@ git commit -m "feat(web): render real Overview metrics with date-range pills"
 ### Task 5: Users list loader + page
 
 **Files:**
+
 - Create: `apps/web/app/admin/users/users-data.ts`
 - Create: `apps/web/app/admin/users/page.tsx`
 - Test: `apps/web/app/admin/users/users-data.test.ts`
 
 **Interfaces:**
+
 - Consumes: `getAdminUser()`, `serviceClient()`, `AdminSidebar`.
 - Produces: `export type AdminUserRow = { userId: string; displayName: string; joinedAt: string; pushCount: number; machineCount: number; feedbackCount: number }` and `export async function loadUsers(db: SupabaseClient, search?: string): Promise<AdminUserRow[]>`.
 
@@ -535,8 +568,18 @@ import { loadUsers } from './users-data';
 
 function fakeDb() {
   const profiles = [
-    { user_id: 'u1', display_name: 'Ada', github_username: 'ada', created_at: '2026-01-01T00:00:00Z' },
-    { user_id: 'u2', display_name: 'Bo', github_username: 'bo', created_at: '2026-02-01T00:00:00Z' },
+    {
+      user_id: 'u1',
+      display_name: 'Ada',
+      github_username: 'ada',
+      created_at: '2026-01-01T00:00:00Z',
+    },
+    {
+      user_id: 'u2',
+      display_name: 'Bo',
+      github_username: 'bo',
+      created_at: '2026-02-01T00:00:00Z',
+    },
   ];
   const versions = [{ user_id: 'u1' }, { user_id: 'u1' }];
   const machines = [{ user_id: 'u1', machine_id: 'm1' }];
@@ -549,7 +592,12 @@ function fakeDb() {
       builder.select = chain;
       builder.ilike = chain;
       builder.then = (resolve: (v: unknown) => void) => {
-        const map: Record<string, unknown> = { profiles, environment_versions: versions, machines, feedback };
+        const map: Record<string, unknown> = {
+          profiles,
+          environment_versions: versions,
+          machines,
+          feedback,
+        };
         resolve({ data: map[table] ?? [], error: null });
       };
       return builder;
@@ -561,8 +609,22 @@ describe('loadUsers', () => {
   it('joins push/machine/feedback counts onto each profile', async () => {
     const result = await loadUsers(fakeDb());
     expect(result).toEqual([
-      { userId: 'u1', displayName: 'Ada', joinedAt: '2026-01-01T00:00:00Z', pushCount: 2, machineCount: 1, feedbackCount: 1 },
-      { userId: 'u2', displayName: 'Bo', joinedAt: '2026-02-01T00:00:00Z', pushCount: 0, machineCount: 0, feedbackCount: 0 },
+      {
+        userId: 'u1',
+        displayName: 'Ada',
+        joinedAt: '2026-01-01T00:00:00Z',
+        pushCount: 2,
+        machineCount: 1,
+        feedbackCount: 1,
+      },
+      {
+        userId: 'u2',
+        displayName: 'Bo',
+        joinedAt: '2026-02-01T00:00:00Z',
+        pushCount: 0,
+        machineCount: 0,
+        feedbackCount: 0,
+      },
     ]);
   });
 });
@@ -588,28 +650,51 @@ export type AdminUserRow = {
   feedbackCount: number;
 };
 
-type ProfileRow = { user_id: string; display_name: string | null; github_username: string | null; created_at: string };
+type ProfileRow = {
+  user_id: string;
+  display_name: string | null;
+  github_username: string | null;
+  created_at: string;
+};
 
-export const loadUsers = async (db: SupabaseClient, search?: string): Promise<AdminUserRow[]> => {
-  let profilesQuery = db.from('profiles').select('user_id, display_name, github_username, created_at');
-  if (search) profilesQuery = profilesQuery.ilike('display_name', `%${search}%`);
+export const loadUsers = async (
+  db: SupabaseClient,
+  search?: string,
+): Promise<AdminUserRow[]> => {
+  let profilesQuery = db
+    .from('profiles')
+    .select('user_id, display_name, github_username, created_at');
+  if (search)
+    profilesQuery = profilesQuery.ilike('display_name', `%${search}%`);
   const { data: profiles } = await profilesQuery;
 
-  const { data: versions } = await db.from('environment_versions').select('user_id');
-  const { data: machines } = await db.from('machines').select('user_id, machine_id');
+  const { data: versions } = await db
+    .from('environment_versions')
+    .select('user_id');
+  const { data: machines } = await db
+    .from('machines')
+    .select('user_id, machine_id');
   const { data: feedbackRows } = await db.from('feedback').select('user_id');
 
   const countBy = (rows: { user_id: string }[] | null) => {
     const counts = new Map<string, number>();
-    for (const row of rows ?? []) counts.set(row.user_id, (counts.get(row.user_id) ?? 0) + 1);
+    for (const row of rows ?? [])
+      counts.set(row.user_id, (counts.get(row.user_id) ?? 0) + 1);
     return counts;
   };
 
   const pushCounts = countBy(versions as { user_id: string }[] | null);
-  const feedbackCounts = countBy((feedbackRows ?? []).filter((r: { user_id: string | null }) => r.user_id) as { user_id: string }[]);
+  const feedbackCounts = countBy(
+    (feedbackRows ?? []).filter(
+      (r: { user_id: string | null }) => r.user_id,
+    ) as { user_id: string }[],
+  );
 
   const machineCounts = new Map<string, Set<string>>();
-  for (const row of (machines ?? []) as { user_id: string; machine_id: string }[]) {
+  for (const row of (machines ?? []) as {
+    user_id: string;
+    machine_id: string;
+  }[]) {
     const set = machineCounts.get(row.user_id) ?? new Set<string>();
     set.add(row.machine_id);
     machineCounts.set(row.user_id, set);
@@ -706,11 +791,13 @@ git commit -m "feat(web): add admin Users list page"
 ### Task 6: Activation funnel loader + page
 
 **Files:**
+
 - Create: `apps/web/app/admin/activation/activation-data.ts`
 - Create: `apps/web/app/admin/activation/page.tsx`
 - Test: `apps/web/app/admin/activation/activation-data.test.ts`
 
 **Interfaces:**
+
 - Produces: `export type ActivationFunnel = { accounts: number; cliAuthenticated: number; firstPush: number; portable: number }` and `export async function loadActivationFunnel(db: SupabaseClient): Promise<ActivationFunnel>`.
 
 - [ ] **Step 1: Write the failing test**
@@ -734,7 +821,8 @@ function fakeDb() {
   return {
     from: (table: string) => ({
       select: () => ({
-        then: (resolve: (v: unknown) => void) => resolve({ data: data[table] ?? [], error: null }),
+        then: (resolve: (v: unknown) => void) =>
+          resolve({ data: data[table] ?? [], error: null }),
       }),
     }),
   } as never;
@@ -743,7 +831,12 @@ function fakeDb() {
 describe('loadActivationFunnel', () => {
   it('counts distinct users at each funnel stage', async () => {
     const result = await loadActivationFunnel(fakeDb());
-    expect(result).toEqual({ accounts: 3, cliAuthenticated: 2, firstPush: 1, portable: 1 });
+    expect(result).toEqual({
+      accounts: 3,
+      cliAuthenticated: 2,
+      firstPush: 1,
+      portable: 1,
+    });
   });
 });
 ```
@@ -769,19 +862,30 @@ export type ActivationFunnel = {
 const distinctUserCount = (rows: { user_id: string }[] | null): number =>
   new Set((rows ?? []).map((r) => r.user_id)).size;
 
-export const loadActivationFunnel = async (db: SupabaseClient): Promise<ActivationFunnel> => {
+export const loadActivationFunnel = async (
+  db: SupabaseClient,
+): Promise<ActivationFunnel> => {
   const { data: profiles } = await db.from('profiles').select('user_id');
   const { data: tokens } = await db.from('cli_tokens').select('user_id');
-  const { data: versions } = await db.from('environment_versions').select('user_id');
-  const { data: machines } = await db.from('machines').select('user_id, machine_id');
+  const { data: versions } = await db
+    .from('environment_versions')
+    .select('user_id');
+  const { data: machines } = await db
+    .from('machines')
+    .select('user_id, machine_id');
 
   const machinesByUser = new Map<string, Set<string>>();
-  for (const row of (machines ?? []) as { user_id: string; machine_id: string }[]) {
+  for (const row of (machines ?? []) as {
+    user_id: string;
+    machine_id: string;
+  }[]) {
     const set = machinesByUser.get(row.user_id) ?? new Set<string>();
     set.add(row.machine_id);
     machinesByUser.set(row.user_id, set);
   }
-  const portable = [...machinesByUser.values()].filter((s) => s.size >= 2).length;
+  const portable = [...machinesByUser.values()].filter(
+    (s) => s.size >= 2,
+  ).length;
 
   return {
     accounts: distinctUserCount(profiles as { user_id: string }[] | null),

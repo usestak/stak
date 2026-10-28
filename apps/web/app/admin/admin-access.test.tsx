@@ -25,7 +25,9 @@ describe('admin access control', () => {
 
   it('A: anonymous visitor (no session) cannot reach /admin — notFound is called', async () => {
     getAdminUserMock.mockResolvedValue(null);
-    await expect(AdminLayout({ children: <div /> })).rejects.toThrow('NEXT_NOT_FOUND');
+    await expect(AdminLayout({ children: <div /> })).rejects.toThrow(
+      'NEXT_NOT_FOUND',
+    );
     expect(notFoundMock).toHaveBeenCalled();
   });
 
@@ -39,7 +41,9 @@ describe('admin access control', () => {
     // this scenario shouldn't occur in production; this test documents what
     // the layout does if that contract were ever violated.
     getAdminUserMock.mockRejectedValue(new Error('admin_users lookup failed'));
-    await expect(AdminLayout({ children: <div /> })).rejects.toThrow('admin_users lookup failed');
+    await expect(AdminLayout({ children: <div /> })).rejects.toThrow(
+      'admin_users lookup failed',
+    );
     expect(notFoundMock).not.toHaveBeenCalled();
   });
 

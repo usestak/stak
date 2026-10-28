@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
-const { getAdminUserMock, notFoundMock, loadFeedbackListMock } = vi.hoisted(() => ({
-  getAdminUserMock: vi.fn(),
-  notFoundMock: vi.fn(() => {
-    throw new Error('NEXT_NOT_FOUND');
+const { getAdminUserMock, notFoundMock, loadFeedbackListMock } = vi.hoisted(
+  () => ({
+    getAdminUserMock: vi.fn(),
+    notFoundMock: vi.fn(() => {
+      throw new Error('NEXT_NOT_FOUND');
+    }),
+    loadFeedbackListMock: vi.fn().mockResolvedValue([]),
   }),
-  loadFeedbackListMock: vi.fn().mockResolvedValue([]),
-}));
+);
 
 vi.mock('@/lib/admin', () => ({ getAdminUser: getAdminUserMock }));
 vi.mock('next/navigation', () => ({ notFound: notFoundMock }));
@@ -18,9 +20,9 @@ import AdminFeedbackPage from './page';
 describe('AdminFeedbackPage', () => {
   it('calls notFound (its own gate) when there is no admin user, before fetching feedback', async () => {
     getAdminUserMock.mockResolvedValue(null);
-    await expect(AdminFeedbackPage({ searchParams: Promise.resolve({}) })).rejects.toThrow(
-      'NEXT_NOT_FOUND',
-    );
+    await expect(
+      AdminFeedbackPage({ searchParams: Promise.resolve({}) }),
+    ).rejects.toThrow('NEXT_NOT_FOUND');
     expect(loadFeedbackListMock).not.toHaveBeenCalled();
   });
 

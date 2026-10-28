@@ -25,7 +25,11 @@ describe('loadOverviewMetrics', () => {
   it('computes totals, activation rate, and portable users from existing tables', async () => {
     const db = fakeDb({
       profiles: { count: 10, data: [], error: null },
-      environment_versions: { count: 4, data: [{ user_id: 'u1' }, { user_id: 'u2' }], error: null },
+      environment_versions: {
+        count: 4,
+        data: [{ user_id: 'u1' }, { user_id: 'u2' }],
+        error: null,
+      },
       machines: {
         count: 0,
         data: [
@@ -65,7 +69,11 @@ describe('loadOverviewMetrics', () => {
     // range-filtered numerator over an all-time denominator.
     const db = fakeDb({
       profiles: { count: 10, data: [], error: null },
-      environment_versions: { count: 4, data: [{ user_id: 'u1' }, { user_id: 'u2' }], error: null },
+      environment_versions: {
+        count: 4,
+        data: [{ user_id: 'u1' }, { user_id: 'u2' }],
+        error: null,
+      },
       machines: { count: 0, data: [], error: null },
       feedback: { count: 0, data: [], error: null },
     });

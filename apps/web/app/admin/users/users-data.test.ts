@@ -4,8 +4,18 @@ import { loadUsers } from './users-data';
 
 function fakeDb() {
   const profiles = [
-    { user_id: 'u1', display_name: 'Ada', github_username: 'ada', created_at: '2026-01-01T00:00:00Z' },
-    { user_id: 'u2', display_name: 'Bo', github_username: 'bo', created_at: '2026-02-01T00:00:00Z' },
+    {
+      user_id: 'u1',
+      display_name: 'Ada',
+      github_username: 'ada',
+      created_at: '2026-01-01T00:00:00Z',
+    },
+    {
+      user_id: 'u2',
+      display_name: 'Bo',
+      github_username: 'bo',
+      created_at: '2026-02-01T00:00:00Z',
+    },
   ];
   const versions = [{ user_id: 'u1' }, { user_id: 'u1' }];
   const machines = [{ user_id: 'u1', machine_id: 'm1' }];
@@ -22,7 +32,12 @@ function fakeDb() {
       builder.or = chain;
       builder.is = chain;
       builder.then = (resolve: (v: unknown) => void) => {
-        const map: Record<string, unknown> = { profiles, environment_versions: versions, machines, feedback };
+        const map: Record<string, unknown> = {
+          profiles,
+          environment_versions: versions,
+          machines,
+          feedback,
+        };
         resolve({ data: map[table] ?? [], error: null });
       };
       return builder;
@@ -45,7 +60,8 @@ describe('loadUsers', () => {
           capturedOrArg = arg;
           return builder;
         };
-        builder.then = (resolve: (v: unknown) => void) => resolve({ data: [], error: null });
+        builder.then = (resolve: (v: unknown) => void) =>
+          resolve({ data: [], error: null });
         return builder;
       },
     } as never;
@@ -55,14 +71,30 @@ describe('loadUsers', () => {
     // The comma/parens from the search term must be inside double quotes,
     // not sitting at the top level where PostgREST would parse them as
     // filter-string delimiters.
-    expect(capturedOrArg).toBe('display_name.ilike."%a,b(c)%",github_username.ilike."%a,b(c)%"');
+    expect(capturedOrArg).toBe(
+      'display_name.ilike."%a,b(c)%",github_username.ilike."%a,b(c)%"',
+    );
   });
 
   it('joins push/machine/feedback counts onto each profile', async () => {
     const result = await loadUsers(fakeDb());
     expect(result).toEqual([
-      { userId: 'u1', displayName: 'Ada', joinedAt: '2026-01-01T00:00:00Z', pushCount: 2, machineCount: 1, feedbackCount: 1 },
-      { userId: 'u2', displayName: 'Bo', joinedAt: '2026-02-01T00:00:00Z', pushCount: 0, machineCount: 0, feedbackCount: 0 },
+      {
+        userId: 'u1',
+        displayName: 'Ada',
+        joinedAt: '2026-01-01T00:00:00Z',
+        pushCount: 2,
+        machineCount: 1,
+        feedbackCount: 1,
+      },
+      {
+        userId: 'u2',
+        displayName: 'Bo',
+        joinedAt: '2026-02-01T00:00:00Z',
+        pushCount: 0,
+        machineCount: 0,
+        feedbackCount: 0,
+      },
     ]);
   });
 

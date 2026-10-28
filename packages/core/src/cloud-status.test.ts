@@ -95,7 +95,10 @@ describe('checkEnvironmentCloudSync', () => {
 
     const result = await checkEnvironmentCloudSync({
       stackHome,
-      client: { getEnvironment: async () => remoteWith(bundle.digest, '00000000-0000-4000-8000-000000000001') },
+      client: {
+        getEnvironment: async () =>
+          remoteWith(bundle.digest, '00000000-0000-4000-8000-000000000001'),
+      },
     });
     expect(result).toEqual({ status: 'up-to-date' });
   });
@@ -125,7 +128,10 @@ describe('checkEnvironmentCloudSync', () => {
       stackHome,
       client: {
         getEnvironment: async () =>
-          remoteWith('sha256:' + 'a'.repeat(64), '00000000-0000-4000-8000-000000000001'),
+          remoteWith(
+            'sha256:' + 'a'.repeat(64),
+            '00000000-0000-4000-8000-000000000001',
+          ),
       },
     });
     expect(result).toEqual({ status: 'ahead' });
@@ -157,7 +163,11 @@ describe('checkEnvironmentCloudSync', () => {
       stackHome,
       client: {
         getEnvironment: async () =>
-          remoteWith('sha256:' + 'b'.repeat(64), '00000000-0000-4000-8000-000000000002', 2),
+          remoteWith(
+            'sha256:' + 'b'.repeat(64),
+            '00000000-0000-4000-8000-000000000002',
+            2,
+          ),
       },
     });
     expect(result).toEqual({ status: 'behind', remoteVersionNumber: 2 });
@@ -188,7 +198,11 @@ describe('checkEnvironmentCloudSync', () => {
       stackHome,
       client: {
         getEnvironment: async () =>
-          remoteWith('sha256:' + 'b'.repeat(64), '00000000-0000-4000-8000-000000000002', 2),
+          remoteWith(
+            'sha256:' + 'b'.repeat(64),
+            '00000000-0000-4000-8000-000000000002',
+            2,
+          ),
       },
     });
     expect(result).toEqual({ status: 'diverged' });
@@ -206,7 +220,11 @@ describe('checkEnvironmentCloudSync', () => {
       stackHome,
       client: {
         getEnvironment: async () =>
-          remoteWith('sha256:' + 'c'.repeat(64), '00000000-0000-4000-8000-000000000009', 9),
+          remoteWith(
+            'sha256:' + 'c'.repeat(64),
+            '00000000-0000-4000-8000-000000000009',
+            9,
+          ),
       },
     });
     expect(result).toEqual({ status: 'diverged' });

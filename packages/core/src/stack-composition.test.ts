@@ -306,10 +306,7 @@ describe('Environment resolver', () => {
     // happen to be named 'second' — so simulate that directly via two layers sharing an
     // originStackName, overriding the default (the layer's own `name`).
     const versions = new Map([
-      [
-        importedVersionKey(firstLayer),
-        version('first', hash('a'), 'required'),
-      ],
+      [importedVersionKey(firstLayer), version('first', hash('a'), 'required')],
       [
         importedVersionKey(secondLayer),
         version('second', hash('b'), 'required', 'second'),

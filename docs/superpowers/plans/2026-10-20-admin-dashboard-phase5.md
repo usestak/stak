@@ -21,12 +21,14 @@
 ### Task 1: System page
 
 **Files:**
+
 - Create: `apps/web/app/admin/system/system-data.ts`
 - Create: `apps/web/app/admin/system/page.tsx`
 - Test: `apps/web/app/admin/system/system-data.test.ts`
 - Test: `apps/web/app/admin/system/page.test.tsx`
 
 **Interfaces:**
+
 - Produces: `export type SystemStatus = { webVersion: string; cliVersion: string; dbConnected: boolean; recentFailureCount: number }` and `export async function loadSystemStatus(db: SupabaseClient, webVersion: string, cliVersion: string): Promise<SystemStatus>`.
 
 - [ ] **Step 1: Write the failing test**
@@ -45,7 +47,10 @@ function fakeDb(opts: { connects: boolean; failureCount: number }) {
           then: (resolve: (v: unknown) => void) =>
             opts.connects
               ? resolve({ data: [], error: null })
-              : resolve({ data: null, error: { message: 'connection refused' } }),
+              : resolve({
+                  data: null,
+                  error: { message: 'connection refused' },
+                }),
         }),
         eq: () => ({
           gte: () => ({
@@ -109,7 +114,10 @@ export const loadSystemStatus = async (
   // in this project (which deliberately throws on error). This is the one
   // intentional exception, because "is the DB reachable" is itself the
   // thing being measured.
-  const { error: connectError } = await db.from('profiles').select('user_id').limit(1);
+  const { error: connectError } = await db
+    .from('profiles')
+    .select('user_id')
+    .limit(1);
   const dbConnected = !connectError;
 
   let recentFailureCount = 0;
@@ -199,18 +207,20 @@ Note: verify the relative import path to `packages/cli/package.json` actually re
 // apps/web/app/admin/system/page.test.tsx
 import { describe, expect, it, vi } from 'vitest';
 
-const { getAdminUserMock, notFoundMock, loadSystemStatusMock } = vi.hoisted(() => ({
-  getAdminUserMock: vi.fn(),
-  notFoundMock: vi.fn(() => {
-    throw new Error('NEXT_NOT_FOUND');
+const { getAdminUserMock, notFoundMock, loadSystemStatusMock } = vi.hoisted(
+  () => ({
+    getAdminUserMock: vi.fn(),
+    notFoundMock: vi.fn(() => {
+      throw new Error('NEXT_NOT_FOUND');
+    }),
+    loadSystemStatusMock: vi.fn().mockResolvedValue({
+      webVersion: '0.1.0',
+      cliVersion: '0.2.0-beta.1',
+      dbConnected: true,
+      recentFailureCount: 0,
+    }),
   }),
-  loadSystemStatusMock: vi.fn().mockResolvedValue({
-    webVersion: '0.1.0',
-    cliVersion: '0.2.0-beta.1',
-    dbConnected: true,
-    recentFailureCount: 0,
-  }),
-}));
+);
 
 vi.mock('@/lib/admin', () => ({ getAdminUser: getAdminUserMock }));
 vi.mock('next/navigation', () => ({ notFound: notFoundMock }));
@@ -252,9 +262,11 @@ git commit -m "feat(web): add admin System page"
 ### Task 2: Metric definitions doc
 
 **Files:**
+
 - Create: `docs/admin-metric-definitions.md`
 
 **Interfaces:**
+
 - None (documentation task).
 
 - [ ] **Step 1: Write the doc**
@@ -268,16 +280,19 @@ Permanent reference so these numbers don't drift as the dashboard evolves.
 If a definition changes, update this file in the same commit.
 
 ## Activated user
+
 A user with at least one row in `environment_versions` (i.e. has made a
 successful authenticated Cloud push), ever — not scoped to the selected
 date range. Computed in `apps/web/app/admin/overview-data.ts`.
 
 ## Activation rate
+
 Activated users ÷ total signed-up users, both all-time counts (not
 range-scoped — see "Activated user"). Returns `null`, not `NaN`, when
 there are zero signed-up users.
 
 ## Portable user
+
 A user with active (non-revoked) machines spanning >= 2 distinct
 `machine_id`s. Computed once, shared across Overview/Activation/Usage via
 `apps/web/lib/admin-metrics.ts`'s `loadActiveMachinesByUser`/
@@ -285,6 +300,7 @@ A user with active (non-revoked) machines spanning >= 2 distinct
 same implementation so the figure can't drift between pages.
 
 ## Push / pull success rate
+
 Successful `product_events` of that type ÷ (successful + failed) of that
 type, in the selected date range. Returns `null` when there are zero
 attempts of that type in range. Computed via server-side `head:true`
@@ -301,18 +317,22 @@ page copy reflects this; Reliability's doesn't yet (follow-up candidate).
 against a never-created environment), so it isn't inflated by that.
 
 ## Open feedback
+
 `feedback.status` in `('new', 'reviewing')`.
 
 ## Weekly active user (WAU)
+
 **Not implemented as of Phase 5.** Deferred — see Phase 1 final-review
 carry-over notes; no page currently renders a WAU figure.
 
 ## CLI version breakdown
+
 **Unavailable.** The CLI sends no version header on any Cloud API
 request. Not faked — every page that would show this explicitly renders
 "Unavailable — no CLI version header exists yet" rather than a number.
 
 ## Row-cap caveat (applies to several loaders)
+
 Hosted Supabase/PostgREST caps any single response at 1000 rows by
 default. Several admin loaders (Usage's per-day buckets, Reliability's
 failure grouping, the Feedback and Users lists) fetch row-level data for
@@ -339,6 +359,7 @@ This task is primarily a review/audit task, not new feature code — it may surf
 - [ ] **Step 1: Responsive/visual code review (not a live browser session — see Global Constraints note)**
 
 Read `apps/web/app/admin/admin.css` in full alongside every admin page's JSX, and check against these breakpoints by reasoning about the actual CSS rules (not by rendering):
+
 - 1440/1024 (desktop, primary): sidebar (216px) + main content area — confirm no fixed-width element in any page would overflow at 1024px.
 - 768: confirm the existing `@media (max-width: 768px)` rule (sidebar becomes full-width, stacks above content) actually applies to every page using `.stak-admin`/`.stak-admin-sidebar` (all of them should, since it's the shared layout).
 - 390 (narrow phone): confirm every table on every admin page (Users, Reliability's recent failures, Feedback list) is wrapped in `.stak-admin-table-wrap` (horizontal scroll), not a bare `<table>` that would force page-level horizontal overflow. Grep for `<table>` across `apps/web/app/admin/**/*.tsx` and verify each one's parent is `.stak-admin-table-wrap`.
@@ -352,6 +373,7 @@ Grep every admin page for its empty-state copy (e.g. "No feedback yet.", "No fai
 - [ ] **Step 3: Final security re-confirmation across all 5 phases**
 
 This is a condensed re-check, not a re-derivation of every prior review:
+
 - Grep all of `apps/web/app/admin/**/page.tsx` and confirm every single one calls `getAdminUser()` as its own first statement (not relying solely on `layout.tsx`).
 - Grep all of `apps/web/app/api/admin/**/route.ts` and confirm the same for every HTTP method exported.
 - Confirm `apps/web/lib/admin.ts` and `apps/web/lib/supabase.ts` contain no `'use client'` directive (the original Phase 1 static check, re-run once more at the end).

@@ -21,5 +21,7 @@ export const rangeStart = (range: AdminDateRange): Date | null => {
  */
 export const ADMIN_DATE_RANGES: AdminDateRange[] = ['24h', '7d', '30d', 'all'];
 
-export const isAdminDateRange = (value: string | undefined): value is AdminDateRange =>
+export const isAdminDateRange = (
+  value: string | undefined,
+): value is AdminDateRange =>
   ADMIN_DATE_RANGES.includes(value as AdminDateRange);

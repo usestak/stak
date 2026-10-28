@@ -952,7 +952,11 @@ describe('`stak project` and `stak memory restore` agree on Project ownership (r
     const vendorKey = 'C--Users-NT-Desktop-stack';
     const canonical = 'github.com/usestak/stak';
     const stackHome = await seedWithObjects([
-      { project: gitProject(canonical), rel: 'MEMORY.md', body: 'canonical memory' },
+      {
+        project: gitProject(canonical),
+        rel: 'MEMORY.md',
+        body: 'canonical memory',
+      },
       {
         project: { kind: 'local', vendorKey },
         rel: 'pnpm-native-binary-fix.md',

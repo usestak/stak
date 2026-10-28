@@ -26,39 +26,40 @@
 
 ## File Map
 
-| File | Responsibility |
-|---|---|
-| `packages/spec/src/feedback.ts` (new) | Zod request schema + types for a feedback submission — shared validation contract. |
-| `packages/spec/src/index.ts` | Export the new feedback module. |
-| `supabase/migrations/0012_feedback.sql` (new) | `public.feedback` table, RLS enabled with **no** policies (service-role-only writes, matching `cli_auth_sessions`/`cli_tokens` posture) — never publicly readable. |
-| `apps/web/app/api/feedback/route.ts` (new) | POST handler: validates body with the shared schema, attaches safe metadata, inserts via `serviceClient()`. |
-| `apps/web/app/api/feedback/route.test.ts` (new) | Route handler tests (validation, metadata attach, no-PII guarantee). |
-| `apps/web/app/feedback/page.tsx` (new) | `/feedback` page: short form + privacy note. |
-| `apps/web/app/feedback/feedback-form.tsx` (new) | Client component: the actual form, calls the API route, shows confirmation. |
-| `apps/web/app/feedback/feedback-form.test.tsx` (new) | Form behavior tests. |
-| `apps/web/app/beta/page.tsx` (new) | `/beta` page: what Public Beta is, install command, what's ready, what's not, feedback CTA. |
-| `apps/web/app/beta/page.test.tsx` (new) | Smoke test for `/beta` content. |
-| `apps/web/lib/beta.ts` (new) | Single source of truth: `PUBLIC_BETA_VERSION`, `PUBLIC_BETA_INSTALL_COMMAND`, `PUBLIC_BETA_LABEL`. |
-| `apps/web/lib/beta.test.ts` (new) | Asserts the constants' exact values (regression guard). |
-| `apps/web/app/_components/public-landing-shell.tsx` | Modify: beta pill in nav, hero copy, replace `YourStakSection`/`MoveSection` workflow story with status/add/push + pull/project/memory-restore, footer Feedback link. |
-| `apps/web/app/_components/public-landing-shell.test.tsx` | Modify: assertions for the above. |
-| `apps/web/app/docs/page.tsx` | Modify: add "Daily workflow" and "Move to another machine" sections using `@beta` install. |
-| `apps/web/app/docs/workflows/page.tsx` | Modify: add `status`/`add`/`push` as the primary story; fix the Memory recovery sequence; reframe `scan`/`memory backup`/`memory recover` as advanced. |
-| `apps/web/app/docs/memory/page.tsx` | Modify: fix "Moving to another computer" sequence (no `memory recover` immediately after `pull`). |
-| `apps/web/app/docs/docs-nav.ts` | Modify: no structural change needed — confirmed by `docs.test.ts`; only touched if a nav entry is added. |
-| `apps/web/app/docs/cli/cli-reference.data.ts` | Modify: verify/update `add`, `push`, `pull`, `status` entries are accurate and first-class; correct any stale beta/version text. |
-| `apps/web/app/_components/beta-pill.tsx` (new) | Small reusable `<BetaPill />` client-free component for the nav pill, linking to `/beta`. |
-| `docs/getting-started.md` | Modify: replace V0.1-from-source instructions with `@beta` npm install + status/add/push + new-machine flow (keep source-build as an "advanced/contributing" aside, see CONTRIBUTING.md). |
-| `docs/commands.md`, `docs/memory.md`, `docs/cloud-setup.md`, `docs/troubleshooting.md` | Modify only the specific outdated sequences found in audit (see Task 8); leave advanced-command descriptions intact. |
-| `README.md` | Modify: Public Beta banner line, `@beta` install, new workflow story, accurate Memory limitation. |
-| `packages/cli/README.md` | Modify: same install-command fix; workflow story already closer to current — audit and patch only what's stale. |
-| `.github/ISSUE_TEMPLATE/*`, `CONTRIBUTING.md`, `SECURITY.md` | Audit only; patch only if they contain a stale install command or workflow claim. |
+| File                                                                                   | Responsibility                                                                                                                                                                            |
+| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/spec/src/feedback.ts` (new)                                                  | Zod request schema + types for a feedback submission — shared validation contract.                                                                                                        |
+| `packages/spec/src/index.ts`                                                           | Export the new feedback module.                                                                                                                                                           |
+| `supabase/migrations/0012_feedback.sql` (new)                                          | `public.feedback` table, RLS enabled with **no** policies (service-role-only writes, matching `cli_auth_sessions`/`cli_tokens` posture) — never publicly readable.                        |
+| `apps/web/app/api/feedback/route.ts` (new)                                             | POST handler: validates body with the shared schema, attaches safe metadata, inserts via `serviceClient()`.                                                                               |
+| `apps/web/app/api/feedback/route.test.ts` (new)                                        | Route handler tests (validation, metadata attach, no-PII guarantee).                                                                                                                      |
+| `apps/web/app/feedback/page.tsx` (new)                                                 | `/feedback` page: short form + privacy note.                                                                                                                                              |
+| `apps/web/app/feedback/feedback-form.tsx` (new)                                        | Client component: the actual form, calls the API route, shows confirmation.                                                                                                               |
+| `apps/web/app/feedback/feedback-form.test.tsx` (new)                                   | Form behavior tests.                                                                                                                                                                      |
+| `apps/web/app/beta/page.tsx` (new)                                                     | `/beta` page: what Public Beta is, install command, what's ready, what's not, feedback CTA.                                                                                               |
+| `apps/web/app/beta/page.test.tsx` (new)                                                | Smoke test for `/beta` content.                                                                                                                                                           |
+| `apps/web/lib/beta.ts` (new)                                                           | Single source of truth: `PUBLIC_BETA_VERSION`, `PUBLIC_BETA_INSTALL_COMMAND`, `PUBLIC_BETA_LABEL`.                                                                                        |
+| `apps/web/lib/beta.test.ts` (new)                                                      | Asserts the constants' exact values (regression guard).                                                                                                                                   |
+| `apps/web/app/_components/public-landing-shell.tsx`                                    | Modify: beta pill in nav, hero copy, replace `YourStakSection`/`MoveSection` workflow story with status/add/push + pull/project/memory-restore, footer Feedback link.                     |
+| `apps/web/app/_components/public-landing-shell.test.tsx`                               | Modify: assertions for the above.                                                                                                                                                         |
+| `apps/web/app/docs/page.tsx`                                                           | Modify: add "Daily workflow" and "Move to another machine" sections using `@beta` install.                                                                                                |
+| `apps/web/app/docs/workflows/page.tsx`                                                 | Modify: add `status`/`add`/`push` as the primary story; fix the Memory recovery sequence; reframe `scan`/`memory backup`/`memory recover` as advanced.                                    |
+| `apps/web/app/docs/memory/page.tsx`                                                    | Modify: fix "Moving to another computer" sequence (no `memory recover` immediately after `pull`).                                                                                         |
+| `apps/web/app/docs/docs-nav.ts`                                                        | Modify: no structural change needed — confirmed by `docs.test.ts`; only touched if a nav entry is added.                                                                                  |
+| `apps/web/app/docs/cli/cli-reference.data.ts`                                          | Modify: verify/update `add`, `push`, `pull`, `status` entries are accurate and first-class; correct any stale beta/version text.                                                          |
+| `apps/web/app/_components/beta-pill.tsx` (new)                                         | Small reusable `<BetaPill />` client-free component for the nav pill, linking to `/beta`.                                                                                                 |
+| `docs/getting-started.md`                                                              | Modify: replace V0.1-from-source instructions with `@beta` npm install + status/add/push + new-machine flow (keep source-build as an "advanced/contributing" aside, see CONTRIBUTING.md). |
+| `docs/commands.md`, `docs/memory.md`, `docs/cloud-setup.md`, `docs/troubleshooting.md` | Modify only the specific outdated sequences found in audit (see Task 8); leave advanced-command descriptions intact.                                                                      |
+| `README.md`                                                                            | Modify: Public Beta banner line, `@beta` install, new workflow story, accurate Memory limitation.                                                                                         |
+| `packages/cli/README.md`                                                               | Modify: same install-command fix; workflow story already closer to current — audit and patch only what's stale.                                                                           |
+| `.github/ISSUE_TEMPLATE/*`, `CONTRIBUTING.md`, `SECURITY.md`                           | Audit only; patch only if they contain a stale install command or workflow claim.                                                                                                         |
 
 ---
 
 ## Task 1: Shared Public Beta constants + feedback Zod schema
 
 **Files:**
+
 - Create: `apps/web/lib/beta.ts`
 - Test: `apps/web/lib/beta.test.ts`
 - Create: `packages/spec/src/feedback.ts`
@@ -66,12 +67,14 @@
 - Modify: `packages/spec/src/index.ts`
 
 **Interfaces:**
+
 - Produces: `PUBLIC_BETA_VERSION = 'v0.2.0-beta.1'`, `PUBLIC_BETA_INSTALL_COMMAND = 'npm install -g @memstk/cli@beta'`, `PUBLIC_BETA_LABEL = 'Public Beta'` from `apps/web/lib/beta.ts`.
 - Produces: `feedbackRequestSchema` (Zod) and `type FeedbackRequest = z.infer<typeof feedbackRequestSchema>` from `packages/spec/src/feedback.ts`, consumed by Task 3's route handler.
 
 - [ ] **Step 1: Write the failing tests**
 
 `apps/web/lib/beta.test.ts`:
+
 ```ts
 import { describe, expect, it } from 'vitest';
 
@@ -97,6 +100,7 @@ describe('beta constants', () => {
 ```
 
 `packages/spec/src/feedback.test.ts`:
+
 ```ts
 import { describe, expect, it } from 'vitest';
 
@@ -131,7 +135,10 @@ describe('feedbackRequestSchema', () => {
   });
 
   it('rejects an empty message', () => {
-    const result = feedbackRequestSchema.safeParse({ type: 'other', message: '' });
+    const result = feedbackRequestSchema.safeParse({
+      type: 'other',
+      message: '',
+    });
     expect(result.success).toBe(false);
   });
 
@@ -174,6 +181,7 @@ Expected: FAIL — modules don't exist yet.
 - [ ] **Step 3: Write minimal implementation**
 
 `apps/web/lib/beta.ts`:
+
 ```ts
 export const PUBLIC_BETA_LABEL = 'Public Beta';
 export const PUBLIC_BETA_VERSION = 'v0.2.0-beta.1';
@@ -181,6 +189,7 @@ export const PUBLIC_BETA_INSTALL_COMMAND = 'npm install -g @memstk/cli@beta';
 ```
 
 `packages/spec/src/feedback.ts`:
+
 ```ts
 import { z } from 'zod';
 
@@ -202,6 +211,7 @@ export type FeedbackRequest = z.infer<typeof feedbackRequestSchema>;
 ```
 
 Add to `packages/spec/src/index.ts`:
+
 ```ts
 export * from './feedback.js';
 ```
@@ -223,14 +233,17 @@ git commit -m "feat: add public beta constants and feedback request schema"
 ## Task 2: Feedback storage migration
 
 **Files:**
+
 - Create: `supabase/migrations/0012_feedback.sql`
 
 **Interfaces:**
+
 - Produces: table `public.feedback(id uuid pk, type text, message text, goal text, email text, page_url text, user_id uuid nullable, user_agent text, app_version text, created_at timestamptz)`, consumed by Task 3's route handler via `serviceClient()`.
 
 - [ ] **Step 1: Write the migration**
 
 `supabase/migrations/0012_feedback.sql`:
+
 ```sql
 -- Public Beta website feedback. Mirrors the cli_auth_sessions/cli_tokens posture
 -- (0001_stack_cloud.sql): RLS is enabled with NO policies at all, so anon/
@@ -277,10 +290,12 @@ git commit -m "feat(db): add feedback table with service-role-only RLS posture"
 ## Task 3: Feedback API route
 
 **Files:**
+
 - Create: `apps/web/app/api/feedback/route.ts`
 - Test: `apps/web/app/api/feedback/route.test.ts`
 
 **Interfaces:**
+
 - Consumes: `feedbackRequestSchema` (Task 1, `@stack/spec`), `serviceClient()` (`apps/web/lib/supabase.ts`), `getSessionUser()` (`apps/web/lib/session.ts`).
 - Produces: `POST /api/feedback` — `202 { ok: true }` on success, `400 { ok: false, error }` on invalid body.
 
@@ -289,7 +304,9 @@ git commit -m "feat(db): add feedback table with service-role-only RLS posture"
 ```ts
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../../lib/session', () => ({ getSessionUser: vi.fn(async () => null) }));
+vi.mock('../../../lib/session', () => ({
+  getSessionUser: vi.fn(async () => null),
+}));
 
 const insertMock = vi.fn(async () => ({ error: null }));
 vi.mock('../../../lib/supabase', () => ({
@@ -374,7 +391,10 @@ export async function POST(request: Request): Promise<Response> {
     });
 
   if (error) {
-    return Response.json({ ok: false, error: 'storage-failed' }, { status: 500 });
+    return Response.json(
+      { ok: false, error: 'storage-failed' },
+      { status: 500 },
+    );
   }
 
   return Response.json({ ok: true }, { status: 202 });
@@ -398,18 +418,21 @@ git commit -m "feat(web): add POST /api/feedback route"
 ## Task 4: Feedback page and form
 
 **Files:**
+
 - Create: `apps/web/app/feedback/feedback-form.tsx`
 - Test: `apps/web/app/feedback/feedback-form.test.tsx`
 - Create: `apps/web/app/feedback/page.tsx`
 - Test: `apps/web/app/feedback/page.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `POST /api/feedback` (Task 3).
 - Produces: `<FeedbackForm />` client component used by `/feedback`; `/feedback` route.
 
 - [ ] **Step 1: Write the failing tests**
 
 `feedback-form.test.tsx`:
+
 ```tsx
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -419,9 +442,11 @@ import { FeedbackForm } from './feedback-form';
 
 describe('FeedbackForm', () => {
   it('submits the selected type and message, then shows a calm confirmation', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue({ ok: true, status: 202, json: async () => ({ ok: true }) });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 202,
+      json: async () => ({ ok: true }),
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     render(<FeedbackForm />);
@@ -433,7 +458,9 @@ describe('FeedbackForm', () => {
     await userEvent.click(screen.getByRole('button', { name: /send/i }));
 
     await waitFor(() =>
-      expect(screen.getByText(/thanks\. this directly helps shape the public beta/i)).toBeInTheDocument(),
+      expect(
+        screen.getByText(/thanks\. this directly helps shape the public beta/i),
+      ).toBeInTheDocument(),
     );
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -441,19 +468,25 @@ describe('FeedbackForm', () => {
       expect.objectContaining({ method: 'POST' }),
     );
     const sentBody = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(sentBody).toMatchObject({ type: 'idea', message: 'Add a dark mode toggle.' });
+    expect(sentBody).toMatchObject({
+      type: 'idea',
+      message: 'Add a dark mode toggle.',
+    });
   });
 
   it('shows the privacy note about credentials and secrets', () => {
     render(<FeedbackForm />);
     expect(
-      screen.getByText(/don't include credentials, secrets, or private memory content/i),
+      screen.getByText(
+        /don't include credentials, secrets, or private memory content/i,
+      ),
     ).toBeInTheDocument();
   });
 });
 ```
 
 `page.test.tsx`:
+
 ```tsx
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
@@ -463,7 +496,9 @@ import FeedbackPage from './page';
 describe('/feedback page', () => {
   it('renders the feedback form', () => {
     render(<FeedbackPage />);
-    expect(screen.getByRole('heading', { name: /feedback/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: /feedback/i }),
+    ).toBeInTheDocument();
   });
 });
 ```
@@ -476,6 +511,7 @@ Expected: FAIL — files don't exist.
 - [ ] **Step 3: Write minimal implementation**
 
 `feedback-form.tsx`:
+
 ```tsx
 'use client';
 
@@ -488,7 +524,9 @@ export function FeedbackForm() {
   const [message, setMessage] = useState('');
   const [goal, setGoal] = useState('');
   const [email, setEmail] = useState('');
-  const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>(
+    'idle',
+  );
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -502,7 +540,10 @@ export function FeedbackForm() {
           message,
           goal: goal || undefined,
           email: email || undefined,
-          pageUrl: typeof window !== 'undefined' ? window.location.pathname : undefined,
+          pageUrl:
+            typeof window !== 'undefined'
+              ? window.location.pathname
+              : undefined,
         }),
       });
       setStatus(res.ok ? 'sent' : 'error');
@@ -512,7 +553,9 @@ export function FeedbackForm() {
   };
 
   if (status === 'sent') {
-    return <p role="status">Thanks. This directly helps shape the public beta.</p>;
+    return (
+      <p role="status">Thanks. This directly helps shape the public beta.</p>
+    );
   }
 
   return (
@@ -529,7 +572,9 @@ export function FeedbackForm() {
         <option value="other">Other</option>
       </select>
 
-      <label htmlFor="feedback-message">What happened, or what would you change?</label>
+      <label htmlFor="feedback-message">
+        What happened, or what would you change?
+      </label>
       <textarea
         id="feedback-message"
         required
@@ -537,7 +582,9 @@ export function FeedbackForm() {
         onChange={(e) => setMessage(e.target.value)}
       />
 
-      <label htmlFor="feedback-goal">What were you trying to do? (optional)</label>
+      <label htmlFor="feedback-goal">
+        What were you trying to do? (optional)
+      </label>
       <input
         id="feedback-goal"
         value={goal}
@@ -552,18 +599,24 @@ export function FeedbackForm() {
         onChange={(e) => setEmail(e.target.value)}
       />
 
-      <p>Please don&apos;t include credentials, secrets, or private Memory content.</p>
+      <p>
+        Please don&apos;t include credentials, secrets, or private Memory
+        content.
+      </p>
 
       <button type="submit" disabled={status === 'sending'}>
         Send feedback
       </button>
-      {status === 'error' ? <p role="alert">Something went wrong. Try again.</p> : null}
+      {status === 'error' ? (
+        <p role="alert">Something went wrong. Try again.</p>
+      ) : null}
     </form>
   );
 }
 ```
 
 `page.tsx`:
+
 ```tsx
 import type { Metadata } from 'next';
 
@@ -571,14 +624,18 @@ import { FeedbackForm } from './feedback-form';
 
 export const metadata: Metadata = {
   title: 'Feedback',
-  description: 'Tell us what worked, what was confusing, or what you expected during the STAK Public Beta.',
+  description:
+    'Tell us what worked, what was confusing, or what you expected during the STAK Public Beta.',
 };
 
 export default function FeedbackPage() {
   return (
     <main>
       <h1>Feedback</h1>
-      <p>Short and specific is perfect. This goes straight to the people building STAK.</p>
+      <p>
+        Short and specific is perfect. This goes straight to the people building
+        STAK.
+      </p>
       <FeedbackForm />
     </main>
   );
@@ -602,10 +659,12 @@ git commit -m "feat(web): add /feedback page and form"
 ## Task 5: Public Beta page (`/beta`)
 
 **Files:**
+
 - Create: `apps/web/app/beta/page.tsx`
 - Test: `apps/web/app/beta/page.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `PUBLIC_BETA_VERSION`, `PUBLIC_BETA_INSTALL_COMMAND` (Task 1, `apps/web/lib/beta.ts`).
 
 - [ ] **Step 1: Write the failing test**
@@ -619,18 +678,25 @@ import BetaPage from './page';
 describe('/beta page', () => {
   it('surfaces the @beta install command and current version', () => {
     render(<BetaPage />);
-    expect(screen.getByText('npm install -g @memstk/cli@beta')).toBeInTheDocument();
+    expect(
+      screen.getByText('npm install -g @memstk/cli@beta'),
+    ).toBeInTheDocument();
     expect(screen.getByText(/v0\.2\.0-beta\.1/)).toBeInTheDocument();
   });
 
   it('links to the feedback page', () => {
     render(<BetaPage />);
-    expect(screen.getByRole('link', { name: /feedback/i })).toHaveAttribute('href', '/feedback');
+    expect(screen.getByRole('link', { name: /feedback/i })).toHaveAttribute(
+      'href',
+      '/feedback',
+    );
   });
 
   it('does not overclaim memory portability across every agent', () => {
     render(<BetaPage />);
-    expect(screen.queryByText(/memory.{0,20}every agent/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/memory.{0,20}every agent/i),
+    ).not.toBeInTheDocument();
   });
 });
 ```
@@ -646,11 +712,15 @@ Expected: FAIL — module doesn't exist.
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
-import { PUBLIC_BETA_INSTALL_COMMAND, PUBLIC_BETA_VERSION } from '../../lib/beta';
+import {
+  PUBLIC_BETA_INSTALL_COMMAND,
+  PUBLIC_BETA_VERSION,
+} from '../../lib/beta';
 
 export const metadata: Metadata = {
   title: 'Public Beta',
-  description: 'What to expect from the STAK Public Beta — what works, what we want tested, and known limitations.',
+  description:
+    'What to expect from the STAK Public Beta — what works, what we want tested, and known limitations.',
 };
 
 export default function BetaPage() {
@@ -658,9 +728,9 @@ export default function BetaPage() {
     <main>
       <h1>Public Beta — {PUBLIC_BETA_VERSION}</h1>
       <p>
-        STAK is in a developer Public Beta. The core workflow — carrying
-        Skills and Memory across machines with a Git-like flow — is stable
-        enough to use daily; some edges are still being sharpened.
+        STAK is in a developer Public Beta. The core workflow — carrying Skills
+        and Memory across machines with a Git-like flow — is stable enough to
+        use daily; some edges are still being sharpened.
       </p>
 
       <h2>Install</h2>
@@ -670,31 +740,57 @@ export default function BetaPage() {
 
       <h2>What&apos;s ready</h2>
       <ul>
-        <li>Daily workflow: <code>stak status</code>, <code>stak add .</code>, <code>stak push</code>.</li>
-        <li>Moving to another machine: <code>stak login</code>, <code>stak pull</code>.</li>
+        <li>
+          Daily workflow: <code>stak status</code>, <code>stak add .</code>,{' '}
+          <code>stak push</code>.
+        </li>
+        <li>
+          Moving to another machine: <code>stak login</code>,{' '}
+          <code>stak pull</code>.
+        </li>
         <li>Skills move across Claude Code, Cursor, and Codex.</li>
-        <li>During the public beta, Project Memory portability supports Claude Code.</li>
+        <li>
+          During the public beta, Project Memory portability supports Claude
+          Code.
+        </li>
       </ul>
 
       <h2>What we particularly want tested</h2>
       <ul>
-        <li>Restoring Memory on a fresh machine with <code>stak project</code> and <code>stak memory restore</code>.</li>
-        <li>Mapping local-only Projects with <code>stak project map</code>.</li>
-        <li>Using <code>stak try</code> and <code>stak use</code> with public STAKs.</li>
+        <li>
+          Restoring Memory on a fresh machine with <code>stak project</code> and{' '}
+          <code>stak memory restore</code>.
+        </li>
+        <li>
+          Mapping local-only Projects with <code>stak project map</code>.
+        </li>
+        <li>
+          Using <code>stak try</code> and <code>stak use</code> with public
+          STAKs.
+        </li>
       </ul>
 
       <h2>Known limitations</h2>
       <ul>
-        <li>Project Memory portability currently targets Claude Code, not Cursor or Codex.</li>
-        <li>Some Projects can require explicit <code>stak project map</code> when identity can&apos;t be proven automatically.</li>
-        <li>STAK deliberately fails closed on a conflicting Memory restore rather than overwriting it.</li>
+        <li>
+          Project Memory portability currently targets Claude Code, not Cursor
+          or Codex.
+        </li>
+        <li>
+          Some Projects can require explicit <code>stak project map</code> when
+          identity can&apos;t be proven automatically.
+        </li>
+        <li>
+          STAK deliberately fails closed on a conflicting Memory restore rather
+          than overwriting it.
+        </li>
         <li>CLI and Cloud semantics may continue evolving during the beta.</li>
       </ul>
 
       <h2>Feedback</h2>
       <p>
-        Tell us what was confusing, what broke, or what you expected STAK to
-        do that it didn&apos;t — it directly shapes the beta.{' '}
+        Tell us what was confusing, what broke, or what you expected STAK to do
+        that it didn&apos;t — it directly shapes the beta.{' '}
         <Link href="/feedback">Send feedback</Link>.
       </p>
     </main>
@@ -719,17 +815,20 @@ git commit -m "feat(web): add /beta public beta information page"
 ## Task 6: Landing page — beta pill, hero, workflow story, footer feedback link
 
 **Files:**
+
 - Create: `apps/web/app/_components/beta-pill.tsx`
 - Modify: `apps/web/app/_components/public-landing-shell.tsx`
 - Modify: `apps/web/app/_components/public-landing-shell.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `PUBLIC_BETA_LABEL` (Task 1).
 - Produces: `<BetaPill />`, used in `LandingNav`.
 
 - [ ] **Step 1: Extend the failing tests**
 
 Read `apps/web/app/_components/public-landing-shell.test.tsx` first to match its existing assertion style, then add:
+
 ```tsx
 it('shows an understated Public Beta pill linking to /beta', () => {
   render(<PublicLandingShell />);
@@ -752,7 +851,10 @@ it('shows memory restore (not memory recover) as the step right after pull', () 
 
 it('links Feedback in the footer', () => {
   render(<PublicLandingShell />);
-  expect(screen.getByRole('link', { name: 'Feedback' })).toHaveAttribute('href', '/feedback');
+  expect(screen.getByRole('link', { name: 'Feedback' })).toHaveAttribute(
+    'href',
+    '/feedback',
+  );
 });
 ```
 
@@ -764,6 +866,7 @@ Expected: FAIL on the four new assertions.
 - [ ] **Step 3: Implement `BetaPill`**
 
 `beta-pill.tsx`:
+
 ```tsx
 import Link from 'next/link';
 
@@ -781,9 +884,11 @@ export function BetaPill() {
 - [ ] **Step 4: Wire the pill into `LandingNav`**
 
 In `public-landing-shell.tsx`, import `BetaPill` and render it next to the wordmark:
+
 ```tsx
 import { BetaPill } from './beta-pill';
 ```
+
 ```tsx
 <Link href="/" className="stak-landing-wordmark">
   <img src="/brand/stak-symbol-dark.svg" alt="" width={18} height={18} />
@@ -791,22 +896,24 @@ import { BetaPill } from './beta-pill';
 </Link>
 <BetaPill />
 ```
+
 (Add a minimal `.stak-landing-beta-pill` rule to `public-landing-shell.css` — small text, subtle border/background using existing design tokens in that file, no new color system.)
 
 - [ ] **Step 5: Replace the hero lead copy**
 
 Replace the `<p className="stak-landing-lead">` block in `Hero()` with:
+
 ```tsx
 <p className="stak-landing-lead">
-  Your AI coding environment should move with you. STAK carries portable
-  Skills and Project Memory across machines with a familiar Git-like
-  workflow.
+  Your AI coding environment should move with you. STAK carries portable Skills
+  and Project Memory across machines with a familiar Git-like workflow.
 </p>
 ```
 
 - [ ] **Step 6: Replace `YourStakSection`'s closing strip and `MoveSection`'s steps**
 
 In `YourStakSection`, replace the `stak scan` strip with:
+
 ```tsx
 <div className="stak-landing-strip">
   <span className="stak-landing-strip-cmd">
@@ -819,6 +926,7 @@ In `YourStakSection`, replace the `stak scan` strip with:
 ```
 
 Replace the `MOVES` array in `MoveSection` with the Machine → Main → Cloud story:
+
 ```tsx
 const MOVES = [
   {
@@ -853,6 +961,7 @@ const MOVES = [
   },
 ];
 ```
+
 Update the heading above the list from "Bring your STAK to a new machine." to "Machine → Main → Cloud." and the eyebrow from `MOVE TO ANOTHER MACHINE` to `HOW IT WORKS`. Keep the existing `<ol>`/`stak-landing-move-*` markup — only the data array and heading text change, so the list test selectors (`.closest('li')`) keep working.
 
 - [ ] **Step 7: Add the footer Feedback link**
@@ -878,14 +987,17 @@ git commit -m "feat(web): landing page public beta pill and git-like workflow st
 **Discovered during Task 6's implementation (not in the original audit):** `apps/web/app/_components/landing-scroll-story.tsx`'s `STEPS` array drives the hero's pinned Windows → STAK → macOS scroll animation and independently narrates the OLD workflow — `stak scan` as the lead command, `stak push\nstak memory backup` paired as one step, and `stak login\nstak pull\nstak memory recover` as one step. This violates the same locked constraints Task 6 fixed in the static sections below the hero. `public-landing-shell.tsx` (Task 6) does not render this data — it's a separate component — so Task 6's own diff could not have fixed it.
 
 **Files:**
+
 - Modify: `apps/web/app/_components/landing-scroll-story.tsx` (only the `STEPS` array's `cmd`/`cap`/`sub` string literals — do not touch the scroll-scrubbing/rendering logic around it)
 
 **Interfaces:**
+
 - No exported signature changes — `STEPS: Step[]` keeps its existing `[machine, cmd, output, cap, sub]` tuple shape and length (7 entries).
 
 - [ ] **Step 1: Replace the `STEPS` array's command/caption text for steps 1, 3, and 5 (indices 0, 2, 4)**
 
 Current (lines ~181-213):
+
 ```tsx
 const STEPS: Step[] = [
   [
@@ -929,6 +1041,7 @@ const STEPS: Step[] = [
 ```
 
 Replace with:
+
 ```tsx
 const STEPS: Step[] = [
   [
@@ -938,13 +1051,7 @@ const STEPS: Step[] = [
     'Your agent setup starts on Windows.',
     'Skills, Memory and local setup accumulate as you work.',
   ],
-  [
-    'Windows',
-    'stak add .',
-    '',
-    'Choose what belongs in main.',
-    '',
-  ],
+  ['Windows', 'stak add .', '', 'Choose what belongs in main.', ''],
   [
     'Windows',
     'stak push',
@@ -976,6 +1083,7 @@ const STEPS: Step[] = [
   // ... step 7 comment + entry unchanged (stak run claude) ...
 ];
 ```
+
 Leave the 7th entry (`stak run claude`) and its preceding comment exactly as-is — only entries 1, 2, 3, and 5, 6 (1-indexed) change. Entry 4 (`stak skill check review-pr`) is unchanged.
 
 - [ ] **Step 2: Run the full landing shell test file** (there is no dedicated test file for this component; `public-landing-shell.test.tsx` renders `<ScrollStory />` as part of the page)
@@ -995,6 +1103,7 @@ git commit -m "fix(web): update hero scroll-story steps to the git-like beta wor
 ## Task 7: Docs — getting started, workflows, memory pages
 
 **Files:**
+
 - Modify: `apps/web/app/docs/page.tsx`
 - Modify: `apps/web/app/docs/workflows/page.tsx`
 - Modify: `apps/web/app/docs/memory/page.tsx`
@@ -1007,6 +1116,7 @@ Read `apps/web/app/docs/page.tsx`, `apps/web/app/docs/workflows/page.tsx`, and `
 - [ ] **Step 2: Add "Daily workflow" and "Move to another machine" to `app/docs/page.tsx`**
 
 Insert after the existing "Install STAK" section and before "Your first STAK":
+
 ```tsx
 <h2>Daily workflow</h2>
 <p>
@@ -1045,11 +1155,13 @@ Insert after the existing "Install STAK" section and before "Your first STAK":
   limitations.
 </p>
 ```
+
 Also update the existing `<pre><code>{'npm install -g @memstk/cli\nstak login'}</code></pre>` under "Install STAK" to use `npm install -g @memstk/cli@beta`.
 
 - [ ] **Step 3: Rewrite `app/docs/workflows/page.tsx`'s primary story**
 
 Replace the section order so `status`/`add`/`push` leads (insert right after the intro paragraph, before "Discover existing Skills"):
+
 ```tsx
 <h2>See what changed</h2>
 <p>Read-only — compares this machine against <code>main</code>. Nothing moves yet.</p>
@@ -1069,9 +1181,11 @@ Replace the section order so `status`/`add`/`push` leads (insert right after the
   <code>stak push</code>
 </pre>
 ```
+
 Reframe the existing "Discover existing Skills" section's lead-in to make clear `scan` is diagnostic, not the starting point: change "Before capturing a desired state, see what Skills already exist" to "A diagnostic, read-only discovery across agent Skill roots — not where the daily workflow starts (that's `stak status`)."
 
 Replace the "Recover Memory" section and the "Move/use STAK on another machine" section's command block. Current (stale):
+
 ```tsx
 <pre>
   <code>{`stak memory recover\nstak memory restore`}</code>
@@ -1081,7 +1195,9 @@ Replace the "Recover Memory" section and the "Move/use STAK on another machine" 
   <code>{`stak login\nstak pull\nstak run claude`}</code>
 </pre>
 ```
+
 Replace the whole "Move/use STAK on another machine" section with:
+
 ```tsx
 <h2>Move to another machine</h2>
 <p>
@@ -1103,17 +1219,21 @@ Replace the whole "Move/use STAK on another machine" section with:
   but is not part of this normal flow.
 </p>
 ```
+
 Keep the existing "Back up Memory" section but add one sentence clarifying it's the manual/advanced path: "This is the explicit, manual backup command — the normal `stak push` flow already syncs staged Memory; use this when you want an out-of-band backup."
 
 - [ ] **Step 4: Fix `app/docs/memory/page.tsx`'s "Moving to another computer" section**
 
 Replace:
+
 ```tsx
 <pre>
   <code>{`stak login\nstak pull\nstak memory recover\nstak memory restore\nstak project map my-app ~/code/my-app`}</code>
 </pre>
 ```
+
 and its preceding paragraph with:
+
 ```tsx
 <p>
   On a new machine, sign in and pull — this restores your desired
@@ -1148,6 +1268,7 @@ git commit -m "docs: lead with status/add/push and fix post-pull memory recovery
 ## Task 8: Audit and fix remaining stale references (root `docs/*.md`, security/troubleshooting docs pages)
 
 **Files:**
+
 - Modify (as needed, triage first): `docs/getting-started.md`, `docs/commands.md`, `docs/memory.md`, `docs/cloud-setup.md`, `docs/troubleshooting.md`, `apps/web/app/docs/security/page.tsx`, `apps/web/app/docs/troubleshooting/page.tsx`
 
 - [ ] **Step 1: Re-run the audit greps from the plan header against these files only**
@@ -1157,12 +1278,14 @@ grep -n "npm install -g @memstk/cli\"\|stak memory backup\|stak memory recover\|
   docs/getting-started.md docs/commands.md docs/memory.md docs/cloud-setup.md docs/troubleshooting.md \
   apps/web/app/docs/security/page.tsx apps/web/app/docs/troubleshooting/page.tsx
 ```
+
 For each hit, classify A (outdated onboarding — fix) / B (correct advanced/reference use of the command — leave) / C (test fixture needing a synchronized change) per the plan header's rule. Do not blanket-replace.
 
 - [ ] **Step 2: Fix `docs/getting-started.md`**
 
 This file still documents a from-source V0.1 install with no `@beta` npm path and no `add`/`push`/`status`. Replace the `## Install (V0.1 from source)` section and its npm-name caveat with:
-```md
+
+````md
 ## Install (Public Beta)
 
 ```bash
@@ -1171,11 +1294,13 @@ stak login
 stak init
 stak status
 ```
+````
 
 `npm install -g @memstk/cli@beta` installs the Public Beta — npm's `latest`
 tag intentionally still points at `0.1.2`. Building from source remains
 possible for contributors; see `CONTRIBUTING.md`.
-```
+
+````
 Replace the `## Your first Environment` block's lead (`stak scan` / `stak init` / `stak status` / `stak diff`) with a split: keep `stak init`/`stak status`/`stak diff` as-is, but reframe `stak scan` with one sentence: "Optional diagnostic: `stak scan` is read-only discovery across agent Skill roots — not required before `init`." Add a new `## Everyday workflow` section right after with:
 ```md
 ## Everyday workflow
@@ -1184,8 +1309,9 @@ Replace the `## Your first Environment` block's lead (`stak scan` / `stak init` 
 stak status
 stak add .
 stak push
-```
-```
+````
+
+````
 
 - [ ] **Step 3: Fix `apps/web/app/docs/security/page.tsx` line ~32-37**
 
@@ -1209,13 +1335,14 @@ Expected: PASS. If a test asserts old copy verbatim, update that test's expected
 ```bash
 git add docs/getting-started.md docs/commands.md docs/memory.md docs/cloud-setup.md apps/web/app/docs/security/page.tsx apps/web/app/docs/troubleshooting/page.tsx
 git commit -m "docs: fix remaining stale pre-0.2 install/recovery references"
-```
+````
 
 ---
 
 ## Task 9: CLI reference audit
 
 **Files:**
+
 - Modify (as needed): `apps/web/app/docs/cli/cli-reference.data.ts`
 - Test: `apps/web/app/docs/cli/cli-reference.test.ts` (existing — read first)
 
@@ -1244,16 +1371,19 @@ git commit -m "docs: ensure CLI reference matches 0.2.0-beta.1 behavior"
 ## Task 10: README.md and packages/cli/README.md
 
 **Files:**
+
 - Modify: `README.md`
 - Modify: `packages/cli/README.md`
 
 **Interfaces:**
+
 - Consumes: exact copy from the plan header's Global Constraints.
 
 - [ ] **Step 1: Update root `README.md`**
 
 Replace:
-```md
+
+````md
 STAK is currently in beta. The CLI and Cloud model are actively evolving.
 
 ## Install
@@ -1262,7 +1392,9 @@ STAK is currently in beta. The CLI and Cloud model are actively evolving.
 npm install -g @memstk/cli
 stak login
 ```
-```
+````
+
+````
 with:
 ```md
 **Public Beta · v0.2.0-beta.1.** The CLI and Cloud model are actively
@@ -1275,11 +1407,12 @@ npm install -g @memstk/cli@beta
 stak login
 stak init
 stak status
-```
+````
 
 `npm` `latest` intentionally still points at `0.1.2` — the beta lives on the
 `@beta` dist-tag.
-```
+
+````
 After the existing "Try vs. Use" / "Supported agents" tables, add (or replace an equivalent stale section if one already covers this ground — read the rest of the file first):
 ```md
 ## Everyday workflow
@@ -1288,7 +1421,7 @@ After the existing "Try vs. Use" / "Supported agents" tables, add (or replace an
 stak status
 stak add .
 stak push
-```
+````
 
 ## Move to another machine
 
@@ -1312,7 +1445,8 @@ or use the in-app feedback form at `/feedback` on [memstk.com](https://www.memst
 
 See [`docs/getting-started.md`](docs/getting-started.md) and
 [memstk.com/docs](https://www.memstk.com/docs).
-```
+
+````
 
 - [ ] **Step 2: Update `packages/cli/README.md`**
 
@@ -1323,37 +1457,44 @@ Read it in full first (it already uses the newer workflow per the earlier audit 
 ```bash
 git add README.md packages/cli/README.md
 git commit -m "docs: update README install commands and workflow for public beta"
-```
+````
 
 ---
 
 ## Task 10b: Fix stale "not yet published to npm" contradiction in `packages/cli/README.md`
 
 **Discovered during Task 10's review:** `packages/cli/README.md:12-15` still reads:
+
 ```markdown
 > **Status: 0.1.0 release candidate.** This package is not yet published to npm.
 > Until the public 0.1.0 release, install from source — see the repository.
 
 ## Install (after 0.1.0 is published)
 ```
+
 directly above a real, working `npm install -g @memstk/cli@beta` command (added by Task 10). This directly contradicts the Public Beta's self-serve goal — a new reader is told in one breath the package isn't published and to install from source, then given a real npm command two lines later.
 
 **Files:**
+
 - Modify: `packages/cli/README.md` (only these 4 lines: the blockquote and the heading immediately below it)
 
 - [ ] **Step 1: Replace the stale blockquote and heading**
 
 Replace:
+
 ```markdown
 > **Status: 0.1.0 release candidate.** This package is not yet published to npm.
 > Until the public 0.1.0 release, install from source — see the repository.
 
 ## Install (after 0.1.0 is published)
 ```
+
 with:
+
 ```markdown
 ## Install
 ```
+
 (The `Public Beta · v0.2.0-beta.1.` line Task 10 already added near the top of this file now carries the beta-status signal — the blockquote was saying the same thing with stale, contradictory information, so it is removed rather than reworded.)
 
 - [ ] **Step 2: Re-read the full file to confirm no other stale "not yet published"/"0.1.0 release candidate" claim remains**
@@ -1375,19 +1516,24 @@ git commit -m "docs(cli): remove stale not-yet-published blockquote now that @be
 **Discovered during Task 11's repo-wide audit:** `apps/web/app/_components/public-landing-shell.tsx` has TWO `<CopyRow command="npm install -g @memstk/cli" />` occurrences (hero, line ~167, and `CloseSection`, line ~565) that Task 6 did not touch — Task 6's brief only covered the nav pill, hero lead paragraph, `YourStakSection`/`MoveSection`, and footer, not these two `CopyRow` install CTAs. This violates the locked constraint that every install example uses `@beta`.
 
 **Files:**
+
 - Modify: `apps/web/app/_components/public-landing-shell.tsx` (exactly these two `command="..."` string literals)
 - Modify: `apps/web/app/_components/public-landing-shell.test.tsx` (only if an existing assertion checks this literal string and needs updating)
 
 - [ ] **Step 1: Fix both occurrences**
 
 Change both:
+
 ```tsx
 <CopyRow command="npm install -g @memstk/cli" />
 ```
+
 and
+
 ```tsx
 <CopyRow command="npm install -g @memstk/cli" prefix="1 " />
 ```
+
 to use `npm install -g @memstk/cli@beta` instead.
 
 - [ ] **Step 2: Run the full test file**
@@ -1401,6 +1547,7 @@ Expected: PASS. If an existing assertion checks for the old bare string, update 
 git add apps/web/app/_components/public-landing-shell.tsx
 git commit -m "fix(web): add missing @beta tag to landing page install CTAs"
 ```
+
 (add the test file too, by exact name, only if it was touched)
 
 ---
@@ -1408,21 +1555,25 @@ git commit -m "fix(web): add missing @beta tag to landing page install CTAs"
 ## Task 11b: Fix missing `stak pull` step in the signed-in onboarding page's "existing account, new machine" flow
 
 **Discovered during Task 11's repo-wide audit:** `apps/web/app/onboarding/page.tsx` (the authenticated post-login onboarding screen, not a public marketing/docs page) has a branch for `view.mode !== 'new-account'` (i.e., an existing account signing in on a new machine) that currently reads:
+
 ```tsx
 <p>Your STAK already has Cloud Memory. On the new machine, run:</p>
 <pre className="stak-cmd">
   <code>{`stak login\nstak memory recover\nstak memory restore`}</code>
 </pre>
 ```
+
 This never tells the user to run `stak pull` — meaning the copy as written would never bring down `main`/Skills, only Memory. This is a real functional-onboarding gap, not just stale wording — fix the copy only, do not touch `onboarding-data.ts` or any conditional logic.
 
 **Files:**
+
 - Modify: `apps/web/app/onboarding/page.tsx` (only the JSX inside the `view.mode !== 'new-account'` branch shown above)
 - Modify: `apps/web/app/onboarding/onboarding-data.test.ts` or any page-level test, only if an existing assertion checks this exact string
 
 - [ ] **Step 1: Add the missing `stak pull` step**
 
 Replace:
+
 ```tsx
 <p>Your STAK already has Cloud Memory. On the new machine, run:</p>
 <pre className="stak-cmd">
@@ -1437,7 +1588,9 @@ Replace:
   recovery file from this account.
 </p>
 ```
+
 with:
+
 ```tsx
 <p>Your STAK already has Cloud Memory. On the new machine, run:</p>
 <pre className="stak-cmd">
@@ -1456,6 +1609,7 @@ with:
   when Protected.
 </p>
 ```
+
 (This replaces the routine `recover` step with `pull`, matching the locked workflow, while still mentioning `memory recover` as the explicit/Protected-mode alternative rather than deleting it.)
 
 - [ ] **Step 2: Run any existing test covering this page**
@@ -1469,6 +1623,7 @@ Expected: PASS. Update any assertion checking the old string, if found.
 git add apps/web/app/onboarding/page.tsx
 git commit -m "fix(web): teach stak pull (not memory recover) in existing-account onboarding flow"
 ```
+
 (add a test file too, by exact name, only if it was touched)
 
 ---
@@ -1481,6 +1636,7 @@ git commit -m "fix(web): teach stak pull (not memory recover) in existing-accoun
 grep -rn "npm install -g @memstk/cli\"" --include=*.md --include=*.tsx --include=*.ts . | grep -v node_modules | grep -v "@memstk/cli@beta"
 grep -rln "stak memory recover" --include=*.tsx --include=*.md . | grep -v node_modules
 ```
+
 For every remaining hit, confirm it is either (a) inside a code block documenting the advanced/explicit command correctly, or (b) a CLI source/test file (untouched by design). Note any genuine remaining gap.
 
 - [ ] **Step 2: Run full validation**
@@ -1492,6 +1648,7 @@ pnpm test
 pnpm build
 git diff --check
 ```
+
 Expected: all PASS. Fix any failure before proceeding — do not skip hooks or checks.
 
 - [ ] **Step 3: Review `git status` and `git log` for this work**
@@ -1500,15 +1657,18 @@ Expected: all PASS. Fix any failure before proceeding — do not skip hooks or c
 git status
 git log --oneline -15
 ```
+
 Confirm every intended file is committed and nothing unrelated was swept in.
 
 - [ ] **Step 4: Push (only after explicit confirmation)**
 
 This pushes to `origin/main` on a shared repo — confirm with the user before running:
+
 ```bash
 git fetch origin main
 git push origin main
 ```
+
 Do not force-push. If `origin/main` has moved incompatibly, stop and report rather than force-pushing or rebasing destructively.
 
 - [ ] **Step 5: Report**

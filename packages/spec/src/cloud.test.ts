@@ -16,12 +16,17 @@ const skillA = {
     reason: 'local' as const,
   },
 };
-const resolved = { schemaVersion: 1 as const, skills: { skill_aaaaaaaa: skillA } };
+const resolved = {
+  schemaVersion: 1 as const,
+  skills: { skill_aaaaaaaa: skillA },
+};
 const importedStackVersions: never[] = [];
 const environment = {
   schemaVersion: 1 as const,
   name: 'main',
-  skills: [{ id: 'skill_aaaaaaaa', name: 'alpha', requirement: 'required' as const }],
+  skills: [
+    { id: 'skill_aaaaaaaa', name: 'alpha', requirement: 'required' as const },
+  ],
   stacks: [],
   overrides: {},
 };
@@ -71,7 +76,9 @@ describe('cloudEnvironmentBundleSchema — legacy bundle compatibility', () => {
       environment,
       resolved,
       importedStackVersions,
-      snapshotRequirements: [{ contentHash: skillA.contentHash, reason: 'local' }],
+      snapshotRequirements: [
+        { contentHash: skillA.contentHash, reason: 'local' },
+      ],
       digest,
     };
     const parsed = cloudEnvironmentBundleSchema.parse(legacyProductionShape);

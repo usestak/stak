@@ -381,7 +381,10 @@ describe('restore follows canonical (reconciled) Project identity, not the histo
   };
 
   it('A: a reconciled registry record carries both the legacy and Git claims under one Project ID', () => {
-    const registry = reconciledRegistry('C--Users-NT-Desktop-stack', 'github.com/usestak/stak');
+    const registry = reconciledRegistry(
+      'C--Users-NT-Desktop-stack',
+      'github.com/usestak/stak',
+    );
     expect(registry.projects).toHaveLength(1);
     const record = registry.projects[0];
     expect(record?.claims).toEqual(
@@ -398,12 +401,18 @@ describe('restore follows canonical (reconciled) Project identity, not the histo
       }),
     ).toEqual({ status: 'resolved', projectId: record?.projectId });
     expect(
-      resolveProjectForIdentity(registry, gitProject('github.com/usestak/stak')),
+      resolveProjectForIdentity(
+        registry,
+        gitProject('github.com/usestak/stak'),
+      ),
     ).toEqual({ status: 'resolved', projectId: record?.projectId });
   });
 
   it('B/C: fresh machine, no binding — a legacy-locator item follows the live Git checkout of the SAME reconciled Project', async () => {
-    const registry = reconciledRegistry('C--Users-NT-Desktop-stack', 'github.com/usestak/stak');
+    const registry = reconciledRegistry(
+      'C--Users-NT-Desktop-stack',
+      'github.com/usestak/stak',
+    );
     const stackHome = await seed([
       {
         project: gitProject('github.com/usestak/stak'),
@@ -445,7 +454,10 @@ describe('restore follows canonical (reconciled) Project identity, not the histo
   });
 
   it('D: legacy and canonical entries with the SAME relative path and SAME content dedupe safely (one restored, the other identical — never a spurious conflict)', async () => {
-    const registry = reconciledRegistry('C--Users-NT-Desktop-stack', 'github.com/usestak/stak');
+    const registry = reconciledRegistry(
+      'C--Users-NT-Desktop-stack',
+      'github.com/usestak/stak',
+    );
     const stackHome = await seed([
       {
         project: gitProject('github.com/usestak/stak'),
@@ -480,7 +492,10 @@ describe('restore follows canonical (reconciled) Project identity, not the histo
   });
 
   it('E: legacy and canonical entries with the SAME relative path but DIFFERENT content fail closed (never silently pick one)', async () => {
-    const registry = reconciledRegistry('C--Users-NT-Desktop-stack', 'github.com/usestak/stak');
+    const registry = reconciledRegistry(
+      'C--Users-NT-Desktop-stack',
+      'github.com/usestak/stak',
+    );
     const stackHome = await seed([
       {
         project: gitProject('github.com/usestak/stak'),
@@ -513,11 +528,16 @@ describe('restore follows canonical (reconciled) Project identity, not the histo
       autoMemoryPath(claudeHome, stakDir, 'MEMORY.md'),
       'utf8',
     );
-    expect(['canonical version', 'DIFFERENT legacy version']).toContain(written);
+    expect(['canonical version', 'DIFFERENT legacy version']).toContain(
+      written,
+    );
   });
 
   it('F: a legacy-only relative path (no canonical duplicate) still restores to the reconciled Project target', async () => {
-    const registry = reconciledRegistry('C--Users-NT-Desktop-stack', 'github.com/usestak/stak');
+    const registry = reconciledRegistry(
+      'C--Users-NT-Desktop-stack',
+      'github.com/usestak/stak',
+    );
     const stackHome = await seed([
       {
         project: { kind: 'local', vendorKey: 'C--Users-NT-Desktop-stack' },
@@ -590,7 +610,10 @@ describe('restore follows canonical (reconciled) Project identity, not the histo
         body: 'belongs to stak',
       },
       {
-        project: { kind: 'local', vendorKey: 'C--Users-NT-Desktop-other-project' },
+        project: {
+          kind: 'local',
+          vendorKey: 'C--Users-NT-Desktop-other-project',
+        },
         rel: 'unrelated.md',
         body: 'does not belong to stak',
       },

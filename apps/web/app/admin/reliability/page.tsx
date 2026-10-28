@@ -2,7 +2,11 @@ import { notFound } from 'next/navigation';
 
 import { getAdminUser } from '@/lib/admin';
 import { serviceClient } from '@/lib/supabase';
-import { ADMIN_DATE_RANGES, isAdminDateRange, type AdminDateRange } from '@/lib/admin-date-range';
+import {
+  ADMIN_DATE_RANGES,
+  isAdminDateRange,
+  type AdminDateRange,
+} from '@/lib/admin-date-range';
 
 import { AdminSidebar } from '../_components/admin-sidebar';
 import { loadReliabilityMetrics } from './reliability-data';
@@ -11,7 +15,8 @@ import { loadReliabilityMetrics } from './reliability-data';
 // metric with no data in the selected range (see Overview's activationRate).
 const NO_DATA_LABEL = 'No data yet';
 
-const pct = (rate: number | null): string => (rate === null ? NO_DATA_LABEL : `${(rate * 100).toFixed(1)}%`);
+const pct = (rate: number | null): string =>
+  rate === null ? NO_DATA_LABEL : `${(rate * 100).toFixed(1)}%`;
 
 export default async function AdminReliabilityPage({
   searchParams,
@@ -22,7 +27,9 @@ export default async function AdminReliabilityPage({
   if (!admin) notFound();
 
   const params = await searchParams;
-  const range: AdminDateRange = isAdminDateRange(params.range) ? params.range : '30d';
+  const range: AdminDateRange = isAdminDateRange(params.range)
+    ? params.range
+    : '30d';
   const metrics = await loadReliabilityMetrics(serviceClient(), range);
 
   return (

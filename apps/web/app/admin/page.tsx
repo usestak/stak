@@ -3,7 +3,11 @@ import { notFound } from 'next/navigation';
 
 import { getAdminUser } from '@/lib/admin';
 import { serviceClient } from '@/lib/supabase';
-import { ADMIN_DATE_RANGES, isAdminDateRange, type AdminDateRange } from '@/lib/admin-date-range';
+import {
+  ADMIN_DATE_RANGES,
+  isAdminDateRange,
+  type AdminDateRange,
+} from '@/lib/admin-date-range';
 
 import { AdminSidebar } from './_components/admin-sidebar';
 import { loadOverviewMetrics } from './overview-data';
@@ -17,7 +21,9 @@ export default async function AdminOverviewPage({
   if (!admin) notFound();
 
   const params = await searchParams;
-  const range: AdminDateRange = isAdminDateRange(params.range) ? params.range : '30d';
+  const range: AdminDateRange = isAdminDateRange(params.range)
+    ? params.range
+    : '30d';
   const metrics = await loadOverviewMetrics(serviceClient(), range);
 
   return (

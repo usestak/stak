@@ -65,6 +65,22 @@ export const validateTreePath = (relativePath: string): string => {
   return normalized;
 };
 
+/**
+ * The portable, recorded form of a symlink target read from disk: always `/`-separated,
+ * so a Skill tree's content hash does not depend on the platform it was enumerated on.
+ * Node's `fs.symlink` on Windows rewrites `/` to `\` in the target it creates, and
+ * `readlink` returns that, so a link created from `../SKILL.md` reads back as
+ * `..\SKILL.md` there. On POSIX `\` is an ordinary filename character and is kept.
+ *
+ * Applied only to targets read from the local filesystem (`enumerateSkillTree`). Targets
+ * parsed from an untrusted archive are not rewritten: they are checked and hashed exactly
+ * as the archive spells them.
+ */
+export const recordedSymlinkTarget = (
+  target: string,
+  platform: NodeJS.Platform = process.platform,
+): string => (platform === 'win32' ? target.replaceAll('\\', '/') : target);
+
 export const enumerateSkillTree = async (
   root: string,
   directory = root,
@@ -81,7 +97,7 @@ export const enumerateSkillTree = async (
       results.push({
         relativePath,
         type: 'symlink',
-        target: await readlink(absolute),
+        target: recordedSymlinkTarget(await readlink(absolute)),
       });
     else if (stats.isDirectory())
       results.push(...(await enumerateSkillTree(root, absolute)));

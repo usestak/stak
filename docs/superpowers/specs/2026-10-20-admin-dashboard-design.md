@@ -57,6 +57,7 @@ areas are used; are there emerging reliability problems.
 ## Existing-data metrics vs newly instrumented
 
 Derivable from existing tables, no new instrumentation:
+
 - Total/new users, activation (first push), activation rate, median time to
   first push — `profiles`, `environment_versions`.
 - CLI-authenticated users — `cli_tokens`.
@@ -65,6 +66,7 @@ Derivable from existing tables, no new instrumentation:
 - Feedback counts/filters — `feedback`.
 
 Require new `product_events` table + instrumentation (confirmed in scope):
+
 - Pull success/failure (pull has zero trace today).
 - Push failure (only successful commits are currently recorded).
 - Memory recovery success/conflict.
@@ -72,6 +74,7 @@ Require new `product_events` table + instrumentation (confirmed in scope):
 - Weekly-active-users definition that includes pull activity.
 
 Explicitly deferred/unavailable in v1 (not faked):
+
 - CLI version breakdown in Reliability/System — no header exists; do not add
   a new CLI release just to support this.
 - Agent usage — not observable server-side without local CLI telemetry; stays
@@ -100,13 +103,18 @@ export async function getAdminUser() {
   const user = await getSessionUser(); // existing helper
   if (!user) return null;
   const db = serviceClient(); // existing service-role helper
-  const { data } = await db.from('admin_users').select('role').eq('user_id', user.id).maybeSingle();
+  const { data } = await db
+    .from('admin_users')
+    .select('role')
+    .eq('user_id', user.id)
+    .maybeSingle();
   if (!data) return null;
   return { ...user, role: data.role as 'owner' | 'admin' };
 }
 ```
 
 Rules:
+
 - Every `/admin/*` page is a Server Component; first line calls
   `getAdminUser()` and calls `notFound()` if null (404, not redirect — don't
   reveal the route exists).
@@ -173,11 +181,15 @@ New `packages/cloud-server/src/events.ts`:
 
 ```ts
 export async function recordEvent(e: {
-  userId: string | null; eventName: string; machineId?: string;
-  success?: boolean; errorCode?: string; metadata?: Record<string, unknown>;
+  userId: string | null;
+  eventName: string;
+  machineId?: string;
+  success?: boolean;
+  errorCode?: string;
+  metadata?: Record<string, unknown>;
 }) {
   try {
-    await serviceClient().from('product_events').insert({ /* ... */ });
+    await serviceClient().from('product_events').insert({/* ... */});
   } catch (err) {
     console.error('[product_events] write failed', err); // never throws
   }

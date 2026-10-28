@@ -444,7 +444,18 @@ describe('update reminder — when it prints', () => {
   });
 
   it('cancel() abandons the lookup without printing', async () => {
-    const { dependencies, errors } = setup();
+    // Like the real fetch, reject once aborted. A mock that ignores the signal lets the
+    // abandoned lookup go on to write the cache into `home` while afterEach removes it
+    // (ENOTEMPTY on Linux CI).
+    const abortable = vi.fn<FetchLike>(async (_url, init) => {
+      if (init.signal.aborted) throw new Error('aborted');
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ beta: '0.2.0-beta.4' }),
+      };
+    });
+    const { dependencies, errors } = setup({ fetch: abortable });
     const handle = startUpdateReminder(dependencies, { commandName: 'status' });
     handle.cancel();
     await handle.finish();
