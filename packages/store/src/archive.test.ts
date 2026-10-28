@@ -225,6 +225,34 @@ describe('snapshot archive: crafted symlink layouts', () => {
     );
   });
 
+  it('keeps a literal backslash in an archive symlink target verbatim and still checks it as a separator', () => {
+    // Untrusted archive input is never rewritten (only targets read from local disk are
+    // normalised to `/`): the parsed target, and so the hash, keep the archive's spelling.
+    const inTree = packSkillTreeEntries([
+      file('SKILL.md'),
+      file('docs/guide.md'),
+      link('docs/up', '..\\SKILL.md'),
+    ]);
+    expect(
+      unpackSkillTreeEntries(inTree.bytes).find(
+        (entry) => entry.relativePath === 'docs/up',
+      ),
+    ).toMatchObject({ target: '..\\SKILL.md' });
+    // The containment walk treats `\` as a separator, as Windows would.
+    for (const target of [
+      '..\\..\\outside',
+      '\\absolute',
+      'C:\\Windows',
+      'docs\\..\\..\\x',
+    ])
+      expect(() =>
+        unpackSkillTreeEntries(
+          packSkillTreeEntries([file('SKILL.md'), link('docs/up', target)])
+            .bytes,
+        ),
+      ).toThrow(ArchivePathError);
+  });
+
   it('rejects any entry nested beneath a symlink entry', () => {
     const archive = packSkillTreeEntries([
       link('docs', 'real'),
