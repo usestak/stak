@@ -35,4 +35,29 @@ describe('/beta page', () => {
       ),
     ).toBeInTheDocument();
   });
+
+  it('answers "why not just use Git?" with the heading and all 4 item leads', () => {
+    render(<BetaPage />);
+
+    expect(
+      screen.getByRole('heading', {
+        name: 'Why not just put ~/.claude in a private Git repo?',
+      }),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.getByText('Your memory ends up in the wrong place.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Memory changes every day. Git makes you manage that by hand.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('That folder holds much more than memory.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('One memory for all your agents (coming soon).'),
+    ).toBeInTheDocument();
+  });
 });
