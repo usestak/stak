@@ -65,9 +65,15 @@ export type SkillAddProposal = {
 
 const validDiscovered = (
   scanResult: ScanResult,
-): Array<DiscoveredSkill & { metadata: NonNullable<DiscoveredSkill['metadata']> }> =>
+): Array<
+  DiscoveredSkill & { metadata: NonNullable<DiscoveredSkill['metadata']> }
+> =>
   scanResult.skills.filter(
-    (skill): skill is DiscoveredSkill & { metadata: NonNullable<DiscoveredSkill['metadata']> } =>
+    (
+      skill,
+    ): skill is DiscoveredSkill & {
+      metadata: NonNullable<DiscoveredSkill['metadata']>;
+    } =>
       skill.valid &&
       skill.metadata !== undefined &&
       skill.locations.some((location) => location.scope === 'global'),
@@ -84,7 +90,9 @@ const sourcePathOf = (skill: DiscoveredSkill): string => {
   );
   const first = locations[0];
   if (!first)
-    throw new Error(`No global source location exists for ${skill.contentHash}.`);
+    throw new Error(
+      `No global source location exists for ${skill.contentHash}.`,
+    );
   return first.realPath ?? first.path;
 };
 
@@ -120,20 +128,24 @@ const resolveSelector = (
       candidates: [
         `${locked.contentHash} (tracked in main)`,
         ...untrackedMatches.map(
-          (item) => `${item.contentHash} (${item.locations.map((l) => l.path).join(', ')})`,
+          (item) =>
+            `${item.contentHash} (${item.locations.map((l) => l.path).join(', ')})`,
         ),
       ],
     };
   }
   if (!lockedEntry) {
     if (untrackedMatches.length > 1) {
-      const distinctHashes = new Set(untrackedMatches.map((item) => item.contentHash));
+      const distinctHashes = new Set(
+        untrackedMatches.map((item) => item.contentHash),
+      );
       if (distinctHashes.size > 1)
         return {
           status: 'ambiguous',
           selector,
           candidates: untrackedMatches.map(
-            (item) => `${item.contentHash} (${item.locations.map((l) => l.path).join(', ')})`,
+            (item) =>
+              `${item.contentHash} (${item.locations.map((l) => l.path).join(', ')})`,
           ),
         };
     }
@@ -143,7 +155,9 @@ const resolveSelector = (
         (skill) => skill.contentHash === untracked.contentHash,
       );
       if (!discovered)
-        throw new Error(`Untracked Skill ${selector} missing from scan result.`);
+        throw new Error(
+          `Untracked Skill ${selector} missing from scan result.`,
+        );
       return {
         status: 'ok',
         target: {
@@ -193,7 +207,9 @@ const resolveSelector = (
   const invalid = status.invalidSkills.find(
     (item) =>
       item.name === selector ||
-      item.locations.some((location) => path.basename(location.path) === selector),
+      item.locations.some(
+        (location) => path.basename(location.path) === selector,
+      ),
   );
   if (invalid) return { status: 'invalid', selector };
 
@@ -225,7 +241,12 @@ export const prepareSkillAdd = async (
   for (const selector of selectors) {
     if (seenNames.has(selector)) continue;
     seenNames.add(selector);
-    const resolved = resolveSelector(current, status, options.scanResult, selector);
+    const resolved = resolveSelector(
+      current,
+      status,
+      options.scanResult,
+      selector,
+    );
     if (resolved.status === 'ok') {
       // `add .` silently skips Skills it cannot stage for structural reasons (e.g. a
       // modified Skill whose only origin is an active STAK layer); an explicit
@@ -233,7 +254,8 @@ export const prepareSkillAdd = async (
       targets.push(resolved.target);
     } else if (
       options.selectors === '.' &&
-      (resolved.status === 'stack-origin' || resolved.status === 'already-satisfied')
+      (resolved.status === 'stack-origin' ||
+        resolved.status === 'already-satisfied')
     ) {
       continue;
     } else {
@@ -255,7 +277,8 @@ export const prepareSkillAdd = async (
     skills: { ...current.baseline.skills },
   };
   const snapshotRecords: SnapshotRecord[] = [];
-  const ingestions: Array<{ sourcePath: string; expectedContentHash: string }> = [];
+  const ingestions: Array<{ sourcePath: string; expectedContentHash: string }> =
+    [];
   const now = (options.now ?? (() => new Date()))().toISOString();
 
   for (const target of targets) {
@@ -286,7 +309,11 @@ export const prepareSkillAdd = async (
         }),
       );
     if (target.kind === 'new')
-      manifest.skills.push({ id: entryId, name: target.name, requirement: 'required' });
+      manifest.skills.push({
+        id: entryId,
+        name: target.name,
+        requirement: 'required',
+      });
     lock.skills[entryId] = {
       name: discovered.metadata.name,
       description: discovered.metadata.description,
@@ -330,7 +357,10 @@ const writeSnapshotRecordIfAbsent = async (
 ): Promise<void> => {
   const directory = path.join(stackHome, 'snapshots');
   const final = path.join(directory, `${record.snapshotId}.json`);
-  const staging = path.join(directory, `.${record.snapshotId}.${randomUUID()}.tmp`);
+  const staging = path.join(
+    directory,
+    `.${record.snapshotId}.${randomUUID()}.tmp`,
+  );
   await mkdir(directory, { recursive: true });
   try {
     await writeFile(staging, `${JSON.stringify(record, null, 2)}\n`, {
