@@ -40,7 +40,8 @@ jobs:
         run: pnpm lint
 
       - name: Test
-        run: pnpm test
+        # --continue: report every package's failures, not just the first.
+        run: pnpm test --continue
 
       - name: Build
         run: pnpm build
