@@ -744,7 +744,10 @@ let lastGlobalScan: { result: ScanResult } | undefined;
 
 /**
  * Run a global install for `stak upgrade` with the user's terminal attached. `.cmd` shims on
- * Windows need a shell. Never rejects: a spawn failure resolves with its error code.
+ * Windows need a shell; there the whole command goes in as one line, because Node warns
+ * (DEP0190) when a shell is given a separate args list. The line is built only from fixed
+ * tokens (package manager, `-g`, `@memstk/cli@<channel>`), so nothing needs quoting. Never
+ * rejects: a spawn failure resolves with its error code.
  */
 const runInstall = async (
   install: InstallCommand,
@@ -758,10 +761,10 @@ const runInstall = async (
       resolve(result);
     };
     try {
-      const child = spawn(install.command, install.args, {
-        stdio: 'inherit',
-        shell: process.platform === 'win32',
-      });
+      const child =
+        process.platform === 'win32'
+          ? spawn(install.display, { stdio: 'inherit', shell: true })
+          : spawn(install.command, install.args, { stdio: 'inherit' });
       child.on('error', (error: NodeJS.ErrnoException) =>
         settle({ exitCode: null, errorCode: error.code ?? 'UNKNOWN' }),
       );
