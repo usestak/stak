@@ -3911,6 +3911,29 @@ describe('STAK CLI', () => {
     expect(requested).toBe(3);
   });
 
+  it('recover --passkey prints the folded-project merge line, like the non-passkey recover path (spec §4.2.1)', async () => {
+    const result = await runProgram(['memory', 'recover', '--passkey'], {
+      memoryRecoverPasskey: async () => ({
+        status: 'recovered',
+        objects: 27,
+        files: 29,
+        legacyFiles: 29,
+        projectFiles: 0,
+        generation: 3,
+        folded: [
+          {
+            fromProjectId: 'prj_abcdefghijklmnop',
+            toProjectId: 'prj_qrstuvwxyzabcdef',
+            keptBoth: 0,
+          },
+        ],
+      }),
+    });
+    expect(result.output).toContain(
+      `Merged project ${'prj_abcdefghijklmnop'.slice(0, 10)}… into ${'prj_qrstuvwxyzabcdef'.slice(0, 10)}… (same repository).`,
+    );
+  });
+
   it('recover fails clearly when --backup and --generation disagree', async () => {
     let called = false;
     const result = await runProgram(
