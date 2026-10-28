@@ -11,6 +11,11 @@ import {
   PUBLIC_BETA_LABEL,
   PUBLIC_BETA_VERSION,
 } from '../../lib/beta';
+import {
+  WHY_NOT_GIT_EYEBROW,
+  WHY_NOT_GIT_HEADING,
+  WHY_NOT_GIT_ITEMS,
+} from '../../lib/why-not-git';
 
 export const metadata: Metadata = {
   title: 'Public Beta',
@@ -238,6 +243,28 @@ export default function BetaPage() {
                   <li key={l}>{l}</li>
                 ))}
               </ul>
+            </div>
+          </section>
+
+          <section
+            className="stak-landing-section"
+            aria-label="Why not just use Git?"
+          >
+            <div className="stak-landing-section-head">
+              <div>
+                <span className="stak-landing-eyebrow">
+                  {WHY_NOT_GIT_EYEBROW}
+                </span>
+                <h2>{WHY_NOT_GIT_HEADING}</h2>
+              </div>
+            </div>
+            <div className="stak-landing-objgrid">
+              {WHY_NOT_GIT_ITEMS.map((item) => (
+                <div key={item.lead} className="stak-landing-objcard">
+                  <span className="stak-landing-objcard-big">{item.lead}</span>
+                  <span className="stak-landing-objcard-d">{item.body}</span>
+                </div>
+              ))}
             </div>
           </section>
 

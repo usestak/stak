@@ -12,6 +12,11 @@ import {
 } from './landing-interactive';
 import { HeroWord, ScrollStory } from './landing-scroll-story';
 import { SiteFooter, SiteNav } from './site-chrome';
+import {
+  WHY_NOT_GIT_EYEBROW,
+  WHY_NOT_GIT_HEADING,
+  WHY_NOT_GIT_ITEMS,
+} from '@/lib/why-not-git';
 
 /**
  * Public, signed-out landing page shell - P9 "Task 1" (structure, copy, and
@@ -63,6 +68,7 @@ export function PublicLandingShell() {
           <MoveSection />
           <PrivacySection />
           <MachinesSection />
+          <WhyNotGitSection />
           <CloseSection />
         </main>
         <SiteFooter />
@@ -502,6 +508,30 @@ function MachinesSection() {
             Install the approved Skill versions on this machine.
           </span>
         </div>
+      </div>
+    </section>
+  );
+}
+
+function WhyNotGitSection() {
+  return (
+    <section
+      className="stak-landing-section"
+      aria-label="Why not just use Git?"
+    >
+      <div className="stak-landing-section-head">
+        <div>
+          <span className="stak-landing-eyebrow">{WHY_NOT_GIT_EYEBROW}</span>
+          <h2>{WHY_NOT_GIT_HEADING}</h2>
+        </div>
+      </div>
+      <div className="stak-landing-objgrid">
+        {WHY_NOT_GIT_ITEMS.map((item) => (
+          <div key={item.lead} className="stak-landing-objcard">
+            <span className="stak-landing-objcard-big">{item.lead}</span>
+            <span className="stak-landing-objcard-d">{item.body}</span>
+          </div>
+        ))}
       </div>
     </section>
   );
