@@ -77,8 +77,10 @@ content. The section starts with one line:
 - **Cursor** `.mdc`: YAML frontmatter
   `description: "Project memory from STAK"`, `alwaysApply: true`; then the Memory
   section.
-- **Codex** `AGENTS.override.md`: the team's root `AGENTS.md` verbatim (if present),
-  then a separator line, then the Memory section.
+- **Codex** `AGENTS.override.md`: the team's root `AGENTS.md` (if present; line
+  endings normalised to LF and trailing blank lines trimmed, so output is stable), then
+  a separator line, then the Memory section. Freshness is judged against the hash of
+  the team file's raw bytes.
 
 ## 5. Privacy: keeping files out of Git
 
@@ -121,8 +123,11 @@ content. The section starts with one line:
   up to date, or the count of projects that are out of date / skipped / hand-edited /
   over budget.
 - **Off:** `stak memory agents disable <agent>` deletes the files STAK wrote (only if
-  unchanged since STAK wrote them; hand-edited files are left and reported), removes
-  its entries from the local exclude list, and clears the setting.
+  unchanged since STAK wrote them), removes their entries from the local exclude list,
+  and clears the setting. A **hand-edited** file is left in place and reported, and its
+  exclude entry is **kept**, so it can still never be committed by accident (privacy
+  wins over cleanup). An exclude entry is only removed when no remaining STAK file
+  (e.g. in another worktree of the same repo) still relies on it.
 - **List:** `stak memory agents` shows each agent's on/off state.
 
 ## 8. Errors
