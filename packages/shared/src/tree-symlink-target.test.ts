@@ -1,3 +1,4 @@
+import type * as FsPromises from 'node:fs/promises';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -16,7 +17,7 @@ import {
 // `..\SKILL.md`. Faked here so this runs on every OS without symlink privilege.
 const fakeLinks = vi.hoisted(() => new Map<string, string>());
 vi.mock('node:fs/promises', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  const actual = await importOriginal<typeof FsPromises>();
   return {
     ...actual,
     lstat: (async (target: string) => {
