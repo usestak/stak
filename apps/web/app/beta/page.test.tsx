@@ -11,7 +11,7 @@ describe('/beta page', () => {
     expect(
       screen.getByText('npm install -g @memstk/cli@beta'),
     ).toBeInTheDocument();
-    expect(screen.getByText(/v0\.2\.0-beta\.4/)).toBeInTheDocument();
+    expect(screen.getByText(/v0\.2\.0-beta\.5/)).toBeInTheDocument();
   });
 
   it('links to the feedback page', () => {

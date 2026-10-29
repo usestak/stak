@@ -13,7 +13,7 @@ hard to reproduce, move, or share. STAK gives it a portable identity: a
 canonical record of your Skills that you can carry, project into any
 supported agent, and share safely with others.
 
-**Public Beta · v0.2.0-beta.4.** The CLI and Cloud model are actively evolving during the beta.
+**Public Beta · v0.2.0-beta.5.** The CLI and Cloud model are actively evolving during the beta.
 
 ## Install
 
