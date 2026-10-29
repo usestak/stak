@@ -65,18 +65,21 @@ is automatically verified from what requires an owner decision.
 
 ### How to publish a beta (from `0.2.0-beta.5` on)
 
-GitHub Actions publishes the CLI now, not a laptop. The workflow is
+GitHub Actions builds and stages the CLI now, not a laptop. The workflow is
 `.github/workflows/release-cli.yml` ("Release CLI (beta)"). It uses npm
-trusted publishing, so there is no npm token, `npm login` or browser 2FA.
+trusted publishing, so there is no npm token or `npm login`. It only
+_stages_ the version: nothing reaches users until an owner approves it on npm
+with 2FA.
 
 One-time setup (done once, by an npm owner of `@memstk/cli`):
 
 - [ ] On npmjs.com → `@memstk/cli` → **Settings** → **Trusted Publisher** →
       **GitHub Actions**. Organization or user `usestak`, repository `stak`,
-      workflow filename `release-cli.yml`, environment name `npm`.
-- [ ] Optional: GitHub → `usestak/stak` → **Settings** → **Environments** →
-      `npm` → add yourself as a required reviewer, for an approval click
-      before each publish.
+      workflow filename `release-cli.yml`, environment name `npm`. Leave
+      **Allow `npm publish`** and **Allow `npm dist-tag`** unticked, so the
+      workflow can only stage.
+- [ ] Same page, **Publishing access**: "Require two-factor authentication
+      and disallow bypass 2fa tokens (recommended)".
 
 Each release:
 
@@ -87,9 +90,12 @@ Each release:
 3. [ ] GitHub → **Actions** → **Release CLI (beta)** → **Run workflow** on
        `main`. It refuses non-beta versions, versions already on npm, and runs
        from anywhere but `main`. It builds, typechecks and tests the CLI,
-       installs the packed package, then publishes with `--tag beta` and
+       installs the packed package, then stages it with `--tag beta` and
        pushes the Git tag `v<version>`.
-4. [ ] A few minutes later, `npm view @memstk/cli dist-tags` → `beta` is the
+4. [ ] Approve the staged version on npmjs.com, or with npm 12:
+       `npm stage list @memstk/cli`, then `npm stage approve <stage-id>`.
+       If something looks wrong, `npm stage reject <stage-id>` instead.
+5. [ ] A few minutes later, `npm view @memstk/cli dist-tags` → `beta` is the
        new version and `latest` is still `0.1.2`.
 
 ### Publishing `@memstk/cli@0.2.0-beta.3` to the `beta` dist-tag

@@ -8,6 +8,9 @@ name: Release CLI (beta)
 #
 # Authentication is npm trusted publishing (OIDC): no npm token is stored anywhere.
 # npm only accepts this workflow file, from usestak/stak, in the `npm` environment.
+#
+# The workflow only STAGES the version (`npm stage publish`). Nothing reaches users until
+# an owner approves it on npm with 2FA (npmjs.com, or `npm stage approve <id>`).
 on:
   workflow_dispatch:
 
@@ -36,18 +39,23 @@ jobs:
           echo "::error::Run this workflow from main (it was started on ${GITHUB_REF})."
           exit 1
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           run_install: false
 
-      # Node 24 ships npm 11, which trusted publishing needs (11.5.1 or newer).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
           registry-url: https://registry.npmjs.org
+
+      # `npm stage publish` needs npm 12.
+      - name: Use npm 12
+        run: |
+          npm install -g npm@12
+          npm --version
 
       - name: Check the version
         id: version
@@ -62,10 +70,6 @@ jobs:
           fi
           if npm view "@memstk/cli@$version" version >/dev/null 2>&1; then
             echo "::error::@memstk/cli@$version is already on npm. Merge a version bump first."
-            exit 1
-          fi
-          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
-            echo "::error::Git tag v$version already exists."
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -100,15 +104,20 @@ jobs:
           npm install "$RUNNER_TEMP/$tgz" --no-save
           ./node_modules/.bin/stak --version
 
-      - name: Publish to npm (beta)
+      - name: Stage on npm (beta)
         working-directory: packages/cli
-        run: npm publish --tag beta
+        run: npm stage publish --tag beta
 
+      # Skipped (not failed) when the tag exists, e.g. re-staging after a rejected stage.
       - name: Tag the release in Git
         shell: bash
         run: |
           set -euo pipefail
           tag="v${{ steps.version.outputs.version }}"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "::warning::Git tag $tag already exists; leaving it as it is."
+            exit 0
+          fi
           git tag "$tag"
           git push origin "$tag"
 
@@ -116,11 +125,15 @@ jobs:
         shell: bash
         run: |
           {
-            echo "## Published @memstk/cli@${{ steps.version.outputs.version }} to \`beta\`"
+            echo "## Staged @memstk/cli@${{ steps.version.outputs.version }} for \`beta\`"
             echo
-            echo "npm can take a few minutes to show it. Check with:"
+            echo "It is NOT live yet. Approve it on npmjs.com (package → staged versions),"
+            echo "or from a terminal with npm 12:"
             echo
             echo '```'
-            echo 'npm view @memstk/cli dist-tags'
+            echo 'npm stage list @memstk/cli'
+            echo 'npm stage approve <stage-id>'
             echo '```'
+            echo
+            echo "Then check with \`npm view @memstk/cli dist-tags\`."
           } >> "$GITHUB_STEP_SUMMARY"

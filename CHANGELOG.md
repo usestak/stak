@@ -3,6 +3,16 @@
 All notable changes to STAK are documented here. This project adheres to
 semantic versioning.
 
+## 0.2.0-beta.5 — 2026-10-29
+
+- **#26:** `stak upgrade` on Windows no longer prints Node's `DEP0190`
+  deprecation warning while installing the update.
+- **Release process (#27):** the CLI is now built, tested and staged on npm
+  by a GitHub Actions workflow, using npm trusted publishing. A version only
+  goes live after an owner approves it on npm with 2FA. This is the first
+  release published that way. CI now uses current versions of the GitHub
+  checkout, Node and pnpm actions.
+
 ## 0.2.0-beta.4 — 2026-10-28
 
 - **Shared memory across agents (#23):** `stak run codex` / `stak run cursor`
